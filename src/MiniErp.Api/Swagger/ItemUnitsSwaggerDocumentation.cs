@@ -18,8 +18,8 @@ public sealed class ItemUnitsSwaggerDocumentation : IOperationFilter
         var documentation = context.MethodInfo.Name switch
         {
             nameof(ItemUnitsController.GetAll) => (
-                "Get all item units",
-                "Returns the complete list of non-deleted item units."),
+                "Get paginated item units",
+                "Returns one page of non-deleted item units with total-count metadata. Page size is limited to 100."),
             nameof(ItemUnitsController.GetSelect) => (
                 "Get item units for selection",
                 "Returns active item units as ID and name pairs for dropdown controls."),
@@ -28,13 +28,13 @@ public sealed class ItemUnitsSwaggerDocumentation : IOperationFilter
                 "Returns one non-deleted item unit by its integer ID."),
             nameof(ItemUnitsController.Create) => (
                 "Create an item unit",
-                "Creates an item unit with a unique name."),
+                "Admin only. Creates an item unit with a unique name."),
             nameof(ItemUnitsController.Update) => (
                 "Update an item unit",
-                "Updates an existing item unit while preserving its ID and creation audit information."),
+                "Admin only. Updates an item unit while preserving its ID and creation audit information."),
             nameof(ItemUnitsController.Delete) => (
                 "Delete an item unit",
-                "Soft-deletes an unused item unit. Units assigned to items cannot be deleted."),
+                "Admin only. Soft-deletes an unused item unit. Units referenced by current or historical items cannot be deleted."),
             _ => default
         };
 

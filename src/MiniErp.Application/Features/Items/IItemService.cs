@@ -5,7 +5,8 @@ namespace MiniErp.Application.Features.Items;
 
 public interface IItemService
 {
-    Task<Result<IReadOnlyList<ItemResponse>>> GetAllAsync(
+    Task<Result<PagedResponse<ItemResponse>>> GetAllAsync(
+        PaginationRequest pagination,
         CancellationToken cancellationToken = default);
 
     Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(

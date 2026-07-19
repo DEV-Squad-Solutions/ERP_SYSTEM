@@ -9,19 +9,24 @@ using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.ItemUnits;
 
-public sealed class ItemUnitService(ApplicationDbContext dbContext)
+public sealed class ItemUnitService(
+    ApplicationDbContext dbContext,
+    IPaginationService paginationService)
     : IItemUnitService, IScopedService
 {
-    public async Task<Result<IReadOnlyList<ItemUnitResponse>>> GetAllAsync(
+    public async Task<Result<PagedResponse<ItemUnitResponse>>> GetAllAsync(
+        PaginationRequest pagination,
         CancellationToken cancellationToken = default)
     {
-        var response = await dbContext.ItemUnits
+        var query = dbContext.ItemUnits
             .AsNoTracking()
             .OrderBy(itemUnit => itemUnit.Name)
-            .ProjectToType<ItemUnitResponse>()
-            .ToListAsync(cancellationToken);
+            .ThenBy(itemUnit => itemUnit.Id);
 
-        return Result<IReadOnlyList<ItemUnitResponse>>.Success(response);
+        return await paginationService.PaginateAsync<ItemUnit, ItemUnitResponse>(
+            query,
+            pagination,
+            cancellationToken);
     }
 
     public async Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
@@ -138,7 +143,9 @@ public sealed class ItemUnitService(ApplicationDbContext dbContext)
             return Result.Failure(NotFound(id));
         }
 
-        var isInUse = await dbContext.Items.AnyAsync(
+        var isInUse = await dbContext.Items
+            .IgnoreQueryFilters()
+            .AnyAsync(
             item => item.ItemUnitId == id,
             cancellationToken);
 
@@ -147,7 +154,7 @@ public sealed class ItemUnitService(ApplicationDbContext dbContext)
             return Result.Failure(
                 Error.Conflict(
                     "ItemUnits.InUse",
-                    "The item unit cannot be deleted because it is used by one or more items."));
+                    "The item unit cannot be deleted because it is used by one or more current or historical items."));
         }
 
         itemUnit.IsActive = false;

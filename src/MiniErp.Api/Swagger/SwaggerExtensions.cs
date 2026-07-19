@@ -60,6 +60,7 @@ public static class SwaggerExtensions
             options.DocumentTitle = $"{title} documentation";
             options.DisplayRequestDuration();
             options.EnableDeepLinking();
+            options.EnablePersistAuthorization();
         });
 
         app.MapGet(

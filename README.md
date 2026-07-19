@@ -59,9 +59,26 @@ The Identity seed contains exactly these accounts:
 
 When the seeder runs, it removes every other Identity user, updates these two accounts to the configured password, and corrects their role membership. Disable `Seed:Enabled` after initialization if the application will create additional users. Catalog seeding remains idempotent and creates six standard item units plus `Seed:ItemCount` mock items with deterministic `ITEM-0001` codes.
 
+Both roles can read catalog data. Creating, updating, or deleting items and item
+units requires the `Admin` role.
+
 ## Swagger
 
 When `Swagger:Enabled` is `true`, Swagger UI is available at `/swagger` and the generated document is available at `/swagger/v1/swagger.json`. Set it to `false` for environments where the UI should be disabled. API routes use URL-segment versioning and the controller token: `/api/v1/Items` and `/api/v1/ItemUnits`.
+
+Swagger persists the authorized access token in the same browser, so refreshing
+the Swagger page does not require entering the token again.
+
+The item and item-unit lists are paginated:
+
+```http
+GET /api/v1/Items?pageNumber=1&pageSize=20
+GET /api/v1/ItemUnits?pageNumber=1&pageSize=20
+```
+
+`pageNumber` defaults to `1`, `pageSize` defaults to `20`, and the maximum page
+size is `100`. The response includes `items`, `pageNumber`, `pageSize`,
+`totalCount`, and `totalPages`.
 
 ## JWT authentication
 
@@ -134,6 +151,10 @@ public sealed class CreateCustomerValidator : AbstractValidator<CreateCustomerRe
 Validate requests explicitly in the application use case or endpoint, then convert validation failures to `Error.Validation(...)` and the existing `Result<T>` pattern. This avoids coupling the Application layer to ASP.NET MVC validation behavior.
 
 ## Adding an ERP feature
+
+Follow the detailed [MiniErp Feature Development Guide](FEATURE_DEVELOPMENT_GUIDE.md)
+before implementing a feature, especially its cross-service impact and
+foreign-key delete checks.
 
 1. Put business entities and rules in `MiniErp.Domain`.
 2. Define the use case and any required external port in `MiniErp.Application`.

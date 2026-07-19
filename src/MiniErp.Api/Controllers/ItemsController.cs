@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
 using MiniErp.Application.Common.Models;
@@ -8,10 +9,13 @@ namespace MiniErp.Api.Controllers;
 public sealed class ItemsController(IItemService itemService) : ApiControllerBase
 {
     [HttpGet]
-    [ProducesResponseType<IReadOnlyList<ItemResponse>>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetAll(CancellationToken cancellationToken)
+    [ProducesResponseType<PagedResponse<ItemResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetAll(
+        [FromQuery] PaginationRequest pagination,
+        CancellationToken cancellationToken)
     {
-        var result = await itemService.GetAllAsync(cancellationToken);
+        var result = await itemService.GetAllAsync(pagination, cancellationToken);
         return this.ToActionResult(result);
     }
 
@@ -35,10 +39,12 @@ public sealed class ItemsController(IItemService itemService) : ApiControllerBas
         return this.ToActionResult(result);
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<ItemResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Create(
         ItemRequest request,
@@ -54,10 +60,12 @@ public sealed class ItemsController(IItemService itemService) : ApiControllerBas
                 result.Value);
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}")]
     [ProducesResponseType<ItemResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Update(
         int id,
@@ -69,10 +77,12 @@ public sealed class ItemsController(IItemService itemService) : ApiControllerBas
         return this.ToActionResult(result);
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Delete(
         int id,
         CancellationToken cancellationToken)

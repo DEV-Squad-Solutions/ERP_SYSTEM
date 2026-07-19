@@ -9,19 +9,24 @@ using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.Items;
 
-public sealed class ItemService(ApplicationDbContext dbContext)
+public sealed class ItemService(
+    ApplicationDbContext dbContext,
+    IPaginationService paginationService)
     : IItemService, IScopedService
 {
-    public async Task<Result<IReadOnlyList<ItemResponse>>> GetAllAsync(
+    public async Task<Result<PagedResponse<ItemResponse>>> GetAllAsync(
+        PaginationRequest pagination,
         CancellationToken cancellationToken = default)
     {
-        var response = await dbContext.Items
+        var query = dbContext.Items
             .AsNoTracking()
             .OrderBy(item => item.Name)
-            .ProjectToType<ItemResponse>()
-            .ToListAsync(cancellationToken);
+            .ThenBy(item => item.Id);
 
-        return Result<IReadOnlyList<ItemResponse>>.Success(response);
+        return await paginationService.PaginateAsync<Item, ItemResponse>(
+            query,
+            pagination,
+            cancellationToken);
     }
 
     public async Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
@@ -29,7 +34,7 @@ public sealed class ItemService(ApplicationDbContext dbContext)
     {
         var response = await dbContext.Items
             .AsNoTracking()
-            .Where(item => item.IsActive)
+            .Where(item => item.IsActive && item.ItemUnit.IsActive)
             .OrderBy(item => item.Name)
             .ProjectToType<SelectResponse>()
             .ToListAsync(cancellationToken);
@@ -72,19 +77,16 @@ public sealed class ItemService(ApplicationDbContext dbContext)
                 Error.Conflict("Items.CodeExists", $"Item code '{code}' already exists."));
         }
 
-        var itemUnit = await dbContext.ItemUnits.FirstOrDefaultAsync(
-            entity => entity.Id == request.ItemUnitId,
+        var itemUnitResult = await GetActiveItemUnitAsync(
+            request.ItemUnitId,
             cancellationToken);
-
-        if (itemUnit is null)
+        if (itemUnitResult.IsFailure)
         {
-            return Result<ItemResponse>.Failure(
-                Error.NotFound(
-                    "ItemUnits.NotFound",
-                    $"Item unit with ID {request.ItemUnitId} was not found."));
+            return Result<ItemResponse>.Failure(itemUnitResult.Error);
         }
 
         var item = request.Adapt<Item>();
+        item.ItemUnit = itemUnitResult.Value;
 
         dbContext.Items.Add(item);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -122,19 +124,16 @@ public sealed class ItemService(ApplicationDbContext dbContext)
                 Error.Conflict("Items.CodeExists", $"Item code '{code}' already exists."));
         }
 
-        var itemUnit = await dbContext.ItemUnits.FirstOrDefaultAsync(
-            entity => entity.Id == request.ItemUnitId,
+        var itemUnitResult = await GetActiveItemUnitAsync(
+            request.ItemUnitId,
             cancellationToken);
-
-        if (itemUnit is null)
+        if (itemUnitResult.IsFailure)
         {
-            return Result<ItemResponse>.Failure(
-                Error.NotFound(
-                    "ItemUnits.NotFound",
-                    $"Item unit with ID {request.ItemUnitId} was not found."));
+            return Result<ItemResponse>.Failure(itemUnitResult.Error);
         }
 
         request.Adapt(item);
+        item.ItemUnit = itemUnitResult.Value;
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return Result<ItemResponse>.Success(item.Adapt<ItemResponse>());
@@ -170,4 +169,28 @@ public sealed class ItemService(ApplicationDbContext dbContext)
 
     private static Error NotFound(int id) =>
         Error.NotFound("Items.NotFound", $"Item with ID {id} was not found.");
+
+    private async Task<Result<ItemUnit>> GetActiveItemUnitAsync(
+        int itemUnitId,
+        CancellationToken cancellationToken)
+    {
+        var itemUnit = await dbContext.ItemUnits.FirstOrDefaultAsync(
+            entity => entity.Id == itemUnitId,
+            cancellationToken);
+
+        if (itemUnit is null)
+        {
+            return Result<ItemUnit>.Failure(
+                Error.NotFound(
+                    "ItemUnits.NotFound",
+                    $"Item unit with ID {itemUnitId} was not found."));
+        }
+
+        return !itemUnit.IsActive
+            ? Result<ItemUnit>.Failure(
+                Error.Conflict(
+                    "ItemUnits.Inactive",
+                    $"Item unit with ID {itemUnitId} is inactive."))
+            : Result<ItemUnit>.Success(itemUnit);
+    }
 }
