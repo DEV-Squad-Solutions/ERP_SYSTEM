@@ -22,9 +22,9 @@ public static class SwaggerExtensions
                 Name = "Authorization",
                 Type = SecuritySchemeType.Http,
                 Scheme = "bearer",
-                BearerFormat = "Bearer token",
+                BearerFormat = "JWT",
                 In = ParameterLocation.Header,
-                Description = "Enter a bearer token in the format: Bearer {token}"
+                Description = "Paste the access token only. Swagger adds the 'Bearer' prefix automatically."
             });
 
             options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
@@ -32,6 +32,7 @@ public static class SwaggerExtensions
                 [new OpenApiSecuritySchemeReference("Bearer", document)] = []
             });
 
+            options.OperationFilter<AllowAnonymousOperationFilter>();
             options.OperationFilter<ItemsSwaggerDocumentation>();
             options.OperationFilter<ItemUnitsSwaggerDocumentation>();
         });

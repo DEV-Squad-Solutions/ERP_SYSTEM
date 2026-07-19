@@ -11,8 +11,23 @@ namespace MiniErp.Infrastructure.Seeding;
 
 public static class DevelopmentDataSeeder
 {
-    private const string DefaultRole = "User";
     private const string SeedActor = "seed";
+
+    private static readonly SeedUser[] SeedUsers =
+    [
+        new(
+            "admin",
+            "admin@minierp.local",
+            "Admin",
+            "System",
+            "Administrator"),
+        new(
+            "user",
+            "user@minierp.local",
+            "User",
+            "Application",
+            "User")
+    ];
 
     private static readonly string[] DefaultItemUnitNames =
     [
@@ -36,15 +51,10 @@ public static class DevelopmentDataSeeder
                 "Seed:Password must be configured when Seed:Enabled is true.");
         }
 
-        var userCount = Math.Clamp(
-            configuration.GetValue("Seed:UserCount", 10),
-            0,
-            1_000);
         var itemCount = Math.Clamp(
             configuration.GetValue("Seed:ItemCount", 25),
             0,
             10_000);
-        var roleName = configuration["Seed:Role"] ?? DefaultRole;
 
         await using var scope = services.CreateAsyncScope();
         var roleManager = scope.ServiceProvider
@@ -52,43 +62,135 @@ public static class DevelopmentDataSeeder
         var userManager = scope.ServiceProvider
             .GetRequiredService<UserManager<ApplicationUser>>();
 
-        if (!await roleManager.RoleExistsAsync(roleName))
+        await SeedIdentityAsync(
+            userManager,
+            roleManager,
+            password,
+            cancellationToken);
+
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await SeedCatalogAsync(dbContext, itemCount, cancellationToken);
+    }
+
+    private static async Task SeedIdentityAsync(
+        UserManager<ApplicationUser> userManager,
+        RoleManager<IdentityRole<Guid>> roleManager,
+        string password,
+        CancellationToken cancellationToken)
+    {
+        foreach (var roleName in SeedUsers
+                     .Select(seedUser => seedUser.Role)
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            var roleResult = await roleManager.CreateAsync(new IdentityRole<Guid>(roleName));
-            EnsureSucceeded(roleResult, $"creating the '{roleName}' role");
-        }
-
-        var faker = new Faker("en");
-
-        for (var index = 1; index <= userCount; index++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var email = $"demo{index}@minierp.local";
-            if (await userManager.FindByEmailAsync(email) is not null)
+            if (await roleManager.RoleExistsAsync(roleName))
             {
                 continue;
             }
 
-            var user = new ApplicationUser
-            {
-                UserName = email,
-                Email = email,
-                EmailConfirmed = true,
-                FirstName = faker.Name.FirstName(),
-                LastName = faker.Name.LastName(),
-                ProfileImage = $"https://i.pravatar.cc/150?u={Uri.EscapeDataString(email)}"
-            };
-
-            var userResult = await userManager.CreateAsync(user, password);
-            EnsureSucceeded(userResult, $"creating user '{email}'");
-
-            var roleResult = await userManager.AddToRoleAsync(user, roleName);
-            EnsureSucceeded(roleResult, $"assigning '{roleName}' to '{email}'");
+            var roleResult = await roleManager.CreateAsync(
+                new IdentityRole<Guid>(roleName));
+            EnsureSucceeded(roleResult, $"creating the '{roleName}' role");
         }
 
-        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await SeedCatalogAsync(dbContext, itemCount, cancellationToken);
+        var allowedUserNames = SeedUsers
+            .Select(seedUser => seedUser.UserName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var existingUsers = await userManager.Users.ToListAsync(cancellationToken);
+
+        foreach (var existingUser in existingUsers.Where(
+                     user => !allowedUserNames.Contains(user.UserName ?? string.Empty)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var deleteResult = await userManager.DeleteAsync(existingUser);
+            EnsureSucceeded(
+                deleteResult,
+                $"deleting user '{existingUser.UserName}'");
+        }
+
+        foreach (var seedUser in SeedUsers)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var user = await userManager.FindByNameAsync(seedUser.UserName);
+            if (user is null)
+            {
+                user = new ApplicationUser
+                {
+                    UserName = seedUser.UserName,
+                    Email = seedUser.Email,
+                    EmailConfirmed = true,
+                    FirstName = seedUser.FirstName,
+                    LastName = seedUser.LastName,
+                    ProfileImage = string.Empty
+                };
+
+                var createResult = await userManager.CreateAsync(user, password);
+                EnsureSucceeded(
+                    createResult,
+                    $"creating user '{seedUser.UserName}'");
+            }
+            else
+            {
+                user.Email = seedUser.Email;
+                user.EmailConfirmed = true;
+                user.FirstName = seedUser.FirstName;
+                user.LastName = seedUser.LastName;
+                user.ProfileImage = string.Empty;
+
+                var updateResult = await userManager.UpdateAsync(user);
+                EnsureSucceeded(
+                    updateResult,
+                    $"updating user '{seedUser.UserName}'");
+
+                if (!await userManager.CheckPasswordAsync(user, password))
+                {
+                    var resetToken = await userManager
+                        .GeneratePasswordResetTokenAsync(user);
+                    var resetResult = await userManager.ResetPasswordAsync(
+                        user,
+                        resetToken,
+                        password);
+                    EnsureSucceeded(
+                        resetResult,
+                        $"resetting the password for '{seedUser.UserName}'");
+                }
+            }
+
+            await SetOnlyRoleAsync(userManager, user, seedUser.Role);
+        }
+    }
+
+    private static async Task SetOnlyRoleAsync(
+        UserManager<ApplicationUser> userManager,
+        ApplicationUser user,
+        string roleName)
+    {
+        var currentRoles = await userManager.GetRolesAsync(user);
+        var rolesToRemove = currentRoles
+            .Where(currentRole => !string.Equals(
+                currentRole,
+                roleName,
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (rolesToRemove.Length > 0)
+        {
+            var removeResult = await userManager.RemoveFromRolesAsync(
+                user,
+                rolesToRemove);
+            EnsureSucceeded(
+                removeResult,
+                $"removing old roles from '{user.UserName}'");
+        }
+
+        if (!await userManager.IsInRoleAsync(user, roleName))
+        {
+            var addResult = await userManager.AddToRoleAsync(user, roleName);
+            EnsureSucceeded(
+                addResult,
+                $"assigning '{roleName}' to '{user.UserName}'");
+        }
     }
 
     private static async Task SeedCatalogAsync(
@@ -199,4 +301,11 @@ public static class DevelopmentDataSeeder
         throw new InvalidOperationException(
             $"Identity seed failed while {operation}: {errors}");
     }
+
+    private sealed record SeedUser(
+        string UserName,
+        string Email,
+        string Role,
+        string FirstName,
+        string LastName);
 }

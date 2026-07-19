@@ -1,8 +1,11 @@
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.IdentityModel.Tokens;
 using MiniErp.Infrastructure.Identity;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
@@ -33,11 +36,68 @@ public static class DependencyInjection
             .AddIdentityCore<ApplicationUser>()
             .AddRoles<IdentityRole<Guid>>()
             .AddEntityFrameworkStores<ApplicationDbContext>()
+            .AddSignInManager()
             .AddDefaultTokenProviders();
 
         services.Configure<IdentityOptions>(
             configuration.GetSection("Identity"));
 
+        var jwtSection = configuration.GetSection(JwtOptions.SectionName);
+        var jwtOptions = jwtSection.Get<JwtOptions>()
+            ?? throw new InvalidOperationException(
+                $"Configuration section '{JwtOptions.SectionName}' was not found.");
+
+        ValidateJwtOptions(jwtOptions);
+        services.Configure<JwtOptions>(jwtSection);
+
+        services
+            .AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+            })
+            .AddJwtBearer(options =>
+            {
+                options.MapInboundClaims = false;
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidIssuer = jwtOptions.Issuer,
+                    ValidateAudience = true,
+                    ValidAudience = jwtOptions.Audience,
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(
+                        Encoding.UTF8.GetBytes(jwtOptions.SigningKey)),
+                    ValidateLifetime = true,
+                    ClockSkew = TimeSpan.FromSeconds(30),
+                    NameClaimType = "unique_name",
+                    RoleClaimType = "role"
+                };
+            });
+
         return services;
+    }
+
+    private static void ValidateJwtOptions(JwtOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(options.Issuer) ||
+            string.IsNullOrWhiteSpace(options.Audience))
+        {
+            throw new InvalidOperationException(
+                "Jwt:Issuer and Jwt:Audience must be configured.");
+        }
+
+        if (Encoding.UTF8.GetByteCount(options.SigningKey) < 32)
+        {
+            throw new InvalidOperationException(
+                "Jwt:SigningKey must contain at least 32 bytes.");
+        }
+
+        if (options.AccessTokenExpirationMinutes <= 0 ||
+            options.RefreshTokenExpirationDays <= 0)
+        {
+            throw new InvalidOperationException(
+                "JWT token expiration values must be greater than zero.");
+        }
     }
 }

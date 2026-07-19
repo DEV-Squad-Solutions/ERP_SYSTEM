@@ -14,6 +14,8 @@ public sealed class ApplicationDbContext(
 
     public DbSet<ItemUnit> ItemUnits => Set<ItemUnit>();
 
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);

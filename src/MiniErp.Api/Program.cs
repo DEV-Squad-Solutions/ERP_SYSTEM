@@ -1,6 +1,5 @@
 using FluentValidation;
 using Asp.Versioning;
-using Microsoft.AspNetCore.Identity;
 using MiniErp.Api.Exceptions;
 using MiniErp.Api.Swagger;
 using MiniErp.Application;
@@ -27,8 +26,10 @@ builder.Services.AddCors(options =>
             .AllowAnyMethod()
             .AllowAnyHeader());
 });
+
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
 builder.Services
     .AddApiVersioning(options =>
     {
@@ -56,9 +57,6 @@ builder.Services.AddSwaggerDocumentation(builder.Configuration);
 
 builder.Services.AddInfrastructure(builder.Configuration);
 
-builder.Services
-    .AddAuthentication(IdentityConstants.BearerScheme)
-    .AddBearerToken(IdentityConstants.BearerScheme);
 builder.Services.AddAuthorization();
 
 var app = builder.Build();

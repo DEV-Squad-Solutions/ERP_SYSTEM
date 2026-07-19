@@ -48,11 +48,62 @@ $env:Seed__Password = "use-a-strong-secret-password"
 dotnet run --project src/MiniErp.Api/MiniErp.Api.csproj --launch-profile https
 ```
 
-The current base seed password is a temporary development credential. Replace it with `Seed__Password` through the production environment or a secret provider before using the application in a real production environment. The application fails fast when seeding is enabled without a password. The seeder creates the configured number of `demo1@minierp.local`, `demo2@minierp.local`, and so on, six standard item units, and `Seed:ItemCount` mock items with deterministic `ITEM-0001` codes. Existing users, units, and item codes are skipped, so restarting the application does not duplicate seed data.
+The current base seed password is a temporary development credential. Replace it with `Seed__Password` through the production environment or a secret provider before using the application in a real production environment. The application fails fast when seeding is enabled without a password.
+
+The Identity seed contains exactly these accounts:
+
+| Username | Password | Role |
+|---|---|---|
+| `admin` | `P@ssword123` | `Admin` |
+| `user` | `P@ssword123` | `User` |
+
+When the seeder runs, it removes every other Identity user, updates these two accounts to the configured password, and corrects their role membership. Disable `Seed:Enabled` after initialization if the application will create additional users. Catalog seeding remains idempotent and creates six standard item units plus `Seed:ItemCount` mock items with deterministic `ITEM-0001` codes.
 
 ## Swagger
 
 When `Swagger:Enabled` is `true`, Swagger UI is available at `/swagger` and the generated document is available at `/swagger/v1/swagger.json`. Set it to `false` for environments where the UI should be disabled. API routes use URL-segment versioning and the controller token: `/api/v1/Items` and `/api/v1/ItemUnits`.
+
+## JWT authentication
+
+The API issues short-lived JWT access tokens and rotating refresh tokens. In production, configure a signing key containing at least 32 bytes through a secret provider or the `Jwt__SigningKey` environment variable. The signing key in `appsettings.Development.json` is for local development only.
+
+Sign in with an existing Identity user:
+
+```http
+POST /api/v1/Auth/login
+Content-Type: application/json
+
+{
+  "userName": "admin",
+  "password": "P@ssword123"
+}
+```
+
+The login response contains the access and refresh tokens with basic user information:
+
+```json
+{
+  "accessToken": "...",
+  "refreshToken": "...",
+  "fullName": "System Administrator",
+  "email": "admin@minierp.local"
+}
+```
+
+The refresh response contains only `accessToken` and `refreshToken`.
+
+Use the access token as `Authorization: Bearer {accessToken}`. To rotate an expired or expiring access token, call:
+
+```http
+POST /api/v1/Auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "..."
+}
+```
+
+Each successful refresh revokes the submitted refresh token and returns a new access-token/refresh-token pair. Refresh tokens are stored in the database only as SHA-256 hashes. Access tokens are not stored. All API controllers require authentication except the login and refresh actions.
 
 ## Result pattern
 
