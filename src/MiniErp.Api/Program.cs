@@ -11,11 +11,22 @@ using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Seeding;
 using SharpGrip.FluentValidation.AutoValidation.Mvc.Extensions;
 
+const string AllowAnyFrontendPolicy = "AllowAnyFrontend";
+
 var builder = WebApplication.CreateBuilder(args);
 
 MappingConfiguration.Register();
 
 builder.Services.AddControllers();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(
+        AllowAnyFrontendPolicy,
+        policy => policy
+            .AllowAnyOrigin()
+            .AllowAnyMethod()
+            .AllowAnyHeader());
+});
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services
@@ -66,6 +77,7 @@ app.UseExceptionHandler();
 app.UseSwaggerDocumentation();
 
 app.UseHttpsRedirection();
+app.UseCors(AllowAnyFrontendPolicy);
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
