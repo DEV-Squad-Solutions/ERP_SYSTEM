@@ -99,7 +99,11 @@ size is `100`. The response includes `items`, `pageNumber`, `pageSize`,
 
 ## JWT authentication
 
-The API issues short-lived JWT access tokens and rotating refresh tokens. In production, configure a signing key containing at least 32 bytes through a secret provider or the `Jwt__SigningKey` environment variable. The signing key in `appsettings.Development.json` is for local development only.
+The API issues short-lived JWT access tokens and rotating refresh tokens. All
+development token settings are under `Jwt` in `appsettings.json`. In
+production, replace the development signing key with a key containing at least
+32 bytes through a secret provider or the `Jwt__SigningKey` environment
+variable.
 
 Sign in with an existing Identity user:
 
@@ -132,6 +136,10 @@ Because the seeded `admin` has multiple companies, login returns a short-lived s
 }
 ```
 
+Do not put `selectionToken` in Swagger's **Authorize** dialog. It has the
+separate `MiniErp.Client.CompanySelection` audience and is accepted only by
+`POST /api/v1/Auth/select-company`.
+
 Select one of the returned companies to receive the final company-scoped tokens:
 
 ```http
@@ -144,7 +152,9 @@ Content-Type: application/json
 }
 ```
 
-The refresh response contains only `accessToken` and `refreshToken`.
+The company-selection response contains `accessToken` and `refreshToken`.
+Put only that `accessToken` in Swagger's **Authorize** dialog. Swagger adds the
+`Bearer` prefix automatically.
 
 Use the access token as `Authorization: Bearer {accessToken}`. To rotate an expired or expiring access token, call:
 

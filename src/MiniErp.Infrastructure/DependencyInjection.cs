@@ -65,12 +65,13 @@ public static class DependencyInjection
                     ValidateIssuer = true,
                     ValidIssuer = jwtOptions.Issuer,
                     ValidateAudience = true,
-                    ValidAudience = jwtOptions.Audience,
+                    ValidAudience = jwtOptions.AccessToken.Audience,
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = new SymmetricSecurityKey(
                         Encoding.UTF8.GetBytes(jwtOptions.SigningKey)),
                     ValidateLifetime = true,
-                    ClockSkew = TimeSpan.FromSeconds(30),
+                    ClockSkew = TimeSpan.FromSeconds(
+                        jwtOptions.ClockSkewSeconds),
                     NameClaimType = "unique_name",
                     RoleClaimType = "role"
                 };
@@ -109,10 +110,13 @@ public static class DependencyInjection
     private static void ValidateJwtOptions(JwtOptions options)
     {
         if (string.IsNullOrWhiteSpace(options.Issuer) ||
-            string.IsNullOrWhiteSpace(options.Audience))
+            string.IsNullOrWhiteSpace(options.AccessToken.Audience) ||
+            string.IsNullOrWhiteSpace(
+                options.CompanySelectionToken.Audience))
         {
             throw new InvalidOperationException(
-                "Jwt:Issuer and Jwt:Audience must be configured.");
+                "Jwt:Issuer, Jwt:AccessToken:Audience, and " +
+                "Jwt:CompanySelectionToken:Audience must be configured.");
         }
 
         if (Encoding.UTF8.GetByteCount(options.SigningKey) < 32)
@@ -121,12 +125,18 @@ public static class DependencyInjection
                 "Jwt:SigningKey must contain at least 32 bytes.");
         }
 
-        if (options.AccessTokenExpirationMinutes <= 0 ||
-            options.CompanySelectionTokenExpirationMinutes <= 0 ||
-            options.RefreshTokenExpirationDays <= 0)
+        if (options.AccessToken.ExpirationMinutes <= 0 ||
+            options.CompanySelectionToken.ExpirationMinutes <= 0 ||
+            options.RefreshToken.ExpirationDays <= 0)
         {
             throw new InvalidOperationException(
                 "JWT token expiration values must be greater than zero.");
+        }
+
+        if (options.ClockSkewSeconds < 0)
+        {
+            throw new InvalidOperationException(
+                "Jwt:ClockSkewSeconds cannot be negative.");
         }
     }
 }

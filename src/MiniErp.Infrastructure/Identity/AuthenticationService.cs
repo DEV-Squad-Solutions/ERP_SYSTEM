@@ -228,7 +228,8 @@ public sealed class AuthenticationService(
             CompanyId = companyId,
             TokenHash = HashRefreshToken(rawRefreshToken),
             CreatedAtUtc = now,
-            ExpiresAtUtc = now.AddDays(options.RefreshTokenExpirationDays)
+            ExpiresAtUtc = now.AddDays(
+                options.RefreshToken.ExpirationDays)
         });
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -255,9 +256,9 @@ public sealed class AuthenticationService(
 
         return WriteToken(
             claims,
-            options.Audience,
+            options.AccessToken.Audience,
             now,
-            now.AddMinutes(options.AccessTokenExpirationMinutes));
+            now.AddMinutes(options.AccessToken.ExpirationMinutes));
     }
 
     private string CreateCompanySelectionToken(ApplicationUser user)
@@ -273,9 +274,10 @@ public sealed class AuthenticationService(
 
         return WriteToken(
             claims,
-            CompanySelectionAudience,
+            options.CompanySelectionToken.Audience,
             now,
-            now.AddMinutes(options.CompanySelectionTokenExpirationMinutes));
+            now.AddMinutes(
+                options.CompanySelectionToken.ExpirationMinutes));
     }
 
     private Result<CompanySelectionTokenData> ValidateCompanySelectionToken(
@@ -289,7 +291,8 @@ public sealed class AuthenticationService(
             };
             var principal = tokenHandler.ValidateToken(
                 selectionToken,
-                CreateTokenValidationParameters(CompanySelectionAudience),
+                CreateTokenValidationParameters(
+                    options.CompanySelectionToken.Audience),
                 out var validatedToken);
 
             if (validatedToken is not JwtSecurityToken jwtToken ||
@@ -387,7 +390,7 @@ public sealed class AuthenticationService(
             IssuerSigningKey = new SymmetricSecurityKey(
                 Encoding.UTF8.GetBytes(options.SigningKey)),
             ValidateLifetime = true,
-            ClockSkew = TimeSpan.FromSeconds(30),
+            ClockSkew = TimeSpan.FromSeconds(options.ClockSkewSeconds),
             NameClaimType = JwtRegisteredClaimNames.UniqueName,
             RoleClaimType = "role"
         };
@@ -404,9 +407,6 @@ public sealed class AuthenticationService(
                 userCompany.CompanyId,
                 userCompany.Company.Name))
             .ToListAsync(cancellationToken);
-
-    private string CompanySelectionAudience =>
-        $"{options.Audience}.CompanySelection";
 
     private static string CreateRefreshToken() =>
         Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(64));
