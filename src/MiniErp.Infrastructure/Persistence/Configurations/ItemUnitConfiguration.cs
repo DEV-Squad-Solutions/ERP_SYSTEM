@@ -20,8 +20,15 @@ public sealed class ItemUnitConfiguration : AuditableEntityConfiguration<ItemUni
             .HasMaxLength(100)
             .IsRequired();
 
-        builder.HasIndex(itemUnit => itemUnit.Name)
+        builder.HasAlternateKey(itemUnit => new { itemUnit.CompanyId, itemUnit.Id });
+
+        builder.HasIndex(itemUnit => new { itemUnit.CompanyId, itemUnit.Name })
             .IsUnique()
             .HasFilter("[IsDeleted] = 0");
+
+        builder.HasOne(itemUnit => itemUnit.Company)
+            .WithMany()
+            .HasForeignKey(itemUnit => itemUnit.CompanyId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

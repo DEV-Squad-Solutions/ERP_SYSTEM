@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -7,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using MiniErp.Application.Common.Abstractions;
+using MiniErp.Application.Common.Authentication;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Authentication;
 using MiniErp.Infrastructure.Persistence;
@@ -45,13 +47,27 @@ public sealed class AuthenticationService(
             return InvalidCredentials();
         }
 
-        var tokenResult = await CreateTokenPairAsync(user, cancellationToken);
+        var companies = await GetAllowedCompaniesAsync(user.Id, cancellationToken);
+        if (companies.Count == 0)
+        {
+            return Result<LoginResponse>.Failure(NoCompanyAccess());
+        }
+
+        var tokenResult = await CreateTokenPairAsync(
+            user,
+            companies,
+            cancellationToken);
+        if (tokenResult.IsFailure)
+        {
+            return Result<LoginResponse>.Failure(tokenResult.Error);
+        }
 
         return Result<LoginResponse>.Success(new LoginResponse(
             tokenResult.Value.AccessToken,
             tokenResult.Value.RefreshToken,
             $"{user.FirstName} {user.LastName}".Trim(),
-            user.Email ?? string.Empty));
+            user.Email ?? string.Empty,
+            companies));
     }
 
     public async Task<Result<TokenResponse>> RefreshAsync(
@@ -81,10 +97,19 @@ public sealed class AuthenticationService(
 
         storedToken.RevokedAtUtc = now;
 
+        var companies = await GetAllowedCompaniesAsync(
+            storedToken.UserId,
+            cancellationToken);
+        if (companies.Count == 0)
+        {
+            return Result<TokenResponse>.Failure(NoCompanyAccess());
+        }
+
         try
         {
             return await CreateTokenPairAsync(
                 storedToken.User,
+                companies,
                 cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
@@ -95,9 +120,10 @@ public sealed class AuthenticationService(
 
     private async Task<Result<TokenResponse>> CreateTokenPairAsync(
         ApplicationUser user,
+        IReadOnlyList<CompanyAccessResponse> companies,
         CancellationToken cancellationToken)
     {
-        var accessToken = await CreateAccessTokenAsync(user);
+        var accessToken = await CreateAccessTokenAsync(user, companies);
         var rawRefreshToken = CreateRefreshToken();
         var now = timeProvider.GetUtcNow();
 
@@ -116,7 +142,9 @@ public sealed class AuthenticationService(
             new TokenResponse(accessToken, rawRefreshToken));
     }
 
-    private async Task<string> CreateAccessTokenAsync(ApplicationUser user)
+    private async Task<string> CreateAccessTokenAsync(
+        ApplicationUser user,
+        IReadOnlyList<CompanyAccessResponse> companies)
     {
         var now = timeProvider.GetUtcNow();
         var roles = await userManager.GetRolesAsync(user);
@@ -141,6 +169,9 @@ public sealed class AuthenticationService(
         }
 
         claims.AddRange(roles.Select(role => new Claim("role", role)));
+        claims.AddRange(companies.Select(company => new Claim(
+            CustomClaimTypes.CompanyId,
+            company.Id.ToString(CultureInfo.InvariantCulture))));
 
         var key = new SymmetricSecurityKey(
             Encoding.UTF8.GetBytes(options.SigningKey));
@@ -156,6 +187,21 @@ public sealed class AuthenticationService(
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
+
+    private Task<List<CompanyAccessResponse>> GetAllowedCompaniesAsync(
+        Guid userId,
+        CancellationToken cancellationToken) =>
+        dbContext.UserCompanies
+            .AsNoTracking()
+            .Where(userCompany =>
+                userCompany.UserId == userId &&
+                !userCompany.Company.IsDeleted)
+            .OrderBy(userCompany => userCompany.Company.Name)
+            .ThenBy(userCompany => userCompany.CompanyId)
+            .Select(userCompany => new CompanyAccessResponse(
+                userCompany.CompanyId,
+                userCompany.Company.Name))
+            .ToListAsync(cancellationToken);
 
     private static string CreateRefreshToken() =>
         Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(64));
@@ -175,4 +221,9 @@ public sealed class AuthenticationService(
             Error.Unauthorized(
                 "Authentication.InvalidRefreshToken",
                 "The refresh token is invalid or expired."));
+
+    private static Error NoCompanyAccess() =>
+        Error.Forbidden(
+            "Authentication.NoCompanyAccess",
+            "The user is not assigned to an active company.");
 }

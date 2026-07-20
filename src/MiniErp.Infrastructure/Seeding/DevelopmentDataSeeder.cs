@@ -57,25 +57,34 @@ public static class DevelopmentDataSeeder
             10_000);
 
         await using var scope = services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var roleManager = scope.ServiceProvider
             .GetRequiredService<RoleManager<IdentityRole<Guid>>>();
         var userManager = scope.ServiceProvider
             .GetRequiredService<UserManager<ApplicationUser>>();
 
+        var company = await SeedCompaniesAsync(dbContext, cancellationToken);
         await SeedIdentityAsync(
+            dbContext,
             userManager,
             roleManager,
             password,
+            company.Id,
             cancellationToken);
 
-        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await SeedCatalogAsync(dbContext, itemCount, cancellationToken);
+        await SeedCatalogAsync(
+            dbContext,
+            company.Id,
+            itemCount,
+            cancellationToken);
     }
 
     private static async Task SeedIdentityAsync(
+        ApplicationDbContext dbContext,
         UserManager<ApplicationUser> userManager,
         RoleManager<IdentityRole<Guid>> roleManager,
         string password,
+        int companyId,
         CancellationToken cancellationToken)
     {
         foreach (var roleName in SeedUsers
@@ -90,22 +99,6 @@ public static class DevelopmentDataSeeder
             var roleResult = await roleManager.CreateAsync(
                 new IdentityRole<Guid>(roleName));
             EnsureSucceeded(roleResult, $"creating the '{roleName}' role");
-        }
-
-        var allowedUserNames = SeedUsers
-            .Select(seedUser => seedUser.UserName)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var existingUsers = await userManager.Users.ToListAsync(cancellationToken);
-
-        foreach (var existingUser in existingUsers.Where(
-                     user => !allowedUserNames.Contains(user.UserName ?? string.Empty)))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var deleteResult = await userManager.DeleteAsync(existingUser);
-            EnsureSucceeded(
-                deleteResult,
-                $"deleting user '{existingUser.UserName}'");
         }
 
         foreach (var seedUser in SeedUsers)
@@ -158,7 +151,24 @@ public static class DevelopmentDataSeeder
             }
 
             await SetOnlyRoleAsync(userManager, user, seedUser.Role);
+
+            var companyAssigned = await dbContext.UserCompanies.AnyAsync(
+                userCompany =>
+                    userCompany.UserId == user.Id &&
+                    userCompany.CompanyId == companyId,
+                cancellationToken);
+
+            if (!companyAssigned)
+            {
+                dbContext.UserCompanies.Add(new UserCompany
+                {
+                    UserId = user.Id,
+                    CompanyId = companyId
+                });
+            }
         }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private static async Task SetOnlyRoleAsync(
@@ -195,11 +205,14 @@ public static class DevelopmentDataSeeder
 
     private static async Task SeedCatalogAsync(
         ApplicationDbContext dbContext,
+        int companyId,
         int itemCount,
         CancellationToken cancellationToken)
     {
         var itemUnits = await dbContext.ItemUnits
-            .Where(itemUnit => DefaultItemUnitNames.Contains(itemUnit.Name))
+            .Where(itemUnit =>
+                itemUnit.CompanyId == companyId &&
+                DefaultItemUnitNames.Contains(itemUnit.Name))
             .ToListAsync(cancellationToken);
 
         var itemUnitsByName = itemUnits.ToDictionary(
@@ -217,6 +230,7 @@ public static class DevelopmentDataSeeder
 
             var itemUnit = new ItemUnit
             {
+                CompanyId = companyId,
                 Name = unitName,
                 IsActive = true,
                 CreatedById = SeedActor,
@@ -237,7 +251,9 @@ public static class DevelopmentDataSeeder
 
         var existingItemCodes = await dbContext.Items
             .IgnoreQueryFilters()
-            .Where(item => item.Code.StartsWith("ITEM-"))
+            .Where(item =>
+                item.CompanyId == companyId &&
+                item.Code.StartsWith("ITEM-"))
             .Select(item => item.Code)
             .ToHashSetAsync(cancellationToken);
 
@@ -253,6 +269,7 @@ public static class DevelopmentDataSeeder
         }
 
         var itemFaker = new Faker<Item>("en")
+            .RuleFor(item => item.CompanyId, _ => companyId)
             .RuleFor(item => item.Code, faker => $"ITEM-{faker.IndexFaker + 1:0000}")
             .RuleFor(item => item.Name, faker => faker.Commerce.ProductName())
             .RuleFor(item => item.Description, faker => faker.Commerce.ProductDescription())
@@ -283,6 +300,42 @@ public static class DevelopmentDataSeeder
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task<Company> SeedCompaniesAsync(
+        ApplicationDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        const string commercialRegister = "54321";
+        const string taxNumber = "456789123";
+
+        var existingCompany = await dbContext.Companies
+            .FirstOrDefaultAsync(
+                company =>
+                    company.CommercialRegister == commercialRegister ||
+                    company.TaxNumber == taxNumber,
+                cancellationToken);
+
+        if (existingCompany is not null)
+        {
+            return existingCompany;
+        }
+
+        var company = new Company
+        {
+            Name = "مجموعة السلام القابضة",
+            Address = "شارع النصر، مدينة نصر، القاهرة",
+            CommercialRegister = commercialRegister,
+            TaxNumber = taxNumber,
+            ManagerName = "خالد السلام",
+            CreatedById = SeedActor,
+            CreatedByPc = Environment.MachineName,
+            CreatedOn = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc)
+        };
+
+        dbContext.Companies.Add(company);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return company;
     }
 
     private static void EnsureSucceeded(

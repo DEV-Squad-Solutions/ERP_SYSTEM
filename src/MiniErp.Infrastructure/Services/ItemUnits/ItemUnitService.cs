@@ -11,15 +11,24 @@ namespace MiniErp.Infrastructure.Services.ItemUnits;
 
 public sealed class ItemUnitService(
     ApplicationDbContext dbContext,
-    IPaginationService paginationService)
+    IPaginationService paginationService,
+    ICurrentCompanyService currentCompanyService)
     : IItemUnitService, IScopedService
 {
     public async Task<Result<PagedResponse<ItemUnitResponse>>> GetAllAsync(
         PaginationRequest pagination,
         CancellationToken cancellationToken = default)
     {
+        var companyResult = currentCompanyService.GetCompanyId();
+        if (companyResult.IsFailure)
+        {
+            return Result<PagedResponse<ItemUnitResponse>>.Failure(companyResult.Error);
+        }
+
+        var companyId = companyResult.Value;
         var query = dbContext.ItemUnits
             .AsNoTracking()
+            .Where(itemUnit => itemUnit.CompanyId == companyId)
             .OrderBy(itemUnit => itemUnit.Name)
             .ThenBy(itemUnit => itemUnit.Id);
 
@@ -32,9 +41,18 @@ public sealed class ItemUnitService(
     public async Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
         CancellationToken cancellationToken = default)
     {
+        var companyResult = currentCompanyService.GetCompanyId();
+        if (companyResult.IsFailure)
+        {
+            return Result<IReadOnlyList<SelectResponse>>.Failure(companyResult.Error);
+        }
+
+        var companyId = companyResult.Value;
         var response = await dbContext.ItemUnits
             .AsNoTracking()
-            .Where(itemUnit => itemUnit.IsActive)
+            .Where(itemUnit =>
+                itemUnit.CompanyId == companyId &&
+                itemUnit.IsActive)
             .OrderBy(itemUnit => itemUnit.Name)
             .ProjectToType<SelectResponse>()
             .ToListAsync(cancellationToken);
@@ -51,9 +69,16 @@ public sealed class ItemUnitService(
             return Result<ItemUnitResponse>.Failure(InvalidId());
         }
 
+        var companyResult = currentCompanyService.GetCompanyId();
+        if (companyResult.IsFailure)
+        {
+            return Result<ItemUnitResponse>.Failure(companyResult.Error);
+        }
+
+        var companyId = companyResult.Value;
         var response = await dbContext.ItemUnits
             .AsNoTracking()
-            .Where(entity => entity.Id == id)
+            .Where(entity => entity.Id == id && entity.CompanyId == companyId)
             .ProjectToType<ItemUnitResponse>()
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -66,9 +91,19 @@ public sealed class ItemUnitService(
         ItemUnitRequest request,
         CancellationToken cancellationToken = default)
     {
-        var name = request.Name.Trim();
+        var companyResult = currentCompanyService.GetCompanyId();
+        if (companyResult.IsFailure)
+        {
+            return Result<ItemUnitResponse>.Failure(companyResult.Error);
+        }
+
+        var companyId = companyResult.Value;
+        var itemUnit = request.Adapt<ItemUnit>();
+        itemUnit.CompanyId = companyId;
         var nameExists = await dbContext.ItemUnits.AnyAsync(
-            entity => entity.Name == name,
+            entity =>
+                entity.CompanyId == companyId &&
+                entity.Name == itemUnit.Name,
             cancellationToken);
 
         if (nameExists)
@@ -76,10 +111,8 @@ public sealed class ItemUnitService(
             return Result<ItemUnitResponse>.Failure(
                 Error.Conflict(
                     "ItemUnits.NameExists",
-                    $"Item unit '{name}' already exists."));
+                    $"Item unit '{itemUnit.Name}' already exists."));
         }
-
-        var itemUnit = request.Adapt<ItemUnit>();
 
         dbContext.ItemUnits.Add(itemUnit);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -97,8 +130,15 @@ public sealed class ItemUnitService(
             return Result<ItemUnitResponse>.Failure(InvalidId());
         }
 
+        var companyResult = currentCompanyService.GetCompanyId();
+        if (companyResult.IsFailure)
+        {
+            return Result<ItemUnitResponse>.Failure(companyResult.Error);
+        }
+
+        var companyId = companyResult.Value;
         var itemUnit = await dbContext.ItemUnits.FirstOrDefaultAsync(
-            entity => entity.Id == id,
+            entity => entity.Id == id && entity.CompanyId == companyId,
             cancellationToken);
 
         if (itemUnit is null)
@@ -106,9 +146,12 @@ public sealed class ItemUnitService(
             return Result<ItemUnitResponse>.Failure(NotFound(id));
         }
 
-        var name = request.Name.Trim();
+        var normalizedItemUnit = request.Adapt<ItemUnit>();
         var nameExists = await dbContext.ItemUnits.AnyAsync(
-            entity => entity.Name == name && entity.Id != id,
+            entity =>
+                entity.CompanyId == companyId &&
+                entity.Name == normalizedItemUnit.Name &&
+                entity.Id != id,
             cancellationToken);
 
         if (nameExists)
@@ -116,7 +159,7 @@ public sealed class ItemUnitService(
             return Result<ItemUnitResponse>.Failure(
                 Error.Conflict(
                     "ItemUnits.NameExists",
-                    $"Item unit '{name}' already exists."));
+                    $"Item unit '{normalizedItemUnit.Name}' already exists."));
         }
 
         request.Adapt(itemUnit);
@@ -134,8 +177,15 @@ public sealed class ItemUnitService(
             return Result.Failure(InvalidId());
         }
 
+        var companyResult = currentCompanyService.GetCompanyId();
+        if (companyResult.IsFailure)
+        {
+            return Result.Failure(companyResult.Error);
+        }
+
+        var companyId = companyResult.Value;
         var itemUnit = await dbContext.ItemUnits.FirstOrDefaultAsync(
-            entity => entity.Id == id,
+            entity => entity.Id == id && entity.CompanyId == companyId,
             cancellationToken);
 
         if (itemUnit is null)
@@ -146,8 +196,10 @@ public sealed class ItemUnitService(
         var isInUse = await dbContext.Items
             .IgnoreQueryFilters()
             .AnyAsync(
-            item => item.ItemUnitId == id,
-            cancellationToken);
+                item =>
+                    item.CompanyId == companyId &&
+                    item.ItemUnitId == id,
+                cancellationToken);
 
         if (isInUse)
         {

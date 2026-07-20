@@ -20,7 +20,7 @@ public sealed class ItemConfiguration : AuditableEntityConfiguration<Item>
             .HasMaxLength(50)
             .IsRequired();
 
-        builder.HasIndex(item => item.Code)
+        builder.HasIndex(item => new { item.CompanyId, item.Code })
             .IsUnique()
             .HasFilter("[IsDeleted] = 0");
 
@@ -31,9 +31,15 @@ public sealed class ItemConfiguration : AuditableEntityConfiguration<Item>
         builder.Property(item => item.Description)
             .HasMaxLength(1_000);
 
+        builder.HasOne(item => item.Company)
+            .WithMany()
+            .HasForeignKey(item => item.CompanyId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.HasOne(item => item.ItemUnit)
             .WithMany(itemUnit => itemUnit.Items)
-            .HasForeignKey(item => item.ItemUnitId)
+            .HasForeignKey(item => new { item.CompanyId, item.ItemUnitId })
+            .HasPrincipalKey(itemUnit => new { itemUnit.CompanyId, itemUnit.Id })
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

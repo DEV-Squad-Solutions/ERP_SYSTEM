@@ -4,11 +4,13 @@ namespace MiniErp.Infrastructure.Identity;
 
 public sealed class ApplicationUser : IdentityUser<Guid>
 {
-    public required string FirstName { get; set; }
+    public string FirstName { get; set; } = string.Empty;
 
-    public required string LastName { get; set; }
+    public string LastName { get; set; } = string.Empty;
 
-    public required string ProfileImage { get; set; }
+    public string ProfileImage { get; set; } = string.Empty;
 
     public ICollection<RefreshToken> RefreshTokens { get; set; } = [];
+
+    public ICollection<UserCompany> UserCompanies { get; set; } = [];
 }

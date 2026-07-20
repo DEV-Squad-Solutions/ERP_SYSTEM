@@ -4,4 +4,5 @@ public sealed record LoginResponse(
     string AccessToken,
     string RefreshToken,
     string FullName,
-    string Email);
+    string Email,
+    IReadOnlyList<CompanyAccessResponse> Companies);

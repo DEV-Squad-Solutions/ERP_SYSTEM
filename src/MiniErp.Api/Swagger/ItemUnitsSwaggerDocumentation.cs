@@ -19,16 +19,16 @@ public sealed class ItemUnitsSwaggerDocumentation : IOperationFilter
         {
             nameof(ItemUnitsController.GetAll) => (
                 "Get paginated item units",
-                "Returns one page of non-deleted item units with total-count metadata. Page size is limited to 100."),
+                "Returns one page of non-deleted item units for the active company with total-count metadata. Page size is limited to 100."),
             nameof(ItemUnitsController.GetSelect) => (
                 "Get item units for selection",
-                "Returns active item units as ID and name pairs for dropdown controls."),
+                "Returns active item units for the active company as ID and name pairs for dropdown controls."),
             nameof(ItemUnitsController.GetById) => (
                 "Get an item unit",
-                "Returns one non-deleted item unit by its integer ID."),
+                "Returns one non-deleted item unit owned by the active company."),
             nameof(ItemUnitsController.Create) => (
                 "Create an item unit",
-                "Admin only. Creates an item unit with a unique name."),
+                "Admin only. Creates an item unit with a company-unique name."),
             nameof(ItemUnitsController.Update) => (
                 "Update an item unit",
                 "Admin only. Updates an item unit while preserving its ID and creation audit information."),
