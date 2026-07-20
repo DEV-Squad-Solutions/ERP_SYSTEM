@@ -12,20 +12,15 @@ namespace MiniErp.Infrastructure.Services.Items;
 public sealed class ItemService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentCompanyService currentCompanyService)
+    ICurrentCompanyContext currentCompanyContext)
     : IItemService, IScopedService
 {
+    private readonly int companyId = currentCompanyContext.CompanyId;
+
     public async Task<Result<PagedResponse<ItemResponse>>> GetAllAsync(
         PaginationRequest pagination,
         CancellationToken cancellationToken = default)
     {
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<PagedResponse<ItemResponse>>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var query = dbContext.Items
             .AsNoTracking()
             .Where(item => item.CompanyId == companyId)
@@ -41,13 +36,6 @@ public sealed class ItemService(
     public async Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
         CancellationToken cancellationToken = default)
     {
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<IReadOnlyList<SelectResponse>>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var response = await dbContext.Items
             .AsNoTracking()
             .Where(item =>
@@ -70,13 +58,6 @@ public sealed class ItemService(
             return Result<ItemResponse>.Failure(InvalidId());
         }
 
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<ItemResponse>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var response = await dbContext.Items
             .AsNoTracking()
             .Where(entity => entity.Id == id && entity.CompanyId == companyId)
@@ -92,13 +73,6 @@ public sealed class ItemService(
         ItemRequest request,
         CancellationToken cancellationToken = default)
     {
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<ItemResponse>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var item = request.Adapt<Item>();
         item.CompanyId = companyId;
         var codeExists = await dbContext.Items.AnyAsync(
@@ -141,13 +115,6 @@ public sealed class ItemService(
             return Result<ItemResponse>.Failure(InvalidId());
         }
 
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<ItemResponse>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var item = await dbContext.Items.FirstOrDefaultAsync(
             entity => entity.Id == id && entity.CompanyId == companyId,
             cancellationToken);
@@ -198,13 +165,6 @@ public sealed class ItemService(
             return Result.Failure(InvalidId());
         }
 
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var item = await dbContext.Items.FirstOrDefaultAsync(
             entity => entity.Id == id && entity.CompanyId == companyId,
             cancellationToken);

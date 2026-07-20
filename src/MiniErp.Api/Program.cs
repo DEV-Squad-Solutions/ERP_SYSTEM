@@ -14,7 +14,7 @@ const string AllowAnyFrontendPolicy = "AllowAnyFrontend";
 
 var builder = WebApplication.CreateBuilder(args);
 
-MappingConfiguration.Register();
+MappingConfiguration.Register(typeof(InfrastructureAssemblyMarker).Assembly);
 
 builder.Services.AddControllers();
 builder.Services.AddCors(options =>

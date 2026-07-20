@@ -18,15 +18,33 @@ public static class DevelopmentDataSeeder
         new(
             "admin",
             "admin@minierp.local",
-            "Admin",
+            ["Admin", "User"],
             "System",
             "Administrator"),
         new(
             "user",
             "user@minierp.local",
-            "User",
+            ["User"],
             "Application",
             "User")
+    ];
+
+    private static readonly SeedCompany[] AdditionalSeedCompanies =
+    [
+        new(
+            "MiniERP Trading Company",
+            "Nasr City, Cairo",
+            "54322",
+            "456789124",
+            "Ahmed Hassan",
+            new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)),
+        new(
+            "MiniERP Distribution Company",
+            "Smouha, Alexandria",
+            "54323",
+            "456789125",
+            "Mona Ibrahim",
+            new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc))
     ];
 
     private static readonly string[] DefaultItemUnitNames =
@@ -37,6 +55,13 @@ public static class DevelopmentDataSeeder
         "Kilogram",
         "Liter",
         "Meter"
+    ];
+
+    private static readonly SeedStore[] DefaultStores =
+    [
+        new("MAIN", "Main Store"),
+        new("SALES", "Sales Store"),
+        new("RETURNS", "Returns Store")
     ];
 
     public static async Task SeedAsync(
@@ -63,20 +88,35 @@ public static class DevelopmentDataSeeder
         var userManager = scope.ServiceProvider
             .GetRequiredService<UserManager<ApplicationUser>>();
 
-        var company = await SeedCompaniesAsync(dbContext, cancellationToken);
+        var primaryCompany = await SeedCompaniesAsync(
+            dbContext,
+            cancellationToken);
+        var companies = new List<Company> { primaryCompany };
+        companies.AddRange(await SeedAdditionalCompaniesAsync(
+            dbContext,
+            cancellationToken));
+
         await SeedIdentityAsync(
             dbContext,
             userManager,
             roleManager,
             password,
-            company.Id,
+            companies,
             cancellationToken);
 
-        await SeedCatalogAsync(
-            dbContext,
-            company.Id,
-            itemCount,
-            cancellationToken);
+        foreach (var company in companies)
+        {
+            await SeedStoresAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
+            await SeedCatalogAsync(
+                dbContext,
+                company.Id,
+                itemCount,
+                cancellationToken);
+        }
     }
 
     private static async Task SeedIdentityAsync(
@@ -84,11 +124,11 @@ public static class DevelopmentDataSeeder
         UserManager<ApplicationUser> userManager,
         RoleManager<IdentityRole<Guid>> roleManager,
         string password,
-        int companyId,
+        IReadOnlyList<Company> companies,
         CancellationToken cancellationToken)
     {
         foreach (var roleName in SeedUsers
-                     .Select(seedUser => seedUser.Role)
+                     .SelectMany(seedUser => seedUser.Roles)
                      .Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (await roleManager.RoleExistsAsync(roleName))
@@ -150,15 +190,21 @@ public static class DevelopmentDataSeeder
                 }
             }
 
-            await SetOnlyRoleAsync(userManager, user, seedUser.Role);
+            await SetRolesAsync(userManager, user, seedUser.Roles);
 
-            var companyAssigned = await dbContext.UserCompanies.AnyAsync(
-                userCompany =>
+            var companyIds = seedUser.Roles.Contains(
+                    "Admin",
+                    StringComparer.OrdinalIgnoreCase)
+                ? companies.Select(company => company.Id).ToArray()
+                : [companies[0].Id];
+            var assignedCompanyIds = await dbContext.UserCompanies
+                .Where(userCompany =>
                     userCompany.UserId == user.Id &&
-                    userCompany.CompanyId == companyId,
-                cancellationToken);
+                    companyIds.Contains(userCompany.CompanyId))
+                .Select(userCompany => userCompany.CompanyId)
+                .ToHashSetAsync(cancellationToken);
 
-            if (!companyAssigned)
+            foreach (var companyId in companyIds.Except(assignedCompanyIds))
             {
                 dbContext.UserCompanies.Add(new UserCompany
                 {
@@ -171,17 +217,16 @@ public static class DevelopmentDataSeeder
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private static async Task SetOnlyRoleAsync(
+    private static async Task SetRolesAsync(
         UserManager<ApplicationUser> userManager,
         ApplicationUser user,
-        string roleName)
+        IReadOnlyCollection<string> roleNames)
     {
         var currentRoles = await userManager.GetRolesAsync(user);
         var rolesToRemove = currentRoles
-            .Where(currentRole => !string.Equals(
+            .Where(currentRole => !roleNames.Contains(
                 currentRole,
-                roleName,
-                StringComparison.OrdinalIgnoreCase))
+                StringComparer.OrdinalIgnoreCase))
             .ToArray();
 
         if (rolesToRemove.Length > 0)
@@ -194,13 +239,58 @@ public static class DevelopmentDataSeeder
                 $"removing old roles from '{user.UserName}'");
         }
 
-        if (!await userManager.IsInRoleAsync(user, roleName))
+        var rolesToAdd = roleNames
+            .Where(roleName => !currentRoles.Contains(
+                roleName,
+                StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+        if (rolesToAdd.Length > 0)
         {
-            var addResult = await userManager.AddToRoleAsync(user, roleName);
+            var addResult = await userManager.AddToRolesAsync(user, rolesToAdd);
             EnsureSucceeded(
                 addResult,
-                $"assigning '{roleName}' to '{user.UserName}'");
+                $"assigning roles to '{user.UserName}'");
         }
+    }
+
+    private static async Task SeedStoresAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var seedStoreCodes = DefaultStores
+            .Select(seedStore => seedStore.Code)
+            .ToArray();
+        var existingCodes = await dbContext.Stores
+            .Where(store =>
+                store.CompanyId == company.Id &&
+                seedStoreCodes.Contains(store.Code))
+            .Select(store => store.Code)
+            .ToHashSetAsync(cancellationToken);
+        var createdOn = DateTime.UtcNow;
+        var createdByPc = Environment.MachineName;
+
+        foreach (var seedStore in DefaultStores)
+        {
+            if (existingCodes.Contains(seedStore.Code))
+            {
+                continue;
+            }
+
+            dbContext.Stores.Add(new Store
+            {
+                CompanyId = company.Id,
+                Code = seedStore.Code,
+                Name = $"{seedStore.Name} - Company {company.Id}",
+                Address = company.Address,
+                IsActive = true,
+                CreatedById = SeedActor,
+                CreatedByPc = createdByPc,
+                CreatedOn = createdOn
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private static async Task SeedCatalogAsync(
@@ -271,13 +361,17 @@ public static class DevelopmentDataSeeder
         var itemFaker = new Faker<Item>("en")
             .RuleFor(item => item.CompanyId, _ => companyId)
             .RuleFor(item => item.Code, faker => $"ITEM-{faker.IndexFaker + 1:0000}")
-            .RuleFor(item => item.Name, faker => faker.Commerce.ProductName())
-            .RuleFor(item => item.Description, faker => faker.Commerce.ProductDescription())
+            .RuleFor(
+                item => item.Name,
+                faker => $"Company {companyId} - {faker.Commerce.ProductName()}")
+            .RuleFor(
+                item => item.Description,
+                faker => $"Company {companyId}: {faker.Commerce.ProductDescription()}")
             .RuleFor(item => item.IsActive, _ => true)
             .RuleFor(item => item.CreatedById, _ => SeedActor)
             .RuleFor(item => item.CreatedByPc, _ => createdByPc)
             .RuleFor(item => item.CreatedOn, _ => createdOn)
-            .UseSeed(20260719);
+            .UseSeed(20260719 + companyId);
 
         var generatedItems = itemFaker.Generate(itemCount);
 
@@ -300,6 +394,44 @@ public static class DevelopmentDataSeeder
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task<IReadOnlyList<Company>> SeedAdditionalCompaniesAsync(
+        ApplicationDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var companies = new List<Company>(AdditionalSeedCompanies.Length);
+
+        foreach (var seedCompany in AdditionalSeedCompanies)
+        {
+            var company = await dbContext.Companies.FirstOrDefaultAsync(
+                entity =>
+                    entity.CommercialRegister == seedCompany.CommercialRegister ||
+                    entity.TaxNumber == seedCompany.TaxNumber,
+                cancellationToken);
+
+            if (company is null)
+            {
+                company = new Company
+                {
+                    Name = seedCompany.Name,
+                    Address = seedCompany.Address,
+                    CommercialRegister = seedCompany.CommercialRegister,
+                    TaxNumber = seedCompany.TaxNumber,
+                    ManagerName = seedCompany.ManagerName,
+                    CreatedById = SeedActor,
+                    CreatedByPc = Environment.MachineName,
+                    CreatedOn = seedCompany.CreatedOn
+                };
+
+                dbContext.Companies.Add(company);
+            }
+
+            companies.Add(company);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return companies;
     }
 
     private static async Task<Company> SeedCompaniesAsync(
@@ -358,7 +490,19 @@ public static class DevelopmentDataSeeder
     private sealed record SeedUser(
         string UserName,
         string Email,
-        string Role,
+        string[] Roles,
         string FirstName,
         string LastName);
+
+    private sealed record SeedCompany(
+        string Name,
+        string Address,
+        string CommercialRegister,
+        string TaxNumber,
+        string ManagerName,
+        DateTime CreatedOn);
+
+    private sealed record SeedStore(
+        string Code,
+        string Name);
 }

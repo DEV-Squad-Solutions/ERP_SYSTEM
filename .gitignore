@@ -2,3 +2,8 @@
 **/bin/
 **/obj/
 *.csproj.user
+client/node_modules/
+client/dist/
+client/.env.local
+client/*.tsbuildinfo
+/client/

@@ -50,17 +50,34 @@ dotnet run --project src/MiniErp.Api/MiniErp.Api.csproj --launch-profile https
 
 The current base seed password is a temporary development credential. Replace it with `Seed__Password` through the production environment or a secret provider before using the application in a real production environment. The application fails fast when seeding is enabled without a password.
 
-The Identity seed contains exactly these accounts:
+The Identity seed ensures these test accounts exist:
 
-| Username | Password | Role |
-|---|---|---|
-| `admin` | `P@ssword123` | `Admin` |
-| `user` | `P@ssword123` | `User` |
+| Username | Password | Roles | Company access |
+|---|---|---|---|
+| `admin` | `P@ssword123` | `Admin`, `User` | All three seeded companies |
+| `user` | `P@ssword123` | `User` | Primary seeded company only |
 
-When the seeder runs, it removes every other Identity user, updates these two accounts to the configured password, and corrects their role membership. Disable `Seed:Enabled` after initialization if the application will create additional users. Catalog seeding remains idempotent and creates six standard item units plus `Seed:ItemCount` mock items with deterministic `ITEM-0001` codes.
+The seeder does not delete other application users. It creates one primary company plus two additional simulation companies and assigns all three to `admin`, allowing the company-selection login flow to be tested. It assigns only the primary company to `user`, allowing the direct-login flow to be tested. Seeding remains idempotent and creates three company-specific stores, six standard item units, and `Seed:ItemCount` visibly company-labelled mock items per seeded company with deterministic `ITEM-0001` codes. Item, item-unit, and store endpoints read the single `company_id` in the selected-company access token and return only that company's data.
 
 Both roles can read catalog data. Creating, updating, or deleting items and item
 units requires the `Admin` role.
+
+User create and update requests accept a `roles` array, for example
+`"roles": ["Admin", "User"]`. A user must have at least one role. Changed role
+assignments are included in newly issued access tokens, so the affected user must
+log in again after an administrator updates their roles.
+
+## React client
+
+The `client` folder contains a responsive React/Vite ERP client. Successful login and company selection open a company-scoped workspace with a sidebar and CRUD screens for Companies, Users, Stores, Item Units, and Items. Tenant-owned tables display their `CompanyId` so the selected-company filter is visible during development.
+
+```powershell
+cd client
+npm install
+npm run dev
+```
+
+The client targets `https://localhost:7067/api/v1` by default. Override it with `VITE_API_BASE_URL` or edit the API URL on the login screen. Companies and Users require the `Admin` role; non-admin users receive read-only catalog screens.
 
 ## Swagger
 
@@ -96,14 +113,34 @@ Content-Type: application/json
 }
 ```
 
-The login response contains the access and refresh tokens with basic user information:
+Because the seeded `admin` has multiple companies, login returns a short-lived selection token instead of the final access and refresh tokens:
 
 ```json
 {
-  "accessToken": "...",
-  "refreshToken": "...",
+  "requiresCompanySelection": true,
+  "selectionToken": "...",
+  "accessToken": null,
+  "refreshToken": null,
   "fullName": "System Administrator",
-  "email": "admin@minierp.local"
+  "email": "admin@minierp.local",
+  "roles": ["Admin", "User"],
+  "companies": [
+    { "id": 1, "name": "..." },
+    { "id": 2, "name": "MiniERP Trading Company" },
+    { "id": 3, "name": "MiniERP Distribution Company" }
+  ]
+}
+```
+
+Select one of the returned companies to receive the final company-scoped tokens:
+
+```http
+POST /api/v1/Auth/select-company
+Content-Type: application/json
+
+{
+  "selectionToken": "...",
+  "companyId": 2
 }
 ```
 

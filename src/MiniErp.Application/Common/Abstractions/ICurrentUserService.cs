@@ -2,7 +2,7 @@ using MiniErp.Application.Common.Results;
 
 namespace MiniErp.Application.Common.Abstractions;
 
-public interface ICurrentCompanyService
+public interface ICurrentUserService
 {
-    Result<int> GetCompanyId();
+    Result<Guid> GetUserId();
 }

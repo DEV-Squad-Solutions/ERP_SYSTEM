@@ -20,7 +20,12 @@ public sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refresh
         builder.HasIndex(token => token.TokenHash)
             .IsUnique();
 
-        builder.HasIndex(token => new { token.UserId, token.ExpiresAtUtc });
+        builder.HasIndex(token => new
+        {
+            token.UserId,
+            token.CompanyId,
+            token.ExpiresAtUtc
+        });
 
         builder.Property(token => token.RowVersion)
             .IsRowVersion();
@@ -29,5 +34,10 @@ public sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refresh
             .WithMany(user => user.RefreshTokens)
             .HasForeignKey(token => token.UserId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(token => token.Company)
+            .WithMany()
+            .HasForeignKey(token => token.CompanyId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

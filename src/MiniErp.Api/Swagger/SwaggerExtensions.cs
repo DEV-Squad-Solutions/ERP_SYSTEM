@@ -33,11 +33,12 @@ public static class SwaggerExtensions
             });
 
             options.OperationFilter<AllowAnonymousOperationFilter>();
-            options.OperationFilter<CompanyContextOperationFilter>();
+            options.OperationFilter<AuthenticationSwaggerDocumentation>();
             options.OperationFilter<CompaniesSwaggerDocumentation>();
             options.OperationFilter<ItemsSwaggerDocumentation>();
             options.OperationFilter<ItemUnitsSwaggerDocumentation>();
             options.OperationFilter<StoresSwaggerDocumentation>();
+            options.OperationFilter<UsersSwaggerDocumentation>();
         });
 
         return services;

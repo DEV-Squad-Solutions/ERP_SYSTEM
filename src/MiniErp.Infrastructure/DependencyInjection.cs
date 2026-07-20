@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
+using MiniErp.Application.Common.Authentication;
 using MiniErp.Infrastructure.Identity;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
@@ -73,6 +74,33 @@ public static class DependencyInjection
                     NameClaimType = "unique_name",
                     RoleClaimType = "role"
                 };
+                options.Events = new JwtBearerEvents
+                {
+                    OnTokenValidated = context =>
+                    {
+                        var tokenUse = context.Principal?
+                            .FindFirst(CustomClaimTypes.TokenUse)?
+                            .Value;
+                        if (!string.Equals(
+                                tokenUse,
+                                CustomClaimTypes.AccessTokenUse,
+                                StringComparison.Ordinal))
+                        {
+                            context.Fail("The token is not an access token.");
+                            return Task.CompletedTask;
+                        }
+
+                        if (!CompanyClaimResolver.TryGetCompanyId(
+                                context.Principal,
+                                out _))
+                        {
+                            context.Fail(
+                                "The access token must contain exactly one valid company_id claim.");
+                        }
+
+                        return Task.CompletedTask;
+                    }
+                };
             });
 
         return services;
@@ -94,6 +122,7 @@ public static class DependencyInjection
         }
 
         if (options.AccessTokenExpirationMinutes <= 0 ||
+            options.CompanySelectionTokenExpirationMinutes <= 0 ||
             options.RefreshTokenExpirationDays <= 0)
         {
             throw new InvalidOperationException(

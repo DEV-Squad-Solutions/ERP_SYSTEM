@@ -12,20 +12,15 @@ namespace MiniErp.Infrastructure.Services.ItemUnits;
 public sealed class ItemUnitService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentCompanyService currentCompanyService)
+    ICurrentCompanyContext currentCompanyContext)
     : IItemUnitService, IScopedService
 {
+    private readonly int companyId = currentCompanyContext.CompanyId;
+
     public async Task<Result<PagedResponse<ItemUnitResponse>>> GetAllAsync(
         PaginationRequest pagination,
         CancellationToken cancellationToken = default)
     {
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<PagedResponse<ItemUnitResponse>>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var query = dbContext.ItemUnits
             .AsNoTracking()
             .Where(itemUnit => itemUnit.CompanyId == companyId)
@@ -41,13 +36,6 @@ public sealed class ItemUnitService(
     public async Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
         CancellationToken cancellationToken = default)
     {
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<IReadOnlyList<SelectResponse>>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var response = await dbContext.ItemUnits
             .AsNoTracking()
             .Where(itemUnit =>
@@ -69,13 +57,6 @@ public sealed class ItemUnitService(
             return Result<ItemUnitResponse>.Failure(InvalidId());
         }
 
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<ItemUnitResponse>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var response = await dbContext.ItemUnits
             .AsNoTracking()
             .Where(entity => entity.Id == id && entity.CompanyId == companyId)
@@ -91,13 +72,6 @@ public sealed class ItemUnitService(
         ItemUnitRequest request,
         CancellationToken cancellationToken = default)
     {
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<ItemUnitResponse>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var itemUnit = request.Adapt<ItemUnit>();
         itemUnit.CompanyId = companyId;
         var nameExists = await dbContext.ItemUnits.AnyAsync(
@@ -130,13 +104,6 @@ public sealed class ItemUnitService(
             return Result<ItemUnitResponse>.Failure(InvalidId());
         }
 
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<ItemUnitResponse>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var itemUnit = await dbContext.ItemUnits.FirstOrDefaultAsync(
             entity => entity.Id == id && entity.CompanyId == companyId,
             cancellationToken);
@@ -177,13 +144,6 @@ public sealed class ItemUnitService(
             return Result.Failure(InvalidId());
         }
 
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var itemUnit = await dbContext.ItemUnits.FirstOrDefaultAsync(
             entity => entity.Id == id && entity.CompanyId == companyId,
             cancellationToken);

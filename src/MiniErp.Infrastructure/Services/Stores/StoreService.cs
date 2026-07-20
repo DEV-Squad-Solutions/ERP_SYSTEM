@@ -12,20 +12,15 @@ namespace MiniErp.Infrastructure.Services.Stores;
 public sealed class StoreService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentCompanyService currentCompanyService)
+    ICurrentCompanyContext currentCompanyContext)
     : IStoreService, IScopedService
 {
+    private readonly int companyId = currentCompanyContext.CompanyId;
+
     public async Task<Result<PagedResponse<StoreResponse>>> GetAllAsync(
         PaginationRequest pagination,
         CancellationToken cancellationToken = default)
     {
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<PagedResponse<StoreResponse>>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var query = dbContext.Stores
             .AsNoTracking()
             .Where(store => store.CompanyId == companyId)
@@ -41,13 +36,6 @@ public sealed class StoreService(
     public async Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
         CancellationToken cancellationToken = default)
     {
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<IReadOnlyList<SelectResponse>>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var response = await dbContext.Stores
             .AsNoTracking()
             .Where(store => store.CompanyId == companyId && store.IsActive)
@@ -68,13 +56,6 @@ public sealed class StoreService(
             return Result<StoreResponse>.Failure(InvalidId());
         }
 
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<StoreResponse>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var response = await dbContext.Stores
             .AsNoTracking()
             .Where(store => store.Id == id && store.CompanyId == companyId)
@@ -90,13 +71,6 @@ public sealed class StoreService(
         StoreRequest request,
         CancellationToken cancellationToken = default)
     {
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<StoreResponse>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var store = request.Adapt<Store>();
         store.CompanyId = companyId;
         var codeExists = await dbContext.Stores.AnyAsync(
@@ -126,13 +100,6 @@ public sealed class StoreService(
             return Result<StoreResponse>.Failure(InvalidId());
         }
 
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result<StoreResponse>.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var store = await dbContext.Stores.FirstOrDefaultAsync(
             entity => entity.Id == id && entity.CompanyId == companyId,
             cancellationToken);
@@ -170,13 +137,6 @@ public sealed class StoreService(
             return Result.Failure(InvalidId());
         }
 
-        var companyResult = currentCompanyService.GetCompanyId();
-        if (companyResult.IsFailure)
-        {
-            return Result.Failure(companyResult.Error);
-        }
-
-        var companyId = companyResult.Value;
         var store = await dbContext.Stores.FirstOrDefaultAsync(
             entity => entity.Id == id && entity.CompanyId == companyId,
             cancellationToken);

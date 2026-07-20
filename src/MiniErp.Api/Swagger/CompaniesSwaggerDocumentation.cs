@@ -29,7 +29,7 @@ public sealed class CompaniesSwaggerDocumentation : IOperationFilter
                 "Admin only. Returns one non-deleted company by its integer ID."),
             nameof(CompaniesController.Create) => (
                 "Create a company",
-                "Admin only. Creates a company with unique commercial-register and tax-number values."),
+                "Admin only. Creates a company with unique commercial-register and tax-number values and grants the authenticated admin access to it atomically. The admin must log in again to select the new company."),
             nameof(CompaniesController.Update) => (
                 "Update a company",
                 "Admin only. Updates a company while preserving its ID and creation audit information."),

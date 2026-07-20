@@ -5,13 +5,15 @@ using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Companies;
 using MiniErp.Domain.Entities;
+using MiniErp.Infrastructure.Identity;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.Companies;
 
 public sealed class CompanyService(
     ApplicationDbContext dbContext,
-    IPaginationService paginationService)
+    IPaginationService paginationService,
+    ICurrentUserService currentUserService)
     : ICompanyService, IScopedService
 {
     public async Task<Result<PagedResponse<CompanyResponse>>> GetAllAsync(
@@ -78,7 +80,18 @@ public sealed class CompanyService(
             return Result<CompanyResponse>.Failure(duplicateError);
         }
 
+        var currentUserResult = currentUserService.GetUserId();
+        if (currentUserResult.IsFailure)
+        {
+            return Result<CompanyResponse>.Failure(currentUserResult.Error);
+        }
+
         dbContext.Companies.Add(company);
+        dbContext.UserCompanies.Add(new UserCompany
+        {
+            UserId = currentUserResult.Value,
+            Company = company
+        });
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<CompanyResponse>.Success(company.Adapt<CompanyResponse>());

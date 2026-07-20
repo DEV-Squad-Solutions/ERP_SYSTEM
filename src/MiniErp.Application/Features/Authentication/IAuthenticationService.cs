@@ -8,7 +8,15 @@ public interface IAuthenticationService
         LoginRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<Result<TokenResponse>> SelectCompanyAsync(
+        SelectCompanyRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<Result<TokenResponse>> RefreshAsync(
+        RefreshTokenRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result> LogoutAsync(
         RefreshTokenRequest request,
         CancellationToken cancellationToken = default);
 }
