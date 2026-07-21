@@ -57,10 +57,11 @@ The Identity seed ensures these test accounts exist:
 | `admin` | `P@ssword123` | `Admin`, `User` | All three seeded companies |
 | `user` | `P@ssword123` | `User` | Primary seeded company only |
 
-The seeder does not delete other application users. It creates one primary company plus two additional simulation companies and assigns all three to `admin`, allowing the company-selection login flow to be tested. It assigns only the primary company to `user`, allowing the direct-login flow to be tested. Seeding remains idempotent and creates three company-specific stores, six standard item units, and `Seed:ItemCount` visibly company-labelled mock items per seeded company with deterministic `ITEM-0001` codes. Item, item-unit, and store endpoints read the single `company_id` in the selected-company access token and return only that company's data.
+The seeder does not delete other application users. It creates one primary company plus two additional simulation companies and assigns all three to `admin`, allowing the company-selection login flow to be tested. It assigns only the primary company to `user`, allowing the direct-login flow to be tested. Seeding remains idempotent and creates three company-specific stores, drivers, and shared customer/supplier business partners, six standard item units, and `Seed:ItemCount` visibly company-labelled mock items per seeded company with deterministic codes. Business-partner, driver, item, item-unit, and store endpoints read the single `company_id` in the selected-company access token and return only that company's data.
 
-Both roles can read catalog data. Creating, updating, or deleting items and item
-units requires the `Admin` role.
+Both roles can read company master data. Creating, updating, or deleting
+business partners, drivers, stores, items, and item units requires the `Admin`
+role.
 
 User create and update requests accept a `roles` array, for example
 `"roles": ["Admin", "User"]`. A user must have at least one role. Changed role
@@ -69,10 +70,14 @@ log in again after an administrator updates their roles.
 
 ## React client
 
-The `client` folder contains a responsive React/Vite ERP client. Successful login and company selection open a company-scoped workspace with a sidebar and CRUD screens for Companies, Users, Stores, Item Units, and Items. Tenant-owned tables display their `CompanyId` so the selected-company filter is visible during development.
+The separate `G:/test/miniErp/client` project contains a responsive React/Vite
+ERP client. Successful login and company selection open a company-scoped
+workspace with sidebar CRUD screens for Companies, Users, Business Partners,
+Drivers, Stores, Item Units, and Items. Tenant-owned tables display their
+`CompanyId` so the selected-company filter is visible during development.
 
 ```powershell
-cd client
+cd G:/test/miniErp/client
 npm install
 npm run dev
 ```
@@ -86,9 +91,11 @@ When `Swagger:Enabled` is `true`, Swagger UI is available at `/swagger` and the 
 Swagger persists the authorized access token in the same browser, so refreshing
 the Swagger page does not require entering the token again.
 
-The item and item-unit lists are paginated:
+Business-partner, driver, item, and item-unit lists are paginated:
 
 ```http
+GET /api/v1/Drivers?pageNumber=1&pageSize=20
+GET /api/v1/BusinessPartners?pageNumber=1&pageSize=20
 GET /api/v1/Items?pageNumber=1&pageSize=20
 GET /api/v1/ItemUnits?pageNumber=1&pageSize=20
 ```

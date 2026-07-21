@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using FluentValidation;
 using Asp.Versioning;
 using MiniErp.Api.Exceptions;
@@ -16,7 +17,13 @@ var builder = WebApplication.CreateBuilder(args);
 
 MappingConfiguration.Register(typeof(InfrastructureAssemblyMarker).Assembly);
 
-builder.Services.AddControllers();
+builder.Services
+    .AddControllers()
+    .AddJsonOptions(options =>
+        options.JsonSerializerOptions.Converters.Add(
+            new JsonStringEnumConverter(
+                namingPolicy: null,
+                allowIntegerValues: false)));
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(

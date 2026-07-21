@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MiniErp.Domain.Entities;
+using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Identity;
 using MiniErp.Infrastructure.Persistence;
 
@@ -64,6 +65,32 @@ public static class DevelopmentDataSeeder
         new("RETURNS", "Returns Store")
     ];
 
+    private static readonly SeedDriver[] DefaultDrivers =
+    [
+        new(
+            "DRV-001",
+            "Ahmed Ali",
+            "123456",
+            new DateOnly(2028, 12, 31)),
+        new(
+            "DRV-002",
+            "Mahmoud Hassan",
+            "234567",
+            new DateOnly(2029, 6, 30)),
+        new(
+            "DRV-003",
+            "Omar Ibrahim",
+            "345678",
+            new DateOnly(2029, 12, 31))
+    ];
+
+    private static readonly SeedBusinessPartner[] DefaultBusinessPartners =
+    [
+        new("BP-001", "Ahmed Mohamed Trading", "123456", CurrencyCode.EGP, 50_000m),
+        new("BP-002", "Al Salam Supplies", "234567", CurrencyCode.USD, 75_000m),
+        new("BP-003", "Nile Distribution", "345678", CurrencyCode.EGP, 100_000m)
+    ];
+
     public static async Task SeedAsync(
         IServiceProvider services,
         IConfiguration configuration,
@@ -107,6 +134,16 @@ public static class DevelopmentDataSeeder
         foreach (var company in companies)
         {
             await SeedStoresAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
+            await SeedDriversAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
+            await SeedBusinessPartnersAsync(
                 dbContext,
                 company,
                 cancellationToken);
@@ -283,6 +320,98 @@ public static class DevelopmentDataSeeder
                 Code = seedStore.Code,
                 Name = $"{seedStore.Name} - Company {company.Id}",
                 Address = company.Address,
+                IsActive = true,
+                CreatedById = SeedActor,
+                CreatedByPc = createdByPc,
+                CreatedOn = createdOn
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedDriversAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var seedDriverCodes = DefaultDrivers
+            .Select(seedDriver => seedDriver.Code)
+            .ToArray();
+        var existingCodes = (await dbContext.Drivers
+                .IgnoreQueryFilters()
+                .Where(driver =>
+                    driver.CompanyId == company.Id &&
+                    seedDriverCodes.Contains(driver.Code))
+                .Select(driver => driver.Code)
+                .ToListAsync(cancellationToken))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var createdOn = DateTime.UtcNow;
+        var createdByPc = Environment.MachineName;
+
+        foreach (var seedDriver in DefaultDrivers)
+        {
+            if (existingCodes.Contains(seedDriver.Code))
+            {
+                continue;
+            }
+
+            dbContext.Drivers.Add(new Driver
+            {
+                CompanyId = company.Id,
+                Code = seedDriver.Code,
+                Name = $"{seedDriver.Name} - Company {company.Id}",
+                PhoneNumber = $"010{company.Id % 100:00}{seedDriver.PhoneSuffix}",
+                NationalId = $"NID-{company.Id:0000}-{seedDriver.Code}",
+                LicenseNumber = $"LIC-{company.Id:0000}-{seedDriver.Code}",
+                LicenseExpiryDate = seedDriver.LicenseExpiryDate,
+                IsActive = true,
+                CreatedById = SeedActor,
+                CreatedByPc = createdByPc,
+                CreatedOn = createdOn
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedBusinessPartnersAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var seedPartnerCodes = DefaultBusinessPartners
+            .Select(seedPartner => seedPartner.Code)
+            .ToArray();
+        var existingCodes = (await dbContext.BusinessPartners
+                .IgnoreQueryFilters()
+                .Where(partner =>
+                    partner.CompanyId == company.Id &&
+                    seedPartnerCodes.Contains(partner.Code))
+                .Select(partner => partner.Code)
+                .ToListAsync(cancellationToken))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var createdOn = DateTime.UtcNow;
+        var createdByPc = Environment.MachineName;
+
+        foreach (var seedPartner in DefaultBusinessPartners)
+        {
+            if (existingCodes.Contains(seedPartner.Code))
+            {
+                continue;
+            }
+
+            dbContext.BusinessPartners.Add(new BusinessPartner
+            {
+                CompanyId = company.Id,
+                Code = seedPartner.Code,
+                Name = $"{seedPartner.Name} - Company {company.Id}",
+                PhoneNumber = $"010{company.Id % 100:00}{seedPartner.PhoneSuffix}",
+                Email = $"{seedPartner.Code.ToLowerInvariant()}.company{company.Id}@minierp.local",
+                Address = company.Address,
+                TaxNumber = $"TAX-{company.Id:0000}-{seedPartner.Code}",
+                Currency = seedPartner.Currency,
+                CreditLimit = seedPartner.CreditLimit,
                 IsActive = true,
                 CreatedById = SeedActor,
                 CreatedByPc = createdByPc,
@@ -505,4 +634,17 @@ public static class DevelopmentDataSeeder
     private sealed record SeedStore(
         string Code,
         string Name);
+
+    private sealed record SeedDriver(
+        string Code,
+        string Name,
+        string PhoneSuffix,
+        DateOnly LicenseExpiryDate);
+
+    private sealed record SeedBusinessPartner(
+        string Code,
+        string Name,
+        string PhoneSuffix,
+        CurrencyCode Currency,
+        decimal CreditLimit);
 }

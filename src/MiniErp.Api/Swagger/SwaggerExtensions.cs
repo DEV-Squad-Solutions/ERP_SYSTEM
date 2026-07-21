@@ -34,7 +34,9 @@ public static class SwaggerExtensions
 
             options.OperationFilter<AllowAnonymousOperationFilter>();
             options.OperationFilter<AuthenticationSwaggerDocumentation>();
+            options.OperationFilter<BusinessPartnersSwaggerDocumentation>();
             options.OperationFilter<CompaniesSwaggerDocumentation>();
+            options.OperationFilter<DriversSwaggerDocumentation>();
             options.OperationFilter<ItemsSwaggerDocumentation>();
             options.OperationFilter<ItemUnitsSwaggerDocumentation>();
             options.OperationFilter<StoresSwaggerDocumentation>();

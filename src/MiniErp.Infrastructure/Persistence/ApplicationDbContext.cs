@@ -12,6 +12,10 @@ public sealed class ApplicationDbContext(
 {
     public DbSet<Company> Companies => Set<Company>();
 
+    public DbSet<BusinessPartner> BusinessPartners => Set<BusinessPartner>();
+
+    public DbSet<Driver> Drivers => Set<Driver>();
+
     public DbSet<Item> Items => Set<Item>();
 
     public DbSet<ItemUnit> ItemUnits => Set<ItemUnit>();
