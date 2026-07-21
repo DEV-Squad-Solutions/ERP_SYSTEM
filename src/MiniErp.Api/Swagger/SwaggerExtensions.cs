@@ -32,6 +32,7 @@ public static class SwaggerExtensions
                 [new OpenApiSecuritySchemeReference("Bearer", document)] = []
             });
 
+            options.SchemaFilter<EnumSchemaDocumentationFilter>();
             options.OperationFilter<AllowAnonymousOperationFilter>();
             options.OperationFilter<AuthenticationSwaggerDocumentation>();
             options.OperationFilter<BusinessPartnersSwaggerDocumentation>();
@@ -41,6 +42,7 @@ public static class SwaggerExtensions
             options.OperationFilter<ItemUnitsSwaggerDocumentation>();
             options.OperationFilter<StoresSwaggerDocumentation>();
             options.OperationFilter<UsersSwaggerDocumentation>();
+            options.OperationFilter<EnumRequestOperationDocumentationFilter>();
         });
 
         return services;
