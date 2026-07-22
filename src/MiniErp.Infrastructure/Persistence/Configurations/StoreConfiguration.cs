@@ -66,10 +66,17 @@ public sealed class StoreConfiguration : AuditableEntityConfiguration<Store>
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasIndex(store => new
-            {
-                store.CompanyId,
-                store.BusinessPartnerId
-            })
-            .HasFilter("[BusinessPartnerId] IS NOT NULL AND [IsDeleted] = 0");
+        {
+            store.CompanyId,
+            store.BusinessPartnerId
+        })
+            .IsUnique()
+            .HasDatabaseName(
+                "UX_Stores_CompanyId_BusinessPartnerId_ActiveContainer")
+            .HasFilter(
+                "[BusinessPartnerId] IS NOT NULL AND " +
+                "[IsContainerStore] = 1 AND " +
+                "[IsActive] = 1 AND " +
+                "[IsDeleted] = 0");
     }
 }

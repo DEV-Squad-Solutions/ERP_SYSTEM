@@ -30,9 +30,9 @@ public sealed class Invoice : AuditableEntity
 
     // References the original sale or purchase when this invoice is a return.
     // It is null for normal sales and purchase invoices.
-    public int? InvoiceId { get; set; }
+    public int? OriginalInvoiceId { get; set; }
 
-    // Navigation to the original invoice referenced by InvoiceId.
+    // Navigation to the original invoice referenced by OriginalInvoiceId.
     public Invoice? OriginalInvoice { get; set; }
 
     public int BusinessPartnerId { get; set; }
@@ -56,13 +56,25 @@ public sealed class Invoice : AuditableEntity
     public int? DriverId { get; set; }
     public Driver? Driver { get; set; }
 
-    public bool IsExternalDriver { get; set; }
+    public bool UsesExternalDriver { get; set; }
     public string? ExternalDriverName { get; set; }
     public string? VehicleNumber { get; set; }
 
     public decimal Total { get; private set; }
 
     public string? Notes { get; set; }
+
+    public DateTime? PostedOn { get; set; }
+
+    public string? PostedById { get; set; }
+
+    public DateTime? CancelledOn { get; set; }
+
+    public string? CancelledById { get; set; }
+
+    public string? CancellationReason { get; set; }
+
+    public byte[] RowVersion { get; set; } = [];
 
     public ICollection<InvoiceLine> Lines { get; set; } = [];
 

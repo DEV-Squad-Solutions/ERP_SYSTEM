@@ -89,6 +89,7 @@ public sealed class StoreService(
 
         var businessPartnerError = await ValidateBusinessPartnerAsync(
             store,
+            null,
             cancellationToken);
         if (businessPartnerError is not null)
         {
@@ -135,6 +136,7 @@ public sealed class StoreService(
 
         var businessPartnerError = await ValidateBusinessPartnerAsync(
             normalizedStore,
+            id,
             cancellationToken);
         if (businessPartnerError is not null)
         {
@@ -183,6 +185,7 @@ public sealed class StoreService(
 
     private async Task<Error?> ValidateBusinessPartnerAsync(
         Store store,
+        int? excludedStoreId,
         CancellationToken cancellationToken)
     {
         if (!store.IsContainerStore)
@@ -216,10 +219,37 @@ public sealed class StoreService(
                 $"لم يتم العثور على العميل أو المورد رقم {store.BusinessPartnerId.Value}.");
         }
 
-        return businessPartner.IsActive
-            ? null
-            : Error.Conflict(
+        if (!businessPartner.IsActive)
+        {
+            return Error.Conflict(
                 "Stores.BusinessPartnerInactive",
                 "يجب ربط مخزن العبوات بعميل أو مورد نشط.");
+        }
+
+        if (!store.IsActive)
+        {
+            return null;
+        }
+
+        var activeContainerStoreExists = await dbContext.Stores
+            .AsNoTracking()
+            .AnyAsync(
+                candidate =>
+                    candidate.CompanyId == companyId &&
+                    candidate.BusinessPartnerId == store.BusinessPartnerId &&
+                    candidate.IsContainerStore &&
+                    candidate.IsActive &&
+                    (!excludedStoreId.HasValue ||
+                     candidate.Id != excludedStoreId.Value),
+                cancellationToken);
+
+        return activeContainerStoreExists
+            ? ActiveContainerStoreExists(store.BusinessPartnerId.Value)
+            : null;
     }
+
+    private static Error ActiveContainerStoreExists(int businessPartnerId) =>
+        Error.Conflict(
+            "Stores.ActiveContainerStoreExists",
+            $"يوجد بالفعل مخزن عبوات نشط مخصص للعميل أو المورد رقم {businessPartnerId}.");
 }

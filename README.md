@@ -84,6 +84,11 @@ npm run dev
 
 The client targets `https://localhost:7067/api/v1` by default. Override it with `VITE_API_BASE_URL` or edit the API URL on the login screen. Companies and Users require the `Admin` role; non-admin users receive read-only catalog screens.
 
+The living backend-to-frontend handoff is maintained at
+`E:\Shaban Documents\Shaban\miniErp backend\FRONTEND_INTEGRATION_GUIDE.md`.
+It separates implemented contracts from planned work and must be updated and
+checked against generated Swagger after every backend feature step.
+
 ## Swagger
 
 When `Swagger:Enabled` is `true`, Swagger UI is available at `/swagger` and the generated document is available at `/swagger/v1/swagger.json`. Set it to `false` for environments where the UI should be disabled. API routes use URL-segment versioning and the controller token: `/api/v1/Items` and `/api/v1/ItemUnits`.

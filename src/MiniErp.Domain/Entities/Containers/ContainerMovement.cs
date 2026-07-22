@@ -18,9 +18,9 @@ public sealed class ContainerMovement : AuditableEntity
 
     public BusinessPartner BusinessPartner { get; set; } = null!;
 
-    public int StoreId { get; set; }
+    public int ContainerStoreId { get; set; }
 
-    public Store Store { get; set; } = null!;
+    public Store ContainerStore { get; set; } = null!;
 
     public int ContainerId { get; set; }
 

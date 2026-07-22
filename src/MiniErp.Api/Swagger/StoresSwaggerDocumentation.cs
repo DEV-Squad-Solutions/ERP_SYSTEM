@@ -41,17 +41,17 @@ public sealed class StoresSwaggerDocumentation : IOperationFilter
             nameof(StoresController.Create) => (
                 "Create a store",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Creates either a product store or a customer-specific container store in the selected company.",
+                    "Admin only. Creates either a product store or a business-partner-specific container store in the selected company.",
                     "`code`, `name`, and `isContainerStore`. `businessPartnerId` is required only when `isContainerStore` is true. Address is optional; `isActive` defaults to true.",
                     "Required strings are trimmed and non-empty. Maximum lengths: code 50, name 200, address 500. A container store requires a positive, active business partner from the selected company; a product store requires `businessPartnerId` to be null.",
-                    "The normalized code must be unique within the company or 409 is returned. A missing or other-company partner returns 404; an inactive partner returns 409. Duplicate names are allowed. `CompanyId` always comes from the token.")),
+                    "The normalized code must be unique within the company. A business partner can have at most one active container store. Duplicates detected before saving return 409; database unique indexes provide final concurrency protection. A missing or other-company partner returns 404; an inactive partner returns 409. Duplicate names are allowed. `CompanyId` always comes from the token.")),
             nameof(StoresController.Update) => (
                 "Update a store",
                 SwaggerOperationDescription.Create(
                     "Admin only. Updates a store in the selected company while preserving identity, tenant, and creation audit fields.",
                     "A positive route `id` and the same conditional request fields required by create.",
                     "All create validation and business-partner rules apply; duplicate-code checks exclude the current store. Changing between product and container types must also add or remove `businessPartnerId` accordingly.",
-                    "Invalid IDs return 400; missing stores or partners return 404; duplicate codes and inactive partners return 409.")),
+                    "Invalid IDs return 400; missing stores or partners return 404. Duplicate codes, inactive partners, and second active container-store assignments detected before saving return 409; database unique indexes provide final concurrency protection.")),
             nameof(StoresController.Delete) => (
                 "Delete a store",
                 SwaggerOperationDescription.Create(
