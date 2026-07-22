@@ -23,8 +23,6 @@ public sealed class Driver : AuditableEntity
 
     public DateOnly? LicenseExpiryDate { get; set; }
 
-    public bool IsInternal { get; set; }
-
     public bool IsActive { get; set; } = true;
 
 }

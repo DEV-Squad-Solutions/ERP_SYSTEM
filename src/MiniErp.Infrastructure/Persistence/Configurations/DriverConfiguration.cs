@@ -13,10 +13,6 @@ public sealed class DriverConfiguration : AuditableEntityConfiguration<Driver>
         builder.ToTable("Drivers");
         builder.HasKey(driver => driver.Id);
 
-        // Driver trip persistence is not implemented yet. Keep this planned
-        // domain property out of the current database model and migration.
-        builder.Ignore(driver => driver.IsInternal);
-
         builder.Property(driver => driver.Id)
             .ValueGeneratedOnAdd();
 
