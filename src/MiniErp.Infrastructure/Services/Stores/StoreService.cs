@@ -4,7 +4,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Stores;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.Stores;
@@ -38,7 +38,10 @@ public sealed class StoreService(
     {
         var response = await dbContext.Stores
             .AsNoTracking()
-            .Where(store => store.CompanyId == companyId && store.IsActive)
+            .Where(store =>
+                store.CompanyId == companyId &&
+                store.IsActive &&
+                !store.IsContainerStore)
             .OrderBy(store => store.Name)
             .ThenBy(store => store.Id)
             .ProjectToType<SelectResponse>()
@@ -84,10 +87,18 @@ public sealed class StoreService(
             return Result<StoreResponse>.Failure(CodeExists(store.Code));
         }
 
+        var businessPartnerError = await ValidateBusinessPartnerAsync(
+            store,
+            cancellationToken);
+        if (businessPartnerError is not null)
+        {
+            return Result<StoreResponse>.Failure(businessPartnerError);
+        }
+
         dbContext.Stores.Add(store);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return Result<StoreResponse>.Success(store.Adapt<StoreResponse>());
+        return await GetByIdAsync(store.Id, cancellationToken);
     }
 
     public async Task<Result<StoreResponse>> UpdateAsync(
@@ -122,10 +133,18 @@ public sealed class StoreService(
             return Result<StoreResponse>.Failure(CodeExists(normalizedStore.Code));
         }
 
+        var businessPartnerError = await ValidateBusinessPartnerAsync(
+            normalizedStore,
+            cancellationToken);
+        if (businessPartnerError is not null)
+        {
+            return Result<StoreResponse>.Failure(businessPartnerError);
+        }
+
         request.Adapt(store);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return Result<StoreResponse>.Success(store.Adapt<StoreResponse>());
+        return await GetByIdAsync(store.Id, cancellationToken);
     }
 
     public async Task<Result> DeleteAsync(
@@ -154,11 +173,53 @@ public sealed class StoreService(
     }
 
     private static Error InvalidId() =>
-        Error.Validation("Stores.InvalidId", "Store ID must be greater than zero.");
+        Error.Validation("Stores.InvalidId", "يجب أن يكون رقم المخزن أكبر من صفر.");
 
     private static Error NotFound(int id) =>
-        Error.NotFound("Stores.NotFound", $"Store with ID {id} was not found.");
+        Error.NotFound("Stores.NotFound", $"لم يتم العثور على المخزن رقم {id}.");
 
     private static Error CodeExists(string code) =>
-        Error.Conflict("Stores.CodeExists", $"Store code '{code}' already exists.");
+        Error.Conflict("Stores.CodeExists", $"كود المخزن '{code}' مستخدم بالفعل.");
+
+    private async Task<Error?> ValidateBusinessPartnerAsync(
+        Store store,
+        CancellationToken cancellationToken)
+    {
+        if (!store.IsContainerStore)
+        {
+            return store.BusinessPartnerId is null
+                ? null
+                : Error.Validation(
+                    "Stores.ProductStoreBusinessPartner",
+                    "يجب عدم تحديد عميل أو مورد لمخزن المنتجات.");
+        }
+
+        if (store.BusinessPartnerId is null or <= 0)
+        {
+            return Error.Validation(
+                "Stores.InvalidBusinessPartnerId",
+                "يجب تحديد عميل أو مورد صحيح للمخزن المخصص للعبوات.");
+        }
+
+        var businessPartner = await dbContext.BusinessPartners
+            .AsNoTracking()
+            .Where(partner =>
+                partner.CompanyId == companyId &&
+                partner.Id == store.BusinessPartnerId.Value)
+            .Select(partner => new { partner.IsActive })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (businessPartner is null)
+        {
+            return Error.NotFound(
+                "Stores.BusinessPartnerNotFound",
+                $"لم يتم العثور على العميل أو المورد رقم {store.BusinessPartnerId.Value}.");
+        }
+
+        return businessPartner.IsActive
+            ? null
+            : Error.Conflict(
+                "Stores.BusinessPartnerInactive",
+                "يجب ربط مخزن العبوات بعميل أو مورد نشط.");
+    }
 }

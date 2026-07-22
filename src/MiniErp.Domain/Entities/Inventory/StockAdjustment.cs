@@ -1,9 +1,10 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 
-namespace MiniErp.Domain.Entities;
+namespace MiniErp.Domain.Entities.Inventory;
 
-public sealed class StockOpeningBalance : AuditableEntity
+public sealed class StockAdjustment : AuditableEntity
 {
     public int Id { get; set; }
 
@@ -19,9 +20,11 @@ public sealed class StockOpeningBalance : AuditableEntity
 
     public DateOnly DocumentDate { get; set; }
 
+    public StockAdjustmentDirection Direction { get; set; }
+
     public DocumentStatus Status { get; set; } = DocumentStatus.Draft;
 
-    public string? Notes { get; set; }
+    public string? Reason { get; set; }
 
-    public ICollection<StockOpeningBalanceLine> Lines { get; set; } = [];
+    public ICollection<StockAdjustmentLine> Lines { get; set; } = [];
 }

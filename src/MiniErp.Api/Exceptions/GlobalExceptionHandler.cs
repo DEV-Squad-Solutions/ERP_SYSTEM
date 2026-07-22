@@ -4,8 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace MiniErp.Api.Exceptions;
 
 public sealed class GlobalExceptionHandler(
-    ILogger<GlobalExceptionHandler> logger,
-    IHostEnvironment environment) : IExceptionHandler
+    ILogger<GlobalExceptionHandler> logger) : IExceptionHandler
 {
     public async ValueTask<bool> TryHandleAsync(
         HttpContext httpContext,
@@ -24,10 +23,8 @@ public sealed class GlobalExceptionHandler(
         var problemDetails = new ProblemDetails
         {
             Status = StatusCodes.Status500InternalServerError,
-            Title = "An unexpected error occurred.",
-            Detail = environment.IsDevelopment()
-                ? exception.Message
-                : "An unexpected error occurred while processing the request.",
+            Title = "حدث خطأ غير متوقع.",
+            Detail = "حدث خطأ غير متوقع أثناء معالجة الطلب.",
             Instance = httpContext.Request.Path
         };
 

@@ -1,7 +1,12 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Inventory;
+using MiniErp.Domain.Entities.Logistics;
+using MiniErp.Domain.Entities.ReferenceData;
 using MiniErp.Domain.Enums;
 
-namespace MiniErp.Domain.Entities;
+namespace MiniErp.Domain.Entities.Invoicing;
 
 public sealed class Invoice : AuditableEntity
 {

@@ -4,7 +4,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.ItemUnits;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.ItemUnits;
@@ -85,7 +85,7 @@ public sealed class ItemUnitService(
             return Result<ItemUnitResponse>.Failure(
                 Error.Conflict(
                     "ItemUnits.NameExists",
-                    $"Item unit '{itemUnit.Name}' already exists."));
+                    $"وحدة الصنف '{itemUnit.Name}' موجودة بالفعل."));
         }
 
         dbContext.ItemUnits.Add(itemUnit);
@@ -126,7 +126,7 @@ public sealed class ItemUnitService(
             return Result<ItemUnitResponse>.Failure(
                 Error.Conflict(
                     "ItemUnits.NameExists",
-                    $"Item unit '{normalizedItemUnit.Name}' already exists."));
+                    $"وحدة الصنف '{normalizedItemUnit.Name}' موجودة بالفعل."));
         }
 
         request.Adapt(itemUnit);
@@ -166,7 +166,7 @@ public sealed class ItemUnitService(
             return Result.Failure(
                 Error.Conflict(
                     "ItemUnits.InUse",
-                    "The item unit cannot be deleted because it is used by one or more current or historical items."));
+                    "لا يمكن حذف وحدة الصنف لأنها مستخدمة في صنف حالي أو تاريخي واحد على الأقل."));
         }
 
         itemUnit.IsActive = false;
@@ -177,10 +177,10 @@ public sealed class ItemUnitService(
     }
 
     private static Error InvalidId() =>
-        Error.Validation("ItemUnits.InvalidId", "Item unit ID must be greater than zero.");
+        Error.Validation("ItemUnits.InvalidId", "يجب أن يكون رقم وحدة الصنف أكبر من صفر.");
 
     private static Error NotFound(int id) =>
         Error.NotFound(
             "ItemUnits.NotFound",
-            $"Item unit with ID {id} was not found.");
+            $"لم يتم العثور على وحدة الصنف رقم {id}.");
 }

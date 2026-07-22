@@ -1,7 +1,9 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.Catalog;
+using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 
-namespace MiniErp.Domain.Entities;
+namespace MiniErp.Domain.Entities.Inventory;
 
 public sealed class ItemMovement : AuditableEntity
 {

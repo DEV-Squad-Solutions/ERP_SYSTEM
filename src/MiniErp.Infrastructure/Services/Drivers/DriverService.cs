@@ -4,7 +4,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Drivers;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.Logistics;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.Drivers;
@@ -185,7 +185,7 @@ public sealed class DriverService(
         {
             return Error.Conflict(
                 "Drivers.NameExists",
-                $"Driver name '{driver.Name}' already exists.");
+                $"اسم السائق '{driver.Name}' موجود بالفعل.");
         }
 
         if (duplicates.Any(entity => string.Equals(
@@ -195,7 +195,7 @@ public sealed class DriverService(
         {
             return Error.Conflict(
                 "Drivers.CodeExists",
-                $"Driver code '{driver.Code}' already exists.");
+                $"كود السائق '{driver.Code}' مستخدم بالفعل.");
         }
 
         if (duplicates.Any(entity => string.Equals(
@@ -205,7 +205,7 @@ public sealed class DriverService(
         {
             return Error.Conflict(
                 "Drivers.LicenseNumberExists",
-                $"Driver licence number '{driver.LicenseNumber}' already exists.");
+                $"رقم رخصة السائق '{driver.LicenseNumber}' مستخدم بالفعل.");
         }
 
         return driver.NationalId is not null &&
@@ -215,17 +215,17 @@ public sealed class DriverService(
                    StringComparison.OrdinalIgnoreCase))
             ? Error.Conflict(
                 "Drivers.NationalIdExists",
-                "A driver with the same national ID already exists.")
+                "يوجد سائق آخر يحمل الرقم القومي نفسه.")
             : null;
     }
 
     private static Error InvalidId() =>
         Error.Validation(
             "Drivers.InvalidId",
-            "Driver ID must be greater than zero.");
+            "يجب أن يكون رقم السائق أكبر من صفر.");
 
     private static Error NotFound(int id) =>
         Error.NotFound(
             "Drivers.NotFound",
-            $"Driver with ID {id} was not found.");
+            $"لم يتم العثور على السائق رقم {id}.");
 }

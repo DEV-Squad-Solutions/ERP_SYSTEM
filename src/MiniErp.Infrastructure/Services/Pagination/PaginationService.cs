@@ -19,7 +19,7 @@ public sealed class PaginationService : IPaginationService, IScopedService
             return Result<PagedResponse<TResponse>>.Failure(
                 Error.Validation(
                     "Pagination.Invalid",
-                    $"Page number must be greater than zero and page size must be between 1 and {PaginationRequest.MaxPageSize}."));
+                    $"يجب أن يكون رقم الصفحة أكبر من صفر، وأن يكون حجم الصفحة بين 1 و{PaginationRequest.MaxPageSize}."));
         }
 
         var totalCount = await query.CountAsync(cancellationToken);

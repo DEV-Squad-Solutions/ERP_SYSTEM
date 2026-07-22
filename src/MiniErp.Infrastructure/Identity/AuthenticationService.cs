@@ -122,7 +122,7 @@ public sealed class AuthenticationService(
             return Result<TokenResponse>.Failure(
                 Error.Forbidden(
                     "Authentication.CompanyAccessDenied",
-                    "The user does not have access to the selected company."));
+                    "لا يملك المستخدم صلاحية الوصول إلى الشركة المحددة."));
         }
 
         return await CreateTokenPairAsync(
@@ -419,13 +419,13 @@ public sealed class AuthenticationService(
         Result<LoginResponse>.Failure(
             Error.Unauthorized(
                 "Authentication.InvalidCredentials",
-                "The username or password is incorrect."));
+                "اسم المستخدم أو كلمة المرور غير صحيحة."));
 
     private static Result<TokenResponse> InvalidRefreshToken() =>
         Result<TokenResponse>.Failure(
             Error.Unauthorized(
                 "Authentication.InvalidRefreshToken",
-                "The refresh token is invalid or expired."));
+                "رمز التحديث غير صالح أو منتهي الصلاحية."));
 
     private static Result<TokenResponse> InvalidCompanySelectionToken() =>
         Result<TokenResponse>.Failure(InvalidCompanySelectionTokenError());
@@ -438,12 +438,12 @@ public sealed class AuthenticationService(
     private static Error InvalidCompanySelectionTokenError() =>
         Error.Unauthorized(
             "Authentication.InvalidCompanySelectionToken",
-            "The company-selection token is invalid or expired.");
+            "رمز اختيار الشركة غير صالح أو منتهي الصلاحية.");
 
     private static Error NoCompanyAccess() =>
         Error.Forbidden(
             "Authentication.NoCompanyAccess",
-            "The user is not assigned to an active company.");
+            "المستخدم غير مرتبط بأي شركة نشطة.");
 
     private sealed record CompanySelectionTokenData(
         Guid UserId,

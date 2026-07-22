@@ -6,4 +6,7 @@ public sealed record StoreResponse(
     string Code,
     string Name,
     string? Address,
+    bool IsContainerStore,
+    int? BusinessPartnerId,
+    string? BusinessPartnerName,
     bool IsActive);

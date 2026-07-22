@@ -36,6 +36,7 @@ public static class DependencyInjection
         services
             .AddIdentityCore<ApplicationUser>()
             .AddRoles<IdentityRole<Guid>>()
+            .AddErrorDescriber<ArabicIdentityErrorDescriber>()
             .AddEntityFrameworkStores<ApplicationDbContext>()
             .AddSignInManager()
             .AddDefaultTokenProviders();
@@ -87,7 +88,7 @@ public static class DependencyInjection
                                 CustomClaimTypes.AccessTokenUse,
                                 StringComparison.Ordinal))
                         {
-                            context.Fail("The token is not an access token.");
+                            context.Fail("الرمز المستخدم ليس رمز وصول.");
                             return Task.CompletedTask;
                         }
 
@@ -96,7 +97,7 @@ public static class DependencyInjection
                                 out _))
                         {
                             context.Fail(
-                                "The access token must contain exactly one valid company_id claim.");
+                                "يجب أن يحتوي رمز الوصول على قيمة company_id واحدة وصحيحة.");
                         }
 
                         return Task.CompletedTask;

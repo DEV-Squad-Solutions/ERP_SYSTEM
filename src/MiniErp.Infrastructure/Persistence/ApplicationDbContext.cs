@@ -1,7 +1,11 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.Catalog;
+using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Inventory;
+using MiniErp.Domain.Entities.Logistics;
 using MiniErp.Infrastructure.Identity;
 
 namespace MiniErp.Infrastructure.Persistence;

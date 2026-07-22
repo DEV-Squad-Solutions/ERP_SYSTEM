@@ -16,6 +16,6 @@ internal sealed class CompanyIdsValidator : AbstractValidator<IReadOnlyCollectio
         RuleFor(companyIds => companyIds)
             .Must(companyIds => companyIds.Count == companyIds.Distinct().Count())
             .When(companyIds => companyIds is not null)
-            .WithMessage("Company IDs must not contain duplicates.");
+            .WithMessage("يجب ألا تحتوي الشركات على قيم مكررة.");
     }
 }

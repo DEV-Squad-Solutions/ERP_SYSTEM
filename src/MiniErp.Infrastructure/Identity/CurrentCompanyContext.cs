@@ -21,6 +21,7 @@ public sealed class CurrentCompanyContext(IHttpContextAccessor httpContextAccess
         }
 
         throw new InvalidOperationException(
-            "The current company context is unavailable. Tenant services must run inside an authenticated request with exactly one valid company_id claim.");
+            "لا يمكن تحديد الشركة الحالية. يجب تنفيذ خدمات الشركات داخل طلب " +
+            "مسجل الدخول ويحتوي على قيمة company_id واحدة وصحيحة.");
     }
 }

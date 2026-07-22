@@ -1,5 +1,5 @@
 using Mapster;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.Inventory;
 
 namespace MiniErp.Application.Features.Stores;
 
@@ -15,5 +15,12 @@ public sealed class StoreMappingRegister : IRegister
                 request => string.IsNullOrWhiteSpace(request.Address)
                     ? null
                     : request.Address.Trim());
+
+        config.ForType<Store, StoreResponse>()
+            .Map(
+                response => response.BusinessPartnerName,
+                store => store.BusinessPartner == null
+                    ? null
+                    : store.BusinessPartner.Name);
     }
 }

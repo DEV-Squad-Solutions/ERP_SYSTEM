@@ -1,8 +1,9 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.Companies;
 
-namespace MiniErp.Domain.Entities;
+namespace MiniErp.Domain.Entities.Catalog;
 
-public sealed class Container : AuditableEntity
+public sealed class ItemUnit : AuditableEntity
 {
     public int Id { get; set; }
 
@@ -10,13 +11,9 @@ public sealed class Container : AuditableEntity
 
     public Company Company { get; set; } = null!;
 
-    public string Code { get; set; } = string.Empty;
-
     public string Name { get; set; } = string.Empty;
-
-    public string? Description { get; set; }
 
     public bool IsActive { get; set; } = true;
 
-    public ICollection<StoreContainer> StoreContainers { get; set; } = [];
+    public ICollection<Item> Items { get; set; } = [];
 }

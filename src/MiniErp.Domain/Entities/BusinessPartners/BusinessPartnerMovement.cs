@@ -1,7 +1,9 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
 
-namespace MiniErp.Domain.Entities;
+namespace MiniErp.Domain.Entities.BusinessPartners;
 
 public sealed class BusinessPartnerMovement : AuditableEntity
 {

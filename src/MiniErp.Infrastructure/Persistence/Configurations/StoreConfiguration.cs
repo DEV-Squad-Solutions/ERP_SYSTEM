@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.Inventory;
 
 namespace MiniErp.Infrastructure.Persistence.Configurations;
 
@@ -10,8 +10,17 @@ public sealed class StoreConfiguration : AuditableEntityConfiguration<Store>
     {
         base.Configure(builder);
 
-        builder.ToTable("Stores");
+        builder.ToTable(
+            "Stores",
+            table => table.HasCheckConstraint(
+                "CK_Stores_TypeBusinessPartner",
+                "([IsContainerStore] = 0 AND [BusinessPartnerId] IS NULL) OR " +
+                "([IsContainerStore] = 1 AND [BusinessPartnerId] IS NOT NULL)"));
         builder.HasKey(store => store.Id);
+
+        // Container persistence will be added with its own feature. Ignoring the
+        // navigation prevents convention-based table discovery in the meantime.
+        builder.Ignore(store => store.StoreContainers);
 
         builder.Property(store => store.Id)
             .ValueGeneratedOnAdd();
@@ -33,9 +42,34 @@ public sealed class StoreConfiguration : AuditableEntityConfiguration<Store>
         builder.Property(store => store.Address)
             .HasMaxLength(500);
 
+        builder.Property(store => store.IsContainerStore)
+            .HasDefaultValue(false)
+            .IsRequired();
+
         builder.HasOne(store => store.Company)
             .WithMany()
             .HasForeignKey(store => store.CompanyId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(store => store.BusinessPartner)
+            .WithMany()
+            .HasForeignKey(store => new
+            {
+                store.CompanyId,
+                store.BusinessPartnerId
+            })
+            .HasPrincipalKey(partner => new
+            {
+                partner.CompanyId,
+                partner.Id
+            })
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(store => new
+            {
+                store.CompanyId,
+                store.BusinessPartnerId
+            })
+            .HasFilter("[BusinessPartnerId] IS NOT NULL AND [IsDeleted] = 0");
     }
 }

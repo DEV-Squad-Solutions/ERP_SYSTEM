@@ -4,7 +4,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Companies;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.Companies;
 using MiniErp.Infrastructure.Identity;
 using MiniErp.Infrastructure.Persistence;
 
@@ -170,7 +170,7 @@ public sealed class CompanyService(
             return Result.Failure(
                 Error.Conflict(
                     "Companies.HasDependencies",
-                    "The company cannot be deleted because it has assigned users or current/historical business data."));
+                    "لا يمكن حذف الشركة لوجود مستخدمين مرتبطين بها أو بيانات حالية أو تاريخية تخصها."));
         }
 
         dbContext.Companies.Remove(company);
@@ -195,7 +195,7 @@ public sealed class CompanyService(
         {
             return Error.Conflict(
                 "Companies.CommercialRegisterExists",
-                $"Commercial register '{commercialRegister}' already exists.");
+                $"السجل التجاري '{commercialRegister}' مستخدم بالفعل.");
         }
 
         var taxNumberExists = await dbContext.Companies.AnyAsync(
@@ -207,13 +207,13 @@ public sealed class CompanyService(
         return taxNumberExists
             ? Error.Conflict(
                 "Companies.TaxNumberExists",
-                $"Tax number '{taxNumber}' already exists.")
+                $"الرقم الضريبي '{taxNumber}' مستخدم بالفعل.")
             : null;
     }
 
     private static Error InvalidId() =>
-        Error.Validation("Companies.InvalidId", "Company ID must be greater than zero.");
+        Error.Validation("Companies.InvalidId", "يجب أن يكون رقم الشركة أكبر من صفر.");
 
     private static Error NotFound(int id) =>
-        Error.NotFound("Companies.NotFound", $"Company with ID {id} was not found.");
+        Error.NotFound("Companies.NotFound", $"لم يتم العثور على الشركة رقم {id}.");
 }

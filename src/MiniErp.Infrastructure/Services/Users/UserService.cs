@@ -282,7 +282,7 @@ public sealed class UserService(
             return Result.Failure(
                 Error.Conflict(
                     "Users.CannotDeleteCurrentUser",
-                    "The currently logged-in user cannot delete their own account."));
+                    "لا يمكن للمستخدم الحالي حذف حسابه بنفسه."));
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -344,14 +344,14 @@ public sealed class UserService(
         {
             return Error.Conflict(
                 "Users.UserNameExists",
-                $"Username '{userName}' already exists.");
+                $"اسم المستخدم '{userName}' مستخدم بالفعل.");
         }
 
         var userWithEmail = await userManager.FindByEmailAsync(email);
         return userWithEmail is not null && userWithEmail.Id != excludedId
             ? Error.Conflict(
                 "Users.EmailExists",
-                $"Email '{email}' already exists.")
+                $"البريد الإلكتروني '{email}' مستخدم بالفعل.")
             : null;
     }
 
@@ -386,7 +386,7 @@ public sealed class UserService(
         return Result<List<string>>.Failure(
             Error.NotFound(
                 "Users.RolesNotFound",
-                $"Roles were not found: {string.Join(", ", missingRoles)}."));
+                $"لم يتم العثور على الأدوار التالية: {string.Join(", ", missingRoles)}."));
     }
 
     private async Task<Result<List<UserCompanyResponse>>> GetCompaniesAsync(
@@ -412,7 +412,7 @@ public sealed class UserService(
         return Result<List<UserCompanyResponse>>.Failure(
             Error.NotFound(
                 "Users.CompaniesNotFound",
-                $"Companies were not found or are deleted: {string.Join(", ", missingIds)}."));
+                $"الشركات التالية غير موجودة أو محذوفة: {string.Join(", ", missingIds)}."));
     }
 
     private async Task SyncCompaniesAsync(
@@ -518,21 +518,21 @@ public sealed class UserService(
             "Users.IdentityValidation",
             string.Join(
                 "; ",
-                result.Errors.Select(error => $"{error.Code}: {error.Description}")));
+                result.Errors.Select(error => error.Description)));
 
     private static Error InvalidId() =>
-        Error.Validation("Users.InvalidId", "User ID must not be empty.");
+        Error.Validation("Users.InvalidId", "رقم المستخدم مطلوب.");
 
     private static Error NotFound(Guid id) =>
-        Error.NotFound("Users.NotFound", $"User with ID {id} was not found.");
+        Error.NotFound("Users.NotFound", $"لم يتم العثور على المستخدم رقم {id}.");
 
     private static Error InvalidPagination() =>
         Error.Validation(
             "Pagination.Invalid",
-            $"Page number must be greater than zero and page size must be between 1 and {PaginationRequest.MaxPageSize}.");
+            $"يجب أن يكون رقم الصفحة أكبر من صفر، وأن يكون حجم الصفحة بين 1 و{PaginationRequest.MaxPageSize}.");
 
     private static Error LastAdminError() =>
         Error.Conflict(
             "Users.LastAdmin",
-            "The last Admin user cannot be deleted, and the Admin role cannot be removed from that account.");
+            "لا يمكن حذف آخر مستخدم مسؤول أو إزالة دور المسؤول من حسابه.");
 }

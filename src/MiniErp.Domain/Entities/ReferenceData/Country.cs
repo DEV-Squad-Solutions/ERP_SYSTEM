@@ -1,6 +1,6 @@
 using MiniErp.Domain.Common.Entities;
 
-namespace MiniErp.Domain.Entities;
+namespace MiniErp.Domain.Entities.ReferenceData;
 
 public sealed class Country : AuditableEntity
 {

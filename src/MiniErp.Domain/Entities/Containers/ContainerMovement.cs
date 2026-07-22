@@ -1,6 +1,10 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Inventory;
+using MiniErp.Domain.Entities.Invoicing;
 
-namespace MiniErp.Domain.Entities;
+namespace MiniErp.Domain.Entities.Containers;
 
 public sealed class ContainerMovement : AuditableEntity
 {

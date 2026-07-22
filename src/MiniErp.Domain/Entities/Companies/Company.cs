@@ -1,6 +1,6 @@
 using MiniErp.Domain.Common.Entities;
 
-namespace MiniErp.Domain.Entities;
+namespace MiniErp.Domain.Entities.Companies;
 
 public sealed class Company : AuditableEntity
 {

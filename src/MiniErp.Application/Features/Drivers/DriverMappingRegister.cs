@@ -1,5 +1,5 @@
 using Mapster;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.Logistics;
 
 namespace MiniErp.Application.Features.Drivers;
 

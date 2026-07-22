@@ -4,7 +4,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.BusinessPartners;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.BusinessPartners;
@@ -148,6 +148,20 @@ public sealed class BusinessPartnerService(
             return Result.Failure(NotFound(id));
         }
 
+        var hasContainerStores = await dbContext.Stores
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                store =>
+                    store.CompanyId == companyId &&
+                    store.BusinessPartnerId == id,
+                cancellationToken);
+        if (hasContainerStores)
+        {
+            return Result.Failure(Error.Conflict(
+                "BusinessPartners.HasContainerStores",
+                "لا يمكن حذف العميل أو المورد لارتباطه بمخزن عبوات حالي أو تاريخي."));
+        }
+
         partner.IsActive = false;
         dbContext.BusinessPartners.Remove(partner);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -184,7 +198,7 @@ public sealed class BusinessPartnerService(
         {
             return Error.Conflict(
                 "BusinessPartners.NameExists",
-                $"Business partner name '{partner.Name}' already exists.");
+                $"اسم العميل أو المورد '{partner.Name}' موجود بالفعل.");
         }
 
         if (duplicates.Any(entity => string.Equals(
@@ -194,7 +208,7 @@ public sealed class BusinessPartnerService(
         {
             return Error.Conflict(
                 "BusinessPartners.CodeExists",
-                $"Business partner code '{partner.Code}' already exists.");
+                $"كود العميل أو المورد '{partner.Code}' مستخدم بالفعل.");
         }
 
         return partner.TaxNumber is not null &&
@@ -204,17 +218,17 @@ public sealed class BusinessPartnerService(
                    StringComparison.OrdinalIgnoreCase))
             ? Error.Conflict(
                 "BusinessPartners.TaxNumberExists",
-                "A business partner with the same tax number already exists.")
+                "يوجد عميل أو مورد آخر يحمل الرقم الضريبي نفسه.")
             : null;
     }
 
     private static Error InvalidId() =>
         Error.Validation(
             "BusinessPartners.InvalidId",
-            "Business partner ID must be greater than zero.");
+            "يجب أن يكون رقم العميل أو المورد أكبر من صفر.");
 
     private static Error NotFound(int id) =>
         Error.NotFound(
             "BusinessPartners.NotFound",
-            $"Business partner with ID {id} was not found.");
+            $"لم يتم العثور على العميل أو المورد رقم {id}.");
 }

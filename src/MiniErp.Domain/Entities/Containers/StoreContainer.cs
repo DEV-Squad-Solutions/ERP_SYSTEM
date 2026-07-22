@@ -1,6 +1,8 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Inventory;
 
-namespace MiniErp.Domain.Entities;
+namespace MiniErp.Domain.Entities.Containers;
 
 public sealed class StoreContainer : AuditableEntity
 {

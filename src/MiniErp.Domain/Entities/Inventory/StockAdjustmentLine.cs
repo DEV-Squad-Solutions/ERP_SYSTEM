@@ -1,8 +1,10 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.Catalog;
+using MiniErp.Domain.Entities.Companies;
 
-namespace MiniErp.Domain.Entities;
+namespace MiniErp.Domain.Entities.Inventory;
 
-public sealed class StockOpeningBalanceLine : AuditableEntity
+public sealed class StockAdjustmentLine : AuditableEntity
 {
     public int Id { get; set; }
 
@@ -10,9 +12,9 @@ public sealed class StockOpeningBalanceLine : AuditableEntity
 
     public Company Company { get; set; } = null!;
 
-    public int StockOpeningBalanceId { get; set; }
+    public int StockAdjustmentId { get; set; }
 
-    public StockOpeningBalance StockOpeningBalance { get; set; } = null!;
+    public StockAdjustment StockAdjustment { get; set; } = null!;
 
     public int ItemId { get; set; }
 
@@ -24,6 +26,6 @@ public sealed class StockOpeningBalanceLine : AuditableEntity
 
     public decimal Quantity { get; set; }
 
-    public string? Notes { get; set; }
+    public string? Reason { get; set; }
 
 }

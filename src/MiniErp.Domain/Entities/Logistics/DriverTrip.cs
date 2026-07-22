@@ -1,6 +1,9 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Invoicing;
 
-namespace MiniErp.Domain.Entities;
+namespace MiniErp.Domain.Entities.Logistics;
 
 public sealed class DriverTrip : AuditableEntity
 {

@@ -58,7 +58,7 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
                     "Admin only. Deactivates and soft-deletes a business partner in the selected company; audit history remains.",
                     "A positive route `id` and an Admin bearer token containing one `company_id`.",
                     "`id` must be greater than zero.",
-                    "Invalid IDs return 400. Missing, already-deleted, and other-company records return 404. A repeated delete is not treated as success.")),
+                    "Invalid IDs return 400. Missing, already-deleted, and other-company records return 404. A partner linked to any current or historical container store returns 409. A repeated delete is not treated as success.")),
             _ => default
         };
 

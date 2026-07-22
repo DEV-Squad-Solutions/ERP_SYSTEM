@@ -1,6 +1,8 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Containers;
 
-namespace MiniErp.Domain.Entities;
+namespace MiniErp.Domain.Entities.Invoicing;
 
 public sealed class InvoiceContainerLine : AuditableEntity
 {

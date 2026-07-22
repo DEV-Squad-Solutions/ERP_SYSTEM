@@ -3,9 +3,11 @@ using FluentValidation;
 using Asp.Versioning;
 using MiniErp.Api.Exceptions;
 using MiniErp.Api.Swagger;
+using MiniErp.Api.Validation;
 using MiniErp.Application;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
+using MiniErp.Application.Common.Validation;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Seeding;
@@ -16,6 +18,7 @@ const string AllowAnyFrontendPolicy = "AllowAnyFrontend";
 var builder = WebApplication.CreateBuilder(args);
 
 MappingConfiguration.Register(typeof(InfrastructureAssemblyMarker).Assembly);
+ArabicValidationConfiguration.Configure();
 
 builder.Services
     .AddControllers()
@@ -52,7 +55,11 @@ builder.Services
 builder.Services.AddValidatorsFromAssemblyContaining<ApplicationAssemblyMarker>(
     ServiceLifetime.Scoped);
 builder.Services.AddFluentValidationAutoValidation(configuration =>
-    configuration.DisableBuiltInModelValidation = true);
+{
+    configuration.DisableBuiltInModelValidation = true;
+    configuration.OverrideDefaultResultFactoryWith<
+        ArabicValidationResultFactory>();
+});
 builder.Services.Scan(scan => scan
     .FromAssemblies(
         typeof(ApplicationAssemblyMarker).Assembly,

@@ -36,10 +36,19 @@ public static class ResultExtensions
         var problemDetails = new ProblemDetails
         {
             Status = statusCode,
-            Title = error.Code,
+            Title = error.Type switch
+            {
+                ErrorType.Validation => "بيانات الطلب غير صحيحة.",
+                ErrorType.Unauthorized => "يجب تسجيل الدخول أولًا.",
+                ErrorType.Forbidden => "غير مسموح بتنفيذ هذا الإجراء.",
+                ErrorType.NotFound => "العنصر المطلوب غير موجود.",
+                ErrorType.Conflict => "يوجد تعارض في البيانات.",
+                _ => "حدث خطأ أثناء معالجة الطلب."
+            },
             Detail = error.Description
         };
 
+        problemDetails.Extensions["errorCode"] = error.Code;
         problemDetails.Extensions["errorType"] = error.Type.ToString();
 
         return new ObjectResult(problemDetails)
