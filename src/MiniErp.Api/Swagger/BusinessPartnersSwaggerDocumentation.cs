@@ -28,7 +28,7 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
                 "Returns one non-deleted business partner owned by the active company."),
             nameof(BusinessPartnersController.Create) => (
                 "Create a business partner",
-                "Admin only. Creates a shared customer/supplier record in the active company. Code and any supplied tax number must be unique within that company."),
+                "Admin only. Creates a shared customer/supplier record in the active company. Normalized name, code, and any supplied tax number must be unique within that company."),
             nameof(BusinessPartnersController.Update) => (
                 "Update a business partner",
                 "Admin only. Updates a business partner in the active company while preserving its ID, CompanyId, and creation audit information."),

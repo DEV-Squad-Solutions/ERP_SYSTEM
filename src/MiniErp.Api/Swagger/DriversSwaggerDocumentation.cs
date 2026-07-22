@@ -28,7 +28,7 @@ public sealed class DriversSwaggerDocumentation : IOperationFilter
                 "Returns one non-deleted driver owned by the active company."),
             nameof(DriversController.Create) => (
                 "Create a driver",
-                "Admin only. Creates a driver in the active company. Code and licence number are required and unique within that company; a supplied national ID must also be unique."),
+                "Admin only. Creates a driver in the active company. Normalized name, code, and licence number are required and unique within that company; a supplied national ID must also be unique."),
             nameof(DriversController.Update) => (
                 "Update a driver",
                 "Admin only. Updates a driver in the active company while preserving its ID, CompanyId, and creation audit information."),

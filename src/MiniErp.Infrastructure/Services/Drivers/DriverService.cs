@@ -164,17 +164,29 @@ public sealed class DriverService(
             .Where(entity =>
                 entity.CompanyId == companyId &&
                 (!excludedId.HasValue || entity.Id != excludedId.Value) &&
-                (entity.Code == driver.Code ||
+                (entity.Name == driver.Name ||
+                 entity.Code == driver.Code ||
                  entity.LicenseNumber == driver.LicenseNumber ||
                  (driver.NationalId != null &&
                   entity.NationalId == driver.NationalId)))
             .Select(entity => new
             {
+                entity.Name,
                 entity.Code,
                 entity.LicenseNumber,
                 entity.NationalId
             })
             .ToListAsync(cancellationToken);
+
+        if (duplicates.Any(entity => string.Equals(
+                entity.Name,
+                driver.Name,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            return Error.Conflict(
+                "Drivers.NameExists",
+                $"Driver name '{driver.Name}' already exists.");
+        }
 
         if (duplicates.Any(entity => string.Equals(
                 entity.Code,

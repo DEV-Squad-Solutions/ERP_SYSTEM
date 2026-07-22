@@ -28,7 +28,9 @@ public sealed class DriverConfiguration : AuditableEntityConfiguration<Driver>
             .HasMaxLength(200)
             .IsRequired();
 
-        builder.HasIndex(driver => new { driver.CompanyId, driver.Name });
+        builder.HasIndex(driver => new { driver.CompanyId, driver.Name })
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0");
 
         builder.Property(driver => driver.PhoneNumber)
             .HasMaxLength(50);

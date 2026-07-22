@@ -165,15 +165,27 @@ public sealed class BusinessPartnerService(
             .Where(entity =>
                 entity.CompanyId == companyId &&
                 (!excludedId.HasValue || entity.Id != excludedId.Value) &&
-                (entity.Code == partner.Code ||
+                (entity.Name == partner.Name ||
+                 entity.Code == partner.Code ||
                  (partner.TaxNumber != null &&
                   entity.TaxNumber == partner.TaxNumber)))
             .Select(entity => new
             {
+                entity.Name,
                 entity.Code,
                 entity.TaxNumber
             })
             .ToListAsync(cancellationToken);
+
+        if (duplicates.Any(entity => string.Equals(
+                entity.Name,
+                partner.Name,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            return Error.Conflict(
+                "BusinessPartners.NameExists",
+                $"Business partner name '{partner.Name}' already exists.");
+        }
 
         if (duplicates.Any(entity => string.Equals(
                 entity.Code,

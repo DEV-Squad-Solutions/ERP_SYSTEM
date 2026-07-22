@@ -29,7 +29,9 @@ public sealed class BusinessPartnerConfiguration
             .HasMaxLength(200)
             .IsRequired();
 
-        builder.HasIndex(partner => new { partner.CompanyId, partner.Name });
+        builder.HasIndex(partner => new { partner.CompanyId, partner.Name })
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0");
 
         builder.Property(partner => partner.PhoneNumber)
             .HasMaxLength(50);
