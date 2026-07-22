@@ -2,7 +2,7 @@ using MiniErp.Domain.Common.Entities;
 
 namespace MiniErp.Domain.Entities;
 
-public sealed class ItemUnit : AuditableEntity
+public sealed class Container : AuditableEntity
 {
     public int Id { get; set; }
 
@@ -10,9 +10,13 @@ public sealed class ItemUnit : AuditableEntity
 
     public Company Company { get; set; } = null!;
 
+    public string Code { get; set; } = string.Empty;
+
     public string Name { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
 
     public bool IsActive { get; set; } = true;
 
-    public ICollection<Item> Items { get; set; } = [];
+    public ICollection<StoreContainer> StoreContainers { get; set; } = [];
 }

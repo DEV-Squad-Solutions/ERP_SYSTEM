@@ -8,7 +8,11 @@ public sealed class RefreshToken
 
     public Guid UserId { get; set; }
 
+    public ApplicationUser User { get; set; } = null!;
+
     public int? CompanyId { get; set; }
+
+    public Company? Company { get; set; }
 
     public string TokenHash { get; set; } = string.Empty;
 
@@ -20,7 +24,4 @@ public sealed class RefreshToken
 
     public byte[] RowVersion { get; set; } = [];
 
-    public ApplicationUser User { get; set; } = null!;
-
-    public Company? Company { get; set; }
 }

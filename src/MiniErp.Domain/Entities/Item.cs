@@ -8,7 +8,11 @@ public sealed class Item : AuditableEntity
 
     public int CompanyId { get; set; }
 
+    public Company Company { get; set; } = null!;
+
     public int ItemUnitId { get; set; }
+
+    public ItemUnit ItemUnit { get; set; } = null!;
 
     public string Code { get; set; } = string.Empty;
 
@@ -18,7 +22,4 @@ public sealed class Item : AuditableEntity
 
     public bool IsActive { get; set; } = true;
 
-    public Company Company { get; set; } = null!;
-
-    public ItemUnit ItemUnit { get; set; } = null!;
 }

@@ -9,6 +9,8 @@ public sealed class BusinessPartner : AuditableEntity
 
     public int CompanyId { get; set; }
 
+    public Company Company { get; set; } = null!;
+
     public string Code { get; set; } = string.Empty;
 
     public string Name { get; set; } = string.Empty;
@@ -27,5 +29,4 @@ public sealed class BusinessPartner : AuditableEntity
 
     public bool IsActive { get; set; } = true;
 
-    public Company Company { get; set; } = null!;
 }
