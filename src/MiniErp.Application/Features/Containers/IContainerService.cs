@@ -1,31 +1,28 @@
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 
-namespace MiniErp.Application.Features.Stores;
+namespace MiniErp.Application.Features.Containers;
 
-public interface IStoreService
+public interface IContainerService
 {
-    Task<Result<PagedResponse<StoreResponse>>> GetAllAsync(
+    Task<Result<PagedResponse<ContainerResponse>>> GetAllAsync(
         PaginationRequest pagination,
         CancellationToken cancellationToken = default);
 
     Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
         CancellationToken cancellationToken = default);
 
-    Task<Result<IReadOnlyList<SelectResponse>>> GetContainerSelectAsync(
-        CancellationToken cancellationToken = default);
-
-    Task<Result<StoreResponse>> GetByIdAsync(
+    Task<Result<ContainerResponse>> GetByIdAsync(
         int id,
         CancellationToken cancellationToken = default);
 
-    Task<Result<StoreResponse>> AddAsync(
-        StoreRequest request,
+    Task<Result<ContainerResponse>> AddAsync(
+        ContainerRequest request,
         CancellationToken cancellationToken = default);
 
-    Task<Result<StoreResponse>> UpdateAsync(
+    Task<Result<ContainerResponse>> UpdateAsync(
         int id,
-        StoreRequest request,
+        ContainerRequest request,
         CancellationToken cancellationToken = default);
 
     Task<Result> DeleteAsync(

@@ -31,6 +31,13 @@ public sealed class StoresSwaggerDocumentation : IOperationFilter
                     "A bearer token containing one `company_id`.",
                     "No request fields.",
                     "Returns an empty array when none are available. Container, inactive, deleted, and other-company stores are excluded.")),
+            nameof(StoresController.GetContainerSelect) => (
+                "Get active container stores for selection",
+                SwaggerOperationDescription.Create(
+                    "Returns active, non-deleted container stores linked to active business partners in the selected company as ID and name pairs. Use this selector when managing store-container assignments.",
+                    "A bearer token containing one `company_id`.",
+                    "No request fields.",
+                    "Returns an empty array when none are usable. Product stores, inactive stores, stores with inactive partners, deleted stores, and other-company stores are excluded.")),
             nameof(StoresController.GetById) => (
                 "Get a store",
                 SwaggerOperationDescription.Create(
@@ -50,15 +57,15 @@ public sealed class StoresSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Admin only. Updates a store in the selected company while preserving identity, tenant, and creation audit fields.",
                     "A positive route `id` and the same conditional request fields required by create.",
-                    "All create validation and business-partner rules apply; duplicate-code checks exclude the current store. Changing between product and container types must also add or remove `businessPartnerId` accordingly.",
-                    "Invalid IDs return 400; missing stores or partners return 404. Duplicate codes, inactive partners, and second active container-store assignments detected before saving return 409; database unique indexes provide final concurrency protection.")),
+                    "All create validation and business-partner rules apply; duplicate-code checks exclude the current store. Changing between product and container types must also add or remove `businessPartnerId` accordingly. A store with current or historical container assignments cannot change its type or linked business partner.",
+                    "Invalid IDs return 400; missing stores or partners return 404. Duplicate codes, inactive partners, second active container-store assignments, and protected assignment identity changes return 409; database unique indexes provide final concurrency protection.")),
             nameof(StoresController.Delete) => (
                 "Delete a store",
                 SwaggerOperationDescription.Create(
                     "Admin only. Deactivates and soft-deletes a store in the selected company; audit history remains.",
                     "A positive route `id` and an Admin bearer token containing one `company_id`.",
                     "`id` must be greater than zero.",
-                    "Invalid IDs return 400. Missing, already-deleted, and other-company stores return 404. A repeated delete is not treated as success.")),
+                    "Invalid IDs return 400. Missing, already-deleted, and other-company stores return 404. Current or historical StoreContainer assignments block deletion with 409 (`Stores.HasContainerAssignments`). A repeated delete is not treated as success.")),
             _ => default
         };
 

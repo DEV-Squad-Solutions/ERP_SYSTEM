@@ -50,6 +50,25 @@ public sealed class StoreService(
         return Result<IReadOnlyList<SelectResponse>>.Success(response);
     }
 
+    public async Task<Result<IReadOnlyList<SelectResponse>>> GetContainerSelectAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var response = await dbContext.Stores
+            .AsNoTracking()
+            .Where(store =>
+                store.CompanyId == companyId &&
+                store.IsActive &&
+                store.IsContainerStore &&
+                store.BusinessPartner != null &&
+                store.BusinessPartner.IsActive)
+            .OrderBy(store => store.Name)
+            .ThenBy(store => store.Id)
+            .ProjectToType<SelectResponse>()
+            .ToListAsync(cancellationToken);
+
+        return Result<IReadOnlyList<SelectResponse>>.Success(response);
+    }
+
     public async Task<Result<StoreResponse>> GetByIdAsync(
         int id,
         CancellationToken cancellationToken = default)
@@ -122,6 +141,14 @@ public sealed class StoreService(
         }
 
         var normalizedStore = request.Adapt<Store>();
+
+        if ((store.IsContainerStore != normalizedStore.IsContainerStore ||
+             store.BusinessPartnerId != normalizedStore.BusinessPartnerId) &&
+            await HasHistoricalContainerAssignmentsAsync(id, cancellationToken))
+        {
+            return Result<StoreResponse>.Failure(HasContainerAssignments());
+        }
+
         var codeExists = await dbContext.Stores.AnyAsync(
             entity =>
                 entity.CompanyId == companyId &&
@@ -167,12 +194,28 @@ public sealed class StoreService(
             return Result.Failure(NotFound(id));
         }
 
+        if (await HasHistoricalContainerAssignmentsAsync(id, cancellationToken))
+        {
+            return Result.Failure(HasContainerAssignments());
+        }
+
         store.IsActive = false;
         dbContext.Stores.Remove(store);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
     }
+
+    private Task<bool> HasHistoricalContainerAssignmentsAsync(
+        int storeId,
+        CancellationToken cancellationToken) =>
+        dbContext.StoreContainers
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                assignment =>
+                    assignment.CompanyId == companyId &&
+                    assignment.StoreId == storeId,
+                cancellationToken);
 
     private static Error InvalidId() =>
         Error.Validation("Stores.InvalidId", "يجب أن يكون رقم المخزن أكبر من صفر.");
@@ -181,7 +224,10 @@ public sealed class StoreService(
         Error.NotFound("Stores.NotFound", $"لم يتم العثور على المخزن رقم {id}.");
 
     private static Error CodeExists(string code) =>
-        Error.Conflict("Stores.CodeExists", $"كود المخزن '{code}' مستخدم بالفعل.");
+        Error.Conflict(
+            "Stores.CodeExists",
+            $"كود المخزن '{code}' مستخدم بالفعل.",
+            nameof(StoreRequest.Code));
 
     private async Task<Error?> ValidateBusinessPartnerAsync(
         Store store,
@@ -251,5 +297,11 @@ public sealed class StoreService(
     private static Error ActiveContainerStoreExists(int businessPartnerId) =>
         Error.Conflict(
             "Stores.ActiveContainerStoreExists",
-            $"يوجد بالفعل مخزن عبوات نشط مخصص للعميل أو المورد رقم {businessPartnerId}.");
+            $"يوجد بالفعل مخزن عبوات نشط مخصص للعميل أو المورد رقم {businessPartnerId}.",
+            nameof(StoreRequest.BusinessPartnerId));
+
+    private static Error HasContainerAssignments() =>
+        Error.Conflict(
+            "Stores.HasContainerAssignments",
+            "لا يمكن حذف مخزن العبوات أو تغيير نوعه أو العميل أو المورد المرتبط به لوجود ربط عبوات حالي أو تاريخي.");
 }

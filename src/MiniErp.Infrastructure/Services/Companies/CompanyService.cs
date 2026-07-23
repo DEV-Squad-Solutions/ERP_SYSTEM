@@ -161,9 +161,23 @@ public sealed class CompanyService(
             await dbContext.ItemUnits
                 .IgnoreQueryFilters()
                 .AnyAsync(itemUnit => itemUnit.CompanyId == id, cancellationToken) ||
+            await dbContext.BusinessPartners
+                .IgnoreQueryFilters()
+                .AnyAsync(partner => partner.CompanyId == id, cancellationToken) ||
+            await dbContext.Drivers
+                .IgnoreQueryFilters()
+                .AnyAsync(driver => driver.CompanyId == id, cancellationToken) ||
             await dbContext.Stores
                 .IgnoreQueryFilters()
-                .AnyAsync(store => store.CompanyId == id, cancellationToken);
+                .AnyAsync(store => store.CompanyId == id, cancellationToken) ||
+            await dbContext.Containers
+                .IgnoreQueryFilters()
+                .AnyAsync(container => container.CompanyId == id, cancellationToken) ||
+            await dbContext.StoreContainers
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    assignment => assignment.CompanyId == id,
+                    cancellationToken);
 
         if (hasDependencies)
         {
@@ -195,7 +209,8 @@ public sealed class CompanyService(
         {
             return Error.Conflict(
                 "Companies.CommercialRegisterExists",
-                $"السجل التجاري '{commercialRegister}' مستخدم بالفعل.");
+                $"السجل التجاري '{commercialRegister}' مستخدم بالفعل.",
+                nameof(CompanyRequest.CommercialRegister));
         }
 
         var taxNumberExists = await dbContext.Companies.AnyAsync(
@@ -207,7 +222,8 @@ public sealed class CompanyService(
         return taxNumberExists
             ? Error.Conflict(
                 "Companies.TaxNumberExists",
-                $"الرقم الضريبي '{taxNumber}' مستخدم بالفعل.")
+                $"الرقم الضريبي '{taxNumber}' مستخدم بالفعل.",
+                nameof(CompanyRequest.TaxNumber))
             : null;
     }
 

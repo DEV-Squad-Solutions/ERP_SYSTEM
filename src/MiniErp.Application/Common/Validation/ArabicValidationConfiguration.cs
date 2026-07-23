@@ -10,11 +10,14 @@ public static class ArabicValidationConfiguration
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["Address"] = "العنوان",
+            ["ArabicName"] = "الاسم بالعربية",
             ["BusinessPartnerId"] = "العميل أو المورد",
             ["Code"] = "الكود",
             ["CommercialRegister"] = "السجل التجاري",
             ["CompanyId"] = "الشركة",
             ["CompanyIds"] = "الشركات",
+            ["ContainerId"] = "العبوة",
+            ["ContainerIds"] = "العبوات",
             ["CreditLimit"] = "حد الائتمان",
             ["Currency"] = "العملة",
             ["Description"] = "الوصف",
@@ -33,6 +36,7 @@ public static class ArabicValidationConfiguration
             ["RefreshToken"] = "رمز التحديث",
             ["Roles"] = "الأدوار",
             ["SelectionToken"] = "رمز اختيار الشركة",
+            ["StoreId"] = "المخزن",
             ["TaxNumber"] = "الرقم الضريبي",
             ["UserName"] = "اسم المستخدم"
         };

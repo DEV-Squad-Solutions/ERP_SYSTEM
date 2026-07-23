@@ -85,7 +85,8 @@ public sealed class ItemUnitService(
             return Result<ItemUnitResponse>.Failure(
                 Error.Conflict(
                     "ItemUnits.NameExists",
-                    $"وحدة الصنف '{itemUnit.Name}' موجودة بالفعل."));
+                    $"وحدة الصنف '{itemUnit.Name}' موجودة بالفعل.",
+                    nameof(ItemUnitRequest.Name)));
         }
 
         dbContext.ItemUnits.Add(itemUnit);
@@ -126,7 +127,8 @@ public sealed class ItemUnitService(
             return Result<ItemUnitResponse>.Failure(
                 Error.Conflict(
                     "ItemUnits.NameExists",
-                    $"وحدة الصنف '{normalizedItemUnit.Name}' موجودة بالفعل."));
+                    $"وحدة الصنف '{normalizedItemUnit.Name}' موجودة بالفعل.",
+                    nameof(ItemUnitRequest.Name)));
         }
 
         request.Adapt(itemUnit);

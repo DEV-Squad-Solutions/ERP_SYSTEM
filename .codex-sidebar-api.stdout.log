@@ -1,0 +1,198 @@
+Using launch settings from src\MiniErp.Api\Properties\launchSettings.json...
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (124ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (109ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT OBJECT_ID(N'[__EFMigrationsHistory]');
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (85ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT [MigrationId], [ProductVersion]
+      FROM [__EFMigrationsHistory]
+      ORDER BY [MigrationId];
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(1) [c].[Id], [c].[Address], [c].[CommercialRegister], [c].[CreatedById], [c].[CreatedByPc], [c].[CreatedOn], [c].[DeletedById], [c].[DeletedByPc], [c].[DeletedOn], [c].[IsDeleted], [c].[ManagerName], [c].[Name], [c].[TaxNumber], [c].[UpdatedById], [c].[UpdatedByPc], [c].[UpdatedOn]
+      FROM [Companies] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND ([c].[CommercialRegister] = N'54321' OR [c].[TaxNumber] = N'456789123')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (88ms) [Parameters=[@seedCompany_CommercialRegister='?' (Size = 50), @seedCompany_TaxNumber='?' (Size = 50)], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(1) [c].[Id], [c].[Address], [c].[CommercialRegister], [c].[CreatedById], [c].[CreatedByPc], [c].[CreatedOn], [c].[DeletedById], [c].[DeletedByPc], [c].[DeletedOn], [c].[IsDeleted], [c].[ManagerName], [c].[Name], [c].[TaxNumber], [c].[UpdatedById], [c].[UpdatedByPc], [c].[UpdatedOn]
+      FROM [Companies] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND ([c].[CommercialRegister] = @seedCompany_CommercialRegister OR [c].[TaxNumber] = @seedCompany_TaxNumber)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (71ms) [Parameters=[@seedCompany_CommercialRegister='?' (Size = 50), @seedCompany_TaxNumber='?' (Size = 50)], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(1) [c].[Id], [c].[Address], [c].[CommercialRegister], [c].[CreatedById], [c].[CreatedByPc], [c].[CreatedOn], [c].[DeletedById], [c].[DeletedByPc], [c].[DeletedOn], [c].[IsDeleted], [c].[ManagerName], [c].[Name], [c].[TaxNumber], [c].[UpdatedById], [c].[UpdatedByPc], [c].[UpdatedOn]
+      FROM [Companies] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND ([c].[CommercialRegister] = @seedCompany_CommercialRegister OR [c].[TaxNumber] = @seedCompany_TaxNumber)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (72ms) [Parameters=[@normalizedName='?' (Size = 256)], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(1) [a].[Id], [a].[ConcurrencyStamp], [a].[Name], [a].[NormalizedName]
+      FROM [AspNetRoles] AS [a]
+      WHERE [a].[NormalizedName] = @normalizedName
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@normalizedName='?' (Size = 256)], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(1) [a].[Id], [a].[ConcurrencyStamp], [a].[Name], [a].[NormalizedName]
+      FROM [AspNetRoles] AS [a]
+      WHERE [a].[NormalizedName] = @normalizedName
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (74ms) [Parameters=[@normalizedUserName='?' (Size = 256)], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(1) [a].[Id], [a].[AccessFailedCount], [a].[ConcurrencyStamp], [a].[Email], [a].[EmailConfirmed], [a].[FirstName], [a].[LastName], [a].[LockoutEnabled], [a].[LockoutEnd], [a].[NormalizedEmail], [a].[NormalizedUserName], [a].[PasswordHash], [a].[PhoneNumber], [a].[PhoneNumberConfirmed], [a].[ProfileImage], [a].[SecurityStamp], [a].[TwoFactorEnabled], [a].[UserName]
+      FROM [AspNetUsers] AS [a]
+      WHERE [a].[NormalizedUserName] = @normalizedUserName
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (75ms) [Parameters=[@normalizedUserName='?' (Size = 256)], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(1) [a].[Id], [a].[AccessFailedCount], [a].[ConcurrencyStamp], [a].[Email], [a].[EmailConfirmed], [a].[FirstName], [a].[LastName], [a].[LockoutEnabled], [a].[LockoutEnd], [a].[NormalizedEmail], [a].[NormalizedUserName], [a].[PasswordHash], [a].[PhoneNumber], [a].[PhoneNumberConfirmed], [a].[ProfileImage], [a].[SecurityStamp], [a].[TwoFactorEnabled], [a].[UserName]
+      FROM [AspNetUsers] AS [a]
+      WHERE [a].[NormalizedUserName] = @normalizedUserName
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (83ms) [Parameters=[@normalizedEmail='?' (Size = 256)], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(2) [a].[Id], [a].[AccessFailedCount], [a].[ConcurrencyStamp], [a].[Email], [a].[EmailConfirmed], [a].[FirstName], [a].[LastName], [a].[LockoutEnabled], [a].[LockoutEnd], [a].[NormalizedEmail], [a].[NormalizedUserName], [a].[PasswordHash], [a].[PhoneNumber], [a].[PhoneNumberConfirmed], [a].[ProfileImage], [a].[SecurityStamp], [a].[TwoFactorEnabled], [a].[UserName]
+      FROM [AspNetUsers] AS [a]
+      WHERE [a].[NormalizedEmail] = @normalizedEmail
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (83ms) [Parameters=[@p17='?' (DbType = Guid), @p0='?' (DbType = Int32), @p1='?' (Size = 4000), @p18='?' (Size = 4000), @p2='?' (Size = 256), @p3='?' (DbType = Boolean), @p4='?' (Size = 100), @p5='?' (Size = 100), @p6='?' (DbType = Boolean), @p7='?' (DbType = DateTimeOffset), @p8='?' (Size = 256), @p9='?' (Size = 256), @p10='?' (Size = 4000), @p11='?' (Size = 4000), @p12='?' (DbType = Boolean), @p13='?' (Size = 4000), @p14='?' (Size = 4000), @p15='?' (DbType = Boolean), @p16='?' (Size = 256)], CommandType='Text', CommandTimeout='30']
+      SET IMPLICIT_TRANSACTIONS OFF;
+      SET NOCOUNT ON;
+      UPDATE [AspNetUsers] SET [AccessFailedCount] = @p0, [ConcurrencyStamp] = @p1, [Email] = @p2, [EmailConfirmed] = @p3, [FirstName] = @p4, [LastName] = @p5, [LockoutEnabled] = @p6, [LockoutEnd] = @p7, [NormalizedEmail] = @p8, [NormalizedUserName] = @p9, [PasswordHash] = @p10, [PhoneNumber] = @p11, [PhoneNumberConfirmed] = @p12, [ProfileImage] = @p13, [SecurityStamp] = @p14, [TwoFactorEnabled] = @p15, [UserName] = @p16
+      OUTPUT 1
+      WHERE [Id] = @p17 AND [ConcurrencyStamp] = @p18;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (73ms) [Parameters=[@userId='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      SELECT [a0].[Name]
+      FROM [AspNetUserRoles] AS [a]
+      INNER JOIN [AspNetRoles] AS [a0] ON [a].[RoleId] = [a0].[Id]
+      WHERE [a].[UserId] = @userId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@user_Id='?' (DbType = Guid), @companyIds1='?' (DbType = Int32), @companyIds2='?' (DbType = Int32), @companyIds3='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [u].[CompanyId]
+      FROM [UserCompanies] AS [u]
+      INNER JOIN (
+          SELECT [c].[Id], [c].[IsDeleted]
+          FROM [Companies] AS [c]
+          WHERE [c].[IsDeleted] = CAST(0 AS bit)
+      ) AS [c0] ON [u].[CompanyId] = [c0].[Id]
+      WHERE [c0].[IsDeleted] = CAST(0 AS bit) AND [u].[UserId] = @user_Id AND [u].[CompanyId] IN (@companyIds1, @companyIds2, @companyIds3)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (76ms) [Parameters=[@normalizedUserName='?' (Size = 256)], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(1) [a].[Id], [a].[AccessFailedCount], [a].[ConcurrencyStamp], [a].[Email], [a].[EmailConfirmed], [a].[FirstName], [a].[LastName], [a].[LockoutEnabled], [a].[LockoutEnd], [a].[NormalizedEmail], [a].[NormalizedUserName], [a].[PasswordHash], [a].[PhoneNumber], [a].[PhoneNumberConfirmed], [a].[ProfileImage], [a].[SecurityStamp], [a].[TwoFactorEnabled], [a].[UserName]
+      FROM [AspNetUsers] AS [a]
+      WHERE [a].[NormalizedUserName] = @normalizedUserName
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (72ms) [Parameters=[@normalizedUserName='?' (Size = 256)], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(1) [a].[Id], [a].[AccessFailedCount], [a].[ConcurrencyStamp], [a].[Email], [a].[EmailConfirmed], [a].[FirstName], [a].[LastName], [a].[LockoutEnabled], [a].[LockoutEnd], [a].[NormalizedEmail], [a].[NormalizedUserName], [a].[PasswordHash], [a].[PhoneNumber], [a].[PhoneNumberConfirmed], [a].[ProfileImage], [a].[SecurityStamp], [a].[TwoFactorEnabled], [a].[UserName]
+      FROM [AspNetUsers] AS [a]
+      WHERE [a].[NormalizedUserName] = @normalizedUserName
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@normalizedEmail='?' (Size = 256)], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(2) [a].[Id], [a].[AccessFailedCount], [a].[ConcurrencyStamp], [a].[Email], [a].[EmailConfirmed], [a].[FirstName], [a].[LastName], [a].[LockoutEnabled], [a].[LockoutEnd], [a].[NormalizedEmail], [a].[NormalizedUserName], [a].[PasswordHash], [a].[PhoneNumber], [a].[PhoneNumberConfirmed], [a].[ProfileImage], [a].[SecurityStamp], [a].[TwoFactorEnabled], [a].[UserName]
+      FROM [AspNetUsers] AS [a]
+      WHERE [a].[NormalizedEmail] = @normalizedEmail
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (72ms) [Parameters=[@p17='?' (DbType = Guid), @p0='?' (DbType = Int32), @p1='?' (Size = 4000), @p18='?' (Size = 4000), @p2='?' (Size = 256), @p3='?' (DbType = Boolean), @p4='?' (Size = 100), @p5='?' (Size = 100), @p6='?' (DbType = Boolean), @p7='?' (DbType = DateTimeOffset), @p8='?' (Size = 256), @p9='?' (Size = 256), @p10='?' (Size = 4000), @p11='?' (Size = 4000), @p12='?' (DbType = Boolean), @p13='?' (Size = 4000), @p14='?' (Size = 4000), @p15='?' (DbType = Boolean), @p16='?' (Size = 256)], CommandType='Text', CommandTimeout='30']
+      SET IMPLICIT_TRANSACTIONS OFF;
+      SET NOCOUNT ON;
+      UPDATE [AspNetUsers] SET [AccessFailedCount] = @p0, [ConcurrencyStamp] = @p1, [Email] = @p2, [EmailConfirmed] = @p3, [FirstName] = @p4, [LastName] = @p5, [LockoutEnabled] = @p6, [LockoutEnd] = @p7, [NormalizedEmail] = @p8, [NormalizedUserName] = @p9, [PasswordHash] = @p10, [PhoneNumber] = @p11, [PhoneNumberConfirmed] = @p12, [ProfileImage] = @p13, [SecurityStamp] = @p14, [TwoFactorEnabled] = @p15, [UserName] = @p16
+      OUTPUT 1
+      WHERE [Id] = @p17 AND [ConcurrencyStamp] = @p18;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (71ms) [Parameters=[@userId='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      SELECT [a0].[Name]
+      FROM [AspNetUserRoles] AS [a]
+      INNER JOIN [AspNetRoles] AS [a0] ON [a].[RoleId] = [a0].[Id]
+      WHERE [a].[UserId] = @userId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (77ms) [Parameters=[@user_Id='?' (DbType = Guid), @companyIds1='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [u].[CompanyId]
+      FROM [UserCompanies] AS [u]
+      INNER JOIN (
+          SELECT [c].[Id], [c].[IsDeleted]
+          FROM [Companies] AS [c]
+          WHERE [c].[IsDeleted] = CAST(0 AS bit)
+      ) AS [c0] ON [u].[CompanyId] = [c0].[Id]
+      WHERE [c0].[IsDeleted] = CAST(0 AS bit) AND [u].[UserId] = @user_Id AND [u].[CompanyId] = @companyIds1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (83ms) [Parameters=[@company_Id='?' (DbType = Int32), @seedStoreCodes1='?' (Size = 50), @seedStoreCodes2='?' (Size = 50), @seedStoreCodes3='?' (Size = 50)], CommandType='Text', CommandTimeout='30']
+      SELECT [s].[Code]
+      FROM [Stores] AS [s]
+      WHERE [s].[IsDeleted] = CAST(0 AS bit) AND [s].[CompanyId] = @company_Id AND [s].[Code] IN (@seedStoreCodes1, @seedStoreCodes2, @seedStoreCodes3)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (74ms) [Parameters=[@company_Id='?' (DbType = Int32), @seedDriverCodes1='?' (Size = 50), @seedDriverCodes2='?' (Size = 50), @seedDriverCodes3='?' (Size = 50)], CommandType='Text', CommandTimeout='30']
+      SELECT [d].[Code]
+      FROM [Drivers] AS [d]
+      WHERE [d].[CompanyId] = @company_Id AND [d].[Code] IN (@seedDriverCodes1, @seedDriverCodes2, @seedDriverCodes3)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (76ms) [Parameters=[@company_Id='?' (DbType = Int32), @seedPartnerCodes1='?' (Size = 50), @seedPartnerCodes2='?' (Size = 50), @seedPartnerCodes3='?' (Size = 50)], CommandType='Text', CommandTimeout='30']
+      SELECT [b].[Code]
+      FROM [BusinessPartners] AS [b]
+      WHERE [b].[CompanyId] = @company_Id AND [b].[Code] IN (@seedPartnerCodes1, @seedPartnerCodes2, @seedPartnerCodes3)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [i].[Id], [i].[CompanyId], [i].[CreatedById], [i].[CreatedByPc], [i].[CreatedOn], [i].[DeletedById], [i].[DeletedByPc], [i].[DeletedOn], [i].[IsActive], [i].[IsDeleted], [i].[Name], [i].[UpdatedById], [i].[UpdatedByPc], [i].[UpdatedOn]
+      FROM [ItemUnits] AS [i]
+      WHERE [i].[IsDeleted] = CAST(0 AS bit) AND [i].[CompanyId] = @companyId AND [i].[Name] IN (N'Piece', N'Box', N'Pack', N'Kilogram', N'Liter', N'Meter')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [i].[Code]
+      FROM [Items] AS [i]
+      WHERE [i].[CompanyId] = @companyId AND [i].[Code] LIKE N'ITEM-%'
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (84ms) [Parameters=[@company_Id='?' (DbType = Int32), @seedStoreCodes1='?' (Size = 50), @seedStoreCodes2='?' (Size = 50), @seedStoreCodes3='?' (Size = 50)], CommandType='Text', CommandTimeout='30']
+      SELECT [s].[Code]
+      FROM [Stores] AS [s]
+      WHERE [s].[IsDeleted] = CAST(0 AS bit) AND [s].[CompanyId] = @company_Id AND [s].[Code] IN (@seedStoreCodes1, @seedStoreCodes2, @seedStoreCodes3)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (72ms) [Parameters=[@company_Id='?' (DbType = Int32), @seedDriverCodes1='?' (Size = 50), @seedDriverCodes2='?' (Size = 50), @seedDriverCodes3='?' (Size = 50)], CommandType='Text', CommandTimeout='30']
+      SELECT [d].[Code]
+      FROM [Drivers] AS [d]
+      WHERE [d].[CompanyId] = @company_Id AND [d].[Code] IN (@seedDriverCodes1, @seedDriverCodes2, @seedDriverCodes3)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (75ms) [Parameters=[@company_Id='?' (DbType = Int32), @seedPartnerCodes1='?' (Size = 50), @seedPartnerCodes2='?' (Size = 50), @seedPartnerCodes3='?' (Size = 50)], CommandType='Text', CommandTimeout='30']
+      SELECT [b].[Code]
+      FROM [BusinessPartners] AS [b]
+      WHERE [b].[CompanyId] = @company_Id AND [b].[Code] IN (@seedPartnerCodes1, @seedPartnerCodes2, @seedPartnerCodes3)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (77ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [i].[Id], [i].[CompanyId], [i].[CreatedById], [i].[CreatedByPc], [i].[CreatedOn], [i].[DeletedById], [i].[DeletedByPc], [i].[DeletedOn], [i].[IsActive], [i].[IsDeleted], [i].[Name], [i].[UpdatedById], [i].[UpdatedByPc], [i].[UpdatedOn]
+      FROM [ItemUnits] AS [i]
+      WHERE [i].[IsDeleted] = CAST(0 AS bit) AND [i].[CompanyId] = @companyId AND [i].[Name] IN (N'Piece', N'Box', N'Pack', N'Kilogram', N'Liter', N'Meter')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (75ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [i].[Code]
+      FROM [Items] AS [i]
+      WHERE [i].[CompanyId] = @companyId AND [i].[Code] LIKE N'ITEM-%'
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (74ms) [Parameters=[@company_Id='?' (DbType = Int32), @seedStoreCodes1='?' (Size = 50), @seedStoreCodes2='?' (Size = 50), @seedStoreCodes3='?' (Size = 50)], CommandType='Text', CommandTimeout='30']
+      SELECT [s].[Code]
+      FROM [Stores] AS [s]
+      WHERE [s].[IsDeleted] = CAST(0 AS bit) AND [s].[CompanyId] = @company_Id AND [s].[Code] IN (@seedStoreCodes1, @seedStoreCodes2, @seedStoreCodes3)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@company_Id='?' (DbType = Int32), @seedDriverCodes1='?' (Size = 50), @seedDriverCodes2='?' (Size = 50), @seedDriverCodes3='?' (Size = 50)], CommandType='Text', CommandTimeout='30']
+      SELECT [d].[Code]
+      FROM [Drivers] AS [d]
+      WHERE [d].[CompanyId] = @company_Id AND [d].[Code] IN (@seedDriverCodes1, @seedDriverCodes2, @seedDriverCodes3)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (76ms) [Parameters=[@company_Id='?' (DbType = Int32), @seedPartnerCodes1='?' (Size = 50), @seedPartnerCodes2='?' (Size = 50), @seedPartnerCodes3='?' (Size = 50)], CommandType='Text', CommandTimeout='30']
+      SELECT [b].[Code]
+      FROM [BusinessPartners] AS [b]
+      WHERE [b].[CompanyId] = @company_Id AND [b].[Code] IN (@seedPartnerCodes1, @seedPartnerCodes2, @seedPartnerCodes3)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (71ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [i].[Id], [i].[CompanyId], [i].[CreatedById], [i].[CreatedByPc], [i].[CreatedOn], [i].[DeletedById], [i].[DeletedByPc], [i].[DeletedOn], [i].[IsActive], [i].[IsDeleted], [i].[Name], [i].[UpdatedById], [i].[UpdatedByPc], [i].[UpdatedOn]
+      FROM [ItemUnits] AS [i]
+      WHERE [i].[IsDeleted] = CAST(0 AS bit) AND [i].[CompanyId] = @companyId AND [i].[Name] IN (N'Piece', N'Box', N'Pack', N'Kilogram', N'Liter', N'Meter')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (73ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [i].[Code]
+      FROM [Items] AS [i]
+      WHERE [i].[CompanyId] = @companyId AND [i].[Code] LIKE N'ITEM-%'
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: https://localhost:7067
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://localhost:5236
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Development
+info: Microsoft.Hosting.Lifetime[0]
+      Content root path: E:\MiniErp\src\MiniErp.Api

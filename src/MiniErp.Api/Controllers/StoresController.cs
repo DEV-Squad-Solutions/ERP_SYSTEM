@@ -33,6 +33,16 @@ public sealed class StoresController(IStoreService storeService)
         return this.ToActionResult(result);
     }
 
+    [HttpGet("container-select")]
+    [ProducesResponseType<IReadOnlyList<SelectResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetContainerSelect(
+        CancellationToken cancellationToken)
+    {
+        var result = await storeService.GetContainerSelectAsync(cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("{id:int}")]
     [ProducesResponseType<StoreResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -92,6 +102,7 @@ public sealed class StoresController(IStoreService storeService)
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(
         int id,
         CancellationToken cancellationToken)

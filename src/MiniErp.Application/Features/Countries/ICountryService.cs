@@ -1,31 +1,28 @@
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 
-namespace MiniErp.Application.Features.Stores;
+namespace MiniErp.Application.Features.Countries;
 
-public interface IStoreService
+public interface ICountryService
 {
-    Task<Result<PagedResponse<StoreResponse>>> GetAllAsync(
+    Task<Result<PagedResponse<CountryResponse>>> GetAllAsync(
         PaginationRequest pagination,
         CancellationToken cancellationToken = default);
 
     Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
         CancellationToken cancellationToken = default);
 
-    Task<Result<IReadOnlyList<SelectResponse>>> GetContainerSelectAsync(
-        CancellationToken cancellationToken = default);
-
-    Task<Result<StoreResponse>> GetByIdAsync(
+    Task<Result<CountryResponse>> GetByIdAsync(
         int id,
         CancellationToken cancellationToken = default);
 
-    Task<Result<StoreResponse>> AddAsync(
-        StoreRequest request,
+    Task<Result<CountryResponse>> AddAsync(
+        CountryRequest request,
         CancellationToken cancellationToken = default);
 
-    Task<Result<StoreResponse>> UpdateAsync(
+    Task<Result<CountryResponse>> UpdateAsync(
         int id,
-        StoreRequest request,
+        CountryRequest request,
         CancellationToken cancellationToken = default);
 
     Task<Result> DeleteAsync(

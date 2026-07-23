@@ -37,12 +37,16 @@ public static class SwaggerExtensions
             options.OperationFilter<AuthenticationSwaggerDocumentation>();
             options.OperationFilter<BusinessPartnersSwaggerDocumentation>();
             options.OperationFilter<CompaniesSwaggerDocumentation>();
+            options.OperationFilter<ContainersSwaggerDocumentation>();
+            options.OperationFilter<CountriesSwaggerDocumentation>();
             options.OperationFilter<DriversSwaggerDocumentation>();
             options.OperationFilter<ItemsSwaggerDocumentation>();
             options.OperationFilter<ItemUnitsSwaggerDocumentation>();
             options.OperationFilter<StoresSwaggerDocumentation>();
+            options.OperationFilter<StoreContainersSwaggerDocumentation>();
             options.OperationFilter<UsersSwaggerDocumentation>();
             options.OperationFilter<EnumRequestOperationDocumentationFilter>();
+            options.OperationFilter<UnifiedErrorResponseSwaggerFilter>();
         });
 
         return services;

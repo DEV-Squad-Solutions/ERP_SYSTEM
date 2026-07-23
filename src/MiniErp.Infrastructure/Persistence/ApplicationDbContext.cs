@@ -4,8 +4,10 @@ using Microsoft.EntityFrameworkCore;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Containers;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Logistics;
+using MiniErp.Domain.Entities.ReferenceData;
 using MiniErp.Infrastructure.Identity;
 
 namespace MiniErp.Infrastructure.Persistence;
@@ -25,6 +27,12 @@ public sealed class ApplicationDbContext(
     public DbSet<ItemUnit> ItemUnits => Set<ItemUnit>();
 
     public DbSet<Store> Stores => Set<Store>();
+
+    public DbSet<Country> Countries => Set<Country>();
+
+    public DbSet<Container> Containers => Set<Container>();
+
+    public DbSet<StoreContainer> StoreContainers => Set<StoreContainer>();
 
     public DbSet<UserCompany> UserCompanies => Set<UserCompany>();
 

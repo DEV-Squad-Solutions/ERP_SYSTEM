@@ -86,7 +86,8 @@ public sealed class ItemService(
             return Result<ItemResponse>.Failure(
                 Error.Conflict(
                     "Items.CodeExists",
-                    $"كود الصنف '{item.Code}' مستخدم بالفعل."));
+                    $"كود الصنف '{item.Code}' مستخدم بالفعل.",
+                    nameof(ItemRequest.Code)));
         }
 
         var itemUnitResult = await GetActiveItemUnitAsync(
@@ -137,7 +138,8 @@ public sealed class ItemService(
             return Result<ItemResponse>.Failure(
                 Error.Conflict(
                     "Items.CodeExists",
-                    $"كود الصنف '{normalizedItem.Code}' مستخدم بالفعل."));
+                    $"كود الصنف '{normalizedItem.Code}' مستخدم بالفعل.",
+                    nameof(ItemRequest.Code)));
         }
 
         var itemUnitResult = await GetActiveItemUnitAsync(

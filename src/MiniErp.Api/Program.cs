@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
 using FluentValidation;
 using Asp.Versioning;
+using Microsoft.AspNetCore.Mvc;
+using MiniErp.Api.Errors;
 using MiniErp.Api.Exceptions;
 using MiniErp.Api.Swagger;
 using MiniErp.Api.Validation;
@@ -39,6 +41,17 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.Configure<ApiBehaviorOptions>(options =>
+{
+    options.SuppressMapClientErrors = true;
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var response = ApiErrorResponseFactory.Validation(
+            context.HttpContext,
+            context.ModelState);
+        return ApiErrorResponseFactory.ToObjectResult(response);
+    };
+});
 
 builder.Services
     .AddApiVersioning(options =>
@@ -46,6 +59,7 @@ builder.Services
         options.DefaultApiVersion = new ApiVersion(1.0);
         options.AssumeDefaultVersionWhenUnspecified = true;
         options.ReportApiVersions = true;
+        options.ApiVersionReader = new UrlSegmentApiVersionReader();
     })
     .AddApiExplorer(options =>
     {
@@ -86,6 +100,15 @@ if (app.Configuration.GetValue("Seed:Enabled", false))
 }
 
 app.UseExceptionHandler();
+app.UseStatusCodePages(async context =>
+{
+    var response = ApiErrorResponseFactory.FromStatusCode(
+        context.HttpContext,
+        context.HttpContext.Response.StatusCode);
+    await ApiErrorResponseFactory.WriteAsync(
+        context.HttpContext,
+        response);
+});
 app.UseSwaggerDocumentation();
 
 app.UseHttpsRedirection();

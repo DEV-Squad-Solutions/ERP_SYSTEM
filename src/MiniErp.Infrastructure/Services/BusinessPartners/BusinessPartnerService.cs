@@ -198,7 +198,8 @@ public sealed class BusinessPartnerService(
         {
             return Error.Conflict(
                 "BusinessPartners.NameExists",
-                $"اسم العميل أو المورد '{partner.Name}' موجود بالفعل.");
+                $"اسم العميل أو المورد '{partner.Name}' موجود بالفعل.",
+                nameof(BusinessPartnerRequest.Name));
         }
 
         if (duplicates.Any(entity => string.Equals(
@@ -208,7 +209,8 @@ public sealed class BusinessPartnerService(
         {
             return Error.Conflict(
                 "BusinessPartners.CodeExists",
-                $"كود العميل أو المورد '{partner.Code}' مستخدم بالفعل.");
+                $"كود العميل أو المورد '{partner.Code}' مستخدم بالفعل.",
+                nameof(BusinessPartnerRequest.Code));
         }
 
         return partner.TaxNumber is not null &&
@@ -218,7 +220,8 @@ public sealed class BusinessPartnerService(
                    StringComparison.OrdinalIgnoreCase))
             ? Error.Conflict(
                 "BusinessPartners.TaxNumberExists",
-                "يوجد عميل أو مورد آخر يحمل الرقم الضريبي نفسه.")
+                "يوجد عميل أو مورد آخر يحمل الرقم الضريبي نفسه.",
+                nameof(BusinessPartnerRequest.TaxNumber))
             : null;
     }
 

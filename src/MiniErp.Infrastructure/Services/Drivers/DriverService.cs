@@ -185,7 +185,8 @@ public sealed class DriverService(
         {
             return Error.Conflict(
                 "Drivers.NameExists",
-                $"اسم السائق '{driver.Name}' موجود بالفعل.");
+                $"اسم السائق '{driver.Name}' موجود بالفعل.",
+                nameof(DriverRequest.Name));
         }
 
         if (duplicates.Any(entity => string.Equals(
@@ -195,7 +196,8 @@ public sealed class DriverService(
         {
             return Error.Conflict(
                 "Drivers.CodeExists",
-                $"كود السائق '{driver.Code}' مستخدم بالفعل.");
+                $"كود السائق '{driver.Code}' مستخدم بالفعل.",
+                nameof(DriverRequest.Code));
         }
 
         if (duplicates.Any(entity => string.Equals(
@@ -205,7 +207,8 @@ public sealed class DriverService(
         {
             return Error.Conflict(
                 "Drivers.LicenseNumberExists",
-                $"رقم رخصة السائق '{driver.LicenseNumber}' مستخدم بالفعل.");
+                $"رقم رخصة السائق '{driver.LicenseNumber}' مستخدم بالفعل.",
+                nameof(DriverRequest.LicenseNumber));
         }
 
         return driver.NationalId is not null &&
@@ -215,7 +218,8 @@ public sealed class DriverService(
                    StringComparison.OrdinalIgnoreCase))
             ? Error.Conflict(
                 "Drivers.NationalIdExists",
-                "يوجد سائق آخر يحمل الرقم القومي نفسه.")
+                "يوجد سائق آخر يحمل الرقم القومي نفسه.",
+                nameof(DriverRequest.NationalId))
             : null;
     }
 

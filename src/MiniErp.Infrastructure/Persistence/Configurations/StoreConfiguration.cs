@@ -18,12 +18,14 @@ public sealed class StoreConfiguration : AuditableEntityConfiguration<Store>
                 "([IsContainerStore] = 1 AND [BusinessPartnerId] IS NOT NULL)"));
         builder.HasKey(store => store.Id);
 
-        // Container persistence will be added with its own feature. Ignoring the
-        // navigation prevents convention-based table discovery in the meantime.
-        builder.Ignore(store => store.StoreContainers);
-
         builder.Property(store => store.Id)
             .ValueGeneratedOnAdd();
+
+        builder.HasAlternateKey(store => new
+        {
+            store.CompanyId,
+            store.Id
+        });
 
         builder.Property(store => store.Code)
             .HasMaxLength(50)

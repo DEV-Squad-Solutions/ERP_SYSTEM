@@ -344,14 +344,16 @@ public sealed class UserService(
         {
             return Error.Conflict(
                 "Users.UserNameExists",
-                $"اسم المستخدم '{userName}' مستخدم بالفعل.");
+                $"اسم المستخدم '{userName}' مستخدم بالفعل.",
+                nameof(UserCreateRequest.UserName));
         }
 
         var userWithEmail = await userManager.FindByEmailAsync(email);
         return userWithEmail is not null && userWithEmail.Id != excludedId
             ? Error.Conflict(
                 "Users.EmailExists",
-                $"البريد الإلكتروني '{email}' مستخدم بالفعل.")
+                $"البريد الإلكتروني '{email}' مستخدم بالفعل.",
+                nameof(UserCreateRequest.Email))
             : null;
     }
 
