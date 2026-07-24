@@ -196,3 +196,454 @@ info: Microsoft.Hosting.Lifetime[0]
       Hosting environment: Development
 info: Microsoft.Hosting.Lifetime[0]
       Content root path: E:\MiniErp\src\MiniErp.Api
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (75ms) [Parameters=[@normalizedUserName='?' (Size = 256)], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(1) [a].[Id], [a].[AccessFailedCount], [a].[ConcurrencyStamp], [a].[Email], [a].[EmailConfirmed], [a].[FirstName], [a].[LastName], [a].[LockoutEnabled], [a].[LockoutEnd], [a].[NormalizedEmail], [a].[NormalizedUserName], [a].[PasswordHash], [a].[PhoneNumber], [a].[PhoneNumberConfirmed], [a].[ProfileImage], [a].[SecurityStamp], [a].[TwoFactorEnabled], [a].[UserName]
+      FROM [AspNetUsers] AS [a]
+      WHERE [a].[NormalizedUserName] = @normalizedUserName
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (85ms) [Parameters=[@userId='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      SELECT [u].[CompanyId], [c0].[Name]
+      FROM [UserCompanies] AS [u]
+      INNER JOIN (
+          SELECT [c].[Id], [c].[IsDeleted], [c].[Name]
+          FROM [Companies] AS [c]
+          WHERE [c].[IsDeleted] = CAST(0 AS bit)
+      ) AS [c0] ON [u].[CompanyId] = [c0].[Id]
+      WHERE [c0].[IsDeleted] = CAST(0 AS bit) AND [u].[UserId] = @userId
+      ORDER BY [c0].[Name], [u].[CompanyId]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (80ms) [Parameters=[@userId='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      SELECT [a0].[Name]
+      FROM [AspNetUserRoles] AS [a]
+      INNER JOIN [AspNetRoles] AS [a0] ON [a].[RoleId] = [a0].[Id]
+      WHERE [a].[UserId] = @userId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (72ms) [Parameters=[@p='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(1) [a].[Id], [a].[AccessFailedCount], [a].[ConcurrencyStamp], [a].[Email], [a].[EmailConfirmed], [a].[FirstName], [a].[LastName], [a].[LockoutEnabled], [a].[LockoutEnd], [a].[NormalizedEmail], [a].[NormalizedUserName], [a].[PasswordHash], [a].[PhoneNumber], [a].[PhoneNumberConfirmed], [a].[ProfileImage], [a].[SecurityStamp], [a].[TwoFactorEnabled], [a].[UserName]
+      FROM [AspNetUsers] AS [a]
+      WHERE [a].[Id] = @p
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (82ms) [Parameters=[@user_Id='?' (DbType = Guid), @request_CompanyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT CASE
+          WHEN EXISTS (
+              SELECT 1
+              FROM [UserCompanies] AS [u]
+              INNER JOIN (
+                  SELECT [c].[Id], [c].[IsDeleted]
+                  FROM [Companies] AS [c]
+                  WHERE [c].[IsDeleted] = CAST(0 AS bit)
+              ) AS [c0] ON [u].[CompanyId] = [c0].[Id]
+              WHERE [c0].[IsDeleted] = CAST(0 AS bit) AND [u].[UserId] = @user_Id AND [u].[CompanyId] = @request_CompanyId) THEN CAST(1 AS bit)
+          ELSE CAST(0 AS bit)
+      END
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (72ms) [Parameters=[@userId='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      SELECT [a0].[Name]
+      FROM [AspNetUserRoles] AS [a]
+      INNER JOIN [AspNetRoles] AS [a0] ON [a].[RoleId] = [a0].[Id]
+      WHERE [a].[UserId] = @userId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (71ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = Int32), @p2='?' (DbType = DateTimeOffset), @p3='?' (DbType = DateTimeOffset), @p4='?' (DbType = DateTimeOffset), @p5='?' (Size = 64) (DbType = AnsiString), @p6='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      SET IMPLICIT_TRANSACTIONS OFF;
+      SET NOCOUNT ON;
+      INSERT INTO [RefreshTokens] ([Id], [CompanyId], [CreatedAtUtc], [ExpiresAtUtc], [RevokedAtUtc], [TokenHash], [UserId])
+      OUTPUT INSERTED.[RowVersion]
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6);
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [BusinessPartners] AS [b]
+      WHERE [b].[IsDeleted] = CAST(0 AS bit) AND [b].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (71ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [b].[Id], [b].[CompanyId], [b].[Code], [b].[Name], CASE
+          WHEN [b].[PhoneNumber] IS NOT NULL THEN [b].[PhoneNumber]
+      END, CASE
+          WHEN [b].[Email] IS NOT NULL THEN [b].[Email]
+      END, CASE
+          WHEN [b].[Address] IS NOT NULL THEN [b].[Address]
+      END, CASE
+          WHEN [b].[TaxNumber] IS NOT NULL THEN [b].[TaxNumber]
+      END, [b].[Currency], [b].[CreditLimit], [b].[IsActive]
+      FROM [BusinessPartners] AS [b]
+      WHERE [b].[IsDeleted] = CAST(0 AS bit) AND [b].[CompanyId] = @companyId
+      ORDER BY [b].[Name], [b].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [BusinessPartners] AS [b]
+      WHERE [b].[IsDeleted] = CAST(0 AS bit) AND [b].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (71ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [b].[Id], [b].[CompanyId], [b].[Code], [b].[Name], CASE
+          WHEN [b].[PhoneNumber] IS NOT NULL THEN [b].[PhoneNumber]
+      END, CASE
+          WHEN [b].[Email] IS NOT NULL THEN [b].[Email]
+      END, CASE
+          WHEN [b].[Address] IS NOT NULL THEN [b].[Address]
+      END, CASE
+          WHEN [b].[TaxNumber] IS NOT NULL THEN [b].[TaxNumber]
+      END, [b].[Currency], [b].[CreditLimit], [b].[IsActive]
+      FROM [BusinessPartners] AS [b]
+      WHERE [b].[IsDeleted] = CAST(0 AS bit) AND [b].[CompanyId] = @companyId
+      ORDER BY [b].[Name], [b].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [Drivers] AS [d]
+      WHERE [d].[IsDeleted] = CAST(0 AS bit) AND [d].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [d].[Id], [d].[CompanyId], [d].[Code], [d].[Name], CASE
+          WHEN [d].[PhoneNumber] IS NOT NULL THEN [d].[PhoneNumber]
+      END, CASE
+          WHEN [d].[NationalId] IS NOT NULL THEN [d].[NationalId]
+      END, [d].[LicenseNumber], CASE
+          WHEN [d].[LicenseExpiryDate] IS NOT NULL THEN [d].[LicenseExpiryDate]
+      END, [d].[IsActive]
+      FROM [Drivers] AS [d]
+      WHERE [d].[IsDeleted] = CAST(0 AS bit) AND [d].[CompanyId] = @companyId
+      ORDER BY [d].[Name], [d].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [Drivers] AS [d]
+      WHERE [d].[IsDeleted] = CAST(0 AS bit) AND [d].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [d].[Id], [d].[CompanyId], [d].[Code], [d].[Name], CASE
+          WHEN [d].[PhoneNumber] IS NOT NULL THEN [d].[PhoneNumber]
+      END, CASE
+          WHEN [d].[NationalId] IS NOT NULL THEN [d].[NationalId]
+      END, [d].[LicenseNumber], CASE
+          WHEN [d].[LicenseExpiryDate] IS NOT NULL THEN [d].[LicenseExpiryDate]
+      END, [d].[IsActive]
+      FROM [Drivers] AS [d]
+      WHERE [d].[IsDeleted] = CAST(0 AS bit) AND [d].[CompanyId] = @companyId
+      ORDER BY [d].[Name], [d].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (97ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (68ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (68ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [BusinessPartners] AS [b]
+      WHERE [b].[IsDeleted] = CAST(0 AS bit) AND [b].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [b].[Id], [b].[CompanyId], [b].[Code], [b].[Name], CASE
+          WHEN [b].[PhoneNumber] IS NOT NULL THEN [b].[PhoneNumber]
+      END, CASE
+          WHEN [b].[Email] IS NOT NULL THEN [b].[Email]
+      END, CASE
+          WHEN [b].[Address] IS NOT NULL THEN [b].[Address]
+      END, CASE
+          WHEN [b].[TaxNumber] IS NOT NULL THEN [b].[TaxNumber]
+      END, [b].[Currency], [b].[CreditLimit], [b].[IsActive]
+      FROM [BusinessPartners] AS [b]
+      WHERE [b].[IsDeleted] = CAST(0 AS bit) AND [b].[CompanyId] = @companyId
+      ORDER BY [b].[Name], [b].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [BusinessPartners] AS [b]
+      WHERE [b].[IsDeleted] = CAST(0 AS bit) AND [b].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [b].[Id], [b].[CompanyId], [b].[Code], [b].[Name], CASE
+          WHEN [b].[PhoneNumber] IS NOT NULL THEN [b].[PhoneNumber]
+      END, CASE
+          WHEN [b].[Email] IS NOT NULL THEN [b].[Email]
+      END, CASE
+          WHEN [b].[Address] IS NOT NULL THEN [b].[Address]
+      END, CASE
+          WHEN [b].[TaxNumber] IS NOT NULL THEN [b].[TaxNumber]
+      END, [b].[Currency], [b].[CreditLimit], [b].[IsActive]
+      FROM [BusinessPartners] AS [b]
+      WHERE [b].[IsDeleted] = CAST(0 AS bit) AND [b].[CompanyId] = @companyId
+      ORDER BY [b].[Name], [b].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (68ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [Drivers] AS [d]
+      WHERE [d].[IsDeleted] = CAST(0 AS bit) AND [d].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [d].[Id], [d].[CompanyId], [d].[Code], [d].[Name], CASE
+          WHEN [d].[PhoneNumber] IS NOT NULL THEN [d].[PhoneNumber]
+      END, CASE
+          WHEN [d].[NationalId] IS NOT NULL THEN [d].[NationalId]
+      END, [d].[LicenseNumber], CASE
+          WHEN [d].[LicenseExpiryDate] IS NOT NULL THEN [d].[LicenseExpiryDate]
+      END, [d].[IsActive]
+      FROM [Drivers] AS [d]
+      WHERE [d].[IsDeleted] = CAST(0 AS bit) AND [d].[CompanyId] = @companyId
+      ORDER BY [d].[Name], [d].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [Drivers] AS [d]
+      WHERE [d].[IsDeleted] = CAST(0 AS bit) AND [d].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [d].[Id], [d].[CompanyId], [d].[Code], [d].[Name], CASE
+          WHEN [d].[PhoneNumber] IS NOT NULL THEN [d].[PhoneNumber]
+      END, CASE
+          WHEN [d].[NationalId] IS NOT NULL THEN [d].[NationalId]
+      END, [d].[LicenseNumber], CASE
+          WHEN [d].[LicenseExpiryDate] IS NOT NULL THEN [d].[LicenseExpiryDate]
+      END, [d].[IsActive]
+      FROM [Drivers] AS [d]
+      WHERE [d].[IsDeleted] = CAST(0 AS bit) AND [d].[CompanyId] = @companyId
+      ORDER BY [d].[Name], [d].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (68ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (77ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [Drivers] AS [d]
+      WHERE [d].[IsDeleted] = CAST(0 AS bit) AND [d].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [d].[Id], [d].[CompanyId], [d].[Code], [d].[Name], CASE
+          WHEN [d].[PhoneNumber] IS NOT NULL THEN [d].[PhoneNumber]
+      END, CASE
+          WHEN [d].[NationalId] IS NOT NULL THEN [d].[NationalId]
+      END, [d].[LicenseNumber], CASE
+          WHEN [d].[LicenseExpiryDate] IS NOT NULL THEN [d].[LicenseExpiryDate]
+      END, [d].[IsActive]
+      FROM [Drivers] AS [d]
+      WHERE [d].[IsDeleted] = CAST(0 AS bit) AND [d].[CompanyId] = @companyId
+      ORDER BY [d].[Name], [d].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (68ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [Drivers] AS [d]
+      WHERE [d].[IsDeleted] = CAST(0 AS bit) AND [d].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [d].[Id], [d].[CompanyId], [d].[Code], [d].[Name], CASE
+          WHEN [d].[PhoneNumber] IS NOT NULL THEN [d].[PhoneNumber]
+      END, CASE
+          WHEN [d].[NationalId] IS NOT NULL THEN [d].[NationalId]
+      END, [d].[LicenseNumber], CASE
+          WHEN [d].[LicenseExpiryDate] IS NOT NULL THEN [d].[LicenseExpiryDate]
+      END, [d].[IsActive]
+      FROM [Drivers] AS [d]
+      WHERE [d].[IsDeleted] = CAST(0 AS bit) AND [d].[CompanyId] = @companyId
+      ORDER BY [d].[Name], [d].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (74ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [ItemUnits] AS [i]
+      WHERE [i].[IsDeleted] = CAST(0 AS bit) AND [i].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (72ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [i].[Id], [i].[CompanyId], [i].[Name], [i].[IsActive]
+      FROM [ItemUnits] AS [i]
+      WHERE [i].[IsDeleted] = CAST(0 AS bit) AND [i].[CompanyId] = @companyId
+      ORDER BY [i].[Name], [i].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (76ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [i].[Id], [i].[Name]
+      FROM [ItemUnits] AS [i]
+      WHERE [i].[IsDeleted] = CAST(0 AS bit) AND [i].[CompanyId] = @companyId AND [i].[IsActive] = CAST(1 AS bit)
+      ORDER BY [i].[Name]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (78ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [Items] AS [i]
+      WHERE [i].[IsDeleted] = CAST(0 AS bit) AND [i].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (72ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [i1].[Id], [i1].[CompanyId], [i1].[ItemUnitId], [i2].[Name], [i1].[Code], [i1].[Name], CASE
+          WHEN [i1].[Description] IS NOT NULL THEN [i1].[Description]
+      END, [i1].[IsActive]
+      FROM (
+          SELECT [i].[Id], [i].[Code], [i].[CompanyId], [i].[Description], [i].[IsActive], [i].[ItemUnitId], [i].[Name]
+          FROM [Items] AS [i]
+          WHERE [i].[IsDeleted] = CAST(0 AS bit) AND [i].[CompanyId] = @companyId
+          ORDER BY [i].[Name], [i].[Id]
+          OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+      ) AS [i1]
+      INNER JOIN (
+          SELECT [i0].[Id], [i0].[CompanyId], [i0].[Name]
+          FROM [ItemUnits] AS [i0]
+          WHERE [i0].[IsDeleted] = CAST(0 AS bit)
+      ) AS [i2] ON [i1].[CompanyId] = [i2].[CompanyId] AND [i1].[ItemUnitId] = [i2].[Id]
+      ORDER BY [i1].[Name], [i1].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [ItemUnits] AS [i]
+      WHERE [i].[IsDeleted] = CAST(0 AS bit) AND [i].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (71ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [i].[Id], [i].[CompanyId], [i].[Name], [i].[IsActive]
+      FROM [ItemUnits] AS [i]
+      WHERE [i].[IsDeleted] = CAST(0 AS bit) AND [i].[CompanyId] = @companyId
+      ORDER BY [i].[Name], [i].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [s].[Id], [s].[Name]
+      FROM [Stores] AS [s]
+      LEFT JOIN (
+          SELECT [b].[Id], [b].[CompanyId], [b].[IsActive]
+          FROM [BusinessPartners] AS [b]
+          WHERE [b].[IsDeleted] = CAST(0 AS bit)
+      ) AS [b0] ON [s].[CompanyId] = [b0].[CompanyId] AND [s].[BusinessPartnerId] = [b0].[Id]
+      WHERE [s].[IsDeleted] = CAST(0 AS bit) AND [s].[CompanyId] = @companyId AND [s].[IsActive] = CAST(1 AS bit) AND [s].[IsContainerStore] = CAST(1 AS bit) AND [b0].[Id] IS NOT NULL AND [b0].[IsActive] = CAST(1 AS bit)
+      ORDER BY [s].[Name], [s].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [s].[Id], [s].[Name]
+      FROM [Stores] AS [s]
+      LEFT JOIN (
+          SELECT [b].[Id], [b].[CompanyId], [b].[IsActive]
+          FROM [BusinessPartners] AS [b]
+          WHERE [b].[IsDeleted] = CAST(0 AS bit)
+      ) AS [b0] ON [s].[CompanyId] = [b0].[CompanyId] AND [s].[BusinessPartnerId] = [b0].[Id]
+      WHERE [s].[IsDeleted] = CAST(0 AS bit) AND [s].[CompanyId] = @companyId AND [s].[IsActive] = CAST(1 AS bit) AND [s].[IsContainerStore] = CAST(1 AS bit) AND [b0].[Id] IS NOT NULL AND [b0].[IsActive] = CAST(1 AS bit)
+      ORDER BY [s].[Name], [s].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (68ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[CompanyId], [c].[Code], [c].[Name], CASE
+          WHEN [c].[Description] IS NOT NULL THEN [c].[Description]
+      END, [c].[IsActive]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId
+      ORDER BY [c].[Name], [c].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (69ms) [Parameters=[@companyId='?' (DbType = Int32), @p='?' (DbType = Int32), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[CompanyId], [c].[Code], [c].[Name], CASE
+          WHEN [c].[Description] IS NOT NULL THEN [c].[Description]
+      END, [c].[IsActive]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId
+      ORDER BY [c].[Name], [c].[Id]
+      OFFSET @p ROWS FETCH NEXT @p2 ROWS ONLY
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (68ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [s].[Id], [s].[Name]
+      FROM [Stores] AS [s]
+      LEFT JOIN (
+          SELECT [b].[Id], [b].[CompanyId], [b].[IsActive]
+          FROM [BusinessPartners] AS [b]
+          WHERE [b].[IsDeleted] = CAST(0 AS bit)
+      ) AS [b0] ON [s].[CompanyId] = [b0].[CompanyId] AND [s].[BusinessPartnerId] = [b0].[Id]
+      WHERE [s].[IsDeleted] = CAST(0 AS bit) AND [s].[CompanyId] = @companyId AND [s].[IsActive] = CAST(1 AS bit) AND [s].[IsContainerStore] = CAST(1 AS bit) AND [b0].[Id] IS NOT NULL AND [b0].[IsActive] = CAST(1 AS bit)
+      ORDER BY [s].[Name], [s].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (68ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [s].[Id], [s].[Name]
+      FROM [Stores] AS [s]
+      LEFT JOIN (
+          SELECT [b].[Id], [b].[CompanyId], [b].[IsActive]
+          FROM [BusinessPartners] AS [b]
+          WHERE [b].[IsDeleted] = CAST(0 AS bit)
+      ) AS [b0] ON [s].[CompanyId] = [b0].[CompanyId] AND [s].[BusinessPartnerId] = [b0].[Id]
+      WHERE [s].[IsDeleted] = CAST(0 AS bit) AND [s].[CompanyId] = @companyId AND [s].[IsActive] = CAST(1 AS bit) AND [s].[IsContainerStore] = CAST(1 AS bit) AND [b0].[Id] IS NOT NULL AND [b0].[IsActive] = CAST(1 AS bit)
+      ORDER BY [s].[Name], [s].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (70ms) [Parameters=[@companyId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT [c].[Id], [c].[Name]
+      FROM [Containers] AS [c]
+      WHERE [c].[IsDeleted] = CAST(0 AS bit) AND [c].[CompanyId] = @companyId AND [c].[IsActive] = CAST(1 AS bit)
+      ORDER BY [c].[Name], [c].[Id]
