@@ -13,6 +13,10 @@ public interface IStoreContainerService
         int storeId,
         CancellationToken cancellationToken = default);
 
+    Task<Result<StoreContainerWorkspaceResponse>> GetWorkspaceAsync(
+        int storeId,
+        CancellationToken cancellationToken = default);
+
     Task<Result<StoreContainerResponse>> GetByIdAsync(
         int id,
         CancellationToken cancellationToken = default);

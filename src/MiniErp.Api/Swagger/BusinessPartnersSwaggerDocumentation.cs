@@ -20,10 +20,10 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
             nameof(BusinessPartnersController.GetAll) => (
                 "Get paginated business partners",
                 SwaggerOperationDescription.Create(
-                    "Returns a deterministic page of shared customer/supplier records for the selected company, ordered by name and ID.",
+                    "Returns a deterministic page of shared customer/supplier records for the selected company, ordered by name and ID. Each item also includes its active container Store, when present, and the complete active Containers workspace with `isAssigned` and `storeContainerId`.",
                     "A bearer token containing one `company_id`. Pagination fields are optional and default to page 1 with 20 items.",
                     "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100.",
-                    "Invalid pagination returns 400. Pages beyond the result set are empty. Records from other companies and soft-deleted records are never returned.")),
+                    "Invalid pagination returns 400. Pages beyond the result set are empty. Records from other companies and soft-deleted records are never returned. Partners without an active container Store return `containerStore: null` and an empty `containers` array.")),
             nameof(BusinessPartnersController.GetSelect) => (
                 "Get active business partners for selection",
                 SwaggerOperationDescription.Create(
@@ -38,6 +38,13 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
                     "A bearer token containing one `company_id` and route `id`.",
                     "`id` must be greater than zero.",
                     "Invalid IDs return 400. Missing, deleted, and other-company records return 404 without revealing tenant data.")),
+            nameof(BusinessPartnersController.GetContainerStore) => (
+                "Get a business partner with its container store",
+                SwaggerOperationDescription.Create(
+                    "Returns one company-owned BusinessPartner together with its active container Store and one active Containers list. Each Container includes `isAssigned` and `storeContainerId`, allowing an edit screen to render the complete relationship without repeated nested BusinessPartner data.",
+                    "A bearer token containing one `company_id` and route `id`.",
+                    "`id` must be greater than zero.",
+                    "Invalid IDs return 400. Missing, deleted, and other-company BusinessPartners return 404. `containerStore` is null when the partner has no active container Store; `storeContainers` is then empty. Use `PUT /BusinessPartners/{id}`, `PUT /Stores/{id}`, `PUT /Containers/{id}`, and `PUT /StoreContainers/upsert` for edits.")),
             nameof(BusinessPartnersController.Create) => (
                 "Create a business partner",
                 SwaggerOperationDescription.Create(

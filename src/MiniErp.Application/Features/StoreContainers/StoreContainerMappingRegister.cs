@@ -23,6 +23,12 @@ public sealed class StoreContainerMappingRegister : IRegister
                 assignment => assignment.Container.Code)
             .Map(
                 response => response.ContainerName,
-                assignment => assignment.Container.Name);
+                assignment => assignment.Container.Name)
+            .Map(
+                response => response.BusinessPartner,
+                assignment => assignment.Store.BusinessPartner)
+            .Map(
+                response => response.Container,
+                assignment => assignment.Container);
     }
 }

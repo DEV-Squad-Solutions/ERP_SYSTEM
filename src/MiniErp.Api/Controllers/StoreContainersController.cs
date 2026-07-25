@@ -40,6 +40,21 @@ public sealed class StoreContainersController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("workspace")]
+    [ProducesResponseType<StoreContainerWorkspaceResponse>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> GetWorkspace(
+        [FromQuery] int storeId,
+        CancellationToken cancellationToken)
+    {
+        var result = await storeContainerService.GetWorkspaceAsync(
+            storeId,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("{id:int}")]
     [ProducesResponseType<StoreContainerResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

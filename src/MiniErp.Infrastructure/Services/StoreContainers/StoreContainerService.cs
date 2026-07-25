@@ -5,6 +5,9 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.StoreContainers;
+using MiniErp.Application.Features.BusinessPartners;
+using MiniErp.Application.Features.Containers;
+using MiniErp.Application.Features.Stores;
 using MiniErp.Domain.Entities.Containers;
 using MiniErp.Infrastructure.Persistence;
 
@@ -71,6 +74,97 @@ public sealed class StoreContainerService(
             .ToListAsync(cancellationToken);
 
         return Result<IReadOnlyList<SelectResponse>>.Success(response);
+    }
+
+    public async Task<Result<StoreContainerWorkspaceResponse>> GetWorkspaceAsync(
+        int storeId,
+        CancellationToken cancellationToken = default)
+    {
+        if (storeId <= 0)
+        {
+            return Result<StoreContainerWorkspaceResponse>.Failure(
+                InvalidStoreId());
+        }
+
+        var storeError = await ValidateStoreAsync(
+            storeId,
+            requireUsable: true,
+            cancellationToken);
+        if (storeError is not null)
+        {
+            return Result<StoreContainerWorkspaceResponse>.Failure(storeError);
+        }
+
+        var store = await dbContext.Stores
+            .AsNoTracking()
+            .Where(entity =>
+                entity.CompanyId == companyId &&
+                entity.Id == storeId)
+            .ProjectToType<StoreResponse>()
+            .FirstAsync(cancellationToken);
+
+        var businessPartner = store.BusinessPartnerId.HasValue
+            ? await dbContext.BusinessPartners
+                .AsNoTracking()
+                .Where(partner =>
+                    partner.CompanyId == companyId &&
+                    partner.Id == store.BusinessPartnerId.Value)
+                .ProjectToType<BusinessPartnerResponse>()
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
+
+        var containers = await GetWorkspaceContainersAsync(
+            storeId,
+            cancellationToken);
+
+        return Result<StoreContainerWorkspaceResponse>.Success(
+            new StoreContainerWorkspaceResponse(
+                store,
+                businessPartner,
+                containers));
+    }
+
+    private async Task<IReadOnlyList<StoreContainerWorkspaceContainerResponse>>
+        GetWorkspaceContainersAsync(
+            int storeId,
+            CancellationToken cancellationToken)
+    {
+        var rows = await dbContext.Containers
+            .AsNoTracking()
+            .Where(container =>
+                container.CompanyId == companyId &&
+                container.IsActive)
+            .OrderBy(container => container.Name)
+            .ThenBy(container => container.Id)
+            .Select(container => new
+            {
+                container.Id,
+                container.CompanyId,
+                container.Code,
+                container.Name,
+                container.Description,
+                container.IsActive,
+                StoreContainerId = container.StoreContainers
+                    .Where(assignment =>
+                        assignment.CompanyId == companyId &&
+                        assignment.StoreId == storeId &&
+                        assignment.IsActive)
+                    .Select(assignment => (int?)assignment.Id)
+                    .FirstOrDefault()
+            })
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .Select(container => new StoreContainerWorkspaceContainerResponse(
+                container.Id,
+                container.CompanyId,
+                container.Code,
+                container.Name,
+                container.Description,
+                container.IsActive,
+                container.StoreContainerId.HasValue,
+                container.StoreContainerId))
+            .ToList();
     }
 
     public async Task<Result<StoreContainerResponse>> GetByIdAsync(

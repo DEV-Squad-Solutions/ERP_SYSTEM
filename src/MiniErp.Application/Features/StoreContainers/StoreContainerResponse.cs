@@ -1,3 +1,6 @@
+using MiniErp.Application.Features.BusinessPartners;
+using MiniErp.Application.Features.Containers;
+
 namespace MiniErp.Application.Features.StoreContainers;
 
 public sealed record StoreContainerResponse(
@@ -11,4 +14,6 @@ public sealed record StoreContainerResponse(
     int ContainerId,
     string ContainerCode,
     string ContainerName,
+    BusinessPartnerResponse? BusinessPartner,
+    ContainerResponse Container,
     bool IsActive);

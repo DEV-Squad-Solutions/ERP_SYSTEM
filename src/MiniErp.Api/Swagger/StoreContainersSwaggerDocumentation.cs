@@ -31,6 +31,13 @@ public sealed class StoreContainersSwaggerDocumentation : IOperationFilter
                     "A bearer token containing one `company_id` and query `storeId`.",
                     "`storeId` must be greater than zero and identify an active container store with an active business partner in the selected company.",
                     "Invalid IDs return 400 (`StoreContainers.InvalidStoreId`); missing, deleted, and other-company stores return 404 (`StoreContainers.StoreNotFound`). Product stores, inactive stores, or stores with an inactive partner return 409 (`StoreContainers.StoreNotContainerStore`, `StoreContainers.StoreInactive`, or `StoreContainers.StoreBusinessPartnerInactive`). Returns an empty array when no usable active assignment exists.")),
+            nameof(StoreContainersController.GetWorkspace) => (
+                "Get the editable store-container workspace",
+                SwaggerOperationDescription.Create(
+                    "Returns the selected container store, its BusinessPartner, and one active Containers list. Each Container includes `isAssigned` and `storeContainerId`, so the client can render and edit the complete assignment set without repeated BusinessPartner or StoreContainer payloads.",
+                    "A bearer token containing one `company_id` and query `storeId`.",
+                    "`storeId` must be greater than zero and identify an active container store with an active BusinessPartner in the selected company.",
+                    "Invalid IDs return 400 (`StoreContainers.InvalidStoreId`); missing or other-company stores return 404 (`StoreContainers.StoreNotFound`); product stores or inactive store/partner state return 409 (`StoreContainers.StoreNotContainerStore`, `StoreContainers.StoreInactive`, or `StoreContainers.StoreBusinessPartnerInactive`). Use `PUT /BusinessPartners/{id}` for partner edits, `PUT /Stores/{id}` for store edits, `PUT /StoreContainers/upsert` for the atomic complete Container set, and `PUT /Containers/{id}` for Container edits.")),
             nameof(StoreContainersController.GetById) => (
                 "Get a store-container assignment",
                 SwaggerOperationDescription.Create(
