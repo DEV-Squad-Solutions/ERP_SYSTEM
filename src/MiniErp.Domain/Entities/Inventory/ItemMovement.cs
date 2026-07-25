@@ -21,9 +21,9 @@ public sealed class ItemMovement : AuditableEntity
 
     public Item Item { get; set; } = null!;
 
-    public int ItemUnitId { get; set; }
+    public int? ItemUnitId { get; set; }
 
-    public ItemUnit ItemUnit { get; set; } = null!;
+    public ItemUnit? ItemUnit { get; set; }
 
     public ItemMovementType MovementType { get; set; }
 

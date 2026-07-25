@@ -74,6 +74,14 @@ public static class DevelopmentDataSeeder
     private static readonly SeedStore ContainerStore =
         new("CONTAINERS", "Container Store");
 
+    private static readonly (int Count, decimal Weight, decimal Price)[]
+        StockOpeningLineAmounts =
+        [
+            (10, 2.50m, 12.00m),
+            (6, 4.00m, 15.50m),
+            (20, 1.25m, 8.75m)
+        ];
+
     private static readonly SeedCountry[] DefaultCountries =
     [
         new("EG", "Egypt", "\u0645\u0635\u0631"),
@@ -193,6 +201,11 @@ public static class DevelopmentDataSeeder
                 dbContext,
                 company.Id,
                 itemCount,
+                cancellationToken);
+
+            await SeedStockOpeningBalancesAsync(
+                dbContext,
+                company,
                 cancellationToken);
         }
     }
@@ -760,6 +773,118 @@ public static class DevelopmentDataSeeder
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedStockOpeningBalancesAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        const string documentNumber = "OPEN-001";
+        var seedNotes = $"Seed draft for Company {company.Id}";
+
+        var existingBalance = await dbContext.StockOpeningBalances
+            .IgnoreQueryFilters()
+            .Include(balance => balance.Lines)
+            .FirstOrDefaultAsync(
+                balance =>
+                    balance.CompanyId == company.Id &&
+                    balance.DocumentNumber == documentNumber,
+                cancellationToken);
+        if (existingBalance is not null)
+        {
+            if (existingBalance.IsDeleted ||
+                existingBalance.Notes != seedNotes)
+            {
+                return;
+            }
+
+            var existingSeedLines = existingBalance.Lines
+                .Where(line =>
+                    !line.IsDeleted &&
+                    line.Notes == "Seed draft line")
+                .OrderBy(line => line.Id)
+                .Take(StockOpeningLineAmounts.Length)
+                .ToList();
+
+            for (var index = 0; index < existingSeedLines.Count; index++)
+            {
+                ApplyStockOpeningSeedAmounts(
+                    existingSeedLines[index],
+                    index);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
+        var store = await dbContext.Stores
+            .Where(store =>
+                store.CompanyId == company.Id &&
+                store.Code == "MAIN" &&
+                store.IsActive &&
+                !store.IsContainerStore)
+            .Select(store => new { store.Id })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (store is null)
+        {
+            return;
+        }
+
+        var items = await dbContext.Items
+            .Where(item =>
+                item.CompanyId == company.Id &&
+                item.IsActive &&
+                item.ItemUnit.IsActive)
+            .OrderBy(item => item.Id)
+            .Take(3)
+            .Select(item => new
+            {
+                item.Id,
+                item.ItemUnitId
+            })
+            .ToListAsync(cancellationToken);
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        var balance = new StockOpeningBalance
+        {
+            CompanyId = company.Id,
+            StoreId = store.Id,
+            DocumentNumber = documentNumber,
+            DocumentDate = new DateOnly(2026, 1, 1),
+            Notes = seedNotes
+        };
+
+        for (var index = 0; index < items.Count; index++)
+        {
+            var item = items[index];
+            var line = new StockOpeningBalanceLine
+            {
+                CompanyId = company.Id,
+                ItemId = item.Id,
+                ItemUnitId = item.ItemUnitId,
+                Notes = "Seed draft line"
+            };
+            ApplyStockOpeningSeedAmounts(line, index);
+            balance.Lines.Add(line);
+        }
+
+        dbContext.StockOpeningBalances.Add(balance);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void ApplyStockOpeningSeedAmounts(
+        StockOpeningBalanceLine line,
+        int index)
+    {
+        var amount = StockOpeningLineAmounts[index];
+        line.Count = amount.Count;
+        line.Weight = amount.Weight;
+        line.Price = amount.Price;
+        line.CalculateAmounts();
     }
 
     private static async Task<IReadOnlyList<Company>> SeedAdditionalCompaniesAsync(

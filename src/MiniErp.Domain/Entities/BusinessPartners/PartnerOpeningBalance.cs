@@ -26,8 +26,8 @@ public sealed class PartnerOpeningBalance : AuditableEntity
 
     public decimal Amount { get; set; }
 
-    public DocumentStatus Status { get; set; } = DocumentStatus.Draft;
-
     public string? Notes { get; set; }
+
+    public byte[] RowVersion { get; set; } = [];
 
 }

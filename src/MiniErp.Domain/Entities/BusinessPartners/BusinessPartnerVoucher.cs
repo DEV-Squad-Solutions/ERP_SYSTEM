@@ -26,13 +26,12 @@ public sealed class BusinessPartnerVoucher : AuditableEntity
 
     public decimal Amount { get; set; }
 
-    public DocumentStatus Status { get; set; } = DocumentStatus.Draft;
-
     public string? Notes { get; set; }
+
+    public byte[] RowVersion { get; set; } = [];
 
     public ICollection<BusinessPartnerVoucherAllocation> Allocations { get; set; } = [];
 
-    // A posted voucher creates one financial movement for its full amount.
     public ICollection<BusinessPartnerMovement> Movements { get; set; } = [];
 
     public decimal GetAllocatedAmount() =>

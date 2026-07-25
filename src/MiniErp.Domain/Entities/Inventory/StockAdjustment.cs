@@ -22,9 +22,9 @@ public sealed class StockAdjustment : AuditableEntity
 
     public StockAdjustmentDirection Direction { get; set; }
 
-    public DocumentStatus Status { get; set; } = DocumentStatus.Draft;
-
     public string? Reason { get; set; }
+
+    public byte[] RowVersion { get; set; } = [];
 
     public ICollection<StockAdjustmentLine> Lines { get; set; } = [];
 }

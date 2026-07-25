@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using MiniErp.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using MiniErp.Infrastructure.Persistence;
 namespace MiniErp.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260725084727_AddStockOpening")]
+    partial class AddStockOpening
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -729,9 +732,6 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Property<int>("CompanyId")
                         .HasColumnType("int");
 
-                    b.Property<int>("Count")
-                        .HasColumnType("int");
-
                     b.Property<string>("CreatedById")
                         .IsRequired()
                         .HasMaxLength(450)
@@ -762,16 +762,12 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Property<int>("ItemId")
                         .HasColumnType("int");
 
-                    b.Property<int?>("ItemUnitId")
+                    b.Property<int>("ItemUnitId")
                         .HasColumnType("int");
 
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
-
-                    b.Property<decimal>("Price")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("Quantity")
                         .HasPrecision(18, 6)
@@ -779,10 +775,6 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("StockOpeningBalanceId")
                         .HasColumnType("int");
-
-                    b.Property<decimal>("Total")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("UpdatedById")
                         .HasMaxLength(450)
@@ -794,10 +786,6 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTime?>("UpdatedOn")
                         .HasColumnType("datetime2");
-
-                    b.Property<decimal>("Weight")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("decimal(18,6)");
 
                     b.HasKey("Id");
 
@@ -811,15 +799,7 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("StockOpeningBalanceLines", null, t =>
                         {
-                            t.HasCheckConstraint("CK_StockOpeningBalanceLines_Count_Positive", "[Count] > 0");
-
-                            t.HasCheckConstraint("CK_StockOpeningBalanceLines_Price_NonNegative", "[Price] >= 0");
-
                             t.HasCheckConstraint("CK_StockOpeningBalanceLines_Quantity_Positive", "[Quantity] > 0");
-
-                            t.HasCheckConstraint("CK_StockOpeningBalanceLines_Total_NonNegative", "[Total] >= 0");
-
-                            t.HasCheckConstraint("CK_StockOpeningBalanceLines_Weight_Positive", "[Weight] > 0");
                         });
                 });
 
@@ -1403,7 +1383,8 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("CompanyId", "ItemUnitId")
                         .HasPrincipalKey("CompanyId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.HasOne("MiniErp.Domain.Entities.Inventory.StockOpeningBalance", "StockOpeningBalance")
                         .WithMany("Lines")

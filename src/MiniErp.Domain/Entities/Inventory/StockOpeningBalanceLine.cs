@@ -20,12 +20,36 @@ public sealed class StockOpeningBalanceLine : AuditableEntity
 
     public Item Item { get; set; } = null!;
 
-    public int ItemUnitId { get; set; }
+    public int? ItemUnitId { get; set; }
 
-    public ItemUnit ItemUnit { get; set; } = null!;
+    public ItemUnit? ItemUnit { get; set; }
 
-    public decimal Quantity { get; set; }
+    public int Count { get; set; }
+
+    public decimal Weight { get; set; }
+
+    public decimal Quantity { get; private set; }
+
+    public decimal Price { get; set; }
+
+    public decimal Total { get; private set; }
 
     public string? Notes { get; set; }
 
+    public void CalculateAmounts()
+    {
+        if (!StockOpeningBalanceAmountRules.TryCalculate(
+                Count,
+                Weight,
+                Price,
+                out var quantity,
+                out var total))
+        {
+            throw new InvalidOperationException(
+                "The opening-balance line values cannot be represented by the configured quantity and money precision.");
+        }
+
+        Quantity = quantity;
+        Total = total;
+    }
 }

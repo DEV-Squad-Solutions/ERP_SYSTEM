@@ -38,6 +38,13 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
                     "A bearer token containing one `company_id` and route `id`.",
                     "`id` must be greater than zero.",
                     "Invalid IDs return 400. Missing, deleted, and other-company records return 404 without revealing tenant data. Partners without an active container Store return `containerStore: null` and an empty `containers` array.")),
+            nameof(BusinessPartnersController.GetContainerStore) => (
+                "Get a business partner container store",
+                SwaggerOperationDescription.Create(
+                    "Returns only the active container Store linked to one business partner and the selected company's complete active Containers workspace. It does not return the full business-partner detail. Each Container includes `isAssigned` and `storeContainerId`.",
+                    "A bearer token containing one `company_id` and route `id` for the business partner.",
+                    "`id` must be greater than zero.",
+                    "Invalid IDs return 400. Missing, deleted, and other-company partners return 404 without revealing tenant data. A partner without an active container Store also returns 404.")),
             nameof(BusinessPartnersController.Create) => (
                 "Create a business partner",
                 SwaggerOperationDescription.Create(

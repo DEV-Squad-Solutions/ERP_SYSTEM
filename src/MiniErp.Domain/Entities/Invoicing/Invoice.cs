@@ -22,8 +22,6 @@ public sealed class Invoice : AuditableEntity
 
     public InvoiceType InvoiceType { get; set; }
 
-    public DocumentStatus Status { get; set; } = DocumentStatus.Draft;
-
     public DateOnly InvoiceDate { get; set; }
 
     public DateOnly? DueDate { get; set; }
@@ -63,16 +61,6 @@ public sealed class Invoice : AuditableEntity
     public decimal Total { get; private set; }
 
     public string? Notes { get; set; }
-
-    public DateTime? PostedOn { get; set; }
-
-    public string? PostedById { get; set; }
-
-    public DateTime? CancelledOn { get; set; }
-
-    public string? CancelledById { get; set; }
-
-    public string? CancellationReason { get; set; }
 
     public byte[] RowVersion { get; set; } = [];
 

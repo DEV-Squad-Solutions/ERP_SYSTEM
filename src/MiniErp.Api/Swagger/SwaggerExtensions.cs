@@ -44,6 +44,7 @@ public static class SwaggerExtensions
             options.OperationFilter<ItemUnitsSwaggerDocumentation>();
             options.OperationFilter<StoresSwaggerDocumentation>();
             options.OperationFilter<StoreContainersSwaggerDocumentation>();
+            options.OperationFilter<StockOpeningBalancesSwaggerDocumentation>();
             options.OperationFilter<UsersSwaggerDocumentation>();
             options.OperationFilter<EnumRequestOperationDocumentationFilter>();
             options.OperationFilter<UnifiedErrorResponseSwaggerFilter>();

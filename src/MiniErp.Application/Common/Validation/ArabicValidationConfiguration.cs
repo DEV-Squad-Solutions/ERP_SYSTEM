@@ -9,6 +9,17 @@ public static class ArabicValidationConfiguration
     private static readonly IReadOnlyDictionary<string, string> DisplayNames =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
+            ["DocumentDate"] = "تاريخ المستند",
+            ["DocumentNumber"] = "رقم المستند",
+            ["ItemId"] = "الصنف",
+            ["Lines"] = "سطور المستند",
+            ["Notes"] = "الملاحظات",
+            ["Quantity"] = "الكمية",
+            ["Count"] = "العدد",
+            ["Weight"] = "الوزن",
+            ["Price"] = "السعر",
+            ["Total"] = "الإجمالي",
+            ["RowVersion"] = "إصدار السجل",
             ["Address"] = "العنوان",
             ["ArabicName"] = "الاسم بالعربية",
             ["BusinessPartnerId"] = "العميل أو المورد",

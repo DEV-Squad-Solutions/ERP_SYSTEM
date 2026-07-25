@@ -5,4 +5,7 @@
     <Project Path="src/MiniErp.Domain/MiniErp.Domain.csproj" />
     <Project Path="src/MiniErp.Infrastructure/MiniErp.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MiniErp.Tests/MiniErp.Tests.csproj" />
+  </Folder>
 </Solution>

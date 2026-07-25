@@ -16,6 +16,10 @@ public interface IBusinessPartnerService
         int id,
         CancellationToken cancellationToken = default);
 
+    Task<Result<BusinessPartnerContainerStoreResponse>> GetContainerStoreAsync(
+        int id,
+        CancellationToken cancellationToken = default);
+
     Task<Result<BusinessPartnerResponse>> AddAsync(
         BusinessPartnerRequest request,
         CancellationToken cancellationToken = default);

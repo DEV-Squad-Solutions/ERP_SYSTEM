@@ -34,6 +34,12 @@ public sealed class ApplicationDbContext(
 
     public DbSet<StoreContainer> StoreContainers => Set<StoreContainer>();
 
+    public DbSet<StockOpeningBalance> StockOpeningBalances =>
+        Set<StockOpeningBalance>();
+
+    public DbSet<StockOpeningBalanceLine> StockOpeningBalanceLines =>
+        Set<StockOpeningBalanceLine>();
+
     public DbSet<UserCompany> UserCompanies => Set<UserCompany>();
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();

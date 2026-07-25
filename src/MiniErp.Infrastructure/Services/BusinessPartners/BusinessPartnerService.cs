@@ -150,6 +150,58 @@ public sealed class BusinessPartnerService(
             });
     }
 
+    public async Task<Result<BusinessPartnerContainerStoreResponse>>
+        GetContainerStoreAsync(
+            int id,
+            CancellationToken cancellationToken = default)
+    {
+        if (id <= 0)
+        {
+            return Result<BusinessPartnerContainerStoreResponse>.Failure(
+                InvalidId());
+        }
+
+        var partnerExists = await dbContext.BusinessPartners
+            .AsNoTracking()
+            .AnyAsync(
+                partner =>
+                    partner.Id == id &&
+                    partner.CompanyId == companyId,
+                cancellationToken);
+
+        if (!partnerExists)
+        {
+            return Result<BusinessPartnerContainerStoreResponse>.Failure(
+                NotFound(id));
+        }
+
+        var containerStore = await dbContext.Stores
+            .AsNoTracking()
+            .Where(store =>
+                store.CompanyId == companyId &&
+                store.BusinessPartnerId == id &&
+                store.IsContainerStore &&
+                store.IsActive)
+            .OrderBy(store => store.Id)
+            .ProjectToType<StoreResponse>()
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (containerStore is null)
+        {
+            return Result<BusinessPartnerContainerStoreResponse>.Failure(
+                ContainerStoreNotFound(id));
+        }
+
+        var containers = await GetContainerWorkspaceAsync(
+            containerStore.Id,
+            cancellationToken);
+
+        return Result<BusinessPartnerContainerStoreResponse>.Success(
+            new BusinessPartnerContainerStoreResponse(
+                containerStore,
+                containers));
+    }
+
     private async Task<IReadOnlyList<StoreContainerWorkspaceContainerResponse>>
         GetContainerWorkspaceAsync(
             int? storeId,
@@ -431,6 +483,11 @@ public sealed class BusinessPartnerService(
         Error.Validation(
             "BusinessPartners.InvalidId",
             "يجب أن يكون رقم العميل أو المورد أكبر من صفر.");
+
+    private static Error ContainerStoreNotFound(int id) =>
+        Error.NotFound(
+            "BusinessPartners.ContainerStoreNotFound",
+            $"لم يتم العثور على مخزن عبوات نشط مرتبط بالعميل أو المورد رقم {id}.");
 
     private static Error NotFound(int id) =>
         Error.NotFound(

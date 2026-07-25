@@ -16,6 +16,12 @@ public sealed class ItemConfiguration : AuditableEntityConfiguration<Item>
         builder.Property(item => item.Id)
             .ValueGeneratedOnAdd();
 
+        builder.HasAlternateKey(item => new
+        {
+            item.CompanyId,
+            item.Id
+        });
+
         builder.Property(item => item.Code)
             .HasMaxLength(50)
             .IsRequired();
