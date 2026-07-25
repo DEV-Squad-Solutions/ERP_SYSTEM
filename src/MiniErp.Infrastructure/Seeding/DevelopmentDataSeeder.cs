@@ -6,8 +6,10 @@ using Microsoft.Extensions.DependencyInjection;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Containers;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Logistics;
+using MiniErp.Domain.Entities.ReferenceData;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Identity;
 using MiniErp.Infrastructure.Persistence;
@@ -69,6 +71,24 @@ public static class DevelopmentDataSeeder
         new("RETURNS", "Returns Store")
     ];
 
+    private static readonly SeedStore ContainerStore =
+        new("CONTAINERS", "Container Store");
+
+    private static readonly SeedCountry[] DefaultCountries =
+    [
+        new("EG", "Egypt", "\u0645\u0635\u0631"),
+        new("SA", "Saudi Arabia", "\u0627\u0644\u0633\u0639\u0648\u062f\u064a\u0629"),
+        new("AE", "United Arab Emirates", "\u0627\u0644\u0625\u0645\u0627\u0631\u0627\u062a"),
+        new("US", "United States", "\u0627\u0644\u0648\u0644\u0627\u064a\u0627\u062a \u0627\u0644\u0645\u062a\u062d\u062f\u0629")
+    ];
+
+    private static readonly SeedContainer[] DefaultContainers =
+    [
+        new("CTN-001", "Small Crate", "Reusable small crate"),
+        new("CTN-002", "Large Crate", "Reusable large crate"),
+        new("CTN-003", "Pallet", "Reusable pallet")
+    ];
+
     private static readonly SeedDriver[] DefaultDrivers =
     [
         new(
@@ -119,6 +139,8 @@ public static class DevelopmentDataSeeder
         var userManager = scope.ServiceProvider
             .GetRequiredService<UserManager<ApplicationUser>>();
 
+        await SeedCountriesAsync(dbContext, cancellationToken);
+
         var primaryCompany = await SeedCompaniesAsync(
             dbContext,
             cancellationToken);
@@ -137,17 +159,32 @@ public static class DevelopmentDataSeeder
 
         foreach (var company in companies)
         {
+            await SeedBusinessPartnersAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
             await SeedStoresAsync(
                 dbContext,
                 company,
                 cancellationToken);
 
-            await SeedDriversAsync(
+            await SeedContainerStoreAsync(
                 dbContext,
                 company,
                 cancellationToken);
 
-            await SeedBusinessPartnersAsync(
+            await SeedContainersAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
+            await SeedStoreContainersAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
+            await SeedDriversAsync(
                 dbContext,
                 company,
                 cancellationToken);
@@ -158,6 +195,44 @@ public static class DevelopmentDataSeeder
                 itemCount,
                 cancellationToken);
         }
+    }
+
+    private static async Task SeedCountriesAsync(
+        ApplicationDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var countryCodes = DefaultCountries
+            .Select(country => country.Code)
+            .ToArray();
+        var existingCodes = (await dbContext.Countries
+                .IgnoreQueryFilters()
+                .Where(country => countryCodes.Contains(country.Code))
+                .Select(country => country.Code)
+                .ToListAsync(cancellationToken))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var createdOn = DateTime.UtcNow;
+        var createdByPc = Environment.MachineName;
+
+        foreach (var seedCountry in DefaultCountries)
+        {
+            if (existingCodes.Contains(seedCountry.Code))
+            {
+                continue;
+            }
+
+            dbContext.Countries.Add(new Country
+            {
+                Code = seedCountry.Code,
+                Name = seedCountry.Name,
+                ArabicName = seedCountry.ArabicName,
+                IsActive = true,
+                CreatedById = SeedActor,
+                CreatedByPc = createdByPc,
+                CreatedOn = createdOn
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private static async Task SeedIdentityAsync(
@@ -303,6 +378,7 @@ public static class DevelopmentDataSeeder
             .Select(seedStore => seedStore.Code)
             .ToArray();
         var existingCodes = await dbContext.Stores
+            .IgnoreQueryFilters()
             .Where(store =>
                 store.CompanyId == company.Id &&
                 seedStoreCodes.Contains(store.Code))
@@ -328,6 +404,163 @@ public static class DevelopmentDataSeeder
                 CreatedById = SeedActor,
                 CreatedByPc = createdByPc,
                 CreatedOn = createdOn
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedContainerStoreAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var existingStore = await dbContext.Stores
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                store =>
+                    store.CompanyId == company.Id &&
+                    store.Code == ContainerStore.Code,
+                cancellationToken);
+        if (existingStore is not null)
+        {
+            return;
+        }
+
+        var businessPartnerId = await dbContext.BusinessPartners
+            .Where(partner =>
+                partner.CompanyId == company.Id &&
+                partner.IsActive &&
+                !dbContext.Stores.Any(store =>
+                    store.CompanyId == company.Id &&
+                    store.BusinessPartnerId == partner.Id &&
+                    store.IsContainerStore &&
+                    store.IsActive))
+            .OrderBy(partner => partner.Id)
+            .Select(partner => (int?)partner.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!businessPartnerId.HasValue)
+        {
+            return;
+        }
+
+        dbContext.Stores.Add(new Store
+        {
+            CompanyId = company.Id,
+            Code = ContainerStore.Code,
+            Name = $"{ContainerStore.Name} - Company {company.Id}",
+            Address = company.Address,
+            IsContainerStore = true,
+            BusinessPartnerId = businessPartnerId.Value,
+            IsActive = true,
+            CreatedById = SeedActor,
+            CreatedByPc = Environment.MachineName,
+            CreatedOn = DateTime.UtcNow
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedContainersAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var containerCodes = DefaultContainers
+            .Select(container => container.Code)
+            .ToArray();
+        var existingCodes = (await dbContext.Containers
+                .IgnoreQueryFilters()
+                .Where(container =>
+                    container.CompanyId == company.Id &&
+                    containerCodes.Contains(container.Code))
+                .Select(container => container.Code)
+                .ToListAsync(cancellationToken))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var createdOn = DateTime.UtcNow;
+        var createdByPc = Environment.MachineName;
+
+        foreach (var seedContainer in DefaultContainers)
+        {
+            if (existingCodes.Contains(seedContainer.Code))
+            {
+                continue;
+            }
+
+            dbContext.Containers.Add(new Container
+            {
+                CompanyId = company.Id,
+                Code = seedContainer.Code,
+                Name = $"{seedContainer.Name} - Company {company.Id}",
+                Description = seedContainer.Description,
+                IsActive = true,
+                CreatedById = SeedActor,
+                CreatedByPc = createdByPc,
+                CreatedOn = createdOn
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedStoreContainersAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var containerStore = await dbContext.Stores
+            .Where(store =>
+                store.CompanyId == company.Id &&
+                store.Code == ContainerStore.Code &&
+                store.IsActive &&
+                store.IsContainerStore)
+            .Select(store => new { store.Id })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (containerStore is null)
+        {
+            return;
+        }
+
+        var containerCodes = DefaultContainers
+            .Select(container => container.Code)
+            .ToArray();
+        var containers = await dbContext.Containers
+            .Where(container =>
+                container.CompanyId == company.Id &&
+                container.IsActive &&
+                containerCodes.Contains(container.Code))
+            .Select(container => new { container.Id })
+            .ToListAsync(cancellationToken);
+        if (containers.Count == 0)
+        {
+            return;
+        }
+
+        var containerIds = containers
+            .Select(container => container.Id)
+            .ToArray();
+        var existingContainerIds = (await dbContext.StoreContainers
+                .IgnoreQueryFilters()
+                .Where(assignment =>
+                    assignment.CompanyId == company.Id &&
+                    assignment.StoreId == containerStore.Id &&
+                    containerIds.Contains(assignment.ContainerId))
+                .Select(assignment => assignment.ContainerId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        foreach (var containerId in containerIds.Where(
+                     containerId => !existingContainerIds.Contains(containerId)))
+        {
+            dbContext.StoreContainers.Add(new StoreContainer
+            {
+                CompanyId = company.Id,
+                StoreId = containerStore.Id,
+                ContainerId = containerId,
+                IsActive = true,
+                CreatedById = SeedActor,
+                CreatedByPc = Environment.MachineName,
+                CreatedOn = DateTime.UtcNow
             });
         }
 
@@ -638,6 +871,16 @@ public static class DevelopmentDataSeeder
     private sealed record SeedStore(
         string Code,
         string Name);
+
+    private sealed record SeedCountry(
+        string Code,
+        string Name,
+        string ArabicName);
+
+    private sealed record SeedContainer(
+        string Code,
+        string Name,
+        string Description);
 
     private sealed record SeedDriver(
         string Code,

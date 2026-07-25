@@ -35,5 +35,6 @@ public sealed class CountryConfiguration
         builder.Property(country => country.ArabicName)
             .HasMaxLength(200)
             .IsRequired();
+
     }
 }

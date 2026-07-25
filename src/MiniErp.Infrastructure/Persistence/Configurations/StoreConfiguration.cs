@@ -21,6 +21,9 @@ public sealed class StoreConfiguration : AuditableEntityConfiguration<Store>
         builder.Property(store => store.Id)
             .ValueGeneratedOnAdd();
 
+        builder.Property(store => store.CompanyId)
+            .IsRequired();
+
         builder.HasAlternateKey(store => new
         {
             store.CompanyId,
@@ -47,6 +50,7 @@ public sealed class StoreConfiguration : AuditableEntityConfiguration<Store>
         builder.Property(store => store.IsContainerStore)
             .HasDefaultValue(false)
             .IsRequired();
+
 
         builder.HasOne(store => store.Company)
             .WithMany()

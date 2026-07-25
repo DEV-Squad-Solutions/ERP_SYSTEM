@@ -17,6 +17,9 @@ public sealed class ContainerConfiguration
         builder.Property(container => container.Id)
             .ValueGeneratedOnAdd();
 
+        builder.Property(container => container.CompanyId)
+            .IsRequired();
+
         builder.HasAlternateKey(container => new
         {
             container.CompanyId,
@@ -48,6 +51,7 @@ public sealed class ContainerConfiguration
 
         builder.Property(container => container.Description)
             .HasMaxLength(1_000);
+
 
         builder.HasOne(container => container.Company)
             .WithMany()

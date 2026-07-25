@@ -23,6 +23,7 @@ public static class ArabicValidationConfiguration
             ["Description"] = "الوصف",
             ["Email"] = "البريد الإلكتروني",
             ["FirstName"] = "الاسم الأول",
+            ["IsContainerStore"] = "نوع المخزن",
             ["ItemUnitId"] = "وحدة الصنف",
             ["LastName"] = "اسم العائلة",
             ["LicenseNumber"] = "رقم الرخصة",

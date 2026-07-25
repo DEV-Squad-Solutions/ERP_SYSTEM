@@ -17,6 +17,16 @@ public sealed class StoreContainerConfiguration
         builder.Property(assignment => assignment.Id)
             .ValueGeneratedOnAdd();
 
+        builder.Property(assignment => assignment.CompanyId)
+            .IsRequired();
+
+        builder.Property(assignment => assignment.StoreId)
+            .IsRequired();
+
+        builder.Property(assignment => assignment.ContainerId)
+            .IsRequired();
+
+
         builder.HasOne(assignment => assignment.Company)
             .WithMany()
             .HasForeignKey(assignment => assignment.CompanyId)
