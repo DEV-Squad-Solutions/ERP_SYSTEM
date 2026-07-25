@@ -20,10 +20,10 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
             nameof(BusinessPartnersController.GetAll) => (
                 "Get paginated business partners",
                 SwaggerOperationDescription.Create(
-                    "Returns a deterministic page of shared customer/supplier records for the selected company, ordered by name and ID. Each item also includes its active container Store, when present, and the complete active Containers workspace with `isAssigned` and `storeContainerId`.",
+                    "Returns a deterministic page of shared customer/supplier records for the selected company, ordered by name and ID. Each item also includes its active container Store, when present, and only the active Containers assigned to that Store. Every returned Container has `isAssigned: true` and its `storeContainerId`.",
                     "A bearer token containing one `company_id`. Pagination fields are optional and default to page 1 with 20 items.",
                     "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100.",
-                    "Invalid pagination returns 400. Pages beyond the result set are empty. Records from other companies and soft-deleted records are never returned. Partners without an active container Store return `containerStore: null` and an empty `containers` array.")),
+                    "Invalid pagination returns 400. Pages beyond the result set are empty. Records from other companies and soft-deleted records are never returned. Partners without an active container Store or active assignments return an empty `containers` array.")),
             nameof(BusinessPartnersController.GetSelect) => (
                 "Get active business partners for selection",
                 SwaggerOperationDescription.Create(
@@ -41,7 +41,7 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
             nameof(BusinessPartnersController.GetContainerStore) => (
                 "Get a business partner container store",
                 SwaggerOperationDescription.Create(
-                    "Returns only the active container Store linked to one business partner and the selected company's complete active Containers workspace. It does not return the full business-partner detail. Each Container includes `isAssigned` and `storeContainerId`.",
+                    "Returns only the active container Store linked to one business partner and the active Containers assigned to that Store. It does not return the full business-partner detail or unassigned company Containers. Each returned Container includes `isAssigned: true` and its `storeContainerId`.",
                     "A bearer token containing one `company_id` and route `id` for the business partner.",
                     "`id` must be greater than zero.",
                     "Invalid IDs return 400. Missing, deleted, and other-company partners return 404 without revealing tenant data. A partner without an active container Store also returns 404.")),

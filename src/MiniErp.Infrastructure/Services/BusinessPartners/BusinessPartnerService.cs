@@ -62,7 +62,7 @@ public sealed class BusinessPartnerService(
             .GroupBy(store => store.BusinessPartnerId!.Value)
             .ToDictionary(group => group.Key, group => group.First());
 
-        var workspaceByStoreId = await GetContainerWorkspacesAsync(
+        var containersByStoreId = await GetAssignedContainersAsync(
             containerStores.Select(store => store.Id).ToArray(),
             cancellationToken);
 
@@ -71,10 +71,10 @@ public sealed class BusinessPartnerService(
             {
                 storeByPartnerId.TryGetValue(partner.Id, out var containerStore);
                 var containers = containerStore is not null &&
-                    workspaceByStoreId.TryGetValue(
+                    containersByStoreId.TryGetValue(
                         containerStore.Id,
-                        out var workspace)
-                    ? workspace
+                        out var assignedContainers)
+                    ? assignedContainers
                     : [];
 
                 return partner with
@@ -192,7 +192,7 @@ public sealed class BusinessPartnerService(
                 ContainerStoreNotFound(id));
         }
 
-        var containers = await GetContainerWorkspaceAsync(
+        var containers = await GetAssignedContainersAsync(
             containerStore.Id,
             cancellationToken);
 
@@ -200,6 +200,84 @@ public sealed class BusinessPartnerService(
             new BusinessPartnerContainerStoreResponse(
                 containerStore,
                 containers));
+    }
+
+    private async Task<IReadOnlyList<StoreContainerWorkspaceContainerResponse>>
+        GetAssignedContainersAsync(
+            int storeId,
+            CancellationToken cancellationToken)
+    {
+        var containersByStoreId = await GetAssignedContainersAsync(
+            [storeId],
+            cancellationToken);
+
+        return containersByStoreId.TryGetValue(storeId, out var containers)
+            ? containers
+            : [];
+    }
+
+    private async Task<Dictionary<
+        int,
+        IReadOnlyList<StoreContainerWorkspaceContainerResponse>>>
+        GetAssignedContainersAsync(
+            IReadOnlyCollection<int> storeIds,
+            CancellationToken cancellationToken)
+    {
+        var distinctStoreIds = storeIds
+            .Where(storeId => storeId > 0)
+            .Distinct()
+            .ToArray();
+
+        if (distinctStoreIds.Length == 0)
+        {
+            return [];
+        }
+
+        var assignments = await dbContext.StoreContainers
+            .AsNoTracking()
+            .Where(assignment =>
+                assignment.CompanyId == companyId &&
+                distinctStoreIds.Contains(assignment.StoreId) &&
+                assignment.IsActive &&
+                assignment.Container.IsActive)
+            .OrderBy(assignment => assignment.StoreId)
+            .ThenBy(assignment => assignment.Container.Name)
+            .ThenBy(assignment => assignment.ContainerId)
+            .Select(assignment => new
+            {
+                assignment.StoreId,
+                StoreContainerId = assignment.Id,
+                assignment.Container.Id,
+                assignment.Container.CompanyId,
+                assignment.Container.Code,
+                assignment.Container.Name,
+                assignment.Container.Description,
+                assignment.Container.IsActive
+            })
+            .ToListAsync(cancellationToken);
+
+        var result = new Dictionary<
+            int,
+            IReadOnlyList<StoreContainerWorkspaceContainerResponse>>();
+
+        foreach (var storeId in distinctStoreIds)
+        {
+            result[storeId] = assignments
+                .Where(assignment => assignment.StoreId == storeId)
+                .Select(assignment =>
+                    new StoreContainerWorkspaceContainerResponse(
+                        assignment.Id,
+                        assignment.CompanyId,
+                        assignment.Code,
+                        assignment.Name,
+                        assignment.Description,
+                        assignment.IsActive,
+                        true,
+                        assignment.StoreContainerId))
+                .ToList();
+        }
+
+        return result;
     }
 
     private async Task<IReadOnlyList<StoreContainerWorkspaceContainerResponse>>

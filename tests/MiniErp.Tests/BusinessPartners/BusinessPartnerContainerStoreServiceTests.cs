@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
+using MiniErp.Application.Common.Models;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Services.BusinessPartners;
@@ -18,7 +19,7 @@ public sealed class BusinessPartnerContainerStoreServiceTests
     }
 
     [Fact]
-    public async Task GetContainerStore_ReturnsStoreAndTenantContainerWorkspace()
+    public async Task GetContainerStore_ReturnsOnlyContainersAssignedToStore()
     {
         await using var database =
             await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
@@ -31,20 +32,40 @@ public sealed class BusinessPartnerContainerStoreServiceTests
         Assert.Equal(1, result.Value.ContainerStore.BusinessPartnerId);
         Assert.Equal("Partner One", result.Value.ContainerStore.BusinessPartnerName);
 
-        Assert.Collection(
-            result.Value.Containers,
-            container =>
+        var container = Assert.Single(result.Value.Containers);
+        Assert.Equal(100, container.Id);
+        Assert.True(container.IsAssigned);
+        Assert.Equal(1_000, container.StoreContainerId);
+    }
+
+    [Fact]
+    public async Task GetAll_ReturnsOnlyActiveContainersAssignedToPartnerStore()
+    {
+        await using var database =
+            await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.GetAllAsync(
+            new PaginationRequest
             {
-                Assert.Equal(100, container.Id);
-                Assert.True(container.IsAssigned);
-                Assert.Equal(1_000, container.StoreContainerId);
-            },
-            container =>
-            {
-                Assert.Equal(101, container.Id);
-                Assert.False(container.IsAssigned);
-                Assert.Null(container.StoreContainerId);
+                PageNumber = 1,
+                PageSize = 20
             });
+
+        Assert.True(result.IsSuccess);
+        var partner = Assert.Single(
+            result.Value.Items,
+            item => item.Id == 1);
+        var container = Assert.Single(partner.Containers!);
+        Assert.Equal(100, container.Id);
+        Assert.True(container.IsAssigned);
+        Assert.Equal(1_000, container.StoreContainerId);
+
+        var partnerWithoutStore = Assert.Single(
+            result.Value.Items,
+            item => item.Id == 2);
+        Assert.Null(partnerWithoutStore.ContainerStore);
+        Assert.Empty(partnerWithoutStore.Containers!);
     }
 
     [Fact]
