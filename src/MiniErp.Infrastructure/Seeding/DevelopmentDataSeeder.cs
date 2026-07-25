@@ -172,6 +172,11 @@ public static class DevelopmentDataSeeder
                 company,
                 cancellationToken);
 
+            await SeedPartnerOpeningBalancesAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
             await SeedStoresAsync(
                 dbContext,
                 company,
@@ -770,6 +775,61 @@ public static class DevelopmentDataSeeder
             item.ItemUnit = itemUnit;
 
             dbContext.Items.Add(item);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedPartnerOpeningBalancesAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var seedBalances = new (string DocumentNumber, PartnerBalanceType BalanceType, decimal Amount)[]
+        {
+            ("PARTNER-OPEN-001", PartnerBalanceType.Receivable, 2_500m),
+            ("PARTNER-OPEN-002", PartnerBalanceType.Payable, 1_750m)
+        };
+
+        var partners = await dbContext.BusinessPartners
+            .Where(partner =>
+                partner.CompanyId == company.Id &&
+                partner.IsActive)
+            .OrderBy(partner => partner.Id)
+            .Take(seedBalances.Length)
+            .Select(partner => new
+            {
+                partner.Id,
+                partner.Currency
+            })
+            .ToListAsync(cancellationToken);
+
+        for (var index = 0; index < partners.Count; index++)
+        {
+            var seed = seedBalances[index];
+            var partner = partners[index];
+            var exists = await dbContext.PartnerOpeningBalances
+                .IgnoreQueryFilters()
+                .AnyAsync(balance =>
+                    balance.CompanyId == company.Id &&
+                    balance.DocumentNumber == seed.DocumentNumber,
+                    cancellationToken);
+            if (exists)
+            {
+                continue;
+            }
+
+            dbContext.PartnerOpeningBalances.Add(new PartnerOpeningBalance
+            {
+                CompanyId = company.Id,
+                BusinessPartnerId = partner.Id,
+                DocumentNumber = seed.DocumentNumber,
+                DocumentDate = new DateOnly(2026, 1, 1),
+                Currency = partner.Currency,
+                BalanceType = seed.BalanceType,
+                Amount = seed.Amount,
+                Notes = $"Seed {seed.BalanceType} for Company {company.Id}"
+            });
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);

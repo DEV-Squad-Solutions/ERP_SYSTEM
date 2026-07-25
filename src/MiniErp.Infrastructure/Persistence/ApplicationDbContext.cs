@@ -20,6 +20,9 @@ public sealed class ApplicationDbContext(
 
     public DbSet<BusinessPartner> BusinessPartners => Set<BusinessPartner>();
 
+    public DbSet<PartnerOpeningBalance> PartnerOpeningBalances =>
+        Set<PartnerOpeningBalance>();
+
     public DbSet<Driver> Drivers => Set<Driver>();
 
     public DbSet<Item> Items => Set<Item>();
