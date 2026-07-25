@@ -62,7 +62,9 @@ public sealed class Invoice : AuditableEntity
 
     public string? Notes { get; set; }
 
-    public byte[] RowVersion { get; set; } = [];
+    public DateTime LastModifiedAt { get; private set; }
+
+    public byte[] RowVersion { get; private set; } = [];
 
     public ICollection<InvoiceLine> Lines { get; set; } = [];
 
@@ -76,6 +78,11 @@ public sealed class Invoice : AuditableEntity
         }
 
         Total = Lines.Sum(line => line.Total);
+    }
+
+    public void Touch(DateTime utcNow)
+    {
+        LastModifiedAt = utcNow;
     }
 
     public PaymentStatus GetPaymentStatus(decimal paidAmount)
