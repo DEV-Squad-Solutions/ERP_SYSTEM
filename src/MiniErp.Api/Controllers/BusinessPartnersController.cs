@@ -47,20 +47,6 @@ public sealed class BusinessPartnersController(
         return this.ToActionResult(result);
     }
 
-    [HttpGet("{id:int}/container-store")]
-    [ProducesResponseType<BusinessPartnerContainerStoreResponse>(
-        StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetContainerStore(
-        int id,
-        CancellationToken cancellationToken)
-    {
-        var result = await businessPartnerService.GetContainerStoreAsync(
-            id,
-            cancellationToken);
-        return this.ToActionResult(result);
-    }
-
     [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<BusinessPartnerResponse>(StatusCodes.Status201Created)]

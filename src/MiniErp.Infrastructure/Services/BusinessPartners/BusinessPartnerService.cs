@@ -122,34 +122,9 @@ public sealed class BusinessPartnerService(
             .ProjectToType<BusinessPartnerResponse>()
             .FirstOrDefaultAsync(cancellationToken);
 
-        return response is null
-            ? Result<BusinessPartnerResponse>.Failure(NotFound(id))
-            : Result<BusinessPartnerResponse>.Success(response);
-    }
-
-    public async Task<Result<BusinessPartnerContainerStoreResponse>>
-        GetContainerStoreAsync(
-            int id,
-            CancellationToken cancellationToken = default)
-    {
-        if (id <= 0)
+        if (response is null)
         {
-            return Result<BusinessPartnerContainerStoreResponse>.Failure(
-                InvalidId());
-        }
-
-        var businessPartner = await dbContext.BusinessPartners
-            .AsNoTracking()
-            .Where(partner =>
-                partner.Id == id &&
-                partner.CompanyId == companyId)
-            .ProjectToType<BusinessPartnerResponse>()
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (businessPartner is null)
-        {
-            return Result<BusinessPartnerContainerStoreResponse>.Failure(
-                NotFound(id));
+            return Result<BusinessPartnerResponse>.Failure(NotFound(id));
         }
 
         var containerStore = await dbContext.Stores
@@ -167,11 +142,12 @@ public sealed class BusinessPartnerService(
             containerStore?.Id,
             cancellationToken);
 
-        return Result<BusinessPartnerContainerStoreResponse>.Success(
-            new BusinessPartnerContainerStoreResponse(
-                businessPartner,
-                containerStore,
-                containers));
+        return Result<BusinessPartnerResponse>.Success(
+            response with
+            {
+                ContainerStore = containerStore,
+                Containers = containers
+            });
     }
 
     private async Task<IReadOnlyList<StoreContainerWorkspaceContainerResponse>>
