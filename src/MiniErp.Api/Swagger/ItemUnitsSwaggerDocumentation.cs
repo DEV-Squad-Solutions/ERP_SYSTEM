@@ -58,7 +58,7 @@ public sealed class ItemUnitsSwaggerDocumentation : IOperationFilter
                     "Admin only. Soft-deletes an unused item unit in the selected company.",
                     "A positive route `id` and an Admin bearer token containing one `company_id`.",
                     "`id` must be greater than zero.",
-                    "Invalid IDs return 400; missing, deleted, and other-company units return 404. References from current or historical items block deletion with 409.")),
+                    "Invalid IDs return 400; missing, deleted, and other-company units return 404. References from current or historical items, invoice lines, stock opening balance lines, or item movements block deletion with 409 (`ItemUnits.InUse`).")),
             _ => default
         };
 

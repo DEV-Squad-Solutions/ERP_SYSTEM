@@ -161,14 +161,35 @@ public sealed class ItemUnitService(
                 item =>
                     item.CompanyId == companyId &&
                     item.ItemUnitId == id,
-                cancellationToken);
+                cancellationToken) ||
+            await dbContext.InvoiceLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.ItemUnitId == id,
+                    cancellationToken) ||
+            await dbContext.StockOpeningBalanceLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.ItemUnitId == id,
+                    cancellationToken) ||
+            await dbContext.ItemMovements
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    movement =>
+                        movement.CompanyId == companyId &&
+                        movement.ItemUnitId == id,
+                    cancellationToken);
 
         if (isInUse)
         {
             return Result.Failure(
                 Error.Conflict(
                     "ItemUnits.InUse",
-                    "لا يمكن حذف وحدة الصنف لأنها مستخدمة في صنف حالي أو تاريخي واحد على الأقل."));
+                    "لا يمكن حذف وحدة الصنف لارتباطها بأصناف أو مستندات أو حركات حالية أو تاريخية."));
         }
 
         itemUnit.IsActive = false;

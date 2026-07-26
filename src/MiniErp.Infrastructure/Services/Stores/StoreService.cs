@@ -199,6 +199,40 @@ public sealed class StoreService(
             return Result.Failure(HasContainerAssignments());
         }
 
+        var hasDependencies = await dbContext.Invoices
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                invoice =>
+                    invoice.CompanyId == companyId &&
+                    (invoice.StoreId == id ||
+                     invoice.ContainerStoreId == id),
+                cancellationToken) ||
+            await dbContext.StockOpeningBalances
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    balance =>
+                        balance.CompanyId == companyId &&
+                        balance.StoreId == id,
+                    cancellationToken) ||
+            await dbContext.ItemMovements
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    movement =>
+                        movement.CompanyId == companyId &&
+                        movement.StoreId == id,
+                    cancellationToken) ||
+            await dbContext.ContainerMovements
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    movement =>
+                        movement.CompanyId == companyId &&
+                        movement.ContainerStoreId == id,
+                    cancellationToken);
+        if (hasDependencies)
+        {
+            return Result.Failure(HasDependencies());
+        }
+
         store.IsActive = false;
         dbContext.Stores.Remove(store);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -304,4 +338,9 @@ public sealed class StoreService(
         Error.Conflict(
             "Stores.HasContainerAssignments",
             "لا يمكن حذف مخزن العبوات أو تغيير نوعه أو العميل أو المورد المرتبط به لوجود ربط عبوات حالي أو تاريخي.");
+
+    private static Error HasDependencies() =>
+        Error.Conflict(
+            "Stores.HasDependencies",
+            "لا يمكن حذف المخزن لارتباطه بمستندات أو حركات حالية أو تاريخية.");
 }

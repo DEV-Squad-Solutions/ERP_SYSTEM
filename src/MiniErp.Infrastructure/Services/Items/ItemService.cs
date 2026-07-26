@@ -43,6 +43,7 @@ public sealed class ItemService(
                 item.IsActive &&
                 item.ItemUnit.IsActive)
             .OrderBy(item => item.Name)
+            .ThenBy(item => item.Id)
             .ProjectToType<SelectResponse>()
             .ToListAsync(cancellationToken);
 
@@ -176,6 +177,32 @@ public sealed class ItemService(
             return Result.Failure(NotFound(id));
         }
 
+        var isInUse = await dbContext.InvoiceLines
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                line =>
+                    line.CompanyId == companyId &&
+                    line.ItemId == id,
+                cancellationToken) ||
+            await dbContext.StockOpeningBalanceLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.ItemId == id,
+                    cancellationToken) ||
+            await dbContext.ItemMovements
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    movement =>
+                        movement.CompanyId == companyId &&
+                        movement.ItemId == id,
+                    cancellationToken);
+        if (isInUse)
+        {
+            return Result.Failure(InUse());
+        }
+
         item.IsActive = false;
         dbContext.Items.Remove(item);
 
@@ -188,6 +215,11 @@ public sealed class ItemService(
 
     private static Error NotFound(int id) =>
         Error.NotFound("Items.NotFound", $"لم يتم العثور على الصنف رقم {id}.");
+
+    private static Error InUse() =>
+        Error.Conflict(
+            "Items.InUse",
+            "لا يمكن حذف الصنف لارتباطه بمستندات أو حركات حالية أو تاريخية.");
 
     private async Task<Result<ItemUnit>> GetActiveItemUnitAsync(
         int itemUnitId,

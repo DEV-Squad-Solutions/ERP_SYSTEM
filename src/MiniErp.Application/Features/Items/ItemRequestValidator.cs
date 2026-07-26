@@ -10,14 +10,27 @@ public sealed class ItemRequestValidator : AbstractValidator<ItemRequest>
             .GreaterThan(0);
 
         RuleFor(request => request.Code)
-            .NotEmpty()
-            .MaximumLength(50);
+            .NotEmpty();
+
+        RuleFor(request => request.Code)
+            .MaximumLength(50)
+            .When(request =>
+                request.Code is not null &&
+                request.Code.Trim().Length > 50);
 
         RuleFor(request => request.Name)
-            .NotEmpty()
-            .MaximumLength(200);
+            .NotEmpty();
+
+        RuleFor(request => request.Name)
+            .MaximumLength(200)
+            .When(request =>
+                request.Name is not null &&
+                request.Name.Trim().Length > 200);
 
         RuleFor(request => request.Description)
-            .MaximumLength(1_000);
+            .MaximumLength(1_000)
+            .When(request =>
+                request.Description is not null &&
+                request.Description.Trim().Length > 1_000);
     }
 }

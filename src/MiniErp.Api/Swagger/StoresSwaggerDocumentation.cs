@@ -65,7 +65,7 @@ public sealed class StoresSwaggerDocumentation : IOperationFilter
                     "Admin only. Deactivates and soft-deletes a store in the selected company; audit history remains.",
                     "A positive route `id` and an Admin bearer token containing one `company_id`.",
                     "`id` must be greater than zero.",
-                    "Invalid IDs return 400. Missing, already-deleted, and other-company stores return 404. Current or historical StoreContainer assignments block deletion with 409 (`Stores.HasContainerAssignments`). A repeated delete is not treated as success.")),
+                    "Invalid IDs return 400. Missing, already-deleted, and other-company stores return 404. Current or historical StoreContainer assignments block deletion with 409 (`Stores.HasContainerAssignments`); invoices, stock opening balances, item movements, and container movements return 409 (`Stores.HasDependencies`). A repeated delete is not treated as success.")),
             _ => default
         };
 

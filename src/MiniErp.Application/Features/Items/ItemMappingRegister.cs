@@ -12,7 +12,7 @@ public sealed class ItemMappingRegister : IRegister
             .Map(item => item.Name, request => request.Name.Trim())
             .Map(
                 item => item.Description,
-                request => request.Description == null
+                request => string.IsNullOrWhiteSpace(request.Description)
                     ? null
                     : request.Description.Trim());
     }
