@@ -19,6 +19,16 @@ List pagination defaults to page 1 and size 20. `pageSize` must be 1–100.
 Ordering is invoice date descending, then ID descending. Every list item
 contains complete ordered product and container lines.
 
+## Selectors
+
+Use the shared select endpoints for partners, product stores, items, countries,
+and drivers. After a business partner is selected, load
+`GET /api/v1/BusinessPartners/{id}` and use only its active `containerStore`
+and containers where both `isActive` and `isAssigned` are true. Clear the
+container store and container lines when the partner changes or when the
+invoice type changes to Purchase or PurchaseReturn. The general container
+store and container selectors are not filtered for invoice use.
+
 ## Enums
 
 Enums are serialized as JSON names; numeric enum values are rejected.

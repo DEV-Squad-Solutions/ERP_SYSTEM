@@ -1,4 +1,3 @@
-using System.Data;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -62,7 +61,6 @@ public sealed partial class InvoiceService(
         var invoice = request.Adapt<Invoice>();
 
         await using var transaction = await dbContext.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
             cancellationToken);
 
         var preparation = await PrepareAsync(
@@ -129,7 +127,6 @@ public sealed partial class InvoiceService(
         var requestedValues = request.Adapt<Invoice>();
 
         await using var transaction = await dbContext.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
             cancellationToken);
 
         var invoice = await LoadForWriteAsync(id, cancellationToken);
@@ -209,7 +206,6 @@ public sealed partial class InvoiceService(
         }
 
         await using var transaction = await dbContext.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
             cancellationToken);
 
         var invoice = await LoadForWriteAsync(id, cancellationToken);
