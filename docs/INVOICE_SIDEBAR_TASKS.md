@@ -374,7 +374,10 @@ VoucherType:
   Receipt = 1, Payment = 2
 
 PaymentStatus:
-  Unpaid = 1, PartiallyPaid = 2, Paid = 3
+  Unpaid = 1, Paid = 2
+
+PaymentTerm:
+  Cash = 1, Credit = 2
 ```
 
 Enums are sent as JSON names, not numeric values.
@@ -859,9 +862,9 @@ CompanyId / Company
 InvoiceNumber
 ExportInvoiceCode?
 InvoiceType
+PaymentTerm (Cash = 1, Credit = 2; defaults to Cash)
 InvoiceDate
 DueDate?
-OriginalInvoiceId? / OriginalInvoice?
 BusinessPartnerId / BusinessPartner
 StoreId / product Store
 ContainerStoreId? / ContainerStore?
@@ -886,7 +889,6 @@ Current InvoiceLine scaffold:
 Id
 CompanyId / Company
 InvoiceId / Invoice
-OriginalInvoiceLineId? / OriginalInvoiceLine?
 ItemId / Item
 ItemUnitId / ItemUnit (server-derived; not sent by client)
 Count
@@ -914,11 +916,26 @@ Audit fields
 
 - Paginated list, details, create, update, and soft delete.
 - Sales, purchase, sales-return, and purchase-return types.
+- Required Cash/Credit payment term. Cash is immediately paid; Credit remains
+  outstanding against the partner account in the current no-posting workflow.
 - Server-generated invoice number.
 - Server-derived currency and item units.
 - Request line fields: `ItemId`, `Count`, `Weight`, `Price`, and `Notes`.
-- Calculate line quantity, line total, and invoice total on the server.
-- Validate original-invoice relationships and remaining return quantities.
+- Request header fields include `DiscountAmount` and `PaidAmount`.
+- Calculate line quantity, subtotal, net invoice total, and remaining amount on
+  the server:
+
+  ```text
+  Subtotal = SUM(Line Total)
+  Total = Subtotal - DiscountAmount
+  RemainingAmount = Total - PaidAmount
+  ```
+
+- `DiscountAmount` and `PaidAmount` are non-negative monetary values. Discount
+  cannot exceed the subtotal and paid amount cannot exceed the net total.
+  Cash invoices must be fully paid; Credit invoices may be unpaid, partially
+  paid, or fully paid.
+- Treat sales and purchase returns as independent invoice documents.
 - Use an active product `StoreId`.
 - Keep partner `ContainerStoreId` on the invoice header when container lines
   are used.
@@ -926,8 +943,17 @@ Audit fields
   to that partner's active container store.
 - External driver name remains only on Invoice; `Driver` contains internal
   company drivers.
-- No status, posting, cancellation, reversal, movements, or DriverTrip
-  generation.
+- Invoice CRUD synchronizes current `ItemMovement`,
+  `ContainerMovement`, `BusinessPartnerMovement`, and internal `DriverTrip`
+  rows in the same transaction. Updates replace active side-effect rows and
+  deletes soft-delete them with the invoice.
+- A `BusinessPartnerMovement` is created only when `RemainingAmount` is
+  positive. Cash invoices are immediately paid and do not create an
+  outstanding movement; a fully paid Credit invoice also creates none.
+- There is no status, posting, cancellation, reversal, voucher, or allocation
+  workflow in this current feature. Responses expose server-derived
+  `Subtotal`, `DiscountAmount`, `Total`, `PaymentStatus`, `PaidAmount`, and
+  `RemainingAmount`.
 
 Planned routes:
 
@@ -940,7 +966,8 @@ DELETE /api/v1/Invoices/{id}
 ```
 
 Create request does not send `CompanyId`, `InvoiceNumber`, `Currency`,
-`ItemUnitId`, `Quantity`, line `Total`, invoice `Total`, audit fields,
+`PaymentStatus`, `Subtotal`, `Total`, or `RemainingAmount`,
+`ItemUnitId`, `Quantity`, line totals, audit fields,
 `LastModifiedAt`, or `RowVersion`.
 
 Update request uses the same editable fields and additionally sends the
@@ -951,7 +978,9 @@ Line calculations:
 ```text
 Quantity = Count * Weight
 Line Total = Quantity * Price
-Invoice Total = SUM(Line Total)
+Subtotal = SUM(Line Total)
+Total = Subtotal - DiscountAmount
+RemainingAmount = Total - PaidAmount
 ```
 
 Container-line validation:
@@ -973,13 +1002,13 @@ Driver validation:
 
 Return validation:
 
-- Sales return references a Sales invoice.
-- Purchase return references a Purchase invoice.
-- Original invoice must match company, partner, product store, and currency.
-- Returned quantities cannot exceed the remaining unreturned quantities.
+- Returns do not reference or allocate against an earlier invoice.
+- Validate the normal active partner, store, item, unit, container, driver,
+  quantity, price, and payment-term rules.
+- Purchase returns require sufficient stock.
+- Backdated additions or updates must not make any later historical stock
+  balance negative.
 - Repeated item IDs are rejected.
-- Concurrent return validation must not allow total returns above the original
-  quantity.
 
 ### Concurrency
 
@@ -1179,23 +1208,16 @@ pagination where applicable, Swagger, verification, and frontend contracts.
 
 ### Current decision
 
-Automatic DriverTrip creation is deferred because invoices have no posting
-side effects.
-
-Do not:
-
-- Create trips automatically from invoice CRUD.
-- Add manual trip creation or deletion.
-- Reintroduce invoice status or posting.
-
-If approved later, define the trip source and lifecycle before implementing
-read endpoints or nullable trip-price updates.
+Invoice CRUD creates one `DriverTrip` when an internal driver is supplied.
+The trip is synchronized on update and soft-deleted with the invoice. External
+driver data remains on the invoice only.
 
 ## Completion gate for Steps 2–5
 
 Before declaring a document step complete:
 
-- Confirm no status/post/cancel/reversal/movement logic was added.
+- Confirm no status/post/cancel/reversal/voucher/allocation logic was added.
+- Confirm invoice side-effect rows are synchronized atomically.
 - Confirm all company-owned reads and writes are tenant-filtered.
 - Confirm aggregate writes are atomic.
 - Confirm header-only concurrency and stale child-only conflicts.
@@ -1227,7 +1249,7 @@ Every applicable document feature must cover:
 - Company A cannot list or get Company B documents.
 - Company A cannot update or delete a Company B document.
 - Company A cannot reference Company B partner, store, item, unit, container,
-  driver, original invoice, or allocated invoice.
+  or driver.
 - Missing, inactive, and soft-deleted references return the documented error.
 - Product documents reject container stores.
 - Container references are assigned to the selected partner container store.
@@ -1304,8 +1326,12 @@ Do not silently decide these while implementing:
    always derived from the selected partner.
 2. Stock Adjustment line model: retain the current single `Quantity` scaffold
    versus adopt Invoice-style count/weight/value fields.
-3. Invoice number generation format and concurrency-safe sequence.
+3. Invoice number generation format and concurrency-safe sequence. **Resolved
+   for Step 3:** `INV-{CompanyId}-{UTC yyyyMMddHHmmssfff}-{8-char GUID
+   suffix}`, with a company-scoped unique filtered index.
 4. Exact decimal precision and rounding for Invoice and voucher money.
+   **Resolved for Step 3 invoices:** quantity `decimal(18,6)`, money
+   `decimal(18,2)`, line totals rounded away from zero to two decimals.
 5. Whether delete requests also require a row version. Update requests
    definitely require it.
 6. Balance-report source of truth after movements were removed.

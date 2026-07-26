@@ -22,16 +22,11 @@ public sealed class Invoice : AuditableEntity
 
     public InvoiceType InvoiceType { get; set; }
 
+    public PaymentTerm PaymentTerm { get; set; } = PaymentTerm.Cash;
+
     public DateOnly InvoiceDate { get; set; }
 
     public DateOnly? DueDate { get; set; }
-
-    // References the original sale or purchase when this invoice is a return.
-    // It is null for normal sales and purchase invoices.
-    public int? OriginalInvoiceId { get; set; }
-
-    // Navigation to the original invoice referenced by OriginalInvoiceId.
-    public Invoice? OriginalInvoice { get; set; }
 
     public int BusinessPartnerId { get; set; }
 
@@ -58,7 +53,17 @@ public sealed class Invoice : AuditableEntity
     public string? ExternalDriverName { get; set; }
     public string? VehicleNumber { get; set; }
 
+    public decimal DiscountAmount { get; set; }
+
+    public decimal PaidAmount { get; set; }
+
     public decimal Total { get; private set; }
+
+    public decimal Subtotal =>
+        Lines.Sum(line => line.Total);
+
+    public decimal RemainingAmount =>
+        Total - PaidAmount;
 
     public string? Notes { get; set; }
 
@@ -77,7 +82,10 @@ public sealed class Invoice : AuditableEntity
             line.CalculateAmounts();
         }
 
-        Total = Lines.Sum(line => line.Total);
+        Total = decimal.Round(
+            Subtotal - DiscountAmount,
+            InvoiceAmountRules.MoneyScale,
+            MidpointRounding.AwayFromZero);
     }
 
     public void Touch(DateTime utcNow)
@@ -85,15 +93,8 @@ public sealed class Invoice : AuditableEntity
         LastModifiedAt = utcNow;
     }
 
-    public PaymentStatus GetPaymentStatus(decimal paidAmount)
-    {
-        if (paidAmount <= 0)
-        {
-            return PaymentStatus.Unpaid;
-        }
-
-        return paidAmount < Total
-            ? PaymentStatus.PartiallyPaid
-            : PaymentStatus.Paid;
-    }
+    public PaymentStatus GetPaymentStatus() =>
+        RemainingAmount <= 0m
+            ? PaymentStatus.Paid
+            : PaymentStatus.Unpaid;
 }

@@ -16,10 +16,6 @@ public sealed class InvoiceLine : AuditableEntity
 
     public Invoice Invoice { get; set; } = null!;
 
-    public int? OriginalInvoiceLineId { get; set; }
-
-    public InvoiceLine? OriginalInvoiceLine { get; set; }
-
     public int ItemId { get; set; }
 
     public Item Item { get; set; } = null!;
@@ -42,7 +38,18 @@ public sealed class InvoiceLine : AuditableEntity
 
     public void CalculateAmounts()
     {
-        Quantity = Count * Weight;
-        Total = Quantity * Price;
+        if (!InvoiceAmountRules.TryCalculate(
+                Count,
+                Weight,
+                Price,
+                out var quantity,
+                out var total))
+        {
+            throw new InvalidOperationException(
+                "The invoice line values cannot be represented by the configured quantity and money precision.");
+        }
+
+        Quantity = quantity;
+        Total = total;
     }
 }

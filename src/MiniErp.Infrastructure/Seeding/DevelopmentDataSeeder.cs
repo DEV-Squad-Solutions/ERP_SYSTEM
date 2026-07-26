@@ -8,6 +8,7 @@ using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Containers;
 using MiniErp.Domain.Entities.Inventory;
+using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Logistics;
 using MiniErp.Domain.Entities.ReferenceData;
 using MiniErp.Domain.Enums;
@@ -209,6 +210,11 @@ public static class DevelopmentDataSeeder
                 cancellationToken);
 
             await SeedStockOpeningBalancesAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
+            await SeedInvoicesAsync(
                 dbContext,
                 company,
                 cancellationToken);
@@ -933,6 +939,200 @@ public static class DevelopmentDataSeeder
         }
 
         dbContext.StockOpeningBalances.Add(balance);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedInvoicesAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var existingExportCodes = await dbContext.Invoices
+            .IgnoreQueryFilters()
+            .Where(invoice =>
+                invoice.CompanyId == company.Id &&
+                (invoice.ExportInvoiceCode == "SEED-CASH" ||
+                 invoice.ExportInvoiceCode == "SEED-CREDIT"))
+            .Select(invoice => invoice.ExportInvoiceCode)
+            .ToHashSetAsync(cancellationToken);
+
+        var partner = await dbContext.BusinessPartners
+            .Where(candidate =>
+                candidate.CompanyId == company.Id &&
+                candidate.IsActive)
+            .OrderBy(candidate => candidate.Id)
+            .Select(candidate => new
+            {
+                candidate.Id,
+                candidate.Currency
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+        var store = await dbContext.Stores
+            .Where(candidate =>
+                candidate.CompanyId == company.Id &&
+                candidate.Code == "MAIN" &&
+                candidate.IsActive &&
+                !candidate.IsContainerStore)
+            .Select(candidate => new { candidate.Id })
+            .FirstOrDefaultAsync(cancellationToken);
+        var item = await dbContext.Items
+            .Where(candidate =>
+                candidate.CompanyId == company.Id &&
+                candidate.IsActive &&
+                candidate.ItemUnit.IsActive)
+            .OrderBy(candidate => candidate.Id)
+            .Select(candidate => new
+            {
+                candidate.Id,
+                candidate.ItemUnitId
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (partner is null || store is null || item is null)
+        {
+            return;
+        }
+
+        var seeds = new[]
+        {
+            (
+                ExportCode: "SEED-CASH",
+                InvoiceNumber: $"SEED-{company.Id}-CASH",
+                PaymentTerm: PaymentTerm.Cash,
+                DueDate: (DateOnly?)null),
+            (
+                ExportCode: "SEED-CREDIT",
+                InvoiceNumber: $"SEED-{company.Id}-CREDIT",
+                PaymentTerm: PaymentTerm.Credit,
+                DueDate: (DateOnly?)new DateOnly(2026, 8, 24))
+        };
+
+        foreach (var seed in seeds)
+        {
+            if (existingExportCodes.Contains(seed.ExportCode))
+            {
+                continue;
+            }
+
+            var invoice = new Invoice
+            {
+                CompanyId = company.Id,
+                InvoiceNumber = seed.InvoiceNumber,
+                ExportInvoiceCode = seed.ExportCode,
+                InvoiceType = InvoiceType.Sales,
+                PaymentTerm = seed.PaymentTerm,
+                InvoiceDate = new DateOnly(2026, 7, 25),
+                DueDate = seed.DueDate,
+                BusinessPartnerId = partner.Id,
+                StoreId = store.Id,
+                Currency = partner.Currency,
+                Notes = $"Seed {seed.PaymentTerm} invoice for Company {company.Id}",
+                CreatedById = SeedActor,
+                CreatedByPc = Environment.MachineName,
+                CreatedOn = DateTime.UtcNow
+            };
+            var line = new InvoiceLine
+            {
+                CompanyId = company.Id,
+                ItemId = item.Id,
+                ItemUnitId = item.ItemUnitId,
+                Count = 1,
+                Weight = 1m,
+                Price = 100m,
+                Notes = "Seed invoice line"
+            };
+            line.CalculateAmounts();
+            invoice.Lines.Add(line);
+            invoice.CalculateTotal();
+            if (invoice.PaymentTerm == PaymentTerm.Cash)
+            {
+                invoice.PaidAmount = invoice.Total;
+            }
+
+            invoice.Touch(DateTime.UtcNow);
+            dbContext.Invoices.Add(invoice);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var seededInvoices = await dbContext.Invoices
+            .Include(invoice => invoice.Lines)
+            .Where(invoice =>
+                invoice.CompanyId == company.Id &&
+                (invoice.ExportInvoiceCode == "SEED-CASH" ||
+                 invoice.ExportInvoiceCode == "SEED-CREDIT"))
+            .ToListAsync(cancellationToken);
+
+        foreach (var invoice in seededInvoices)
+        {
+            var hasItemMovements = await dbContext.ItemMovements.AnyAsync(
+                movement =>
+                    movement.CompanyId == company.Id &&
+                    movement.ReferenceId == invoice.Id &&
+                    movement.ReferenceNumber == invoice.InvoiceNumber,
+                cancellationToken);
+            if (!hasItemMovements)
+            {
+                var itemMovementType =
+                    InvoiceMovementRules.GetItemMovementType(
+                        invoice.InvoiceType);
+                var inbound = InvoiceMovementRules.IsInbound(
+                    invoice.InvoiceType);
+
+                foreach (var line in invoice.Lines)
+                {
+                    dbContext.ItemMovements.Add(
+                        new ItemMovement
+                        {
+                            CompanyId = company.Id,
+                            StoreId = invoice.StoreId,
+                            ItemId = line.ItemId,
+                            ItemUnitId = line.ItemUnitId,
+                            MovementType = itemMovementType,
+                            ReferenceId = invoice.Id,
+                            ReferenceNumber = invoice.InvoiceNumber,
+                            MovementDate = invoice.InvoiceDate,
+                            QuantityIn = inbound ? line.Quantity : 0m,
+                            QuantityOut = inbound ? 0m : line.Quantity,
+                            Description = $"Invoice {invoice.InvoiceNumber}"
+                        });
+                }
+            }
+
+            var hasPartnerMovement =
+                await dbContext.BusinessPartnerMovements.AnyAsync(
+                    movement =>
+                        movement.CompanyId == company.Id &&
+                        movement.InvoiceId == invoice.Id,
+                    cancellationToken);
+            if (!hasPartnerMovement &&
+                InvoiceMovementRules.ShouldCreatePartnerMovement(
+                    invoice.PaymentTerm,
+                    invoice.RemainingAmount))
+            {
+                var movementType =
+                    InvoiceMovementRules.GetPartnerMovementType(
+                        invoice.InvoiceType);
+                var (debit, credit) =
+                    InvoiceMovementRules.GetPartnerAmounts(
+                        invoice.InvoiceType,
+                        invoice.RemainingAmount);
+                dbContext.BusinessPartnerMovements.Add(
+                    new BusinessPartnerMovement
+                    {
+                        CompanyId = company.Id,
+                        BusinessPartnerId = invoice.BusinessPartnerId,
+                        InvoiceId = invoice.Id,
+                        MovementType = movementType,
+                        MovementDate = invoice.InvoiceDate,
+                        Currency = invoice.Currency,
+                        Debit = debit,
+                        Credit = credit,
+                        Description = $"Invoice {invoice.InvoiceNumber}"
+                    });
+            }
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 

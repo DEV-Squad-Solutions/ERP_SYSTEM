@@ -6,6 +6,7 @@ using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Containers;
 using MiniErp.Domain.Entities.Inventory;
+using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Logistics;
 using MiniErp.Domain.Entities.ReferenceData;
 using MiniErp.Infrastructure.Identity;
@@ -42,6 +43,23 @@ public sealed class ApplicationDbContext(
 
     public DbSet<StockOpeningBalanceLine> StockOpeningBalanceLines =>
         Set<StockOpeningBalanceLine>();
+
+    public DbSet<Invoice> Invoices => Set<Invoice>();
+
+    public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
+
+    public DbSet<InvoiceContainerLine> InvoiceContainerLines =>
+        Set<InvoiceContainerLine>();
+
+    public DbSet<ItemMovement> ItemMovements => Set<ItemMovement>();
+
+    public DbSet<ContainerMovement> ContainerMovements =>
+        Set<ContainerMovement>();
+
+    public DbSet<BusinessPartnerMovement> BusinessPartnerMovements =>
+        Set<BusinessPartnerMovement>();
+
+    public DbSet<DriverTrip> DriverTrips => Set<DriverTrip>();
 
     public DbSet<UserCompany> UserCompanies => Set<UserCompany>();
 
