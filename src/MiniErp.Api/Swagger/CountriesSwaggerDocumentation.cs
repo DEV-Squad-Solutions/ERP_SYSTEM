@@ -58,7 +58,7 @@ public sealed class CountriesSwaggerDocumentation : IOperationFilter
                     "Admin only. Deactivates and soft-deletes a country; audit history remains.",
                     "A positive route `id` and an Admin access token.",
                     "`id` must be greater than zero.",
-                    "Invalid IDs return 400 (`Countries.InvalidId`). Missing, already-deleted, and repeated deletes return 404 (`Countries.NotFound`).")),
+                    "Invalid IDs return 400 (`Countries.InvalidId`). Missing, already-deleted, and repeated deletes return 404 (`Countries.NotFound`). Current or historical invoices in any company block deletion with 409 (`Countries.HasInvoices`).")),
             _ => default
         };
 

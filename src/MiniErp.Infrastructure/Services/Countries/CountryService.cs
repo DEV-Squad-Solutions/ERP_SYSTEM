@@ -134,6 +134,18 @@ public sealed class CountryService(
             return Result.Failure(NotFound(id));
         }
 
+        // Countries are global, so any company's current or historical
+        // invoice must preserve the country reference.
+        var hasInvoices = await dbContext.Invoices
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                invoice => invoice.CountryId == id,
+                cancellationToken);
+        if (hasInvoices)
+        {
+            return Result.Failure(HasInvoices());
+        }
+
         country.IsActive = false;
         dbContext.Countries.Remove(country);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -169,4 +181,9 @@ public sealed class CountryService(
             "Countries.CodeExists",
             $"كود الدولة '{code}' مستخدم بالفعل في دولة نشطة.",
             nameof(CountryRequest.Code));
+
+    private static Error HasInvoices() =>
+        Error.Conflict(
+            "Countries.HasInvoices",
+            "لا يمكن حذف الدولة لارتباطها بفواتير حالية أو تاريخية.");
 }
