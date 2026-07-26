@@ -318,7 +318,11 @@ public sealed class BusinessPartnerService(
             .AsNoTracking()
             .Where(container =>
                 container.CompanyId == companyId &&
-                container.IsActive)
+                (container.IsActive ||
+                 container.StoreContainers.Any(assignment =>
+                     assignment.CompanyId == companyId &&
+                     distinctStoreIds.Contains(assignment.StoreId) &&
+                     assignment.IsActive)))
             .OrderBy(container => container.Name)
             .ThenBy(container => container.Id)
             .Select(container => new ContainerWorkspaceDefinition(
@@ -335,8 +339,7 @@ public sealed class BusinessPartnerService(
             .Where(assignment =>
                 assignment.CompanyId == companyId &&
                 distinctStoreIds.Contains(assignment.StoreId) &&
-                assignment.IsActive &&
-                assignment.Container.IsActive)
+                assignment.IsActive)
             .Select(assignment => new
             {
                 assignment.StoreId,

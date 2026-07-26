@@ -39,7 +39,11 @@ public sealed class StockOpeningBalanceLineRequestValidator
                 "ناتج الكمية أو الإجمالي يتجاوز الدقة الرقمية المسموح بها.");
 
         RuleFor(line => line.Notes)
-            .MaximumLength(StockOpeningBalanceRequest.NotesMaximumLength);
+            .MaximumLength(StockOpeningBalanceRequest.NotesMaximumLength)
+            .When(line =>
+                line.Notes is not null &&
+                line.Notes.Trim().Length >
+                StockOpeningBalanceRequest.NotesMaximumLength);
     }
 }
 
@@ -48,7 +52,51 @@ public sealed class StockOpeningBalanceRequestValidator
 {
     public StockOpeningBalanceRequestValidator()
     {
-        StockOpeningBalanceValidationRules.Add(this);
+        RuleFor(request => request.StoreId)
+            .GreaterThan(0);
+
+        RuleFor(request => request.DocumentNumber)
+            .NotEmpty();
+
+        RuleFor(request => request.DocumentNumber)
+            .MaximumLength(StockOpeningBalanceRequest.DocumentNumberMaximumLength)
+            .When(request =>
+                request.DocumentNumber is not null &&
+                request.DocumentNumber.Trim().Length >
+                StockOpeningBalanceRequest.DocumentNumberMaximumLength);
+
+        RuleFor(request => request.DocumentDate)
+            .Must(date => date != default)
+            .WithMessage("تاريخ المستند مطلوب.");
+
+        RuleFor(request => request.Lines)
+            .NotNull()
+            .NotEmpty()
+            .Must(lines =>
+                lines is not null &&
+                lines.Count <= StockOpeningBalanceRequest.MaximumLineCount)
+            .WithMessage(
+                $"لا يجوز أن يتجاوز عدد سطور الرصيد الافتتاحي {StockOpeningBalanceRequest.MaximumLineCount}.")
+            .Must(lines =>
+                lines is not null &&
+                lines.All(line => line is not null))
+            .WithMessage("كل سطر في المستند مطلوب.")
+            .Must(lines =>
+                lines is not null &&
+                lines.All(line => line is not null) &&
+                lines.Select(line => line.ItemId).Distinct().Count() ==
+                lines.Count)
+            .WithMessage("لا يجوز تكرار الصنف في سطور الرصيد الافتتاحي.");
+
+        RuleFor(request => request.Notes)
+            .MaximumLength(StockOpeningBalanceRequest.NotesMaximumLength)
+            .When(request =>
+                request.Notes is not null &&
+                request.Notes.Trim().Length >
+                StockOpeningBalanceRequest.NotesMaximumLength);
+
+        RuleForEach(request => request.Lines)
+            .SetValidator(new StockOpeningBalanceLineRequestValidator());
     }
 }
 
@@ -57,52 +105,54 @@ public sealed class StockOpeningBalanceUpdateRequestValidator
 {
     public StockOpeningBalanceUpdateRequestValidator()
     {
-        StockOpeningBalanceValidationRules.Add(this);
-
-        RuleFor(request => request.RowVersion)
-            .NotNull()
-            .Must(rowVersion => rowVersion is { Length: > 0 })
-            .WithMessage("يجب إرسال إصدار السجل الحالي للتعديل.");
-    }
-}
-
-internal static class StockOpeningBalanceValidationRules
-{
-    public static void Add<T>(AbstractValidator<T> validator)
-        where T : IStockOpeningBalanceRequest
-    {
-        validator.RuleFor(request => request.StoreId)
+        RuleFor(request => request.StoreId)
             .GreaterThan(0);
 
-        validator.RuleFor(request => request.DocumentNumber)
-            .NotEmpty()
-            .Must(number => !string.IsNullOrWhiteSpace(number))
-            .WithMessage("رقم المستند مطلوب.")
-            .MaximumLength(StockOpeningBalanceRequest.DocumentNumberMaximumLength);
+        RuleFor(request => request.DocumentNumber)
+            .NotEmpty();
 
-        validator.RuleFor(request => request.DocumentDate)
+        RuleFor(request => request.DocumentNumber)
+            .MaximumLength(StockOpeningBalanceRequest.DocumentNumberMaximumLength)
+            .When(request =>
+                request.DocumentNumber is not null &&
+                request.DocumentNumber.Trim().Length >
+                StockOpeningBalanceRequest.DocumentNumberMaximumLength);
+
+        RuleFor(request => request.DocumentDate)
             .Must(date => date != default)
             .WithMessage("تاريخ المستند مطلوب.");
 
-        validator.RuleFor(request => request.Lines)
+        RuleFor(request => request.Lines)
             .NotNull()
             .NotEmpty()
-            .Must(lines => lines is not null &&
+            .Must(lines =>
+                lines is not null &&
                 lines.Count <= StockOpeningBalanceRequest.MaximumLineCount)
             .WithMessage(
                 $"لا يجوز أن يتجاوز عدد سطور الرصيد الافتتاحي {StockOpeningBalanceRequest.MaximumLineCount}.")
-            .Must(lines => lines is not null &&
+            .Must(lines =>
+                lines is not null &&
                 lines.All(line => line is not null))
             .WithMessage("كل سطر في المستند مطلوب.")
-            .Must(lines => lines is not null &&
+            .Must(lines =>
+                lines is not null &&
                 lines.All(line => line is not null) &&
-                lines.Select(line => line.ItemId).Distinct().Count() == lines.Count)
+                lines.Select(line => line.ItemId).Distinct().Count() ==
+                lines.Count)
             .WithMessage("لا يجوز تكرار الصنف في سطور الرصيد الافتتاحي.");
 
-        validator.RuleFor(request => request.Notes)
-            .MaximumLength(StockOpeningBalanceRequest.NotesMaximumLength);
+        RuleFor(request => request.Notes)
+            .MaximumLength(StockOpeningBalanceRequest.NotesMaximumLength)
+            .When(request =>
+                request.Notes is not null &&
+                request.Notes.Trim().Length >
+                StockOpeningBalanceRequest.NotesMaximumLength);
 
-        validator.RuleForEach(request => request.Lines)
+        RuleForEach(request => request.Lines)
             .SetValidator(new StockOpeningBalanceLineRequestValidator());
+
+        RuleFor(request => request.RowVersion)
+            .Must(rowVersion => rowVersion is { Length: > 0 })
+            .WithMessage("يجب إرسال إصدار السجل الحالي للتعديل.");
     }
 }

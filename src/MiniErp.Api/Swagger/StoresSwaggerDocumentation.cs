@@ -57,8 +57,8 @@ public sealed class StoresSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Admin only. Updates a store in the selected company while preserving identity, tenant, and creation audit fields.",
                     "A positive route `id` and the same conditional request fields required by create.",
-                    "All create validation and business-partner rules apply; duplicate-code checks exclude the current store. Changing between product and container types must also add or remove `businessPartnerId` accordingly. A store with current or historical container assignments cannot change its type or linked business partner.",
-                    "Invalid IDs return 400; missing stores or partners return 404. Duplicate codes, inactive partners, second active container-store assignments, and protected assignment identity changes return 409; database unique indexes provide final concurrency protection.")),
+                    "All create validation and business-partner rules apply; duplicate-code checks exclude the current store. Changing between product and container types must also add or remove `businessPartnerId` accordingly. A store with current or historical container assignments cannot change its type or linked business partner. Invoices, opening balances, item movements, and container movements also preserve the historical product/container role and linked partner.",
+                    "Invalid IDs return 400; missing stores or partners return 404. Duplicate codes, inactive partners, second active container-store assignments, protected assignment identity changes, and historical role changes return 409 (`Stores.HistoricalIdentityChangeNotAllowed`); database unique indexes provide final concurrency protection.")),
             nameof(StoresController.Delete) => (
                 "Delete a store",
                 SwaggerOperationDescription.Create(

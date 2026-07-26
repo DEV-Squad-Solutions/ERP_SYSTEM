@@ -1,4 +1,3 @@
-using System.Data;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -133,7 +132,11 @@ public sealed class StoreContainerService(
             .AsNoTracking()
             .Where(container =>
                 container.CompanyId == companyId &&
-                container.IsActive)
+                (container.IsActive ||
+                 container.StoreContainers.Any(assignment =>
+                     assignment.CompanyId == companyId &&
+                     assignment.StoreId == storeId &&
+                     assignment.IsActive)))
             .OrderBy(container => container.Name)
             .ThenBy(container => container.Id)
             .Select(container => new
@@ -228,7 +231,6 @@ public sealed class StoreContainerService(
 
         await using var transaction =
             await dbContext.Database.BeginTransactionAsync(
-                IsolationLevel.Serializable,
                 cancellationToken);
 
         var storeError = await ValidateStoreAsync(

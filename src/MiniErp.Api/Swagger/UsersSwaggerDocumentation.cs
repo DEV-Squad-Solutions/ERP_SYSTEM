@@ -51,14 +51,14 @@ public sealed class UsersSwaggerDocumentation : IOperationFilter
                     "Admin only. Updates profile information and replaces all role and company assignments without changing the password.",
                     "An Admin bearer token, non-empty GUID route `id`, profile fields, one or more `roles`, and one or more `companyIds`. Phone is optional.",
                     "Create validation applies except no password is accepted. Duplicate checks exclude the current user.",
-                    "Missing users, roles, or companies return 404; duplicate username/email returns 409. Removing Admin from the final Admin account is blocked with 409. Changes are synchronized transactionally.")),
+                    "Missing users, roles, or companies return 404; duplicate username/email returns 409. Removing Admin from the final Admin account is blocked with 409. Changes are synchronized transactionally, and changing roles invalidates existing access tokens.")),
             nameof(UsersController.AssignCompanies) => (
                 "Assign companies to a user",
                 SwaggerOperationDescription.Create(
                     "Admin only. Replaces the user's complete company-access set.",
                     "An Admin bearer token, non-empty GUID route `id`, and one or more `companyIds`.",
                     "Company IDs must be positive, unique, and reference non-deleted companies.",
-                    "An empty ID returns 400; missing users or companies return 404. Existing access tokens retain their selected company until expiry or logout, so the user must log in again to select another company.")),
+                    "An empty ID returns 400; missing users or companies return 404. Removing the selected company invalidates the user's existing access token on the next request.")),
             nameof(UsersController.Delete) => (
                 "Delete a user",
                 SwaggerOperationDescription.Create(

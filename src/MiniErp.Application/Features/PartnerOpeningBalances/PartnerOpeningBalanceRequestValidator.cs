@@ -8,49 +8,30 @@ public sealed class PartnerOpeningBalanceRequestValidator
 {
     public PartnerOpeningBalanceRequestValidator()
     {
-        PartnerOpeningBalanceValidationRules.Add(this);
-    }
-}
-
-public sealed class PartnerOpeningBalanceUpdateRequestValidator
-    : AbstractValidator<PartnerOpeningBalanceUpdateRequest>
-{
-    public PartnerOpeningBalanceUpdateRequestValidator()
-    {
-        PartnerOpeningBalanceValidationRules.Add(this);
-
-        RuleFor(request => request.RowVersion)
-            .NotNull()
-            .Must(rowVersion => rowVersion is { Length: > 0 })
-            .WithMessage("يجب إرسال إصدار السجل الحالي للتعديل.");
-    }
-}
-
-internal static class PartnerOpeningBalanceValidationRules
-{
-    public static void Add<T>(AbstractValidator<T> validator)
-        where T : IPartnerOpeningBalanceRequest
-    {
-        validator.RuleFor(request => request.BusinessPartnerId)
+        RuleFor(request => request.BusinessPartnerId)
             .GreaterThan(0);
 
-        validator.RuleFor(request => request.DocumentNumber)
-            .NotEmpty()
-            .Must(number => !string.IsNullOrWhiteSpace(number))
-            .WithMessage("رقم المستند مطلوب.")
-            .MaximumLength(PartnerOpeningBalanceRequest.DocumentNumberMaximumLength);
+        RuleFor(request => request.DocumentNumber)
+            .NotEmpty();
 
-        validator.RuleFor(request => request.DocumentDate)
+        RuleFor(request => request.DocumentNumber)
+            .MaximumLength(PartnerOpeningBalanceRequest.DocumentNumberMaximumLength)
+            .When(request =>
+                request.DocumentNumber is not null &&
+                request.DocumentNumber.Trim().Length >
+                PartnerOpeningBalanceRequest.DocumentNumberMaximumLength);
+
+        RuleFor(request => request.DocumentDate)
             .Must(date => date != default)
             .WithMessage("تاريخ المستند مطلوب.");
 
-        validator.RuleFor(request => request.Currency)
+        RuleFor(request => request.Currency)
             .IsInEnum();
 
-        validator.RuleFor(request => request.BalanceType)
+        RuleFor(request => request.BalanceType)
             .IsInEnum();
 
-        validator.RuleFor(request => request.Amount)
+        RuleFor(request => request.Amount)
             .GreaterThan(0)
             .PrecisionScale(
                 PartnerOpeningBalanceAmountRules.MoneyPrecision,
@@ -59,7 +40,62 @@ internal static class PartnerOpeningBalanceValidationRules
             .Must(PartnerOpeningBalanceAmountRules.IsValidAmount)
             .WithMessage("يجب أن يكون المبلغ موجباً وبحد أقصى منزلتين عشريتين.");
 
-        validator.RuleFor(request => request.Notes)
-            .MaximumLength(PartnerOpeningBalanceRequest.NotesMaximumLength);
+        RuleFor(request => request.Notes)
+            .MaximumLength(PartnerOpeningBalanceRequest.NotesMaximumLength)
+            .When(request =>
+                request.Notes is not null &&
+                request.Notes.Trim().Length >
+                PartnerOpeningBalanceRequest.NotesMaximumLength);
+    }
+}
+
+public sealed class PartnerOpeningBalanceUpdateRequestValidator
+    : AbstractValidator<PartnerOpeningBalanceUpdateRequest>
+{
+    public PartnerOpeningBalanceUpdateRequestValidator()
+    {
+        RuleFor(request => request.BusinessPartnerId)
+            .GreaterThan(0);
+
+        RuleFor(request => request.DocumentNumber)
+            .NotEmpty();
+
+        RuleFor(request => request.DocumentNumber)
+            .MaximumLength(PartnerOpeningBalanceRequest.DocumentNumberMaximumLength)
+            .When(request =>
+                request.DocumentNumber is not null &&
+                request.DocumentNumber.Trim().Length >
+                PartnerOpeningBalanceRequest.DocumentNumberMaximumLength);
+
+        RuleFor(request => request.DocumentDate)
+            .Must(date => date != default)
+            .WithMessage("تاريخ المستند مطلوب.");
+
+        RuleFor(request => request.Currency)
+            .IsInEnum();
+
+        RuleFor(request => request.BalanceType)
+            .IsInEnum();
+
+        RuleFor(request => request.Amount)
+            .GreaterThan(0)
+            .PrecisionScale(
+                PartnerOpeningBalanceAmountRules.MoneyPrecision,
+                PartnerOpeningBalanceAmountRules.MoneyScale,
+                ignoreTrailingZeros: true)
+            .Must(PartnerOpeningBalanceAmountRules.IsValidAmount)
+            .WithMessage("يجب أن يكون المبلغ موجباً وبحد أقصى منزلتين عشريتين.");
+
+        RuleFor(request => request.Notes)
+            .MaximumLength(PartnerOpeningBalanceRequest.NotesMaximumLength)
+            .When(request =>
+                request.Notes is not null &&
+                request.Notes.Trim().Length >
+                PartnerOpeningBalanceRequest.NotesMaximumLength);
+
+        RuleFor(request => request.RowVersion)
+            .NotNull()
+            .Must(rowVersion => rowVersion is { Length: > 0 })
+            .WithMessage("يجب إرسال إصدار السجل الحالي للتعديل.");
     }
 }

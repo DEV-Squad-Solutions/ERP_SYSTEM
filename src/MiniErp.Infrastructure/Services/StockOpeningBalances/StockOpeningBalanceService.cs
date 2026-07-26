@@ -1,4 +1,3 @@
-using System.Data;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -58,20 +57,11 @@ public sealed class StockOpeningBalanceService(
         StockOpeningBalanceRequest request,
         CancellationToken cancellationToken = default)
     {
-        var requestError = ValidateRequestShape(request);
-        if (requestError is not null)
-        {
-            return Result<StockOpeningBalanceResponse>.Failure(requestError);
-        }
-
         var normalized = request.Adapt<StockOpeningBalance>();
 
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
-            cancellationToken);
-
         var validationResult = await ValidateRequestAsync(
-            request,
+            normalized.StoreId,
+            request.Lines,
             cancellationToken);
         if (validationResult.IsFailure)
         {
@@ -107,7 +97,6 @@ public sealed class StockOpeningBalanceService(
             .AsNoTracking()
             .FirstAsync(cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
         return Result<StockOpeningBalanceResponse>.Success(response);
     }
 
@@ -121,12 +110,6 @@ public sealed class StockOpeningBalanceService(
             return Result<StockOpeningBalanceResponse>.Failure(InvalidId());
         }
 
-        var requestError = ValidateRequestShape(request);
-        if (requestError is not null)
-        {
-            return Result<StockOpeningBalanceResponse>.Failure(requestError);
-        }
-
         if (request.RowVersion is not { Length: > 0 })
         {
             return Result<StockOpeningBalanceResponse>.Failure(
@@ -137,10 +120,6 @@ public sealed class StockOpeningBalanceService(
         }
 
         var normalized = request.Adapt<StockOpeningBalance>();
-
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
-            cancellationToken);
 
         var openingBalance = await LoadForWriteAsync(id, cancellationToken);
         if (openingBalance is null)
@@ -154,7 +133,8 @@ public sealed class StockOpeningBalanceService(
         }
 
         var validationResult = await ValidateRequestAsync(
-            request,
+            normalized.StoreId,
+            request.Lines,
             cancellationToken);
         if (validationResult.IsFailure)
         {
@@ -196,7 +176,6 @@ public sealed class StockOpeningBalanceService(
         }
         catch (DbUpdateConcurrencyException)
         {
-            await transaction.RollbackAsync(cancellationToken);
             dbContext.ChangeTracker.Clear();
             return Result<StockOpeningBalanceResponse>.Failure(Concurrency());
         }
@@ -205,7 +184,6 @@ public sealed class StockOpeningBalanceService(
             .AsNoTracking()
             .FirstAsync(cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
         return Result<StockOpeningBalanceResponse>.Success(response);
     }
 
@@ -217,10 +195,6 @@ public sealed class StockOpeningBalanceService(
         {
             return Result.Failure(InvalidId());
         }
-
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
-            cancellationToken);
 
         var openingBalance = await LoadForWriteAsync(id, cancellationToken);
         if (openingBalance is null)
@@ -237,12 +211,10 @@ public sealed class StockOpeningBalanceService(
         }
         catch (DbUpdateConcurrencyException)
         {
-            await transaction.RollbackAsync(cancellationToken);
             dbContext.ChangeTracker.Clear();
             return Result.Failure(Concurrency());
         }
 
-        await transaction.CommitAsync(cancellationToken);
         return Result.Success();
     }
 
@@ -330,11 +302,12 @@ public sealed class StockOpeningBalanceService(
 
     private async Task<Result<IReadOnlyDictionary<int, ItemSnapshot>>>
         ValidateRequestAsync(
-            IStockOpeningBalanceRequest request,
+            int storeId,
+            IReadOnlyList<StockOpeningBalanceLineRequest> lines,
             CancellationToken cancellationToken)
     {
         var storeError = await ValidateStoreAsync(
-            request.StoreId,
+            storeId,
             cancellationToken);
         if (storeError is not null)
         {
@@ -342,7 +315,7 @@ public sealed class StockOpeningBalanceService(
         }
 
         return await ValidateLineItemsAsync(
-            [.. request.Lines.Select(line => line.ItemId)],
+            [.. lines.Select(line => line.ItemId)],
             cancellationToken);
     }
 
@@ -441,150 +414,6 @@ public sealed class StockOpeningBalanceService(
                     "StockOpeningBalances.ItemUnitInactive",
                     $"وحدات قياس الأصناف التالية غير نشطة: {string.Join(", ", inactiveUnitItemIds)}.",
                     nameof(StockOpeningBalanceLineRequest.ItemId)));
-    }
-
-    private static Error? ValidateRequestShape(IStockOpeningBalanceRequest request)
-    {
-        if (request is null)
-        {
-            return Error.Validation(
-                "StockOpeningBalances.RequestRequired",
-                "بيانات الرصيد الافتتاحي مطلوبة.");
-        }
-
-        if (request.StoreId <= 0)
-        {
-            return Error.Validation(
-                "StockOpeningBalances.InvalidStoreId",
-                "يجب أن يكون رقم المخزن أكبر من صفر.",
-                nameof(StockOpeningBalanceRequest.StoreId));
-        }
-
-        if (string.IsNullOrWhiteSpace(request.DocumentNumber))
-        {
-            return Error.Validation(
-                "StockOpeningBalances.DocumentNumberRequired",
-                "رقم المستند مطلوب.",
-                nameof(StockOpeningBalanceRequest.DocumentNumber));
-        }
-
-        if (request.DocumentNumber.Length >
-            StockOpeningBalanceRequest.DocumentNumberMaximumLength)
-        {
-            return Error.Validation(
-                "StockOpeningBalances.DocumentNumberTooLong",
-                $"لا يجوز أن يتجاوز رقم المستند {StockOpeningBalanceRequest.DocumentNumberMaximumLength} حرفاً.",
-                nameof(StockOpeningBalanceRequest.DocumentNumber));
-        }
-
-        if (request.Notes?.Length >
-            StockOpeningBalanceRequest.NotesMaximumLength)
-        {
-            return Error.Validation(
-                "StockOpeningBalances.NotesTooLong",
-                $"لا يجوز أن تتجاوز الملاحظات {StockOpeningBalanceRequest.NotesMaximumLength} حرف.",
-                nameof(StockOpeningBalanceRequest.Notes));
-        }
-
-        if (request.DocumentDate == default)
-        {
-            return Error.Validation(
-                "StockOpeningBalances.DocumentDateRequired",
-                "تاريخ المستند مطلوب.",
-                nameof(StockOpeningBalanceRequest.DocumentDate));
-        }
-
-        if (request.Lines is null || request.Lines.Count == 0)
-        {
-            return Error.Validation(
-                "StockOpeningBalances.LinesRequired",
-                "يجب إضافة سطر واحد على الأقل.",
-                nameof(StockOpeningBalanceRequest.Lines));
-        }
-
-        if (request.Lines.Count > StockOpeningBalanceRequest.MaximumLineCount)
-        {
-            return Error.Validation(
-                "StockOpeningBalances.TooManyLines",
-                $"لا يجوز أن يتجاوز عدد السطور {StockOpeningBalanceRequest.MaximumLineCount}.",
-                nameof(StockOpeningBalanceRequest.Lines));
-        }
-
-        if (request.Lines.Any(line => line is null))
-        {
-            return Error.Validation(
-                "StockOpeningBalances.InvalidLine",
-                "كل سطر في المستند مطلوب.",
-                nameof(StockOpeningBalanceRequest.Lines));
-        }
-
-        if (request.Lines.Any(line => line.ItemId <= 0))
-        {
-            return Error.Validation(
-                "StockOpeningBalances.InvalidItemId",
-                "يجب أن يكون رقم الصنف أكبر من صفر.",
-                nameof(StockOpeningBalanceLineRequest.ItemId));
-        }
-
-        if (request.Lines.Any(line => line.Count <= 0))
-        {
-            return Error.Validation(
-                "StockOpeningBalances.InvalidCount",
-                "يجب أن يكون عدد كل سطر أكبر من صفر.",
-                nameof(StockOpeningBalanceLineRequest.Count));
-        }
-
-        if (request.Lines.Any(line =>
-                line.Weight <= 0))
-        {
-            return Error.Validation(
-                "StockOpeningBalances.InvalidWeight",
-                "يجب أن يكون وزن كل سطر أكبر من صفر.",
-                nameof(StockOpeningBalanceLineRequest.Weight));
-        }
-
-        if (request.Lines.Any(line => line.Price < 0))
-        {
-            return Error.Validation(
-                "StockOpeningBalances.InvalidPrice",
-                "يجب ألا يكون سعر السطر أقل من صفر.",
-                nameof(StockOpeningBalanceLineRequest.Price));
-        }
-
-        if (request.Lines.Any(line =>
-                !StockOpeningBalanceAmountRules.TryCalculate(
-                    line.Count,
-                    line.Weight,
-                    line.Price,
-                    out _,
-                    out _)))
-        {
-            return Error.Validation(
-                "StockOpeningBalances.InvalidCalculatedAmounts",
-                "ناتج الكمية أو الإجمالي يتجاوز الدقة الرقمية المسموح بها.",
-                nameof(StockOpeningBalanceRequest.Lines));
-        }
-
-        if (request.Lines.Any(line =>
-                line.Notes?.Length >
-                StockOpeningBalanceRequest.NotesMaximumLength))
-        {
-            return Error.Validation(
-                "StockOpeningBalances.LineNotesTooLong",
-                $"لا يجوز أن تتجاوز ملاحظات السطر {StockOpeningBalanceRequest.NotesMaximumLength} حرف.",
-                nameof(StockOpeningBalanceLineRequest.Notes));
-        }
-
-        if (request.Lines.Select(line => line.ItemId).Distinct().Count() !=
-            request.Lines.Count)
-        {
-            return Error.Validation(
-                "StockOpeningBalances.DuplicateItemIds",
-                "لا يجوز تكرار الصنف في سطور الرصيد الافتتاحي.",
-                nameof(StockOpeningBalanceRequest.Lines));
-        }
-
-        return null;
     }
 
     private static Error InvalidId() =>

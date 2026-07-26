@@ -7,7 +7,12 @@ public sealed class ItemUnitRequestValidator : AbstractValidator<ItemUnitRequest
     public ItemUnitRequestValidator()
     {
         RuleFor(request => request.Name)
-            .NotEmpty()
-            .MaximumLength(100);
+            .NotEmpty();
+
+        RuleFor(request => request.Name)
+            .MaximumLength(100)
+            .When(request =>
+                request.Name is not null &&
+                request.Name.Trim().Length > 100);
     }
 }

@@ -112,20 +112,35 @@ public static class DependencyInjection
                             return;
                         }
 
-                        var dbContext = context.HttpContext.RequestServices
-                            .GetRequiredService<ApplicationDbContext>();
-                        var hasCompanyAccess = await dbContext.UserCompanies
-                            .AsNoTracking()
-                            .AnyAsync(
-                                userCompany =>
-                                    userCompany.UserId == userId &&
-                                    userCompany.CompanyId == companyId,
-                                context.HttpContext.RequestAborted);
-
-                        if (!hasCompanyAccess)
+                        var tokenSecurityStamp = context.Principal?
+                            .FindFirst(CustomClaimTypes.SecurityStamp)?
+                            .Value;
+                        if (string.IsNullOrEmpty(tokenSecurityStamp))
                         {
                             context.Fail(
-                                "المستخدم لا يملك صلاحية الوصول إلى الشركة أو أن الشركة محذوفة.");
+                                "رمز الوصول لا يحتوي على بيانات الجلسة المطلوبة.");
+                            return;
+                        }
+
+                        var dbContext = context.HttpContext.RequestServices
+                            .GetRequiredService<ApplicationDbContext>();
+                        var currentSecurityStamp = await dbContext.UserCompanies
+                            .AsNoTracking()
+                            .Where(userCompany =>
+                                    userCompany.UserId == userId &&
+                                    userCompany.CompanyId == companyId)
+                            .Select(userCompany =>
+                                userCompany.User.SecurityStamp)
+                            .SingleOrDefaultAsync(
+                                context.HttpContext.RequestAborted);
+
+                        if (!string.Equals(
+                                currentSecurityStamp,
+                                tokenSecurityStamp,
+                                StringComparison.Ordinal))
+                        {
+                            context.Fail(
+                                "انتهت صلاحية الجلسة أو لم يعد المستخدم يملك صلاحية الوصول إلى الشركة.");
                         }
                     }
                 };

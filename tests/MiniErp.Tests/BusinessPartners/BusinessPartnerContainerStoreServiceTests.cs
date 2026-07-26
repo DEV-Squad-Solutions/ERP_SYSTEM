@@ -71,6 +71,29 @@ public sealed class BusinessPartnerContainerStoreServiceTests
     }
 
     [Fact]
+    public async Task GetById_WorkspaceIncludesInactiveAssignedContainer()
+    {
+        await using var database =
+            await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.GetByIdAsync(1);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal([100, 101, 102], result.Value.Containers!
+            .Select(container => container.Id)
+            .Order()
+            .ToArray());
+
+        var inactiveAssigned = Assert.Single(
+            result.Value.Containers!,
+            container => container.Id == 102);
+        Assert.False(inactiveAssigned.IsActive);
+        Assert.True(inactiveAssigned.IsAssigned);
+        Assert.Equal(1_001, inactiveAssigned.StoreContainerId);
+    }
+
+    [Fact]
     public async Task GetContainerStore_DoesNotExposeAnotherCompanyPartner()
     {
         await using var database =
@@ -443,6 +466,8 @@ public sealed class BusinessPartnerContainerStoreServiceTests
                     CreatedById, CreatedOn, CreatedByPc, IsDeleted)
                 VALUES
                     (1000, 1, 10, 100, 1,
+                     'test', '2026-01-01', 'test', 0),
+                    (1001, 1, 10, 102, 1,
                      'test', '2026-01-01', 'test', 0),
                     (2000, 2, 20, 200, 1,
                      'test', '2026-01-01', 'test', 0);

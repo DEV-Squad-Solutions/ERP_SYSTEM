@@ -482,6 +482,15 @@ public sealed class UserService(
             }
         }
 
+        if (rolesToRemove.Length > 0 || rolesToAdd.Length > 0)
+        {
+            var stampResult = await userManager.UpdateSecurityStampAsync(user);
+            if (!stampResult.Succeeded)
+            {
+                return Result.Failure(IdentityError(stampResult));
+            }
+        }
+
         return Result.Success();
     }
 
@@ -515,12 +524,32 @@ public sealed class UserService(
             roles,
             companies);
 
-    private static Error IdentityError(IdentityResult result) =>
-        Error.Validation(
-            "Users.IdentityValidation",
-            string.Join(
-                "; ",
-                result.Errors.Select(error => error.Description)));
+    private static Error IdentityError(IdentityResult result)
+    {
+        var errors = result.Errors.ToArray();
+        var duplicateUserName = errors.FirstOrDefault(error =>
+            error.Code == nameof(IdentityErrorDescriber.DuplicateUserName));
+        if (duplicateUserName is not null)
+        {
+            return Error.Conflict(
+                "Users.UserNameExists",
+                duplicateUserName.Description,
+                nameof(UserCreateRequest.UserName));
+        }
+
+        var duplicateEmail = errors.FirstOrDefault(error =>
+            error.Code == nameof(IdentityErrorDescriber.DuplicateEmail));
+        return duplicateEmail is not null
+            ? Error.Conflict(
+                "Users.EmailExists",
+                duplicateEmail.Description,
+                nameof(UserCreateRequest.Email))
+            : Error.Validation(
+                "Users.IdentityValidation",
+                string.Join(
+                    "; ",
+                    errors.Select(error => error.Description)));
+    }
 
     private static Error InvalidId() =>
         Error.Validation("Users.InvalidId", "رقم المستخدم مطلوب.");

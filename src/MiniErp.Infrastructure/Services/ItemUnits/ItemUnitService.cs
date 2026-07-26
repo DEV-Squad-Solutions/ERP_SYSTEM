@@ -42,6 +42,7 @@ public sealed class ItemUnitService(
                 itemUnit.CompanyId == companyId &&
                 itemUnit.IsActive)
             .OrderBy(itemUnit => itemUnit.Name)
+            .ThenBy(itemUnit => itemUnit.Id)
             .ProjectToType<SelectResponse>()
             .ToListAsync(cancellationToken);
 

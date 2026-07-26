@@ -7,6 +7,7 @@ public sealed class UserCompaniesRequestValidator : AbstractValidator<UserCompan
     public UserCompaniesRequestValidator()
     {
         RuleFor(request => request.CompanyIds)
+            .NotNull()
             .SetValidator(new CompanyIdsValidator());
     }
 }

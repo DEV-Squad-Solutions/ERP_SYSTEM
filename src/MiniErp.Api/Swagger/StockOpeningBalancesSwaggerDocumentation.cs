@@ -42,7 +42,7 @@ public sealed class StockOpeningBalancesSwaggerDocumentation : IOperationFilter
             nameof(StockOpeningBalancesController.Update) => (
                 "Update a stock opening balance",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Replaces the header values and complete line set in one serializable transaction. Retained item lines are updated in place, removed lines are soft-deleted, and the audit interceptor records the change.",
+                    "Admin only. Replaces the header values and complete line set in one atomic aggregate save. Retained item lines are updated in place, removed lines are soft-deleted, and the audit interceptor records the change.",
                     "Positive route `id`, the same fields as create, and the current `rowVersion` returned by the API.",
                     "The complete line set is required; item units, quantities, and totals are re-derived by the server. Document number uniqueness is checked per company and excludes the current record. Every successful update advances the header row version, including line-only changes.",
                     "Missing or other-company records return 404. A stale row version returns 409 (`StockOpeningBalances.Concurrency`). This contract has no document-status, posting, cancellation, or movement operation.")),

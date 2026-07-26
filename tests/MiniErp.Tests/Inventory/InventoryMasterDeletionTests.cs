@@ -5,6 +5,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.Items;
+using MiniErp.Application.Features.ItemUnits;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Infrastructure;
@@ -233,6 +234,131 @@ public sealed class InventoryMasterDeletionTests
         Assert.Equal(
             [nameof(ItemRequest.Code), nameof(ItemRequest.Name)],
             result.Errors.Select(error => error.PropertyName));
+    }
+
+    [Fact]
+    public async Task GetAllItemUnits_ReturnsOnlyCurrentCompanyUnits()
+    {
+        await using var database = await InventoryDeletionDatabase.CreateAsync();
+        var service = database.CreateItemUnitService(companyId: 1);
+
+        var result = await service.GetAllAsync(
+            new PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal([2, 5, 1, 3], result.Value.Items.Select(unit => unit.Id));
+    }
+
+    [Fact]
+    public async Task GetItemUnitSelect_ReturnsOnlyActiveCurrentCompanyUnitsInOrder()
+    {
+        await using var database = await InventoryDeletionDatabase.CreateAsync();
+        var service = database.CreateItemUnitService(companyId: 1);
+
+        var result = await service.GetSelectAsync();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal([2, 1, 3], result.Value.Select(unit => unit.Id));
+    }
+
+    [Fact]
+    public async Task GetItemUnitById_DoesNotReturnAnotherCompanyUnit()
+    {
+        await using var database = await InventoryDeletionDatabase.CreateAsync();
+        var service = database.CreateItemUnitService(companyId: 1);
+
+        var result = await service.GetByIdAsync(4);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("ItemUnits.NotFound", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task AddItemUnit_TrimsNameAndAssignsCurrentCompany()
+    {
+        await using var database = await InventoryDeletionDatabase.CreateAsync();
+        var service = database.CreateItemUnitService(companyId: 1);
+
+        var result = await service.AddAsync(
+            new ItemUnitRequest("  New Unit  "));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value.CompanyId);
+        Assert.Equal("New Unit", result.Value.Name);
+        Assert.True(result.Value.IsActive);
+    }
+
+    [Fact]
+    public async Task AddItemUnit_RejectsNormalizedDuplicateName()
+    {
+        await using var database = await InventoryDeletionDatabase.CreateAsync();
+        var service = database.CreateItemUnitService(companyId: 1);
+
+        var result = await service.AddAsync(
+            new ItemUnitRequest("  Primary Unit  "));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("ItemUnits.NameExists", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task UpdateItemUnit_KeepsOwnNameAndAppliesNormalizedValues()
+    {
+        await using var database = await InventoryDeletionDatabase.CreateAsync();
+        var service = database.CreateItemUnitService(companyId: 1);
+
+        var result = await service.UpdateAsync(
+            3,
+            new ItemUnitRequest(
+                "  Unused Unit  ",
+                IsActive: false));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Unused Unit", result.Value.Name);
+        Assert.False(result.Value.IsActive);
+    }
+
+    [Fact]
+    public async Task ItemUnitValidator_AcceptsNameWhoseTrimmedLengthIsValid()
+    {
+        var validator = new ItemUnitRequestValidator();
+        var request = new ItemUnitRequest(
+            $"  {new string('N', 100)}  ");
+
+        var result = await validator.ValidateAsync(request);
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public async Task ItemUnitValidator_UsesSharedMaximumLengthRuleForTrimmedName()
+    {
+        var validator = new ItemUnitRequestValidator();
+        var request = new ItemUnitRequest(
+            $"  {new string('N', 101)}  ");
+
+        var result = await validator.ValidateAsync(request);
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(nameof(ItemUnitRequest.Name), error.PropertyName);
+        Assert.Equal("MaximumLengthValidator", error.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ItemUnitValidator_ReturnsOneRequiredErrorForWhitespaceName()
+    {
+        var validator = new ItemUnitRequestValidator();
+        var request = new ItemUnitRequest("   ");
+
+        var result = await validator.ValidateAsync(request);
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(nameof(ItemUnitRequest.Name), error.PropertyName);
+        Assert.Equal("NotEmptyValidator", error.ErrorCode);
     }
 
     [Theory]

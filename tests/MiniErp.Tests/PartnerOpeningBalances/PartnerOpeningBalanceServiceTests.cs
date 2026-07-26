@@ -101,6 +101,174 @@ public sealed class PartnerOpeningBalanceServiceTests
     }
 
     [Fact]
+    public async Task Add_NormalizesDocumentNumberAndBlankNotes()
+    {
+        await using var database = await PartnerOpeningBalanceTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.AddAsync(
+            new PartnerOpeningBalanceRequest(
+                1,
+                "  OPEN-TRIMMED  ",
+                new DateOnly(2026, 1, 1),
+                CurrencyCode.EGP,
+                PartnerBalanceType.Receivable,
+                125.50m,
+                "   "));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("OPEN-TRIMMED", result.Value.DocumentNumber);
+        Assert.Null(result.Value.Notes);
+    }
+
+    [Fact]
+    public async Task OtherCompany_CannotReadUpdateOrDeleteOpeningBalance()
+    {
+        await using var database = await PartnerOpeningBalanceTestDatabase.CreateAsync();
+        var companyOneService = database.CreateService(companyId: 1);
+        var companyTwoService = database.CreateService(companyId: 2);
+        var createResult = await companyOneService.AddAsync(CreateRequest());
+        var openingBalance = createResult.Value;
+
+        var getResult = await companyTwoService.GetByIdAsync(openingBalance.Id);
+        var updateResult = await companyTwoService.UpdateAsync(
+            openingBalance.Id,
+            new PartnerOpeningBalanceUpdateRequest(
+                openingBalance.BusinessPartnerId,
+                openingBalance.DocumentNumber,
+                openingBalance.DocumentDate,
+                openingBalance.Currency,
+                openingBalance.BalanceType,
+                openingBalance.Amount,
+                openingBalance.Notes,
+                openingBalance.RowVersion));
+        var deleteResult = await companyTwoService.DeleteAsync(openingBalance.Id);
+
+        Assert.Equal("PartnerOpeningBalances.NotFound", getResult.Error.Code);
+        Assert.Equal("PartnerOpeningBalances.NotFound", updateResult.Error.Code);
+        Assert.Equal("PartnerOpeningBalances.NotFound", deleteResult.Error.Code);
+        Assert.True(
+            (await companyOneService.GetByIdAsync(openingBalance.Id)).IsSuccess);
+    }
+
+    [Fact]
+    public async Task Update_AllowsOwnNormalizedDocumentNumber()
+    {
+        await using var database = await PartnerOpeningBalanceTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var createResult = await service.AddAsync(CreateRequest());
+        var openingBalance = createResult.Value;
+
+        var result = await service.UpdateAsync(
+            openingBalance.Id,
+            new PartnerOpeningBalanceUpdateRequest(
+                openingBalance.BusinessPartnerId,
+                $"  {openingBalance.DocumentNumber}  ",
+                openingBalance.DocumentDate,
+                openingBalance.Currency,
+                openingBalance.BalanceType,
+                openingBalance.Amount,
+                "  Updated notes  ",
+                openingBalance.RowVersion));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("OPEN-001", result.Value.DocumentNumber);
+        Assert.Equal("Updated notes", result.Value.Notes);
+    }
+
+    [Fact]
+    public async Task Update_RejectsMissingRowVersion()
+    {
+        await using var database = await PartnerOpeningBalanceTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var createResult = await service.AddAsync(CreateRequest());
+        var openingBalance = createResult.Value;
+
+        var result = await service.UpdateAsync(
+            openingBalance.Id,
+            new PartnerOpeningBalanceUpdateRequest(
+                openingBalance.BusinessPartnerId,
+                openingBalance.DocumentNumber,
+                openingBalance.DocumentDate,
+                openingBalance.Currency,
+                openingBalance.BalanceType,
+                openingBalance.Amount,
+                openingBalance.Notes,
+                null));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "PartnerOpeningBalances.RowVersionRequired",
+            result.Error.Code);
+    }
+
+    [Fact]
+    public async Task RequestValidators_AcceptNormalizedMaximumLengths()
+    {
+        var documentNumber =
+            $"  {new string('D', PartnerOpeningBalanceRequest.DocumentNumberMaximumLength)}  ";
+        var notes =
+            $"  {new string('N', PartnerOpeningBalanceRequest.NotesMaximumLength)}  ";
+        var createValidator = new PartnerOpeningBalanceRequestValidator();
+        var updateValidator = new PartnerOpeningBalanceUpdateRequestValidator();
+
+        var createResult = await createValidator.ValidateAsync(
+            new PartnerOpeningBalanceRequest(
+                1,
+                documentNumber,
+                new DateOnly(2026, 1, 1),
+                CurrencyCode.EGP,
+                PartnerBalanceType.Receivable,
+                1m,
+                notes));
+        var updateResult = await updateValidator.ValidateAsync(
+            new PartnerOpeningBalanceUpdateRequest(
+                1,
+                documentNumber,
+                new DateOnly(2026, 1, 1),
+                CurrencyCode.EGP,
+                PartnerBalanceType.Receivable,
+                1m,
+                notes,
+                new byte[8]));
+
+        Assert.True(createResult.IsValid);
+        Assert.True(updateResult.IsValid);
+    }
+
+    [Fact]
+    public async Task RequestValidators_ReturnOneRequiredErrorForWhitespaceDocumentNumber()
+    {
+        var createValidator = new PartnerOpeningBalanceRequestValidator();
+        var updateValidator = new PartnerOpeningBalanceUpdateRequestValidator();
+
+        var createResult = await createValidator.ValidateAsync(
+            new PartnerOpeningBalanceRequest(
+                1,
+                "   ",
+                new DateOnly(2026, 1, 1),
+                CurrencyCode.EGP,
+                PartnerBalanceType.Receivable,
+                1m,
+                null));
+        var updateResult = await updateValidator.ValidateAsync(
+            new PartnerOpeningBalanceUpdateRequest(
+                1,
+                "   ",
+                new DateOnly(2026, 1, 1),
+                CurrencyCode.EGP,
+                PartnerBalanceType.Receivable,
+                1m,
+                null,
+                new byte[8]));
+
+        var createError = Assert.Single(createResult.Errors);
+        var updateError = Assert.Single(updateResult.Errors);
+        Assert.Equal("NotEmptyValidator", createError.ErrorCode);
+        Assert.Equal("NotEmptyValidator", updateError.ErrorCode);
+    }
+
+    [Fact]
     public async Task Update_UsesOriginalClientTokenAndRejectsStaleToken()
     {
         await using var database = await PartnerOpeningBalanceTestDatabase.CreateAsync();
@@ -224,7 +392,7 @@ public sealed class PartnerOpeningBalanceServiceTests
     }
 
     [Fact]
-    public async Task Add_WhenInsertFails_RollsBackTheAggregate()
+    public async Task Add_WhenInsertFails_DoesNotPersistOpeningBalance()
     {
         await using var database = await PartnerOpeningBalanceTestDatabase.CreateAsync(
             addForcedInsertFailureTrigger: true);

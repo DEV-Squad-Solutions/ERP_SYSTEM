@@ -141,12 +141,27 @@ public sealed class StoreService(
         }
 
         var normalizedStore = request.Adapt<Store>();
+        var typeChanged =
+            store.IsContainerStore != normalizedStore.IsContainerStore;
+        var businessPartnerChanged =
+            store.BusinessPartnerId != normalizedStore.BusinessPartnerId;
 
-        if ((store.IsContainerStore != normalizedStore.IsContainerStore ||
-             store.BusinessPartnerId != normalizedStore.BusinessPartnerId) &&
+        if ((typeChanged || businessPartnerChanged) &&
             await HasHistoricalContainerAssignmentsAsync(id, cancellationToken))
         {
             return Result<StoreResponse>.Failure(HasContainerAssignments());
+        }
+
+        if ((typeChanged &&
+             await HasHistoricalDependenciesAsync(id, cancellationToken)) ||
+            (!typeChanged &&
+             businessPartnerChanged &&
+             await HasHistoricalContainerStoreDependenciesAsync(
+                 id,
+                 cancellationToken)))
+        {
+            return Result<StoreResponse>.Failure(
+                HistoricalIdentityChangeNotAllowed());
         }
 
         var codeExists = await dbContext.Stores.AnyAsync(
@@ -199,36 +214,7 @@ public sealed class StoreService(
             return Result.Failure(HasContainerAssignments());
         }
 
-        var hasDependencies = await dbContext.Invoices
-            .IgnoreQueryFilters()
-            .AnyAsync(
-                invoice =>
-                    invoice.CompanyId == companyId &&
-                    (invoice.StoreId == id ||
-                     invoice.ContainerStoreId == id),
-                cancellationToken) ||
-            await dbContext.StockOpeningBalances
-                .IgnoreQueryFilters()
-                .AnyAsync(
-                    balance =>
-                        balance.CompanyId == companyId &&
-                        balance.StoreId == id,
-                    cancellationToken) ||
-            await dbContext.ItemMovements
-                .IgnoreQueryFilters()
-                .AnyAsync(
-                    movement =>
-                        movement.CompanyId == companyId &&
-                        movement.StoreId == id,
-                    cancellationToken) ||
-            await dbContext.ContainerMovements
-                .IgnoreQueryFilters()
-                .AnyAsync(
-                    movement =>
-                        movement.CompanyId == companyId &&
-                        movement.ContainerStoreId == id,
-                    cancellationToken);
-        if (hasDependencies)
+        if (await HasHistoricalDependenciesAsync(id, cancellationToken))
         {
             return Result.Failure(HasDependencies());
         }
@@ -249,6 +235,57 @@ public sealed class StoreService(
                 assignment =>
                     assignment.CompanyId == companyId &&
                     assignment.StoreId == storeId,
+                cancellationToken);
+
+    private async Task<bool> HasHistoricalDependenciesAsync(
+        int storeId,
+        CancellationToken cancellationToken) =>
+        await dbContext.Invoices
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                invoice =>
+                    invoice.CompanyId == companyId &&
+                    (invoice.StoreId == storeId ||
+                     invoice.ContainerStoreId == storeId),
+                cancellationToken) ||
+        await dbContext.StockOpeningBalances
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                balance =>
+                    balance.CompanyId == companyId &&
+                    balance.StoreId == storeId,
+                cancellationToken) ||
+        await dbContext.ItemMovements
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                movement =>
+                    movement.CompanyId == companyId &&
+                    movement.StoreId == storeId,
+                cancellationToken) ||
+        await dbContext.ContainerMovements
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                movement =>
+                    movement.CompanyId == companyId &&
+                    movement.ContainerStoreId == storeId,
+                cancellationToken);
+
+    private async Task<bool> HasHistoricalContainerStoreDependenciesAsync(
+        int storeId,
+        CancellationToken cancellationToken) =>
+        await dbContext.Invoices
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                invoice =>
+                    invoice.CompanyId == companyId &&
+                    invoice.ContainerStoreId == storeId,
+                cancellationToken) ||
+        await dbContext.ContainerMovements
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                movement =>
+                    movement.CompanyId == companyId &&
+                    movement.ContainerStoreId == storeId,
                 cancellationToken);
 
     private static Error InvalidId() =>
@@ -343,4 +380,9 @@ public sealed class StoreService(
         Error.Conflict(
             "Stores.HasDependencies",
             "لا يمكن حذف المخزن لارتباطه بمستندات أو حركات حالية أو تاريخية.");
+
+    private static Error HistoricalIdentityChangeNotAllowed() =>
+        Error.Conflict(
+            "Stores.HistoricalIdentityChangeNotAllowed",
+            "لا يمكن تغيير نوع المخزن أو العميل أو المورد المرتبط به لوجود مستندات أو حركات حالية أو تاريخية.");
 }

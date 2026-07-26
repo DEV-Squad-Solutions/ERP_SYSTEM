@@ -37,19 +37,19 @@ public sealed class PartnerOpeningBalancesSwaggerDocumentation : IOperationFilte
                 SwaggerOperationDescription.Create(
                     "Admin only. Creates one receivable or payable partner opening balance atomically for the selected company. Audit fields are populated only by the shared audit interceptor.",
                     "`businessPartnerId`, `documentNumber`, `documentDate`, `currency`, `balanceType`, and `amount`; `notes` is optional. Do not send `companyId` or `rowVersion`.",
-                    "The partner must be active and belong to the selected company. The supplied currency must match the partner currency. Document numbers are trimmed, limited to 50 characters, and unique among non-deleted records. Amount must be positive and have at most two decimal places; notes are limited to 1,000 characters. Currency values are `EGP`, `USD`, `EUR`, `GBP`, `SAR`, `AED`, or `KWD`; balance types are `Receivable` or `Payable`.",
+                    "The partner must be active and belong to the selected company. The supplied currency must match the partner currency. Document numbers are trimmed, limited to 50 characters, and unique among non-deleted records. Amount must be positive and have at most two decimal places. Notes are trimmed, blank notes become null, and the normalized value is limited to 1,000 characters. Currency values are `EGP`, `USD`, `EUR`, `GBP`, `SAR`, `AED`, or `KWD`; balance types are `Receivable` or `Payable`.",
                     "Invalid values return 400. Missing or other-company partners return 404. Inactive partners, currency mismatches, and duplicate document numbers return 409.")),
             nameof(PartnerOpeningBalancesController.Update) => (
                 "Update a partner opening balance",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Replaces the complete header in one serializable transaction. The audit interceptor records the update and the header row-version advances when a value changes.",
+                    "Admin only. Updates the complete header using row-version concurrency. The audit interceptor records the update and the header row-version advances when a value changes.",
                     "Positive route `id`, the same fields as create, and the current `rowVersion` returned by the API. The request must not contain `companyId`.",
                     "The active partner and matching currency are revalidated. The document number is normalized and checked for company-scoped uniqueness, excluding the current record. The client row-version is used as EF Core's original concurrency value and is never replaced with a freshly loaded token.",
                     "Missing or other-company records return 404. A missing token returns 400. A stale token returns 409 with `PartnerOpeningBalances.Concurrency` and a reload-and-retry message. This contract has no status, posting, cancellation, reversal, or partner-movement operation.")),
             nameof(PartnerOpeningBalancesController.Delete) => (
                 "Delete a partner opening balance",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Soft-deletes one partner opening balance atomically; audit history remains available through query-filter bypasses.",
+                    "Admin only. Soft-deletes one partner opening balance; audit history remains available through query-filter bypasses.",
                     "A positive route `id` and an Admin bearer token containing one validated `company_id`. No request body is required.",
                     "The operation does not create reversal or partner-movement records.",
                     "Missing, deleted, and other-company records return 404. A concurrent database update returns 409 with a reload-and-retry conflict.")),

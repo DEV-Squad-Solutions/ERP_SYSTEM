@@ -252,6 +252,9 @@ public sealed class AuthenticationService(
         claims.Add(new Claim(
             CustomClaimTypes.CompanyId,
             companyId.ToString(CultureInfo.InvariantCulture)));
+        claims.Add(new Claim(
+            CustomClaimTypes.SecurityStamp,
+            user.SecurityStamp ?? string.Empty));
         claims.AddRange(roles.Select(role => new Claim("role", role)));
 
         return WriteToken(

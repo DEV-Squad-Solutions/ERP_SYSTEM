@@ -32,6 +32,7 @@ public sealed class UserUpdateRequestValidator : AbstractValidator<UserUpdateReq
             .SetValidator(new RolesValidator());
 
         RuleFor(request => request.CompanyIds)
+            .NotNull()
             .SetValidator(new CompanyIdsValidator());
     }
 }

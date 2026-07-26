@@ -34,7 +34,7 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
             nameof(BusinessPartnersController.GetById) => (
                 "Get a business partner",
                 SwaggerOperationDescription.Create(
-                    "Returns one non-deleted business partner owned by the selected company together with its active container Store, when present, and the complete active Containers workspace. Each Container includes `isAssigned` and `storeContainerId`, so this single endpoint is sufficient for partner detail and edit screens.",
+                    "Returns one non-deleted business partner owned by the selected company together with its active container Store, when present, all active Containers, and any inactive Container still assigned to that Store. Each Container includes `isActive`, `isAssigned`, and `storeContainerId`, so inactive assignments remain visible and removable.",
                     "A bearer token containing one `company_id` and route `id`.",
                     "`id` must be greater than zero.",
                     "Invalid IDs return 400. Missing, deleted, and other-company records return 404 without revealing tenant data. Partners without an active container Store return `containerStore: null` and an empty `containers` array.")),

@@ -1,18 +1,5 @@
 namespace MiniErp.Application.Features.StockOpeningBalances;
 
-public interface IStockOpeningBalanceRequest
-{
-    int StoreId { get; }
-
-    string DocumentNumber { get; }
-
-    DateOnly DocumentDate { get; }
-
-    IReadOnlyList<StockOpeningBalanceLineRequest> Lines { get; }
-
-    string? Notes { get; }
-}
-
 public sealed record StockOpeningBalanceLineRequest(
     int ItemId,
     int Count,
@@ -25,7 +12,7 @@ public sealed record StockOpeningBalanceRequest(
     string DocumentNumber,
     DateOnly DocumentDate,
     IReadOnlyList<StockOpeningBalanceLineRequest> Lines,
-    string? Notes) : IStockOpeningBalanceRequest
+    string? Notes)
 {
     public const int DocumentNumberMaximumLength = 50;
 
@@ -41,4 +28,4 @@ public sealed record StockOpeningBalanceUpdateRequest(
     DateOnly DocumentDate,
     IReadOnlyList<StockOpeningBalanceLineRequest> Lines,
     string? Notes,
-    byte[]? RowVersion) : IStockOpeningBalanceRequest;
+    byte[]? RowVersion);

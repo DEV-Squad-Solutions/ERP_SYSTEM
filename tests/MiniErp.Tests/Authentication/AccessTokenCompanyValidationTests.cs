@@ -54,12 +54,37 @@ public sealed class AccessTokenCompanyValidationTests
         Assert.NotNull(context.Result?.Failure);
     }
 
+    [Fact]
+    public async Task TokenValidation_WithStaleSecurityStamp_Fails()
+    {
+        await using var database =
+            await AccessTokenCompanyTestDatabase.CreateAsync();
+
+        var context = await database.ValidateAccessTokenAsync(
+            securityStamp: "stale-security-stamp");
+
+        Assert.NotNull(context.Result?.Failure);
+    }
+
+    [Fact]
+    public async Task TokenValidation_WithoutSecurityStamp_Fails()
+    {
+        await using var database =
+            await AccessTokenCompanyTestDatabase.CreateAsync();
+
+        var context = await database.ValidateAccessTokenAsync(
+            securityStamp: null);
+
+        Assert.NotNull(context.Result?.Failure);
+    }
+
     private sealed class AccessTokenCompanyTestDatabase : IAsyncDisposable
     {
         private static readonly Guid UserId =
             Guid.Parse("22222222-2222-2222-2222-222222222222");
 
         private const int CompanyId = 1;
+        private const string SecurityStamp = "current-security-stamp";
 
         private AccessTokenCompanyTestDatabase(
             SqliteConnection connection,
@@ -129,7 +154,8 @@ public sealed class AccessTokenCompanyValidationTests
             Context.ChangeTracker.Clear();
         }
 
-        public async Task<TokenValidatedContext> ValidateAccessTokenAsync()
+        public async Task<TokenValidatedContext> ValidateAccessTokenAsync(
+            string? securityStamp = SecurityStamp)
         {
             var options = Scope.ServiceProvider
                 .GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
@@ -147,7 +173,7 @@ public sealed class AccessTokenCompanyValidationTests
                 scheme,
                 options)
             {
-                Principal = CreatePrincipal()
+                Principal = CreatePrincipal(securityStamp)
             };
 
             await options.Events.OnTokenValidated(context);
@@ -182,19 +208,30 @@ public sealed class AccessTokenCompanyValidationTests
                     })
                 .Build();
 
-        private static ClaimsPrincipal CreatePrincipal() =>
-            new(
+        private static ClaimsPrincipal CreatePrincipal(string? securityStamp)
+        {
+            var claims = new List<Claim>
+            {
+                new("sub", UserId.ToString()),
+                new(
+                    CustomClaimTypes.TokenUse,
+                    CustomClaimTypes.AccessTokenUse),
+                new(
+                    CustomClaimTypes.CompanyId,
+                    CompanyId.ToString())
+            };
+            if (securityStamp is not null)
+            {
+                claims.Add(new Claim(
+                    CustomClaimTypes.SecurityStamp,
+                    securityStamp));
+            }
+
+            return new ClaimsPrincipal(
                 new ClaimsIdentity(
-                    [
-                        new Claim("sub", UserId.ToString()),
-                        new Claim(
-                            CustomClaimTypes.TokenUse,
-                            CustomClaimTypes.AccessTokenUse),
-                        new Claim(
-                            CustomClaimTypes.CompanyId,
-                            CompanyId.ToString())
-                    ],
+                    claims,
                     JwtBearerDefaults.AuthenticationScheme));
+        }
 
         private static async Task SeedAsync(ApplicationDbContext context)
         {
@@ -206,7 +243,8 @@ public sealed class AccessTokenCompanyValidationTests
                     NormalizedUserName = "COMPANY-TEST-USER",
                     FirstName = "Company",
                     LastName = "Tester",
-                    ProfileImage = string.Empty
+                    ProfileImage = string.Empty,
+                    SecurityStamp = SecurityStamp
                 });
             context.Companies.Add(
                 new Company

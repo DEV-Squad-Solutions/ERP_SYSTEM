@@ -1,4 +1,3 @@
-using System.Data;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -59,17 +58,7 @@ public sealed class PartnerOpeningBalanceService(
         PartnerOpeningBalanceRequest request,
         CancellationToken cancellationToken = default)
     {
-        var requestError = ValidateRequestShape(request);
-        if (requestError is not null)
-        {
-            return Result<PartnerOpeningBalanceResponse>.Failure(requestError);
-        }
-
         var normalized = request.Adapt<PartnerOpeningBalance>();
-
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
-            cancellationToken);
 
         var partnerError = await ValidateBusinessPartnerAsync(
             normalized.BusinessPartnerId,
@@ -99,7 +88,6 @@ public sealed class PartnerOpeningBalanceService(
             .AsNoTracking()
             .FirstAsync(cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
         return Result<PartnerOpeningBalanceResponse>.Success(response);
     }
 
@@ -113,12 +101,6 @@ public sealed class PartnerOpeningBalanceService(
             return Result<PartnerOpeningBalanceResponse>.Failure(InvalidId());
         }
 
-        var requestError = ValidateRequestShape(request);
-        if (requestError is not null)
-        {
-            return Result<PartnerOpeningBalanceResponse>.Failure(requestError);
-        }
-
         if (request.RowVersion is not { Length: > 0 })
         {
             return Result<PartnerOpeningBalanceResponse>.Failure(
@@ -129,10 +111,6 @@ public sealed class PartnerOpeningBalanceService(
         }
 
         var normalized = request.Adapt<PartnerOpeningBalance>();
-
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
-            cancellationToken);
 
         var openingBalance = await dbContext.PartnerOpeningBalances
             .FirstOrDefaultAsync(
@@ -190,7 +168,6 @@ public sealed class PartnerOpeningBalanceService(
         }
         catch (DbUpdateConcurrencyException)
         {
-            await transaction.RollbackAsync(cancellationToken);
             dbContext.ChangeTracker.Clear();
             return Result<PartnerOpeningBalanceResponse>.Failure(Concurrency());
         }
@@ -199,7 +176,6 @@ public sealed class PartnerOpeningBalanceService(
             .AsNoTracking()
             .FirstAsync(cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
         return Result<PartnerOpeningBalanceResponse>.Success(response);
     }
 
@@ -211,10 +187,6 @@ public sealed class PartnerOpeningBalanceService(
         {
             return Result.Failure(InvalidId());
         }
-
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
-            cancellationToken);
 
         var openingBalance = await dbContext.PartnerOpeningBalances
             .FirstOrDefaultAsync(
@@ -235,12 +207,10 @@ public sealed class PartnerOpeningBalanceService(
         }
         catch (DbUpdateConcurrencyException)
         {
-            await transaction.RollbackAsync(cancellationToken);
             dbContext.ChangeTracker.Clear();
             return Result.Failure(Concurrency());
         }
 
-        await transaction.CommitAsync(cancellationToken);
         return Result.Success();
     }
 
@@ -290,83 +260,6 @@ public sealed class PartnerOpeningBalanceService(
                 "PartnerOpeningBalances.CurrencyMismatch",
                 "يجب أن تطابق عملة رصيد الشريك عملة العميل أو المورد.",
                 nameof(PartnerOpeningBalanceRequest.Currency));
-    }
-
-    private static Error? ValidateRequestShape(IPartnerOpeningBalanceRequest request)
-    {
-        if (request is null)
-        {
-            return Error.Validation(
-                "PartnerOpeningBalances.RequestRequired",
-                "بيانات رصيد الشريك مطلوبة.");
-        }
-
-        if (request.BusinessPartnerId <= 0)
-        {
-            return Error.Validation(
-                "PartnerOpeningBalances.InvalidBusinessPartnerId",
-                "يجب أن يكون رقم العميل أو المورد أكبر من صفر.",
-                nameof(PartnerOpeningBalanceRequest.BusinessPartnerId));
-        }
-
-        if (string.IsNullOrWhiteSpace(request.DocumentNumber))
-        {
-            return Error.Validation(
-                "PartnerOpeningBalances.DocumentNumberRequired",
-                "رقم المستند مطلوب.",
-                nameof(PartnerOpeningBalanceRequest.DocumentNumber));
-        }
-
-        if (request.DocumentNumber.Trim().Length >
-            PartnerOpeningBalanceRequest.DocumentNumberMaximumLength)
-        {
-            return Error.Validation(
-                "PartnerOpeningBalances.DocumentNumberTooLong",
-                $"لا يجوز أن يتجاوز رقم المستند {PartnerOpeningBalanceRequest.DocumentNumberMaximumLength} حرفاً.",
-                nameof(PartnerOpeningBalanceRequest.DocumentNumber));
-        }
-
-        if (request.DocumentDate == default)
-        {
-            return Error.Validation(
-                "PartnerOpeningBalances.DocumentDateRequired",
-                "تاريخ المستند مطلوب.",
-                nameof(PartnerOpeningBalanceRequest.DocumentDate));
-        }
-
-        if (!Enum.IsDefined(typeof(CurrencyCode), request.Currency))
-        {
-            return Error.Validation(
-                "PartnerOpeningBalances.CurrencyInvalid",
-                "العملة غير مدعومة.",
-                nameof(PartnerOpeningBalanceRequest.Currency));
-        }
-
-        if (!Enum.IsDefined(typeof(PartnerBalanceType), request.BalanceType))
-        {
-            return Error.Validation(
-                "PartnerOpeningBalances.BalanceTypeInvalid",
-                "نوع رصيد الشريك غير مدعوم.",
-                nameof(PartnerOpeningBalanceRequest.BalanceType));
-        }
-
-        if (!PartnerOpeningBalanceAmountRules.IsValidAmount(request.Amount))
-        {
-            return Error.Validation(
-                "PartnerOpeningBalances.AmountInvalid",
-                "يجب أن يكون المبلغ موجباً وبحد أقصى منزلتين عشريتين.",
-                nameof(PartnerOpeningBalanceRequest.Amount));
-        }
-
-        if (request.Notes?.Length > PartnerOpeningBalanceRequest.NotesMaximumLength)
-        {
-            return Error.Validation(
-                "PartnerOpeningBalances.NotesTooLong",
-                $"لا يجوز أن تتجاوز الملاحظات {PartnerOpeningBalanceRequest.NotesMaximumLength} حرف.",
-                nameof(PartnerOpeningBalanceRequest.Notes));
-        }
-
-        return null;
     }
 
     private static Error InvalidId() =>
