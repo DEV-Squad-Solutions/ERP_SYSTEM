@@ -196,6 +196,8 @@ public sealed class StockOpeningBalanceService(
         }
         catch (DbUpdateConcurrencyException)
         {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
             return Result<StockOpeningBalanceResponse>.Failure(Concurrency());
         }
 
@@ -228,7 +230,17 @@ public sealed class StockOpeningBalanceService(
 
         dbContext.StockOpeningBalanceLines.RemoveRange(openingBalance.Lines);
         dbContext.StockOpeningBalances.Remove(openingBalance);
-        await dbContext.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result.Failure(Concurrency());
+        }
 
         await transaction.CommitAsync(cancellationToken);
         return Result.Success();
@@ -282,9 +294,11 @@ public sealed class StockOpeningBalanceService(
             .ToDictionary(line => line.ItemId);
 
         foreach (var line in openingBalance.Lines
-                     .Where(line => !requestedItemIds.Contains(line.ItemId)))
+                     .Where(line => !requestedItemIds.Contains(line.ItemId))
+                     .ToList())
         {
             dbContext.StockOpeningBalanceLines.Remove(line);
+            openingBalance.Lines.Remove(line);
         }
 
         foreach (var lineRequest in requests)

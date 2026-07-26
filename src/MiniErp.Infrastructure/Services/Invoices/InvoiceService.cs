@@ -97,12 +97,7 @@ public sealed partial class InvoiceService(
         dbContext.Invoices.Add(invoice);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        await SaveSideEffectsAsync(
-            invoice,
-            request.Lines,
-            request.ContainerLines,
-            preparation.Value,
-            cancellationToken);
+        await SaveSideEffectsAsync(invoice, cancellationToken);
 
         var response = await ProjectResponseQuery(invoice.Id)
             .AsNoTracking()
@@ -187,12 +182,7 @@ public sealed partial class InvoiceService(
             await RemoveSideEffectsAsync(invoice, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            await SaveSideEffectsAsync(
-                invoice,
-                request.Lines,
-                request.ContainerLines,
-                preparation.Value,
-                cancellationToken);
+            await SaveSideEffectsAsync(invoice, cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {

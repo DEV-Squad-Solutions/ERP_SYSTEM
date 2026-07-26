@@ -456,6 +456,13 @@ public sealed class BusinessPartnerService(
             return Result<BusinessPartnerResponse>.Failure(duplicateError);
         }
 
+        if (partner.Currency != normalizedPartner.Currency &&
+            await HasFinancialRecordsAsync(id, cancellationToken))
+        {
+            return Result<BusinessPartnerResponse>.Failure(
+                CurrencyChangeNotAllowed());
+        }
+
         request.Adapt(partner);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -489,9 +496,12 @@ public sealed class BusinessPartnerService(
                 cancellationToken);
         if (hasContainerStores)
         {
-            return Result.Failure(Error.Conflict(
-                "BusinessPartners.HasContainerStores",
-                "لا يمكن حذف العميل أو المورد لارتباطه بمخزن عبوات حالي أو تاريخي."));
+            return Result.Failure(HasContainerStores());
+        }
+
+        if (await HasFinancialRecordsAsync(id, cancellationToken))
+        {
+            return Result.Failure(HasFinancialRecords());
         }
 
         partner.IsActive = false;
@@ -506,15 +516,20 @@ public sealed class BusinessPartnerService(
         int? excludedId,
         CancellationToken cancellationToken)
     {
+        var normalizedName = partner.Name.ToUpperInvariant();
+        var normalizedCode = partner.Code.ToUpperInvariant();
+        var normalizedTaxNumber = partner.TaxNumber?.ToUpperInvariant();
+
         var duplicates = await dbContext.BusinessPartners
             .AsNoTracking()
             .Where(entity =>
                 entity.CompanyId == companyId &&
                 (!excludedId.HasValue || entity.Id != excludedId.Value) &&
-                (entity.Name == partner.Name ||
-                 entity.Code == partner.Code ||
-                 (partner.TaxNumber != null &&
-                  entity.TaxNumber == partner.TaxNumber)))
+                (entity.Name.ToUpper() == normalizedName ||
+                 entity.Code.ToUpper() == normalizedCode ||
+                 (normalizedTaxNumber != null &&
+                  entity.TaxNumber != null &&
+                  entity.TaxNumber.ToUpper() == normalizedTaxNumber)))
             .Select(entity => new
             {
                 entity.Name,
@@ -557,6 +572,45 @@ public sealed class BusinessPartnerService(
             : null;
     }
 
+    private async Task<bool> HasFinancialRecordsAsync(
+        int businessPartnerId,
+        CancellationToken cancellationToken) =>
+        await dbContext.Invoices
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                invoice =>
+                    invoice.CompanyId == companyId &&
+                    invoice.BusinessPartnerId == businessPartnerId,
+                cancellationToken) ||
+        await dbContext.PartnerOpeningBalances
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                balance =>
+                    balance.CompanyId == companyId &&
+                    balance.BusinessPartnerId == businessPartnerId,
+                cancellationToken) ||
+        await dbContext.BusinessPartnerMovements
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                movement =>
+                    movement.CompanyId == companyId &&
+                    movement.BusinessPartnerId == businessPartnerId,
+                cancellationToken) ||
+        await dbContext.ContainerMovements
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                movement =>
+                    movement.CompanyId == companyId &&
+                    movement.BusinessPartnerId == businessPartnerId,
+                cancellationToken) ||
+        await dbContext.DriverTrips
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                trip =>
+                    trip.CompanyId == companyId &&
+                    trip.BusinessPartnerId == businessPartnerId,
+                cancellationToken);
+
     private static Error InvalidId() =>
         Error.Validation(
             "BusinessPartners.InvalidId",
@@ -571,4 +625,20 @@ public sealed class BusinessPartnerService(
         Error.NotFound(
             "BusinessPartners.NotFound",
             $"لم يتم العثور على العميل أو المورد رقم {id}.");
+
+    private static Error HasContainerStores() =>
+        Error.Conflict(
+            "BusinessPartners.HasContainerStores",
+            "لا يمكن حذف العميل أو المورد لارتباطه بمخزن عبوات حالي أو تاريخي.");
+
+    private static Error HasFinancialRecords() =>
+        Error.Conflict(
+            "BusinessPartners.HasFinancialRecords",
+            "لا يمكن حذف العميل أو المورد لارتباطه بسجلات مالية حالية أو تاريخية.");
+
+    private static Error CurrencyChangeNotAllowed() =>
+        Error.Conflict(
+            "BusinessPartners.CurrencyChangeNotAllowed",
+            "لا يمكن تغيير عملة العميل أو المورد بعد إنشاء سجلات مالية مرتبطة به.",
+            nameof(BusinessPartnerRequest.Currency));
 }

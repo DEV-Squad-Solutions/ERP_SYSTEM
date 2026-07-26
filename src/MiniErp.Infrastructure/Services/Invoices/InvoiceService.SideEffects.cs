@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Containers;
 using MiniErp.Domain.Entities.Invoicing;
@@ -12,48 +11,35 @@ public sealed partial class InvoiceService
 {
     private async Task SaveSideEffectsAsync(
         Invoice invoice,
-        IReadOnlyList<InvoiceLineRequest> lines,
-        IReadOnlyList<InvoiceContainerLineRequest> containerLines,
-        PreparedInvoice preparation,
         CancellationToken cancellationToken)
     {
         var itemMovementType =
             InvoiceMovementRules.GetItemMovementType(invoice.InvoiceType);
         var inbound = InvoiceMovementRules.IsInbound(invoice.InvoiceType);
 
-        foreach (var requestLine in lines)
+        foreach (var line in invoice.Lines.Where(line => !line.IsDeleted))
         {
-            if (!InvoiceAmountRules.TryCalculate(
-                    requestLine.Count,
-                    requestLine.Weight,
-                    0m,
-                    out var quantity,
-                    out _))
-            {
-                throw new InvalidOperationException(
-                    "The invoice line quantity cannot be calculated.");
-            }
-
             dbContext.ItemMovements.Add(
                 new ItemMovement
                 {
                     CompanyId = companyId,
                     StoreId = invoice.StoreId,
-                    ItemId = requestLine.ItemId,
-                    ItemUnitId = preparation.ItemUnitIds[requestLine.ItemId],
+                    ItemId = line.ItemId,
+                    ItemUnitId = line.ItemUnitId,
                     MovementType = itemMovementType,
                     ReferenceId = invoice.Id,
                     ReferenceNumber = invoice.InvoiceNumber,
                     MovementDate = invoice.InvoiceDate,
-                    QuantityIn = inbound ? quantity : 0m,
-                    QuantityOut = inbound ? 0m : quantity,
+                    QuantityIn = inbound ? line.Quantity : 0m,
+                    QuantityOut = inbound ? 0m : line.Quantity,
                     Description = $"Invoice {invoice.InvoiceNumber}"
                 });
         }
 
         if (invoice.ContainerStoreId.HasValue)
         {
-            foreach (var requestLine in containerLines)
+            foreach (var line in invoice.ContainerLines.Where(
+                         line => !line.IsDeleted))
             {
                 dbContext.ContainerMovements.Add(
                     new ContainerMovement
@@ -61,12 +47,12 @@ public sealed partial class InvoiceService
                         CompanyId = companyId,
                         BusinessPartnerId = invoice.BusinessPartnerId,
                         ContainerStoreId = invoice.ContainerStoreId.Value,
-                        ContainerId = requestLine.ContainerId,
+                        ContainerId = line.ContainerId,
                         InvoiceId = invoice.Id,
                         InvoiceNumber = invoice.InvoiceNumber,
                         MovementDate = invoice.InvoiceDate,
-                        OutgoingUnits = requestLine.OutgoingUnits,
-                        IncomingUnits = requestLine.IncomingUnits,
+                        OutgoingUnits = line.OutgoingUnits,
+                        IncomingUnits = line.IncomingUnits,
                         Description = $"Invoice {invoice.InvoiceNumber}"
                     });
             }

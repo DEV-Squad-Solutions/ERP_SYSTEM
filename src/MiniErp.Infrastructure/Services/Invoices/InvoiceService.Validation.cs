@@ -20,6 +20,24 @@ public sealed partial class InvoiceService
         static Result<PreparedInvoice> Failure(Error error) =>
             Result<PreparedInvoice>.Failure(error);
 
+        if (!Enum.IsDefined(typeof(InvoiceType), invoice.InvoiceType))
+        {
+            return Failure(
+                Error.Validation(
+                    "Invoices.InvoiceTypeInvalid",
+                    "نوع الفاتورة غير مدعوم.",
+                    nameof(InvoiceRequest.InvoiceType)));
+        }
+
+        if (!Enum.IsDefined(typeof(PaymentTerm), invoice.PaymentTerm))
+        {
+            return Failure(
+                Error.Validation(
+                    "Invoices.PaymentTermInvalid",
+                    "طريقة الدفع غير مدعومة.",
+                    nameof(InvoiceRequest.PaymentTerm)));
+        }
+
         if (lines.GroupBy(line => line.ItemId).Any(group => group.Count() > 1))
         {
             return Failure(
@@ -202,34 +220,46 @@ public sealed partial class InvoiceService
                         nameof(InvoiceRequest.ExternalDriverName)));
             }
         }
-        else if (invoice.DriverId is int driverId)
+        else
         {
-            var driver = await dbContext.Drivers
-                .AsNoTracking()
-                .Where(candidate =>
-                    candidate.CompanyId == companyId &&
-                    candidate.Id == driverId)
-                .Select(candidate => new
-                {
-                    candidate.IsActive
-                })
-                .FirstOrDefaultAsync(cancellationToken);
-            if (driver is null)
+            if (invoice.ExternalDriverName is not null)
             {
                 return Failure(
-                    Error.NotFound(
-                        "Invoices.DriverNotFound",
-                        "لم يتم العثور على السائق الداخلي المحدد.",
-                        nameof(InvoiceRequest.DriverId)));
+                    Error.Validation(
+                        "Invoices.ExternalDriverNameNotAllowed",
+                        "لا يجوز إرسال اسم سائق خارجي للسائق الداخلي.",
+                        nameof(InvoiceRequest.ExternalDriverName)));
             }
 
-            if (!driver.IsActive)
+            if (invoice.DriverId is int driverId)
             {
-                return Failure(
-                    Error.Conflict(
-                        "Invoices.DriverInactive",
-                        "لا يمكن استخدام سائق داخلي غير نشط.",
-                        nameof(InvoiceRequest.DriverId)));
+                var driver = await dbContext.Drivers
+                    .AsNoTracking()
+                    .Where(candidate =>
+                        candidate.CompanyId == companyId &&
+                        candidate.Id == driverId)
+                    .Select(candidate => new
+                    {
+                        candidate.IsActive
+                    })
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (driver is null)
+                {
+                    return Failure(
+                        Error.NotFound(
+                            "Invoices.DriverNotFound",
+                            "لم يتم العثور على السائق الداخلي المحدد.",
+                            nameof(InvoiceRequest.DriverId)));
+                }
+
+                if (!driver.IsActive)
+                {
+                    return Failure(
+                        Error.Conflict(
+                            "Invoices.DriverInactive",
+                            "لا يمكن استخدام سائق داخلي غير نشط.",
+                            nameof(InvoiceRequest.DriverId)));
+                }
             }
         }
 
@@ -289,17 +319,6 @@ public sealed partial class InvoiceService
                     nameof(InvoiceLineRequest.ItemId)));
         }
 
-        var stockError = await ValidateStockAsync(
-            invoice,
-            lines,
-            currentInvoiceId,
-            currentInvoiceNumber,
-            cancellationToken);
-        if (stockError is not null)
-        {
-            return Failure(stockError);
-        }
-
         if (containerLines.Count > 0)
         {
             if (invoice.InvoiceType is not (InvoiceType.Sales or
@@ -346,6 +365,17 @@ public sealed partial class InvoiceService
                         $"العبوات غير النشطة أو غير المرتبطة بمخزن العميل: {string.Join(", ", missingContainerIds)}.",
                         nameof(InvoiceContainerLineRequest.ContainerId)));
             }
+        }
+
+        var stockError = await ValidateStockAsync(
+            invoice,
+            lines,
+            currentInvoiceId,
+            currentInvoiceNumber,
+            cancellationToken);
+        if (stockError is not null)
+        {
+            return Failure(stockError);
         }
 
         return Result<PreparedInvoice>.Success(

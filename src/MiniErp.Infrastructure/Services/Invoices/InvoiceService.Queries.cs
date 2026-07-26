@@ -18,6 +18,7 @@ public sealed partial class InvoiceService
         int id,
         CancellationToken cancellationToken) =>
         await dbContext.Invoices
+            .AsSplitQuery()
             .Include(invoice => invoice.Lines)
             .Include(invoice => invoice.ContainerLines)
             .FirstOrDefaultAsync(

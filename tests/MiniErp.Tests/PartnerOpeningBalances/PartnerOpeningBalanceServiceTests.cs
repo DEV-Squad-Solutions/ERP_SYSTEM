@@ -5,6 +5,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.PartnerOpeningBalances;
+using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
@@ -146,6 +147,38 @@ public sealed class PartnerOpeningBalanceServiceTests
     }
 
     [Fact]
+    public async Task Update_RejectsStaleTokenWhenValuesAreUnchangedAndClearsTracking()
+    {
+        await using var database = await PartnerOpeningBalanceTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var createResult = await service.AddAsync(CreateRequest());
+        var original = createResult.Value;
+
+        await database.Context.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE PartnerOpeningBalances SET Amount = Amount WHERE Id = {original.Id}");
+
+        var result = await service.UpdateAsync(
+            original.Id,
+            new PartnerOpeningBalanceUpdateRequest(
+                original.BusinessPartnerId,
+                original.DocumentNumber,
+                original.DocumentDate,
+                original.Currency,
+                original.BalanceType,
+                original.Amount,
+                original.Notes,
+                original.RowVersion));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "PartnerOpeningBalances.Concurrency",
+            result.Error.Code);
+        Assert.Empty(
+            database.Context.ChangeTracker
+                .Entries<PartnerOpeningBalance>());
+    }
+
+    [Fact]
     public async Task Delete_IsSoftDeleteAndExcludedFromNormalQueries()
     {
         await using var database = await PartnerOpeningBalanceTestDatabase.CreateAsync();
@@ -162,6 +195,32 @@ public sealed class PartnerOpeningBalanceServiceTests
         Assert.True(getResult.IsFailure);
         Assert.True(deleted.IsDeleted);
         Assert.NotNull(deleted.DeletedOn);
+    }
+
+    [Fact]
+    public async Task Delete_ConcurrencyFailureRollsBackAndClearsTracking()
+    {
+        await using var database = await PartnerOpeningBalanceTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var createResult = await service.AddAsync(CreateRequest());
+
+        await database.Context.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE PartnerOpeningBalances SET Amount = Amount WHERE Id = {createResult.Value.Id}");
+
+        var result = await service.DeleteAsync(createResult.Value.Id);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "PartnerOpeningBalances.Concurrency",
+            result.Error.Code);
+        Assert.Empty(
+            database.Context.ChangeTracker
+                .Entries<PartnerOpeningBalance>());
+
+        var persisted = await database.Context.PartnerOpeningBalances
+            .IgnoreQueryFilters()
+            .SingleAsync();
+        Assert.False(persisted.IsDeleted);
     }
 
     [Fact]

@@ -51,21 +51,21 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
                     "Admin only. Creates a shared customer/supplier record in the selected company.",
                     "`code`, `name`, `currency`, and `creditLimit`. Phone, email, address, and tax number are optional; `isActive` defaults to true.",
                     "Maximum lengths: code 50, name 200, phone 50, email 256, address 500, taxNumber 100. Email must be valid when supplied; currency must be defined; creditLimit must be non-negative with at most 18 digits and 2 decimals.",
-                    "Normalized name and code must be unique per company; a supplied tax number must also be unique. Duplicates return 409. `CompanyId` always comes from the token.")),
+                    "Normalized name and code must be unique per company without case sensitivity; a supplied tax number follows the same rule. Duplicates return 409. `CompanyId` always comes from the token.")),
             nameof(BusinessPartnersController.Update) => (
                 "Update a business partner",
                 SwaggerOperationDescription.Create(
                     "Admin only. Updates a business partner in the selected company while preserving identity, tenant, and creation audit fields.",
                     "A positive route `id` and the same request fields required by create.",
-                    "All create validation rules apply; duplicate checks exclude the current record.",
-                    "Invalid IDs return 400; missing, deleted, and other-company records return 404; normalized name, code, or tax-number conflicts return 409.")),
+                    "All create validation rules apply; duplicate checks exclude the current record. Currency may change only before the partner has any current or historical financial record.",
+                    "Invalid IDs return 400; missing, deleted, and other-company records return 404; normalized name, code, or tax-number conflicts return 409. A protected currency change returns 409 (`BusinessPartners.CurrencyChangeNotAllowed`).")),
             nameof(BusinessPartnersController.Delete) => (
                 "Delete a business partner",
                 SwaggerOperationDescription.Create(
                     "Admin only. Deactivates and soft-deletes a business partner in the selected company; audit history remains.",
                     "A positive route `id` and an Admin bearer token containing one `company_id`.",
                     "`id` must be greater than zero.",
-                    "Invalid IDs return 400. Missing, already-deleted, and other-company records return 404. A partner linked to any current or historical container store returns 409. A repeated delete is not treated as success.")),
+                    "Invalid IDs return 400. Missing, already-deleted, and other-company records return 404. Current or historical container stores return 409 (`BusinessPartners.HasContainerStores`); invoices, partner opening balances, movements, or driver trips return 409 (`BusinessPartners.HasFinancialRecords`). A repeated delete is not treated as success.")),
             _ => default
         };
 

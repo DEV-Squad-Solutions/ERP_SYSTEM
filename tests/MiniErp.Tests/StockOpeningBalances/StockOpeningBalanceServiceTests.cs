@@ -5,6 +5,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.StockOpeningBalances;
+using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
@@ -107,6 +108,149 @@ public sealed class StockOpeningBalanceServiceTests
         var persisted = await service.GetByIdAsync(original.Id);
         Assert.Equal(50m, persisted.Value.Lines.Single().Quantity);
         Assert.Equal(150m, persisted.Value.Lines.Single().Total);
+    }
+
+    [Fact]
+    public async Task Update_RemoveThenReAddLine_WithSameContext_RestoresActiveLine()
+    {
+        await using var database = await StockOpeningBalanceTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var original = (await service.AddAsync(CreateRequest())).Value;
+
+        var removeResult = await service.UpdateAsync(
+            original.Id,
+            new StockOpeningBalanceUpdateRequest(
+                original.StoreId,
+                original.DocumentNumber,
+                original.DocumentDate,
+                [
+                    new StockOpeningBalanceLineRequest(
+                        2,
+                        5,
+                        1m,
+                        4m,
+                        "replacement item")
+                ],
+                original.Notes,
+                original.RowVersion));
+
+        Assert.True(removeResult.IsSuccess);
+        Assert.Equal(2, Assert.Single(removeResult.Value.Lines).ItemId);
+
+        var trackedHeader = database.Context.ChangeTracker
+            .Entries<StockOpeningBalance>()
+            .Single()
+            .Entity;
+        await database.Context.Entry(trackedHeader).ReloadAsync();
+
+        var reAddResult = await service.UpdateAsync(
+            original.Id,
+            new StockOpeningBalanceUpdateRequest(
+                removeResult.Value.StoreId,
+                removeResult.Value.DocumentNumber,
+                removeResult.Value.DocumentDate,
+                [
+                    new StockOpeningBalanceLineRequest(
+                        1,
+                        3,
+                        2m,
+                        5m,
+                        "re-added item")
+                ],
+                removeResult.Value.Notes,
+                removeResult.Value.RowVersion));
+
+        Assert.True(reAddResult.IsSuccess);
+        var restoredLine = Assert.Single(reAddResult.Value.Lines);
+        Assert.Equal(1, restoredLine.ItemId);
+        Assert.Equal(6m, restoredLine.Quantity);
+        Assert.Equal(30m, restoredLine.Total);
+        Assert.Equal(
+            1,
+            await database.Context.StockOpeningBalanceLines.CountAsync());
+    }
+
+    [Fact]
+    public async Task Update_DatabaseConcurrencyConflict_ReturnsConflictAndClearsTracking()
+    {
+        await using var database = await StockOpeningBalanceTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var original = (await service.AddAsync(CreateRequest())).Value;
+
+        await database.Context.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE StockOpeningBalances SET Notes = Notes WHERE Id = {original.Id}");
+
+        var result = await service.UpdateAsync(
+            original.Id,
+            new StockOpeningBalanceUpdateRequest(
+                original.StoreId,
+                original.DocumentNumber,
+                original.DocumentDate,
+                [
+                    new StockOpeningBalanceLineRequest(
+                        1,
+                        25,
+                        2m,
+                        3m,
+                        "concurrent overwrite")
+                ],
+                "concurrent overwrite",
+                original.RowVersion));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "StockOpeningBalances.Concurrency",
+            result.Error.Code);
+        Assert.Empty(
+            database.Context.ChangeTracker
+                .Entries<StockOpeningBalance>());
+        Assert.Empty(
+            database.Context.ChangeTracker
+                .Entries<StockOpeningBalanceLine>());
+
+        var persisted = await database.Context.StockOpeningBalances
+            .AsNoTracking()
+            .Include(balance => balance.Lines)
+            .SingleAsync(balance => balance.Id == original.Id);
+        Assert.False(persisted.IsDeleted);
+        Assert.Equal(original.Notes, persisted.Notes);
+        Assert.Equal(20m, Assert.Single(persisted.Lines).Quantity);
+    }
+
+    [Fact]
+    public async Task Delete_DatabaseConcurrencyConflict_ReturnsConflictAndRollsBack()
+    {
+        await using var database = await StockOpeningBalanceTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var original = (await service.AddAsync(CreateRequest())).Value;
+
+        await database.Context.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE StockOpeningBalances SET Notes = Notes WHERE Id = {original.Id}");
+
+        var result = await service.DeleteAsync(original.Id);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "StockOpeningBalances.Concurrency",
+            result.Error.Code);
+        Assert.Empty(
+            database.Context.ChangeTracker
+                .Entries<StockOpeningBalance>());
+        Assert.Empty(
+            database.Context.ChangeTracker
+                .Entries<StockOpeningBalanceLine>());
+
+        var persistedHeader = await database.Context.StockOpeningBalances
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .SingleAsync(balance => balance.Id == original.Id);
+        var persistedLine = await database.Context.StockOpeningBalanceLines
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .SingleAsync(line =>
+                line.StockOpeningBalanceId == original.Id);
+        Assert.False(persistedHeader.IsDeleted);
+        Assert.False(persistedLine.IsDeleted);
     }
 
     [Fact]

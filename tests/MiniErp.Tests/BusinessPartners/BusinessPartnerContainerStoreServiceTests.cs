@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
+using MiniErp.Application.Features.BusinessPartners;
+using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Services.BusinessPartners;
@@ -96,6 +98,169 @@ public sealed class BusinessPartnerContainerStoreServiceTests
             result.Error.Code);
     }
 
+    [Fact]
+    public async Task Add_RejectsCaseInsensitiveDuplicateName()
+    {
+        await using var database =
+            await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.AddAsync(
+            new BusinessPartnerRequest(
+                "BP-NEW",
+                "partner one",
+                null,
+                null,
+                null,
+                null,
+                CurrencyCode.EGP,
+                0m));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("BusinessPartners.NameExists", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Add_RejectsCaseInsensitiveDuplicateCode()
+    {
+        await using var database =
+            await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.AddAsync(
+            new BusinessPartnerRequest(
+                "bp-1",
+                "Unique Partner Name",
+                null,
+                null,
+                null,
+                null,
+                CurrencyCode.EGP,
+                0m));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("BusinessPartners.CodeExists", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Add_RejectsCaseInsensitiveDuplicateTaxNumber()
+    {
+        await using var database =
+            await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
+        await database.SetTaxNumberAsync("TAX-001");
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.AddAsync(
+            new BusinessPartnerRequest(
+                "BP-NEW",
+                "Unique Partner Name",
+                null,
+                null,
+                null,
+                "tax-001",
+                CurrencyCode.EGP,
+                0m));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("BusinessPartners.TaxNumberExists", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Update_RejectsAnotherPartnersCaseInsensitiveDuplicateName()
+    {
+        await using var database =
+            await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.UpdateAsync(
+            2,
+            new BusinessPartnerRequest(
+                "BP-2",
+                "partner one",
+                null,
+                null,
+                null,
+                null,
+                CurrencyCode.EGP,
+                0m));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("BusinessPartners.NameExists", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Update_RejectsAnotherPartnersCaseInsensitiveDuplicateCode()
+    {
+        await using var database =
+            await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.UpdateAsync(
+            2,
+            new BusinessPartnerRequest(
+                "bp-1",
+                "Partner Without Store",
+                null,
+                null,
+                null,
+                null,
+                CurrencyCode.EGP,
+                0m));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("BusinessPartners.CodeExists", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Update_RejectsAnotherPartnersCaseInsensitiveDuplicateTaxNumber()
+    {
+        await using var database =
+            await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
+        await database.SetTaxNumberAsync("TAX-001");
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.UpdateAsync(
+            2,
+            new BusinessPartnerRequest(
+                "BP-2",
+                "Partner Without Store",
+                null,
+                null,
+                null,
+                "tax-001",
+                CurrencyCode.EGP,
+                0m));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("BusinessPartners.TaxNumberExists", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Update_AllowsCaseOnlyChangesToOwnUniqueValues()
+    {
+        await using var database =
+            await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
+        await database.SetTaxNumberAsync("TAX-001");
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.UpdateAsync(
+            1,
+            new BusinessPartnerRequest(
+                "bp-1",
+                "partner one",
+                null,
+                null,
+                null,
+                "tax-001",
+                CurrencyCode.EGP,
+                0m));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("bp-1", result.Value.Code);
+        Assert.Equal("partner one", result.Value.Name);
+        Assert.Equal("tax-001", result.Value.TaxNumber);
+    }
+
     private sealed class BusinessPartnerContainerStoreTestDatabase
         : IAsyncDisposable
     {
@@ -135,6 +300,10 @@ public sealed class BusinessPartnerContainerStoreServiceTests
                 Context,
                 new PaginationService(),
                 new TestCurrentCompanyContext(companyId));
+
+        public Task SetTaxNumberAsync(string taxNumber) =>
+            Context.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE BusinessPartners SET TaxNumber = {taxNumber} WHERE Id = 1");
 
         public async ValueTask DisposeAsync()
         {

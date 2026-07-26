@@ -16,7 +16,6 @@ public sealed partial class InvoiceService
             var line = requestLine.Adapt<InvoiceLine>();
             line.CompanyId = companyId;
             line.ItemUnitId = preparation.ItemUnitIds[requestLine.ItemId];
-            line.CalculateAmounts();
             invoice.Lines.Add(line);
         }
     }
@@ -56,7 +55,6 @@ public sealed partial class InvoiceService
                 : incoming.Notes.Trim();
             existingLine.ItemUnitId =
                 preparation.ItemUnitIds[incoming.ItemId];
-            existingLine.CalculateAmounts();
         }
 
         var existingItemIds = invoice.Lines
@@ -69,7 +67,6 @@ public sealed partial class InvoiceService
             var line = incoming.Adapt<InvoiceLine>();
             line.CompanyId = companyId;
             line.ItemUnitId = preparation.ItemUnitIds[incoming.ItemId];
-            line.CalculateAmounts();
             invoice.Lines.Add(line);
         }
     }

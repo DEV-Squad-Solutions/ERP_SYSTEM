@@ -217,6 +217,82 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public async Task Add_ReportsMissingContainerStoreBeforeStockShortage()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                lines: [new InvoiceLineRequest(1, 11, 1m, 10m, null)],
+                containerLines: [new InvoiceContainerLineRequest(1, 1, 0)]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.ContainerStoreRequired", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Add_ReportsForbiddenContainerLinesBeforeStockShortage()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 1, 1m, 10m, null)],
+                containerLines: [new InvoiceContainerLineRequest(1, 1, 0)]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.ContainerLinesNotAllowed", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Add_RejectsInvalidInvoiceTypeInTheService()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest((InvoiceType)99));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.InvoiceTypeInvalid", result.Error.Code);
+        Assert.Equal(0, await database.Context.Invoices.CountAsync());
+    }
+
+    [Fact]
+    public async Task Add_RejectsInvalidPaymentTermInTheService()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                paymentTerm: (PaymentTerm)99));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.PaymentTermInvalid", result.Error.Code);
+        Assert.Equal(0, await database.Context.Invoices.CountAsync());
+    }
+
+    [Fact]
+    public async Task Add_RejectsExternalDriverNameForInternalDriverMode()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(InvoiceType.Sales) with
+        {
+            ExternalDriverName = "External driver"
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.ExternalDriverNameNotAllowed",
+            result.Error.Code);
+    }
+
+    [Fact]
     public async Task Add_PurchaseReturnIncludesAdjustmentIncreaseInAvailableStock()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
@@ -1323,17 +1399,17 @@ public sealed class InvoiceServiceTests
                 StoreId = 2,
                 ItemId = 1,
                 ItemUnitId = 1,
-                MovementType = ItemMovementType.Sales,
+                MovementType = ItemMovementType.Purchase,
                 ReferenceId = 915,
-                ReferenceNumber = "SALE-915",
+                ReferenceNumber = "PURCHASE-915",
                 MovementDate = new DateOnly(2026, 7, 25),
-                QuantityOut = 2m
+                QuantityIn = 2m
             });
         await database.Context.SaveChangesAsync();
 
         var result = await database.CreateService().AddAsync(
             CreateRequest(
-                InvoiceType.SalesReturn,
+                InvoiceType.Sales,
                 storeId: 2,
                 lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)]));
 

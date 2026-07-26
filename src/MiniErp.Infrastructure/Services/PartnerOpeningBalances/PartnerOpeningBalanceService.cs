@@ -145,6 +145,11 @@ public sealed class PartnerOpeningBalanceService(
             return Result<PartnerOpeningBalanceResponse>.Failure(NotFound(id));
         }
 
+        if (!openingBalance.RowVersion.SequenceEqual(request.RowVersion))
+        {
+            return Result<PartnerOpeningBalanceResponse>.Failure(Concurrency());
+        }
+
         var partnerError = await ValidateBusinessPartnerAsync(
             normalized.BusinessPartnerId,
             normalized.Currency,
@@ -175,6 +180,7 @@ public sealed class PartnerOpeningBalanceService(
         openingBalance.Notes = normalized.Notes;
 
         var entry = dbContext.Entry(openingBalance);
+        entry.State = EntityState.Modified;
         entry.Property(balance => balance.RowVersion)
             .OriginalValue = request.RowVersion;
 
@@ -184,6 +190,8 @@ public sealed class PartnerOpeningBalanceService(
         }
         catch (DbUpdateConcurrencyException)
         {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
             return Result<PartnerOpeningBalanceResponse>.Failure(Concurrency());
         }
 
@@ -227,6 +235,8 @@ public sealed class PartnerOpeningBalanceService(
         }
         catch (DbUpdateConcurrencyException)
         {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
             return Result.Failure(Concurrency());
         }
 
