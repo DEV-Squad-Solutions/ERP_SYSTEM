@@ -156,6 +156,7 @@ public sealed partial class InvoiceService(
         }
 
         request.Adapt(invoice);
+        NormalizeDriverValues(invoice);
         invoice.Currency = preparation.Value.Currency;
 
         ReplaceLines(invoice, request, preparation.Value);

@@ -180,6 +180,27 @@ public sealed class InvoiceConfiguration : AuditableEntityConfiguration<Invoice>
             .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasOne(invoice => invoice.ActualDriver)
+            .WithMany()
+            .HasForeignKey(invoice => new
+            {
+                invoice.CompanyId,
+                invoice.ActualDriverId
+            })
+            .HasPrincipalKey(driver => new
+            {
+                driver.CompanyId,
+                driver.Id
+            })
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(invoice => new
+        {
+            invoice.CompanyId,
+            invoice.ActualDriverId
+        });
+
         builder.HasMany(invoice => invoice.Lines)
             .WithOne(line => line.Invoice)
             .HasForeignKey(line => new

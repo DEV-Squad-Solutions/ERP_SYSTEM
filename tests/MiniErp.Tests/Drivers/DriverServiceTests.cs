@@ -223,6 +223,40 @@ public sealed class DriverServiceTests
     }
 
     [Fact]
+    public async Task Delete_WhenDriverIsAnInvoiceActualDriver_BlocksDeletion()
+    {
+        await using var database = await DriverTestDatabase.CreateAsync();
+        await database.AddInvoiceAsync(
+            companyId: 1,
+            driverId: 1,
+            isDeleted: false,
+            actualDriverId: 2);
+
+        var result = await database.CreateService(companyId: 1).DeleteAsync(2);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Drivers.HasDependencies", result.Error.Code);
+        Assert.False((await database.GetDriverAsync(2)).IsDeleted);
+    }
+
+    [Fact]
+    public async Task Delete_WhenDriverIsATripActualDriver_BlocksDeletion()
+    {
+        await using var database = await DriverTestDatabase.CreateAsync();
+        await database.AddDriverTripAsync(
+            companyId: 1,
+            driverId: 1,
+            isDeleted: false,
+            actualDriverId: 2);
+
+        var result = await database.CreateService(companyId: 1).DeleteAsync(2);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Drivers.HasDependencies", result.Error.Code);
+        Assert.False((await database.GetDriverAsync(2)).IsDeleted);
+    }
+
+    [Fact]
     public async Task Delete_WhenDriverIsUnused_SoftDeletesIt()
     {
         await using var database = await DriverTestDatabase.CreateAsync();
@@ -357,23 +391,27 @@ public sealed class DriverServiceTests
         public Task AddInvoiceAsync(
             int companyId,
             int driverId,
-            bool isDeleted) =>
+            bool isDeleted,
+            int? actualDriverId = null) =>
             Context.Database.ExecuteSqlInterpolatedAsync(
                 $"""
                  INSERT INTO Invoices (
-                     Id, CompanyId, DriverId, IsDeleted)
-                 VALUES (100, {companyId}, {driverId}, {isDeleted})
+                     Id, CompanyId, DriverId, ActualDriverId, IsDeleted)
+                 VALUES (
+                     100, {companyId}, {driverId}, {actualDriverId}, {isDeleted})
                  """);
 
         public Task AddDriverTripAsync(
             int companyId,
             int driverId,
-            bool isDeleted) =>
+            bool isDeleted,
+            int? actualDriverId = null) =>
             Context.Database.ExecuteSqlInterpolatedAsync(
                 $"""
                  INSERT INTO DriverTrips (
-                     Id, CompanyId, DriverId, IsDeleted)
-                 VALUES (100, {companyId}, {driverId}, {isDeleted})
+                     Id, CompanyId, DriverId, ActualDriverId, IsDeleted)
+                 VALUES (
+                     100, {companyId}, {driverId}, {actualDriverId}, {isDeleted})
                  """);
 
         public async Task<Driver> GetDriverAsync(int driverId)
@@ -439,6 +477,7 @@ public sealed class DriverServiceTests
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
                     DriverId INTEGER NULL,
+                    ActualDriverId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );
 
@@ -446,6 +485,7 @@ public sealed class DriverServiceTests
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
                     DriverId INTEGER NOT NULL,
+                    ActualDriverId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );
                 """);

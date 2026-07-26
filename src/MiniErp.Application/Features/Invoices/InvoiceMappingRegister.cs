@@ -62,6 +62,7 @@ public sealed class InvoiceMappingRegister : IRegister
             .Ignore(invoice => invoice.ContainerStore)
             .Ignore(invoice => invoice.Country)
             .Ignore(invoice => invoice.Driver)
+            .Ignore(invoice => invoice.ActualDriver)
             .Ignore(invoice => invoice.CreatedById)
             .Ignore(invoice => invoice.CreatedOn)
             .Ignore(invoice => invoice.CreatedByPc)
@@ -96,6 +97,7 @@ public sealed class InvoiceMappingRegister : IRegister
             .Ignore(invoice => invoice.ContainerStore)
             .Ignore(invoice => invoice.Country)
             .Ignore(invoice => invoice.Driver)
+            .Ignore(invoice => invoice.ActualDriver)
             .Ignore(invoice => invoice.CreatedById)
             .Ignore(invoice => invoice.CreatedOn)
             .Ignore(invoice => invoice.CreatedByPc)
@@ -152,6 +154,11 @@ public sealed class InvoiceMappingRegister : IRegister
             .Map(
                 "DriverName",
                 invoice => invoice.Driver == null ? null : invoice.Driver.Name)
+            .Map(
+                "ActualDriverName",
+                invoice => invoice.ActualDriver == null
+                    ? null
+                    : invoice.ActualDriver.Name)
             .Map(
                 "PaymentStatus",
                 invoice => invoice.Total - invoice.PaidAmount <= 0m

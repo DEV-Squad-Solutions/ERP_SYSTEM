@@ -152,14 +152,16 @@ public sealed class DriverService(
             .AnyAsync(
                 invoice =>
                     invoice.CompanyId == companyId &&
-                    invoice.DriverId == id,
+                    (invoice.DriverId == id ||
+                     invoice.ActualDriverId == id),
                 cancellationToken) ||
             await dbContext.DriverTrips
                 .IgnoreQueryFilters()
                 .AnyAsync(
                     trip =>
                         trip.CompanyId == companyId &&
-                        trip.DriverId == id,
+                        (trip.DriverId == id ||
+                         trip.ActualDriverId == id),
                     cancellationToken);
         if (hasDependencies)
         {

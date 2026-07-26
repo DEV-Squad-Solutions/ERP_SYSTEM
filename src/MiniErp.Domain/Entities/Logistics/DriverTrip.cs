@@ -17,6 +17,10 @@ public sealed class DriverTrip : AuditableEntity
 
     public Driver Driver { get; set; } = null!;
 
+    public int? ActualDriverId { get; set; }
+
+    public Driver? ActualDriver { get; set; }
+
     public int InvoiceId { get; set; }
 
     public Invoice Invoice { get; set; } = null!;

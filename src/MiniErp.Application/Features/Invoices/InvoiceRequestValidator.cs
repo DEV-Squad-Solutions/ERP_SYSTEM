@@ -122,6 +122,15 @@ internal static class InvoiceValidationRules
             .GreaterThan(0)
             .When(request => request.DriverId.HasValue);
 
+        validator.RuleFor(request => request.ActualDriverId)
+            .GreaterThan(0)
+            .When(request => request.ActualDriverId.HasValue);
+
+        validator.RuleFor(request => request.DriverId)
+            .NotNull()
+            .When(request => request.ActualDriverId.HasValue)
+            .WithMessage("يجب تحديد السائق الرئيسي قبل السائق الفعلي.");
+
         validator.RuleFor(request => request.DueDate)
             .GreaterThanOrEqualTo(request => request.InvoiceDate)
             .When(request => request.DueDate.HasValue)
@@ -187,15 +196,12 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.ExternalDriverName)
             .NotEmpty()
             .When(request => request.UsesExternalDriver)
-            .WithMessage("اسم السائق الخارجي مطلوب.")
-            .Null()
-            .When(request => !request.UsesExternalDriver)
-            .WithMessage("لا يجوز إرسال اسم سائق خارجي للسائق الداخلي.");
+            .WithMessage("اسم السائق الخارجي مطلوب.");
 
-        validator.RuleFor(request => request.DriverId)
+        validator.RuleFor(request => request.ActualDriverId)
             .Null()
             .When(request => request.UsesExternalDriver)
-            .WithMessage("لا يجوز اختيار سائق داخلي مع السائق الخارجي.");
+            .WithMessage("لا يجوز اختيار سائق فعلي داخلي مع السائق الخارجي.");
 
         validator.RuleForEach(request => request.Lines)
             .SetValidator(new InvoiceLineRequestValidator());
@@ -235,6 +241,15 @@ internal static class InvoiceValidationRules
             .GreaterThan(0)
             .When(request => request.DriverId.HasValue);
 
+        validator.RuleFor(request => request.ActualDriverId)
+            .GreaterThan(0)
+            .When(request => request.ActualDriverId.HasValue);
+
+        validator.RuleFor(request => request.DriverId)
+            .NotNull()
+            .When(request => request.ActualDriverId.HasValue)
+            .WithMessage("يجب تحديد السائق الرئيسي قبل السائق الفعلي.");
+
         validator.RuleFor(request => request.DueDate)
             .GreaterThanOrEqualTo(request => request.InvoiceDate)
             .When(request => request.DueDate.HasValue)
@@ -300,15 +315,12 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.ExternalDriverName)
             .NotEmpty()
             .When(request => request.UsesExternalDriver)
-            .WithMessage("اسم السائق الخارجي مطلوب.")
-            .Null()
-            .When(request => !request.UsesExternalDriver)
-            .WithMessage("لا يجوز إرسال اسم سائق خارجي للسائق الداخلي.");
+            .WithMessage("اسم السائق الخارجي مطلوب.");
 
-        validator.RuleFor(request => request.DriverId)
+        validator.RuleFor(request => request.ActualDriverId)
             .Null()
             .When(request => request.UsesExternalDriver)
-            .WithMessage("لا يجوز اختيار سائق داخلي مع السائق الخارجي.");
+            .WithMessage("لا يجوز اختيار سائق فعلي داخلي مع السائق الخارجي.");
 
         validator.RuleForEach(request => request.Lines)
             .SetValidator(new InvoiceLineRequestValidator());

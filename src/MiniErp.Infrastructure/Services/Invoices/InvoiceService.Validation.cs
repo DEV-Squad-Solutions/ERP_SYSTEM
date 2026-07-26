@@ -200,17 +200,30 @@ public sealed partial class InvoiceService
             }
         }
 
+        NormalizeDriverValues(invoice);
+
+        if (invoice.ActualDriverId.HasValue &&
+            !invoice.DriverId.HasValue)
+        {
+            return Failure(
+                Error.Validation(
+                    "Invoices.MainDriverRequired",
+                    "يجب تحديد السائق الرئيسي قبل تحديد السائق الفعلي.",
+                    nameof(InvoiceRequest.DriverId)));
+        }
+
+        if (invoice.UsesExternalDriver &&
+            invoice.ActualDriverId.HasValue)
+        {
+            return Failure(
+                Error.Validation(
+                    "Invoices.ExternalDriverWithActualDriver",
+                    "لا يجوز اختيار سائق فعلي داخلي مع السائق الخارجي.",
+                    nameof(InvoiceRequest.ActualDriverId)));
+        }
+
         if (invoice.UsesExternalDriver)
         {
-            if (invoice.DriverId is not null)
-            {
-                return Failure(
-                    Error.Validation(
-                        "Invoices.ExternalDriverWithInternalDriver",
-                        "لا يجوز اختيار سائق داخلي مع السائق الخارجي.",
-                        nameof(InvoiceRequest.DriverId)));
-            }
-
             if (string.IsNullOrWhiteSpace(invoice.ExternalDriverName))
             {
                 return Failure(
@@ -220,46 +233,66 @@ public sealed partial class InvoiceService
                         nameof(InvoiceRequest.ExternalDriverName)));
             }
         }
-        else
+
+        if (invoice.DriverId is int driverId)
         {
-            if (invoice.ExternalDriverName is not null)
+            var driver = await dbContext.Drivers
+                .AsNoTracking()
+                .Where(candidate =>
+                    candidate.CompanyId == companyId &&
+                    candidate.Id == driverId)
+                .Select(candidate => new
+                {
+                    candidate.IsActive
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (driver is null)
             {
                 return Failure(
-                    Error.Validation(
-                        "Invoices.ExternalDriverNameNotAllowed",
-                        "لا يجوز إرسال اسم سائق خارجي للسائق الداخلي.",
-                        nameof(InvoiceRequest.ExternalDriverName)));
+                    Error.NotFound(
+                        "Invoices.DriverNotFound",
+                        "لم يتم العثور على السائق الرئيسي المحدد.",
+                        nameof(InvoiceRequest.DriverId)));
             }
 
-            if (invoice.DriverId is int driverId)
+            if (!driver.IsActive)
             {
-                var driver = await dbContext.Drivers
-                    .AsNoTracking()
-                    .Where(candidate =>
-                        candidate.CompanyId == companyId &&
-                        candidate.Id == driverId)
-                    .Select(candidate => new
-                    {
-                        candidate.IsActive
-                    })
-                    .FirstOrDefaultAsync(cancellationToken);
-                if (driver is null)
-                {
-                    return Failure(
-                        Error.NotFound(
-                            "Invoices.DriverNotFound",
-                            "لم يتم العثور على السائق الداخلي المحدد.",
-                            nameof(InvoiceRequest.DriverId)));
-                }
+                return Failure(
+                    Error.Conflict(
+                        "Invoices.DriverInactive",
+                        "لا يمكن استخدام سائق رئيسي غير نشط.",
+                        nameof(InvoiceRequest.DriverId)));
+            }
+        }
 
-                if (!driver.IsActive)
+        if (invoice.ActualDriverId is int actualDriverId)
+        {
+            var actualDriver = await dbContext.Drivers
+                .AsNoTracking()
+                .Where(candidate =>
+                    candidate.CompanyId == companyId &&
+                    candidate.Id == actualDriverId)
+                .Select(candidate => new
                 {
-                    return Failure(
-                        Error.Conflict(
-                            "Invoices.DriverInactive",
-                            "لا يمكن استخدام سائق داخلي غير نشط.",
-                            nameof(InvoiceRequest.DriverId)));
-                }
+                    candidate.IsActive
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (actualDriver is null)
+            {
+                return Failure(
+                    Error.NotFound(
+                        "Invoices.ActualDriverNotFound",
+                        "لم يتم العثور على السائق الفعلي المحدد.",
+                        nameof(InvoiceRequest.ActualDriverId)));
+            }
+
+            if (!actualDriver.IsActive)
+            {
+                return Failure(
+                    Error.Conflict(
+                        "Invoices.ActualDriverInactive",
+                        "لا يمكن استخدام سائق فعلي غير نشط.",
+                        nameof(InvoiceRequest.ActualDriverId)));
             }
         }
 
@@ -699,5 +732,18 @@ public sealed partial class InvoiceService
         }
 
         return null;
+    }
+
+    private static void NormalizeDriverValues(Invoice invoice)
+    {
+        if (invoice.ActualDriverId == invoice.DriverId)
+        {
+            invoice.ActualDriverId = null;
+        }
+
+        if (!invoice.UsesExternalDriver)
+        {
+            invoice.ExternalDriverName = null;
+        }
     }
 }
