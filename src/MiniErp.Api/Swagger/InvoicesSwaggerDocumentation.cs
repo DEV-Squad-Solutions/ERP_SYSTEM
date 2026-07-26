@@ -20,10 +20,10 @@ public sealed class InvoicesSwaggerDocumentation : IOperationFilter
             nameof(InvoicesController.GetAll) => (
                 "Get paginated invoices",
                 SwaggerOperationDescription.Create(
-                    "Returns one deterministic page of invoices owned by the selected company. When `invoiceType` is supplied, only that invoice type is returned. Each item includes complete ordered product and container lines, the responsible and optional actual-driver IDs and names, subtotal, discount, net total, paid amount, remaining amount, payment term, payment status, and row-version token.",
-                    "A bearer token containing one validated `company_id`; `pageNumber`, `pageSize`, and `invoiceType` are optional. `invoiceType` accepts `Sales`, `Purchase`, `SalesReturn`, or `PurchaseReturn`.",
-                    "`pageNumber` must be greater than zero, `pageSize` must be between 1 and 100, and a supplied `invoiceType` must be a supported enum value.",
-                    "Invalid pagination returns 400. Empty and later pages return an empty `items` array. Deleted and other-company records are excluded.")),
+                    "Returns one deterministic page of invoices owned by the selected company. Every supplied filter is combined with AND. Each item includes complete ordered product and container lines, the responsible and optional actual-driver IDs and names, subtotal, discount, net total, paid amount, remaining amount, payment term, payment status, and row-version token.",
+                    "A bearer token containing one validated `company_id`. Optional query fields are `pageNumber`, `pageSize`, partial `invoiceNumber`, `invoiceType`, `businessPartnerId`, `countryId`, `storeId`, responsible `driverId`, `paymentTerm`, `priceStatus`, inclusive `fromDate`, and inclusive `toDate`. `priceStatus` accepts `HasMissingPrice` (`Price == 0` on any line) or `AllItemsPriced` (every line has `Price > 0`). Date filters accept ISO, day-first, month-first, named-month, alternate-separator, and Arabic/Persian-digit forms; ISO `yyyy-MM-dd` remains preferred.",
+                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100; IDs must be positive; enum values must be supported; and `toDate` must not precede `fromDate`. Ambiguous numeric dates are interpreted day-first, so `01/02/2026` means 1 February 2026.",
+                    "Invalid pagination or filters return 400. Empty and later pages return an empty `items` array. Deleted and other-company records are excluded.")),
             nameof(InvoicesController.GetById) => (
                 "Get an invoice",
                 SwaggerOperationDescription.Create(

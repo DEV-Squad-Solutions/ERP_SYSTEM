@@ -9,6 +9,93 @@ namespace MiniErp.Infrastructure.Services.Invoices;
 
 public sealed partial class InvoiceService
 {
+    private static Error? ValidateFilters(InvoiceFilterRequest filters)
+    {
+        if (filters.InvoiceNumber?.Trim().Length >
+            InvoiceRequest.InvoiceNumberMaximumLength)
+        {
+            return Error.Validation(
+                "Invoices.InvoiceNumberFilterInvalid",
+                "رقم الفاتورة في البحث يجب ألا يتجاوز 100 حرف.",
+                nameof(InvoiceFilterRequest.InvoiceNumber));
+        }
+
+        if (filters.InvoiceType.HasValue &&
+            !Enum.IsDefined(
+                typeof(InvoiceType),
+                filters.InvoiceType.Value))
+        {
+            return Error.Validation(
+                "Invoices.InvoiceTypeInvalid",
+                "نوع الفاتورة غير مدعوم.",
+                nameof(InvoiceFilterRequest.InvoiceType));
+        }
+
+        if (filters.PaymentTerm.HasValue &&
+            !Enum.IsDefined(
+                typeof(PaymentTerm),
+                filters.PaymentTerm.Value))
+        {
+            return Error.Validation(
+                "Invoices.PaymentTermInvalid",
+                "شرط السداد غير مدعوم.",
+                nameof(InvoiceFilterRequest.PaymentTerm));
+        }
+
+        if (filters.PriceStatus.HasValue &&
+            !Enum.IsDefined(
+                typeof(InvoicePriceStatus),
+                filters.PriceStatus.Value))
+        {
+            return InvalidFilter(
+                nameof(InvoiceFilterRequest.PriceStatus),
+                "حالة تسعير الأصناف غير مدعومة.");
+        }
+
+        if (filters.BusinessPartnerId is <= 0)
+        {
+            return InvalidFilter(
+                nameof(InvoiceFilterRequest.BusinessPartnerId),
+                "رقم الطرف يجب أن يكون أكبر من صفر.");
+        }
+
+        if (filters.CountryId is <= 0)
+        {
+            return InvalidFilter(
+                nameof(InvoiceFilterRequest.CountryId),
+                "رقم الدولة يجب أن يكون أكبر من صفر.");
+        }
+
+        if (filters.StoreId is <= 0)
+        {
+            return InvalidFilter(
+                nameof(InvoiceFilterRequest.StoreId),
+                "رقم المخزن يجب أن يكون أكبر من صفر.");
+        }
+
+        if (filters.DriverId is <= 0)
+        {
+            return InvalidFilter(
+                nameof(InvoiceFilterRequest.DriverId),
+                "رقم السائق يجب أن يكون أكبر من صفر.");
+        }
+
+        if (filters.FromDate > filters.ToDate)
+        {
+            return InvalidFilter(
+                nameof(InvoiceFilterRequest.ToDate),
+                "تاريخ النهاية يجب ألا يسبق تاريخ البداية.");
+        }
+
+        return null;
+    }
+
+    private static Error InvalidFilter(string target, string description) =>
+        Error.Validation(
+            "Invoices.InvalidFilter",
+            description,
+            target);
+
     private async Task<Result<PreparedInvoice>> PrepareAsync(
         Invoice invoice,
         IReadOnlyList<InvoiceLineRequest> lines,

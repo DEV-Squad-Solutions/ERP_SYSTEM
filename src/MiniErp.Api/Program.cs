@@ -4,6 +4,7 @@ using Asp.Versioning;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Errors;
 using MiniErp.Api.Exceptions;
+using MiniErp.Api.ModelBinding;
 using MiniErp.Api.Swagger;
 using MiniErp.Api.Validation;
 using MiniErp.Application;
@@ -23,7 +24,10 @@ MappingConfiguration.Register(typeof(InfrastructureAssemblyMarker).Assembly);
 ArabicValidationConfiguration.Configure();
 
 builder.Services
-    .AddControllers()
+    .AddControllers(options =>
+        options.ModelBinderProviders.Insert(
+            0,
+            new FlexibleDateOnlyModelBinderProvider()))
     .AddJsonOptions(options =>
         options.JsonSerializerOptions.Converters.Add(
             new JsonStringEnumConverter(

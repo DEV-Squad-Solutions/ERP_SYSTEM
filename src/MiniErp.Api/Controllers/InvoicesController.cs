@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.Invoices;
-using MiniErp.Domain.Enums;
 
 namespace MiniErp.Api.Controllers;
 
@@ -19,12 +18,12 @@ public sealed class InvoicesController(
         StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
-        [FromQuery] InvoiceType? invoiceType,
+        [FromQuery] InvoiceFilterRequest filters,
         CancellationToken cancellationToken)
     {
         var result = await invoiceService.GetAllAsync(
             pagination,
-            invoiceType,
+            filters,
             cancellationToken);
         return this.ToActionResult(result);
     }

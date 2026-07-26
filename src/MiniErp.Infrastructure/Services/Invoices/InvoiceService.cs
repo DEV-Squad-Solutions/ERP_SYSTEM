@@ -21,28 +21,22 @@ public sealed partial class InvoiceService(
 
     public async Task<Result<PagedResponse<InvoiceListResponse>>> GetAllAsync(
         PaginationRequest pagination,
-        InvoiceType? invoiceType = null,
+        InvoiceFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
-        if (invoiceType.HasValue &&
-            !Enum.IsDefined(typeof(InvoiceType), invoiceType.Value))
+        filters ??= new InvoiceFilterRequest();
+        var filterError = ValidateFilters(filters);
+        if (filterError is not null)
         {
             return Result<PagedResponse<InvoiceListResponse>>.Failure(
-                Error.Validation(
-                    "Invoices.InvoiceTypeInvalid",
-                    "نوع الفاتورة غير مدعوم.",
-                    nameof(invoiceType)));
+                filterError);
         }
 
         var query = dbContext.Invoices
             .AsNoTracking()
             .Where(invoice => invoice.CompanyId == companyId);
 
-        if (invoiceType.HasValue)
-        {
-            query = query.Where(
-                invoice => invoice.InvoiceType == invoiceType.Value);
-        }
+        query = ApplyFilters(query, filters);
 
         var orderedQuery = query
             .OrderByDescending(invoice => invoice.InvoiceDate)

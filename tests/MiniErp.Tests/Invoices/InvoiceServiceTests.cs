@@ -2441,7 +2441,10 @@ public sealed class InvoiceServiceTests
 
         var result = await service.GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
-            InvoiceType.Purchase);
+            new InvoiceFilterRequest
+            {
+                InvoiceType = InvoiceType.Purchase
+            });
 
         Assert.True(result.IsSuccess);
         var invoice = Assert.Single(result.Value.Items);
@@ -2455,10 +2458,118 @@ public sealed class InvoiceServiceTests
 
         var result = await database.CreateService().GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
-            (InvoiceType)999);
+            new InvoiceFilterRequest
+            {
+                InvoiceType = (InvoiceType)999
+            });
 
         Assert.True(result.IsFailure);
         Assert.Equal("Invoices.InvoiceTypeInvalid", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task GetAll_AppliesAllInvoiceFiltersTogether()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await SeedInvoiceFilterDataAsync(database);
+
+        var result = await database.CreateService().GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest(),
+            new InvoiceFilterRequest
+            {
+                InvoiceNumber = "  SALES-001  ",
+                InvoiceType = InvoiceType.SalesReturn,
+                BusinessPartnerId = 1,
+                CountryId = 1,
+                StoreId = 1,
+                DriverId = 1,
+                PaymentTerm = PaymentTerm.Cash,
+                PriceStatus = InvoicePriceStatus.HasMissingPrice,
+                FromDate = new DateOnly(2026, 7, 10),
+                ToDate = new DateOnly(2026, 7, 10)
+            });
+
+        Assert.True(result.IsSuccess);
+        var invoice = Assert.Single(result.Value.Items);
+        Assert.Equal("FILTER-SALES-001", invoice.InvoiceNumber);
+        Assert.Equal(1, result.Value.TotalCount);
+        Assert.Equal(1, result.Value.TotalPages);
+    }
+
+    [Theory]
+    [InlineData(InvoicePriceStatus.HasMissingPrice, "FILTER-SALES-001")]
+    [InlineData(InvoicePriceStatus.AllItemsPriced, "FILTER-PURCHASE-002")]
+    public async Task GetAll_FiltersByLinePriceStatus(
+        InvoicePriceStatus priceStatus,
+        string expectedInvoiceNumber)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await SeedInvoiceFilterDataAsync(database);
+
+        var result = await database.CreateService().GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest(),
+            new InvoiceFilterRequest
+            {
+                PriceStatus = priceStatus
+            });
+
+        Assert.True(result.IsSuccess);
+        var invoice = Assert.Single(result.Value.Items);
+        Assert.Equal(expectedInvoiceNumber, invoice.InvoiceNumber);
+    }
+
+    [Fact]
+    public async Task GetAll_RejectsInvalidFiltersExplicitly()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var invalidFilters = new[]
+        {
+            new InvoiceFilterRequest
+            {
+                InvoiceNumber = new string(
+                    'N',
+                    InvoiceRequest.InvoiceNumberMaximumLength + 1)
+            },
+            new InvoiceFilterRequest
+            {
+                PaymentTerm = (PaymentTerm)999
+            },
+            new InvoiceFilterRequest
+            {
+                PriceStatus = (InvoicePriceStatus)999
+            },
+            new InvoiceFilterRequest
+            {
+                BusinessPartnerId = 0
+            },
+            new InvoiceFilterRequest
+            {
+                CountryId = -1
+            },
+            new InvoiceFilterRequest
+            {
+                StoreId = 0
+            },
+            new InvoiceFilterRequest
+            {
+                DriverId = -1
+            },
+            new InvoiceFilterRequest
+            {
+                FromDate = new DateOnly(2026, 7, 31),
+                ToDate = new DateOnly(2026, 7, 1)
+            }
+        };
+
+        foreach (var filters in invalidFilters)
+        {
+            var result = await service.GetAllAsync(
+                new MiniErp.Application.Common.Models.PaginationRequest(),
+                filters);
+
+            Assert.True(result.IsFailure);
+        }
     }
 
     [Fact]
@@ -3194,6 +3305,53 @@ public sealed class InvoiceServiceTests
             null,
             requestedLines,
             containerLines ?? []);
+    }
+
+    private static async Task SeedInvoiceFilterDataAsync(
+        InvoiceTestDatabase database)
+    {
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Countries (
+                Id, Code, Name, ArabicName, IsActive, IsDeleted)
+            VALUES (1, 'EG', 'Egypt', 'مصر', 1, 0);
+            """);
+
+        var service = database.CreateService();
+        var missingPrice = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Cash,
+            lines: [new InvoiceLineRequest(1, 1, 1m, 0m, null)],
+            invoiceDate: new DateOnly(2026, 7, 10),
+            storeId: 1,
+            driverId: 1,
+            invoiceNumber: "FILTER-SALES-001") with
+        {
+            BusinessPartnerId = 1,
+            CountryId = 1
+        };
+        var priced = CreateRequest(
+            InvoiceType.Purchase,
+            PaymentTerm.Credit,
+            lines: [new InvoiceLineRequest(2, 1, 1m, 15m, null)],
+            invoiceDate: new DateOnly(2026, 7, 20),
+            storeId: 2,
+            driverId: 2,
+            invoiceNumber: "FILTER-PURCHASE-002") with
+        {
+            BusinessPartnerId = 2
+        };
+
+        var first = await service.AddAsync(missingPrice);
+        var second = await service.AddAsync(priced);
+
+        Assert.True(
+            first.IsSuccess,
+            first.IsFailure ? first.Error.Description : null);
+        Assert.True(
+            second.IsSuccess,
+            second.IsFailure ? second.Error.Description : null);
+        database.Context.ChangeTracker.Clear();
     }
 
     private static InvoiceUpdateRequest CreateUpdateRequest(
