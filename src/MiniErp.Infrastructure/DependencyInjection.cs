@@ -78,7 +78,7 @@ public static class DependencyInjection
                 };
                 options.Events = new JwtBearerEvents
                 {
-                    OnTokenValidated = context =>
+                    OnTokenValidated = async context =>
                     {
                         var tokenUse = context.Principal?
                             .FindFirst(CustomClaimTypes.TokenUse)?
@@ -89,18 +89,44 @@ public static class DependencyInjection
                                 StringComparison.Ordinal))
                         {
                             context.Fail("الرمز المستخدم ليس رمز وصول.");
-                            return Task.CompletedTask;
+                            return;
                         }
 
                         if (!CompanyClaimResolver.TryGetCompanyId(
                                 context.Principal,
-                                out _))
+                                out var companyId))
                         {
                             context.Fail(
                                 "يجب أن يحتوي رمز الوصول على قيمة company_id واحدة وصحيحة.");
+                            return;
                         }
 
-                        return Task.CompletedTask;
+                        var userIdValue = context.Principal?
+                            .FindFirst("sub")?
+                            .Value;
+                        if (!Guid.TryParse(userIdValue, out var userId) ||
+                            userId == Guid.Empty)
+                        {
+                            context.Fail(
+                                "يجب أن يحتوي رمز الوصول على رقم مستخدم صحيح.");
+                            return;
+                        }
+
+                        var dbContext = context.HttpContext.RequestServices
+                            .GetRequiredService<ApplicationDbContext>();
+                        var hasCompanyAccess = await dbContext.UserCompanies
+                            .AsNoTracking()
+                            .AnyAsync(
+                                userCompany =>
+                                    userCompany.UserId == userId &&
+                                    userCompany.CompanyId == companyId,
+                                context.HttpContext.RequestAborted);
+
+                        if (!hasCompanyAccess)
+                        {
+                            context.Fail(
+                                "المستخدم لا يملك صلاحية الوصول إلى الشركة أو أن الشركة محذوفة.");
+                        }
                     }
                 };
             });
