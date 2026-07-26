@@ -15,6 +15,7 @@ public sealed record InvoiceContainerLineRequest(
     int IncomingUnits);
 
 public sealed record InvoiceRequest(
+    string InvoiceNumber,
     InvoiceType InvoiceType,
     PaymentTerm PaymentTerm,
     DateOnly InvoiceDate,
@@ -36,6 +37,8 @@ public sealed record InvoiceRequest(
     IReadOnlyList<InvoiceContainerLineRequest> ContainerLines
     )
 {
+    public const int InvoiceNumberMaximumLength = 100;
+
     public const int ExportInvoiceCodeMaximumLength = 100;
 
     public const int ExternalDriverNameMaximumLength = 200;

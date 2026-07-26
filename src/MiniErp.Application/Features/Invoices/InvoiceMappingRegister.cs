@@ -25,6 +25,9 @@ public sealed class InvoiceMappingRegister : IRegister
             .Ignore(invoice => invoice.Lines)
             .Ignore(invoice => invoice.ContainerLines)
             .Map(
+                invoice => invoice.InvoiceNumber,
+                request => request.InvoiceNumber.Trim())
+            .Map(
                 invoice => invoice.ExportInvoiceCode,
                 request => Normalize(request.ExportInvoiceCode))
             .Map(

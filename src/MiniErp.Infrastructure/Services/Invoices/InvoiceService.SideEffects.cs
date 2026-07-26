@@ -59,7 +59,6 @@ public sealed partial class InvoiceService
         }
 
         if (InvoiceMovementRules.ShouldCreatePartnerMovement(
-                invoice.PaymentTerm,
                 invoice.RemainingAmount))
         {
             var partnerMovementType =

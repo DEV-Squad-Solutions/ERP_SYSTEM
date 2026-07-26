@@ -45,19 +45,16 @@ public sealed class InvoiceMovementRulesTests
     }
 
     [Theory]
-    [InlineData(PaymentTerm.Cash, 100, false)]
-    [InlineData(PaymentTerm.Credit, 100, true)]
-    [InlineData(PaymentTerm.Credit, 0, false)]
-    [InlineData(PaymentTerm.Credit, -1, false)]
-    public void PartnerMovementIsCreatedOnlyForOutstandingCredit(
-        PaymentTerm paymentTerm,
+    [InlineData(100, true)]
+    [InlineData(0, false)]
+    [InlineData(-1, false)]
+    public void PartnerMovementIsCreatedForAnyOutstandingInvoice(
         decimal remainingAmount,
         bool expected)
     {
         Assert.Equal(
             expected,
             InvoiceMovementRules.ShouldCreatePartnerMovement(
-                paymentTerm,
                 remainingAmount));
     }
 }

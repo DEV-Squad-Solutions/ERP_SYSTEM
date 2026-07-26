@@ -1107,7 +1107,6 @@ public static class DevelopmentDataSeeder
                     cancellationToken);
             if (!hasPartnerMovement &&
                 InvoiceMovementRules.ShouldCreatePartnerMovement(
-                    invoice.PaymentTerm,
                     invoice.RemainingAmount))
             {
                 var movementType =

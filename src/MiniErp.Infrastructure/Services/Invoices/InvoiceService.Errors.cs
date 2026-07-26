@@ -5,13 +5,6 @@ namespace MiniErp.Infrastructure.Services.Invoices;
 
 public sealed partial class InvoiceService
 {
-    private string GenerateInvoiceNumber()
-    {
-        var timestamp = timeProvider.GetUtcNow().UtcDateTime;
-        var suffix = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
-        return $"INV-{companyId}-{timestamp:yyyyMMddHHmmssfff}-{suffix}";
-    }
-
     private static Error InvalidId() =>
         Error.Validation(
             "Invoices.InvalidId",

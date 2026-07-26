@@ -103,21 +103,59 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task Add_AssignsServerControlledValuesAndDoesNotDuplicateChildren()
+    public async Task Add_UsesEnteredInvoiceNumberAndDoesNotDuplicateChildren()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
 
         var result = await database.CreateService().AddAsync(
             CreateRequest(
                 InvoiceType.SalesReturn,
-                lines: [new InvoiceLineRequest(1, 2, 1m, 12m, null)]));
+                lines: [new InvoiceLineRequest(1, 2, 1m, 12m, null)],
+                invoiceNumber: "  SALES-1001  "));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value.CompanyId);
-        Assert.StartsWith("INV-1-", result.Value.InvoiceNumber);
+        Assert.Equal("SALES-1001", result.Value.InvoiceNumber);
         Assert.Equal(24m, result.Value.Total);
         Assert.Single(result.Value.Lines);
         Assert.Equal(1, await database.Context.InvoiceLines.CountAsync());
+    }
+
+    [Fact]
+    public async Task Add_AllowsDuplicateEnteredInvoiceNumber()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var first = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                invoiceNumber: "INV-DUPLICATE"));
+
+        var duplicate = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                invoiceNumber: "  INV-DUPLICATE  "));
+
+        Assert.True(first.IsSuccess);
+        Assert.True(duplicate.IsSuccess);
+        Assert.Equal("INV-DUPLICATE", duplicate.Value.InvoiceNumber);
+        Assert.Equal(2, await database.Context.Invoices.CountAsync());
+    }
+
+    [Fact]
+    public async Task Add_RejectsMissingEnteredInvoiceNumberInTheService()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(InvoiceType.SalesReturn) with
+        {
+            InvoiceNumber = "   "
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.InvoiceNumberInvalid", result.Error.Code);
+        Assert.Equal(0, await database.Context.Invoices.CountAsync());
     }
 
     [Fact]
@@ -1967,7 +2005,6 @@ public sealed class InvoiceServiceTests
     [InlineData(0, -1, PaymentTerm.Credit, "Invoices.InvalidPaidAmount")]
     [InlineData(0, -1, PaymentTerm.Cash, "Invoices.InvalidPaidAmount")]
     [InlineData(0, 21, PaymentTerm.Credit, "Invoices.InvalidPaidAmount")]
-    [InlineData(0, 19, PaymentTerm.Cash, "Invoices.CashInvoiceMustBeFullyPaid")]
     [InlineData(0, 21, PaymentTerm.Cash, "Invoices.InvalidPaidAmount")]
     public async Task Add_RejectsInvalidDiscountOrPaidAmount(
         decimal discountAmount,
@@ -2020,6 +2057,30 @@ public sealed class InvoiceServiceTests
         Assert.Equal(2m, persisted.DiscountAmount);
         Assert.Equal(18m, persisted.PaidAmount);
         Assert.Equal(18m, persisted.Total);
+    }
+
+    [Theory]
+    [InlineData(0, 20)]
+    [InlineData(7, 13)]
+    public async Task Add_CashInvoiceAllowsOutstandingPaidAmount(
+        decimal paidAmount,
+        decimal expectedRemaining)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Cash,
+                paidAmount: paidAmount));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(paidAmount, result.Value.PaidAmount);
+        Assert.Equal(expectedRemaining, result.Value.RemainingAmount);
+        var movement =
+            await database.Context.BusinessPartnerMovements.SingleAsync();
+        Assert.Equal(0m, movement.Debit);
+        Assert.Equal(expectedRemaining, movement.Credit);
     }
 
     [Fact]
@@ -2232,7 +2293,7 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task Update_CreditToCashRequiresAndPersistsFullPayment()
+    public async Task Update_CreditToFullyPaidCashPersistsPayment()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -2261,7 +2322,7 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task Update_ChangedCashTotalMustRemainFullyPaid()
+    public async Task Update_ChangedCashTotalAllowsOutstandingBalance()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -2272,22 +2333,26 @@ public sealed class InvoiceServiceTests
         var changedLines =
             new[] { new InvoiceLineRequest(1, 3, 1m, 10m, null) };
 
-        var invalid = await service.UpdateAsync(
+        var partial = await service.UpdateAsync(
             created.Id,
             CreateUpdateRequest(
                 created,
                 changedLines,
                 paidAmount: 20m));
 
-        Assert.True(invalid.IsFailure);
-        Assert.Equal(
-            "Invoices.CashInvoiceMustBeFullyPaid",
-            invalid.Error.Code);
+        Assert.True(partial.IsSuccess);
+        Assert.Equal(30m, partial.Value.Total);
+        Assert.Equal(20m, partial.Value.PaidAmount);
+        Assert.Equal(10m, partial.Value.RemainingAmount);
+        var movement =
+            await database.Context.BusinessPartnerMovements.SingleAsync();
+        Assert.Equal(10m, movement.Credit);
 
+        database.Context.ChangeTracker.Clear();
         var valid = await service.UpdateAsync(
             created.Id,
             CreateUpdateRequest(
-                created,
+                partial.Value,
                 changedLines,
                 paidAmount: 30m));
 
@@ -2295,6 +2360,9 @@ public sealed class InvoiceServiceTests
         Assert.Equal(30m, valid.Value.Total);
         Assert.Equal(30m, valid.Value.PaidAmount);
         Assert.Equal(0m, valid.Value.RemainingAmount);
+        Assert.Equal(
+            0,
+            await database.Context.BusinessPartnerMovements.CountAsync());
     }
 
     [Theory]
@@ -2302,7 +2370,6 @@ public sealed class InvoiceServiceTests
     [InlineData(21, 0, PaymentTerm.Credit, "Invoices.InvalidDiscountAmount")]
     [InlineData(0, -1, PaymentTerm.Credit, "Invoices.InvalidPaidAmount")]
     [InlineData(0, 21, PaymentTerm.Credit, "Invoices.InvalidPaidAmount")]
-    [InlineData(0, 19, PaymentTerm.Cash, "Invoices.CashInvoiceMustBeFullyPaid")]
     public async Task Update_RejectsInvalidDiscountOrPaidAmount(
         decimal discountAmount,
         decimal paidAmount,
@@ -2362,6 +2429,36 @@ public sealed class InvoiceServiceTests
         var movement =
             await database.Context.BusinessPartnerMovements.SingleAsync();
         Assert.Equal(14m, movement.Credit);
+    }
+
+    [Fact]
+    public async Task GetAll_FiltersBySpecificInvoiceType()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        await service.AddAsync(CreateRequest(InvoiceType.Purchase));
+        await service.AddAsync(CreateRequest(InvoiceType.SalesReturn));
+
+        var result = await service.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest(),
+            InvoiceType.Purchase);
+
+        Assert.True(result.IsSuccess);
+        var invoice = Assert.Single(result.Value.Items);
+        Assert.Equal(InvoiceType.Purchase, invoice.InvoiceType);
+    }
+
+    [Fact]
+    public async Task GetAll_RejectsUnsupportedInvoiceTypeFilter()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest(),
+            (InvoiceType)999);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.InvoiceTypeInvalid", result.Error.Code);
     }
 
     [Fact]
@@ -2745,6 +2842,7 @@ public sealed class InvoiceServiceTests
             discountAmount: 3m,
             paidAmount: 17m) with
         {
+            InvoiceNumber = "  INV-MAP  ",
             ActualDriverId = 2,
             ExportInvoiceCode = "  EXT-1  ",
             ExternalDriverName = "   ",
@@ -2758,7 +2856,7 @@ public sealed class InvoiceServiceTests
         Assert.Empty(invoice.ContainerLines);
         Assert.Equal(0, invoice.Id);
         Assert.Equal(0, invoice.CompanyId);
-        Assert.Equal(string.Empty, invoice.InvoiceNumber);
+        Assert.Equal("INV-MAP", invoice.InvoiceNumber);
         Assert.Equal(0m, invoice.Total);
         Assert.Equal(InvoiceType.Sales, invoice.InvoiceType);
         Assert.Equal(PaymentTerm.Credit, invoice.PaymentTerm);
@@ -2971,6 +3069,39 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public void CreateValidator_RequiresEnteredInvoiceNumber()
+    {
+        var request = CreateRequest(InvoiceType.SalesReturn) with
+        {
+            InvoiceNumber = "   "
+        };
+
+        var result = new InvoiceRequestValidator().Validate(request);
+
+        Assert.Contains(
+            result.Errors,
+            error =>
+                error.PropertyName == nameof(InvoiceRequest.InvoiceNumber));
+    }
+
+    [Fact]
+    public void CreateValidator_UsesTrimmedInvoiceNumberLength()
+    {
+        var request = CreateRequest(InvoiceType.SalesReturn) with
+        {
+            InvoiceNumber =
+                $"  {new string('N', InvoiceRequest.InvoiceNumberMaximumLength)}  "
+        };
+
+        var result = new InvoiceRequestValidator().Validate(request);
+
+        Assert.DoesNotContain(
+            result.Errors,
+            error =>
+                error.PropertyName == nameof(InvoiceRequest.InvoiceNumber));
+    }
+
+    [Fact]
     public void UpdateValidator_UsesTheEightByteRowVersionMessage()
     {
         var request = new InvoiceUpdateRequest(
@@ -3032,7 +3163,8 @@ public sealed class InvoiceServiceTests
         int? containerStoreId = null,
         int? driverId = null,
         decimal discountAmount = 0m,
-        decimal? paidAmount = null)
+        decimal? paidAmount = null,
+        string? invoiceNumber = null)
     {
         var requestedLines =
             lines ?? [new InvoiceLineRequest(1, 2, 1m, 10m, null)];
@@ -3042,6 +3174,7 @@ public sealed class InvoiceServiceTests
                 : 0m);
 
         return new InvoiceRequest(
+            invoiceNumber ?? $"INV-{Guid.NewGuid():N}",
             invoiceType,
             paymentTerm,
             invoiceDate ?? new DateOnly(2026, 7, 25),

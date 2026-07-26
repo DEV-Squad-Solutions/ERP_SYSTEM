@@ -20,6 +20,20 @@ public sealed partial class InvoiceService
         static Result<PreparedInvoice> Failure(Error error) =>
             Result<PreparedInvoice>.Failure(error);
 
+        if (currentInvoiceId is null)
+        {
+            if (string.IsNullOrWhiteSpace(invoice.InvoiceNumber) ||
+                invoice.InvoiceNumber.Length >
+                InvoiceRequest.InvoiceNumberMaximumLength)
+            {
+                return Failure(
+                    Error.Validation(
+                        "Invoices.InvoiceNumberInvalid",
+                        "رقم الفاتورة مطلوب ويجب ألا يتجاوز 100 حرف.",
+                        nameof(InvoiceRequest.InvoiceNumber)));
+            }
+        }
+
         if (!Enum.IsDefined(typeof(InvoiceType), invoice.InvoiceType))
         {
             return Failure(
@@ -447,15 +461,6 @@ public sealed partial class InvoiceService
             return Error.Validation(
                 "Invoices.InvalidPaidAmount",
                 "المبلغ المدفوع يجب ألا يكون سالبًا ولا يمكن أن يتجاوز صافي الفاتورة.",
-                nameof(InvoiceRequest.PaidAmount));
-        }
-
-        if (invoice.PaymentTerm == PaymentTerm.Cash &&
-            invoice.PaidAmount != invoice.Total)
-        {
-            return Error.Validation(
-                "Invoices.CashInvoiceMustBeFullyPaid",
-                "يجب أن يكون صافي الفاتورة النقدية مدفوعًا بالكامل.",
                 nameof(InvoiceRequest.PaidAmount));
         }
 

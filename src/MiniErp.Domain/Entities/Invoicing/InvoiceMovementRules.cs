@@ -31,10 +31,8 @@ public static class InvoiceMovementRules
             _ => throw new ArgumentOutOfRangeException(nameof(invoiceType))
         };
 
-    public static bool ShouldCreatePartnerMovement(
-        PaymentTerm paymentTerm,
-        decimal remainingAmount) =>
-        paymentTerm == PaymentTerm.Credit && remainingAmount > 0m;
+    public static bool ShouldCreatePartnerMovement(decimal remainingAmount) =>
+        remainingAmount > 0m;
 
     public static (decimal Debit, decimal Credit) GetPartnerAmounts(
         InvoiceType invoiceType,

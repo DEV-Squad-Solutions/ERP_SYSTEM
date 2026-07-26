@@ -32,6 +32,16 @@ public sealed class InvoicePaymentTermTests
     }
 
     [Fact]
+    public void CashInvoice_CanHaveZeroPaidAmount()
+    {
+        var invoice = CreateInvoice(PaymentTerm.Cash, 0m);
+
+        Assert.Equal(PaymentStatus.Unpaid, invoice.GetPaymentStatus());
+        Assert.Equal(0m, invoice.PaidAmount);
+        Assert.Equal(25m, invoice.RemainingAmount);
+    }
+
+    [Fact]
     public void PartiallyPaidCreditInvoice_RemainsOutstandingAgainstPartner()
     {
         var invoice = CreateInvoice(PaymentTerm.Credit, 10m);
@@ -43,6 +53,7 @@ public sealed class InvoicePaymentTermTests
 
     [Theory]
     [InlineData(PaymentTerm.Cash, 25, PaymentStatus.Paid, 0)]
+    [InlineData(PaymentTerm.Cash, 0, PaymentStatus.Unpaid, 25)]
     [InlineData(PaymentTerm.Credit, 0, PaymentStatus.Unpaid, 25)]
     [InlineData(PaymentTerm.Credit, 10, PaymentStatus.Unpaid, 15)]
     [InlineData(PaymentTerm.Credit, 25, PaymentStatus.Paid, 0)]
@@ -73,11 +84,14 @@ public sealed class InvoicePaymentTermTests
     }
 
     [Theory]
-    [InlineData(PaymentTerm.Cash)]
-    [InlineData(PaymentTerm.Credit)]
-    public void Validator_AcceptsBothPaymentTerms(PaymentTerm paymentTerm)
+    [InlineData(PaymentTerm.Cash, 0)]
+    [InlineData(PaymentTerm.Credit, 0)]
+    public void Validator_AcceptsBothPaymentTerms(
+        PaymentTerm paymentTerm,
+        decimal paidAmount)
     {
         var request = new InvoiceRequest(
+            "INV-TEST",
             InvoiceType.Sales,
             paymentTerm,
             new DateOnly(2026, 7, 25),
@@ -93,7 +107,7 @@ public sealed class InvoicePaymentTermTests
             null,
             null,
             0m,
-            paymentTerm == PaymentTerm.Cash ? 25m : 0m,
+            paidAmount,
             null,
             [new InvoiceLineRequest(1, 1, 1m, 25m, null)],
             []);
@@ -120,6 +134,7 @@ public sealed class InvoicePaymentTermTests
     public void Validator_RejectsUnsupportedPaymentTerm()
     {
         var request = new InvoiceRequest(
+            "INV-TEST",
             InvoiceType.Sales,
             (PaymentTerm)999,
             new DateOnly(2026, 7, 25),

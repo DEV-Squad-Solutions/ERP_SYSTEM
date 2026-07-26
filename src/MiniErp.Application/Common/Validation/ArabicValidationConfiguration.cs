@@ -12,6 +12,7 @@ public static class ArabicValidationConfiguration
             ["DocumentDate"] = "تاريخ المستند",
             ["DocumentNumber"] = "رقم المستند",
             ["ItemId"] = "الصنف",
+            ["InvoiceNumber"] = "رقم الفاتورة",
             ["Lines"] = "سطور المستند",
             ["Notes"] = "الملاحظات",
             ["Quantity"] = "الكمية",

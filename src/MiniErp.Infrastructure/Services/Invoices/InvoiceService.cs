@@ -5,6 +5,7 @@ using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Invoicing;
+using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.Invoices;
@@ -20,18 +21,37 @@ public sealed partial class InvoiceService(
 
     public async Task<Result<PagedResponse<InvoiceListResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        InvoiceType? invoiceType = null,
         CancellationToken cancellationToken = default)
     {
+        if (invoiceType.HasValue &&
+            !Enum.IsDefined(typeof(InvoiceType), invoiceType.Value))
+        {
+            return Result<PagedResponse<InvoiceListResponse>>.Failure(
+                Error.Validation(
+                    "Invoices.InvoiceTypeInvalid",
+                    "نوع الفاتورة غير مدعوم.",
+                    nameof(invoiceType)));
+        }
+
         var query = dbContext.Invoices
             .AsNoTracking()
-            .Where(invoice => invoice.CompanyId == companyId)
+            .Where(invoice => invoice.CompanyId == companyId);
+
+        if (invoiceType.HasValue)
+        {
+            query = query.Where(
+                invoice => invoice.InvoiceType == invoiceType.Value);
+        }
+
+        var orderedQuery = query
             .OrderByDescending(invoice => invoice.InvoiceDate)
             .ThenByDescending(invoice => invoice.Id);
 
         return await paginationService.PaginateAsync<
             Invoice,
             InvoiceListResponse>(
-            query,
+            orderedQuery,
             pagination,
             cancellationToken);
     }
@@ -76,7 +96,6 @@ public sealed partial class InvoiceService(
         }
 
         invoice.CompanyId = companyId;
-        invoice.InvoiceNumber = GenerateInvoiceNumber();
         invoice.Currency = preparation.Value.Currency;
 
         AddLines(invoice, request, preparation.Value);

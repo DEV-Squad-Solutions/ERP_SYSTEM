@@ -94,6 +94,16 @@ internal static class InvoiceValidationRules
     public static void AddCreateRules(
         AbstractValidator<InvoiceRequest> validator)
     {
+        validator.RuleFor(request => request.InvoiceNumber)
+            .NotEmpty();
+
+        validator.RuleFor(request => request.InvoiceNumber)
+            .MaximumLength(InvoiceRequest.InvoiceNumberMaximumLength)
+            .When(request =>
+                request.InvoiceNumber is not null &&
+                request.InvoiceNumber.Trim().Length >
+                InvoiceRequest.InvoiceNumberMaximumLength);
+
         validator.RuleFor(request => request.InvoiceType)
             .IsInEnum();
 
@@ -355,19 +365,6 @@ internal static class InvoiceValidationRules
             .WithMessage(
                 "المبلغ المدفوع يجب ألا يكون سالبًا ولا يمكن أن يتجاوز صافي الفاتورة.")
             .WithErrorCode("Invoices.InvalidPaidAmount");
-
-        validator.RuleFor(request => request.PaidAmount)
-            .Must((request, paidAmount) =>
-                request.PaymentTerm != Domain.Enums.PaymentTerm.Cash ||
-                !TryCalculateNetTotal(
-                    request.Lines,
-                    request.DiscountAmount,
-                    out _,
-                    out var total) ||
-                paidAmount == total)
-            .WithMessage(
-                "يجب أن يكون صافي الفاتورة النقدية مدفوعًا بالكامل.")
-            .WithErrorCode("Invoices.CashInvoiceMustBeFullyPaid");
     }
 
     private static void AddAmountRules(
@@ -396,19 +393,6 @@ internal static class InvoiceValidationRules
             .WithMessage(
                 "المبلغ المدفوع يجب ألا يكون سالبًا ولا يمكن أن يتجاوز صافي الفاتورة.")
             .WithErrorCode("Invoices.InvalidPaidAmount");
-
-        validator.RuleFor(request => request.PaidAmount)
-            .Must((request, paidAmount) =>
-                request.PaymentTerm != Domain.Enums.PaymentTerm.Cash ||
-                !TryCalculateNetTotal(
-                    request.Lines,
-                    request.DiscountAmount,
-                    out _,
-                    out var total) ||
-                paidAmount == total)
-            .WithMessage(
-                "يجب أن يكون صافي الفاتورة النقدية مدفوعًا بالكامل.")
-            .WithErrorCode("Invoices.CashInvoiceMustBeFullyPaid");
     }
 
     private static bool TryCalculateNetTotal(

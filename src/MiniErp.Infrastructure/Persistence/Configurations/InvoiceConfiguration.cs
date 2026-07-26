@@ -33,9 +33,7 @@ public sealed class InvoiceConfiguration : AuditableEntityConfiguration<Invoice>
         {
             invoice.CompanyId,
             invoice.InvoiceNumber
-        })
-            .IsUnique()
-            .HasFilter("[IsDeleted] = 0");
+        });
 
         builder.Property(invoice => invoice.ExportInvoiceCode)
             .HasMaxLength(100);
