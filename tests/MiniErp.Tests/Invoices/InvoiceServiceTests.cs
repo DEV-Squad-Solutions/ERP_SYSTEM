@@ -6,9 +6,13 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
+using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.Catalog;
+using MiniErp.Domain.Entities.Containers;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Logistics;
+using MiniErp.Domain.Entities.ReferenceData;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
@@ -2391,6 +2395,10 @@ public sealed class InvoiceServiceTests
         Assert.Equal(17m, item.Total);
         Assert.Equal(4m, item.PaidAmount);
         Assert.Equal(13m, item.RemainingAmount);
+        Assert.Equal(1, item.LineCount);
+        Assert.Equal(0, item.ContainerLineCount);
+        Assert.Single(item.Lines);
+        Assert.Empty(item.ContainerLines);
     }
 
     [Fact]
@@ -2625,6 +2633,35 @@ public sealed class InvoiceServiceTests
             Name = "Actual Driver",
             LicenseNumber = "LIC-2"
         };
+        var responsibleDriver = new Driver
+        {
+            Id = 1,
+            CompanyId = 7,
+            Code = "DRV-1",
+            Name = "Responsible Driver",
+            LicenseNumber = "LIC-1"
+        };
+        var businessPartner = new BusinessPartner
+        {
+            Id = 3,
+            CompanyId = 7,
+            Code = "BP-3",
+            Name = "Partner"
+        };
+        var store = new Store
+        {
+            Id = 4,
+            CompanyId = 7,
+            Code = "STORE-4",
+            Name = "Store"
+        };
+        var country = new Country
+        {
+            Id = 5,
+            Code = "EG",
+            Name = "Egypt",
+            ArabicName = "مصر"
+        };
         var invoice = new Invoice
         {
             Id = 41,
@@ -2632,6 +2669,10 @@ public sealed class InvoiceServiceTests
             InvoiceNumber = "INV-SERVER",
             Currency = CurrencyCode.USD,
             CreatedById = "creator",
+            BusinessPartner = businessPartner,
+            Store = store,
+            Country = country,
+            Driver = responsibleDriver,
             ActualDriver = actualDriver,
             Lines = [line]
         };
@@ -2653,12 +2694,12 @@ public sealed class InvoiceServiceTests
             1,
             2,
             false,
-            null,
-            null,
-            null,
+            "   ",
+            "  VEH-2  ",
+            "  EXT-2  ",
             3m,
             4m,
-            "Changed",
+            "  Changed  ",
             [new InvoiceLineRequest(2, 5, 5m, 5m, null)],
             [],
             new byte[] { 8, 7, 6, 5, 4, 3, 2, 1 });
@@ -2674,6 +2715,14 @@ public sealed class InvoiceServiceTests
         Assert.Equal(4m, invoice.PaidAmount);
         Assert.Equal(1, invoice.DriverId);
         Assert.Equal(2, invoice.ActualDriverId);
+        Assert.Equal("EXT-2", invoice.ExportInvoiceCode);
+        Assert.Null(invoice.ExternalDriverName);
+        Assert.Equal("VEH-2", invoice.VehicleNumber);
+        Assert.Equal("Changed", invoice.Notes);
+        Assert.Same(businessPartner, invoice.BusinessPartner);
+        Assert.Same(store, invoice.Store);
+        Assert.Same(country, invoice.Country);
+        Assert.Same(responsibleDriver, invoice.Driver);
         Assert.Same(actualDriver, invoice.ActualDriver);
         Assert.Same(line, Assert.Single(invoice.Lines));
         Assert.Equal(rowVersion, invoice.RowVersion);
@@ -2688,11 +2737,20 @@ public sealed class InvoiceServiceTests
     {
         var request = CreateRequest(
             InvoiceType.Sales,
+            PaymentTerm.Credit,
             containerStoreId: 3,
             lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
             containerLines: [new InvoiceContainerLineRequest(1, 1, 0)],
+            driverId: 1,
             discountAmount: 3m,
-            paidAmount: 17m);
+            paidAmount: 17m) with
+        {
+            ActualDriverId = 2,
+            ExportInvoiceCode = "  EXT-1  ",
+            ExternalDriverName = "   ",
+            VehicleNumber = "  VEH-1  ",
+            Notes = "   "
+        };
 
         var invoice = request.Adapt<Invoice>();
 
@@ -2702,9 +2760,182 @@ public sealed class InvoiceServiceTests
         Assert.Equal(0, invoice.CompanyId);
         Assert.Equal(string.Empty, invoice.InvoiceNumber);
         Assert.Equal(0m, invoice.Total);
+        Assert.Equal(InvoiceType.Sales, invoice.InvoiceType);
+        Assert.Equal(PaymentTerm.Credit, invoice.PaymentTerm);
+        Assert.Equal(request.InvoiceDate, invoice.InvoiceDate);
+        Assert.Equal(request.BusinessPartnerId, invoice.BusinessPartnerId);
+        Assert.Equal(request.StoreId, invoice.StoreId);
+        Assert.Equal(request.ContainerStoreId, invoice.ContainerStoreId);
+        Assert.Equal(1, invoice.DriverId);
+        Assert.Equal(2, invoice.ActualDriverId);
         Assert.Equal(3m, invoice.DiscountAmount);
         Assert.Equal(17m, invoice.PaidAmount);
+        Assert.Equal("EXT-1", invoice.ExportInvoiceCode);
+        Assert.Null(invoice.ExternalDriverName);
+        Assert.Equal("VEH-1", invoice.VehicleNumber);
+        Assert.Null(invoice.Notes);
         Assert.Empty(invoice.RowVersion);
+    }
+
+    [Fact]
+    public void MapsterResponses_MapNamesCalculationsAndOrderedChildren()
+    {
+        var itemUnit = new ItemUnit
+        {
+            Id = 1,
+            CompanyId = 1,
+            Name = "Kilogram"
+        };
+        var firstItem = new Item
+        {
+            Id = 1,
+            CompanyId = 1,
+            ItemUnitId = 1,
+            ItemUnit = itemUnit,
+            Code = "ITEM-1",
+            Name = "First item"
+        };
+        var secondItem = new Item
+        {
+            Id = 2,
+            CompanyId = 1,
+            ItemUnitId = 1,
+            ItemUnit = itemUnit,
+            Code = "ITEM-2",
+            Name = "Second item"
+        };
+        var firstLine = new InvoiceLine
+        {
+            Id = 1,
+            CompanyId = 1,
+            ItemId = 1,
+            Item = firstItem,
+            ItemUnitId = 1,
+            ItemUnit = itemUnit,
+            Count = 1,
+            Weight = 1m,
+            Price = 3m
+        };
+        var secondLine = new InvoiceLine
+        {
+            Id = 2,
+            CompanyId = 1,
+            ItemId = 2,
+            Item = secondItem,
+            ItemUnitId = 1,
+            ItemUnit = itemUnit,
+            Count = 1,
+            Weight = 1m,
+            Price = 4m
+        };
+        var firstContainer = new Container
+        {
+            Id = 1,
+            CompanyId = 1,
+            Code = "CONT-1",
+            Name = "First container"
+        };
+        var secondContainer = new Container
+        {
+            Id = 2,
+            CompanyId = 1,
+            Code = "CONT-2",
+            Name = "Second container"
+        };
+        var invoice = new Invoice
+        {
+            Id = 8,
+            CompanyId = 1,
+            InvoiceNumber = "INV-8",
+            InvoiceType = InvoiceType.Sales,
+            PaymentTerm = PaymentTerm.Credit,
+            InvoiceDate = new DateOnly(2026, 7, 26),
+            BusinessPartnerId = 1,
+            BusinessPartner = new BusinessPartner
+            {
+                Id = 1,
+                CompanyId = 1,
+                Code = "BP-1",
+                Name = "Partner"
+            },
+            StoreId = 1,
+            Store = new Store
+            {
+                Id = 1,
+                CompanyId = 1,
+                Code = "STORE-1",
+                Name = "Store"
+            },
+            DriverId = 1,
+            Driver = new Driver
+            {
+                Id = 1,
+                CompanyId = 1,
+                Code = "DRV-1",
+                Name = "Responsible Driver",
+                LicenseNumber = "LIC-1"
+            },
+            ActualDriverId = 2,
+            ActualDriver = new Driver
+            {
+                Id = 2,
+                CompanyId = 1,
+                Code = "DRV-2",
+                Name = "Actual Driver",
+                LicenseNumber = "LIC-2"
+            },
+            DiscountAmount = 2m,
+            PaidAmount = 4m,
+            Lines = [secondLine, firstLine],
+            ContainerLines =
+            [
+                new InvoiceContainerLine
+                {
+                    Id = 2,
+                    CompanyId = 1,
+                    ContainerId = 2,
+                    Container = secondContainer,
+                    OutgoingUnits = 2
+                },
+                new InvoiceContainerLine
+                {
+                    Id = 1,
+                    CompanyId = 1,
+                    ContainerId = 1,
+                    Container = firstContainer,
+                    OutgoingUnits = 1
+                }
+            ]
+        };
+        invoice.CalculateTotal();
+
+        var response = invoice.Adapt<InvoiceResponse>();
+        var listResponse = invoice.Adapt<InvoiceListResponse>();
+
+        Assert.Equal("Partner", response.BusinessPartnerName);
+        Assert.Equal("Store", response.StoreName);
+        Assert.Equal("Responsible Driver", response.DriverName);
+        Assert.Equal("Actual Driver", response.ActualDriverName);
+        Assert.Equal(7m, response.Subtotal);
+        Assert.Equal(2m, response.DiscountAmount);
+        Assert.Equal(4m, response.PaidAmount);
+        Assert.Equal(1m, response.RemainingAmount);
+        Assert.Equal([1, 2], response.Lines.Select(line => line.Id));
+        Assert.Equal(
+            [1, 2],
+            response.ContainerLines.Select(line => line.Id));
+        Assert.Equal("Partner", listResponse.BusinessPartnerName);
+        Assert.Equal("Store", listResponse.StoreName);
+        Assert.Equal("Responsible Driver", listResponse.DriverName);
+        Assert.Equal("Actual Driver", listResponse.ActualDriverName);
+        Assert.Equal(7m, listResponse.Subtotal);
+        Assert.Equal(1m, listResponse.RemainingAmount);
+        Assert.Equal(2, listResponse.LineCount);
+        Assert.Equal(2, listResponse.ContainerLineCount);
+        Assert.Equal([1, 2], listResponse.Lines.Select(line => line.Id));
+        Assert.Equal(
+            [1, 2],
+            listResponse.ContainerLines.Select(line => line.Id));
     }
 
     [Fact]

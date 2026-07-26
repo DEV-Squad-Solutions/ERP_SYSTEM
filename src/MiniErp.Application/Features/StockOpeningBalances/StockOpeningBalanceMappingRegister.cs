@@ -8,13 +8,10 @@ public sealed class StockOpeningBalanceMappingRegister : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.ForType<StockOpeningBalanceLineRequest, StockOpeningBalanceLine>()
-            .Ignore(line => line.Quantity)
-            .Ignore(line => line.Total)
             .Map(line => line.Notes, request => Normalize(request.Notes));
 
         config.ForType<StockOpeningBalanceRequest, StockOpeningBalance>()
             .Ignore(balance => balance.Lines)
-            .Ignore(balance => balance.RowVersion)
             .Map(balance => balance.DocumentNumber, request => request.DocumentNumber.Trim())
             .Map(balance => balance.Notes, request => Normalize(request.Notes));
 
