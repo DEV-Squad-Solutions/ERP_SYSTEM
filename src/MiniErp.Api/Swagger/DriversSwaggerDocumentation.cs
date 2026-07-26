@@ -58,7 +58,7 @@ public sealed class DriversSwaggerDocumentation : IOperationFilter
                     "Admin only. Deactivates and soft-deletes a driver in the selected company; audit history remains.",
                     "A positive route `id` and an Admin bearer token containing one `company_id`.",
                     "`id` must be greater than zero.",
-                    "Invalid IDs return 400. Missing, already-deleted, and other-company drivers return 404. A repeated delete is not treated as success.")),
+                    "Invalid IDs return 400. Missing, already-deleted, and other-company drivers return 404. Current or historical invoices and driver trips block deletion with 409 (`Drivers.HasDependencies`). A repeated delete is not treated as success.")),
             _ => default
         };
 

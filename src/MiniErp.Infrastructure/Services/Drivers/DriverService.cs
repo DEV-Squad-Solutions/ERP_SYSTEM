@@ -147,6 +147,25 @@ public sealed class DriverService(
             return Result.Failure(NotFound(id));
         }
 
+        var hasDependencies = await dbContext.Invoices
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                invoice =>
+                    invoice.CompanyId == companyId &&
+                    invoice.DriverId == id,
+                cancellationToken) ||
+            await dbContext.DriverTrips
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    trip =>
+                        trip.CompanyId == companyId &&
+                        trip.DriverId == id,
+                    cancellationToken);
+        if (hasDependencies)
+        {
+            return Result.Failure(HasDependencies());
+        }
+
         driver.IsActive = false;
         dbContext.Drivers.Remove(driver);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -232,4 +251,9 @@ public sealed class DriverService(
         Error.NotFound(
             "Drivers.NotFound",
             $"لم يتم العثور على السائق رقم {id}.");
+
+    private static Error HasDependencies() =>
+        Error.Conflict(
+            "Drivers.HasDependencies",
+            "لا يمكن حذف السائق لارتباطه بفواتير أو رحلات حالية أو تاريخية.");
 }
