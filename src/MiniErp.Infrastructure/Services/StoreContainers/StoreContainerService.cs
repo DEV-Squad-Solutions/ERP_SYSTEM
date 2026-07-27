@@ -22,11 +22,25 @@ public sealed class StoreContainerService(
 
     public async Task<Result<PagedResponse<StoreContainerResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        StoreContainerFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
+        filters ??= new StoreContainerFilterRequest();
         var query = dbContext.StoreContainers
             .AsNoTracking()
             .Where(assignment => assignment.CompanyId == companyId)
+            .Where(assignment =>
+                !filters.StoreId.HasValue ||
+                assignment.StoreId == filters.StoreId.Value)
+            .Where(assignment =>
+                !filters.ContainerId.HasValue ||
+                assignment.ContainerId == filters.ContainerId.Value)
+            .Where(assignment =>
+                !filters.BusinessPartnerId.HasValue ||
+                assignment.Store.BusinessPartnerId == filters.BusinessPartnerId.Value)
+            .Where(assignment =>
+                !filters.IsActive.HasValue ||
+                assignment.IsActive == filters.IsActive.Value)
             .OrderBy(assignment => assignment.Store.Name)
             .ThenBy(assignment => assignment.Container.Name)
             .ThenBy(assignment => assignment.Id);

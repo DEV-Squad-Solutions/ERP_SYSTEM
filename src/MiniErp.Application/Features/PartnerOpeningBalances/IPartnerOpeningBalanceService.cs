@@ -7,6 +7,7 @@ public interface IPartnerOpeningBalanceService
 {
     Task<Result<PagedResponse<PartnerOpeningBalanceResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        PartnerOpeningBalanceFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<PartnerOpeningBalanceResponse>> GetByIdAsync(

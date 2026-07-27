@@ -16,10 +16,12 @@ public sealed class ContainersController(IContainerService containerService)
     [ProducesResponseType<PagedResponse<ContainerResponse>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] ContainerFilterRequest filters,
         CancellationToken cancellationToken)
     {
         var result = await containerService.GetAllAsync(
             pagination,
+            filters,
             cancellationToken);
         return this.ToActionResult(result);
     }

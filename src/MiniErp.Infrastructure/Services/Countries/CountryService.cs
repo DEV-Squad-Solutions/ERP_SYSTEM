@@ -16,10 +16,29 @@ public sealed class CountryService(
 {
     public async Task<Result<PagedResponse<CountryResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        CountryFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
+        filters ??= new CountryFilterRequest();
         var query = dbContext.Countries
             .AsNoTracking()
+            .Where(country =>
+                string.IsNullOrWhiteSpace(filters.Search) ||
+                country.Code.Contains(filters.Search.Trim()) ||
+                country.Name.Contains(filters.Search.Trim()) ||
+                country.ArabicName.Contains(filters.Search.Trim()))
+            .Where(country =>
+                string.IsNullOrWhiteSpace(filters.Code) ||
+                country.Code.Contains(filters.Code.Trim()))
+            .Where(country =>
+                string.IsNullOrWhiteSpace(filters.Name) ||
+                country.Name.Contains(filters.Name.Trim()))
+            .Where(country =>
+                string.IsNullOrWhiteSpace(filters.ArabicName) ||
+                country.ArabicName.Contains(filters.ArabicName.Trim()))
+            .Where(country =>
+                !filters.IsActive.HasValue ||
+                country.IsActive == filters.IsActive.Value)
             .OrderBy(country => country.Name)
             .ThenBy(country => country.Id);
 

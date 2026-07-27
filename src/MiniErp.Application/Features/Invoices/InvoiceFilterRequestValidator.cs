@@ -7,6 +7,10 @@ public sealed class InvoiceFilterRequestValidator
 {
     public InvoiceFilterRequestValidator()
     {
+        RuleFor(filter => filter.Search)
+            .MaximumLength(256)
+            .When(filter => filter.Search is not null);
+
         RuleFor(filter => filter.InvoiceNumber)
             .MaximumLength(InvoiceRequest.InvoiceNumberMaximumLength)
             .When(filter =>

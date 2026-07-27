@@ -7,6 +7,7 @@ public interface IBusinessPartnerService
 {
     Task<Result<PagedResponse<BusinessPartnerResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        BusinessPartnerFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(

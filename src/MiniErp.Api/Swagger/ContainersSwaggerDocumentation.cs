@@ -20,8 +20,8 @@ public sealed class ContainersSwaggerDocumentation : IOperationFilter
             nameof(ContainersController.GetAll) => (
                 "Get paginated containers",
                 SwaggerOperationDescription.Create(
-                    "Returns one deterministic page of non-deleted reusable container types for the selected company, ordered by name and ID. The list includes active and inactive records.",
-                    "A bearer token containing one `company_id`. Pagination fields are optional and default to page 1 with 20 items.",
+                    "Returns one deterministic page of non-deleted reusable container types for the selected company, ordered by name and ID. Supplied filters are combined with AND.",
+                    "A bearer token containing one `company_id`. Optional query fields are `pageNumber`, `pageSize`, `search`, `code`, `name`, and `isActive`.",
                     "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100.",
                     "Invalid pagination returns 400. A page beyond the result set is empty. Other-company and soft-deleted containers are excluded.")),
             nameof(ContainersController.GetSelect) => (

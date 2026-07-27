@@ -17,9 +17,13 @@ public sealed class CompaniesController(ICompanyService companyService)
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] CompanyFilterRequest filters,
         CancellationToken cancellationToken)
     {
-        var result = await companyService.GetAllAsync(pagination, cancellationToken);
+        var result = await companyService.GetAllAsync(
+            pagination,
+            filters,
+            cancellationToken);
         return this.ToActionResult(result);
     }
 

@@ -18,10 +18,12 @@ public sealed class BusinessPartnersController(
         StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] BusinessPartnerFilterRequest filters,
         CancellationToken cancellationToken)
     {
         var result = await businessPartnerService.GetAllAsync(
             pagination,
+            filters,
             cancellationToken);
         return this.ToActionResult(result);
     }

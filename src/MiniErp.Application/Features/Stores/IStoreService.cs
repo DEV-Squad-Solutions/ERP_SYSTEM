@@ -7,6 +7,7 @@ public interface IStoreService
 {
     Task<Result<PagedResponse<StoreResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        StoreFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(

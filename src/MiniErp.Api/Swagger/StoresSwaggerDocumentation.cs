@@ -20,9 +20,9 @@ public sealed class StoresSwaggerDocumentation : IOperationFilter
             nameof(StoresController.GetAll) => (
                 "Get stores",
                 SwaggerOperationDescription.Create(
-                    "Returns a deterministic page of non-deleted product and customer container stores for the selected company, ordered by name and ID. Container stores include their linked business-partner ID and name.",
-                    "A bearer token containing one `company_id`. Pagination fields are optional and default to page 1 with 20 items.",
-                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100.",
+                    "Returns a deterministic page of non-deleted product and customer container stores for the selected company, ordered by name and ID. Supplied filters are combined with AND.",
+                    "A bearer token containing one `company_id`. Optional query fields are `pageNumber`, `pageSize`, `search`, `code`, `name`, `businessPartnerId`, `isContainerStore`, and `isActive`.",
+                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100; and `businessPartnerId` must be positive.",
                     "Invalid pagination returns 400. A page beyond the result set is empty. Other-company and soft-deleted stores are excluded.")),
             nameof(StoresController.GetSelect) => (
                 "Get active stores for selection",

@@ -18,10 +18,34 @@ public sealed class CompanyService(
 {
     public async Task<Result<PagedResponse<CompanyResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        CompanyFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
+        filters ??= new CompanyFilterRequest();
         var query = dbContext.Companies
             .AsNoTracking()
+            .Where(company =>
+                string.IsNullOrWhiteSpace(filters.Search) ||
+                company.Name.Contains(filters.Search.Trim()) ||
+                company.Address.Contains(filters.Search.Trim()) ||
+                company.CommercialRegister.Contains(filters.Search.Trim()) ||
+                company.TaxNumber.Contains(filters.Search.Trim()) ||
+                company.ManagerName.Contains(filters.Search.Trim()))
+            .Where(company =>
+                string.IsNullOrWhiteSpace(filters.Name) ||
+                company.Name.Contains(filters.Name.Trim()))
+            .Where(company =>
+                string.IsNullOrWhiteSpace(filters.Address) ||
+                company.Address.Contains(filters.Address.Trim()))
+            .Where(company =>
+                string.IsNullOrWhiteSpace(filters.CommercialRegister) ||
+                company.CommercialRegister.Contains(filters.CommercialRegister.Trim()))
+            .Where(company =>
+                string.IsNullOrWhiteSpace(filters.TaxNumber) ||
+                company.TaxNumber.Contains(filters.TaxNumber.Trim()))
+            .Where(company =>
+                string.IsNullOrWhiteSpace(filters.ManagerName) ||
+                company.ManagerName.Contains(filters.ManagerName.Trim()))
             .OrderBy(company => company.Name)
             .ThenBy(company => company.Id);
 

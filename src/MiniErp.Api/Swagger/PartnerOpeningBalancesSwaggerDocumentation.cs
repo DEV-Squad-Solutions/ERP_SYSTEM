@@ -21,9 +21,9 @@ public sealed class PartnerOpeningBalancesSwaggerDocumentation : IOperationFilte
             nameof(PartnerOpeningBalancesController.GetAll) => (
                 "Get paginated partner opening balances",
                 SwaggerOperationDescription.Create(
-                    "Returns one deterministic page of partner opening balances owned by the selected company. Every item is the complete detail response and includes the business partner ID and name, document fields, balance type, currency, amount, notes, and row-version token.",
-                    "A bearer token containing one validated `company_id`; `pageNumber` and `pageSize` are optional.",
-                    "`pageNumber` must be greater than zero and `pageSize` must be between 1 and 100. Currency and balance type are returned as enum names.",
+                    "Returns one deterministic page of partner opening balances owned by the selected company. Supplied filters are combined with AND. Every item is the complete detail response.",
+                    "A bearer token containing one validated `company_id`; optional query fields are `pageNumber`, `pageSize`, `documentNumber`, `businessPartnerId`, `currency`, `balanceType`, `fromDate`, and `toDate`.",
+                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100; IDs must be positive; enum values must be supported; and `toDate` must not precede `fromDate`.",
                     "Invalid pagination returns 400. Empty and later pages return an empty `items` array. Deleted and other-company records are excluded; this endpoint never returns a reduced header-only item.")),
             nameof(PartnerOpeningBalancesController.GetById) => (
                 "Get a partner opening balance",

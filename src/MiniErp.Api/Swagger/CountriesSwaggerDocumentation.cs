@@ -20,8 +20,8 @@ public sealed class CountriesSwaggerDocumentation : IOperationFilter
             nameof(CountriesController.GetAll) => (
                 "Get paginated countries",
                 SwaggerOperationDescription.Create(
-                    "Returns one deterministic page of global, non-deleted countries, ordered by name and ID. The list includes active and inactive records.",
-                    "An authenticated access token. Pagination fields are optional and default to page 1 with 20 items.",
+                    "Returns one deterministic page of global, non-deleted countries, ordered by name and ID. Supplied filters are combined with AND.",
+                    "An authenticated access token. Optional query fields are `pageNumber`, `pageSize`, `search`, `code`, `name`, `arabicName`, and `isActive`.",
                     "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100.",
                     "Invalid pagination returns 400. A page beyond the result set is empty. Countries are global and are not filtered by the selected company.")),
             nameof(CountriesController.GetSelect) => (

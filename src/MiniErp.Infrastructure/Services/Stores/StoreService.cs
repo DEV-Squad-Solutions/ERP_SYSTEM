@@ -19,11 +19,34 @@ public sealed class StoreService(
 
     public async Task<Result<PagedResponse<StoreResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        StoreFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
+        filters ??= new StoreFilterRequest();
         var query = dbContext.Stores
             .AsNoTracking()
             .Where(store => store.CompanyId == companyId)
+            .Where(store =>
+                string.IsNullOrWhiteSpace(filters.Search) ||
+                store.Code.Contains(filters.Search.Trim()) ||
+                store.Name.Contains(filters.Search.Trim()) ||
+                (store.Address != null &&
+                 store.Address.Contains(filters.Search.Trim())))
+            .Where(store =>
+                string.IsNullOrWhiteSpace(filters.Code) ||
+                store.Code.Contains(filters.Code.Trim()))
+            .Where(store =>
+                string.IsNullOrWhiteSpace(filters.Name) ||
+                store.Name.Contains(filters.Name.Trim()))
+            .Where(store =>
+                !filters.BusinessPartnerId.HasValue ||
+                store.BusinessPartnerId == filters.BusinessPartnerId.Value)
+            .Where(store =>
+                !filters.IsContainerStore.HasValue ||
+                store.IsContainerStore == filters.IsContainerStore.Value)
+            .Where(store =>
+                !filters.IsActive.HasValue ||
+                store.IsActive == filters.IsActive.Value)
             .OrderBy(store => store.Name)
             .ThenBy(store => store.Id);
 

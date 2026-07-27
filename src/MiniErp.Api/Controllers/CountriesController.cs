@@ -16,10 +16,12 @@ public sealed class CountriesController(ICountryService countryService)
     [ProducesResponseType<PagedResponse<CountryResponse>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] CountryFilterRequest filters,
         CancellationToken cancellationToken)
     {
         var result = await countryService.GetAllAsync(
             pagination,
+            filters,
             cancellationToken);
         return this.ToActionResult(result);
     }

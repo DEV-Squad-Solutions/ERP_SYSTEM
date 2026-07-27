@@ -20,9 +20,9 @@ public sealed class StoreContainersSwaggerDocumentation : IOperationFilter
             nameof(StoreContainersController.GetAll) => (
                 "Get paginated store-container assignments",
                 SwaggerOperationDescription.Create(
-                    "Returns one deterministic page of non-deleted container assignments for the selected company, ordered by store name, container name, and assignment ID. Store, partner, and container display fields are projected in one database query.",
-                    "A bearer token containing one `company_id`. Pagination fields are optional and default to page 1 with 20 items.",
-                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100.",
+                    "Returns one deterministic page of non-deleted container assignments for the selected company, ordered by store name, container name, and assignment ID. Supplied filters are combined with AND.",
+                    "A bearer token containing one `company_id`. Optional query fields are `pageNumber`, `pageSize`, `storeId`, `containerId`, `businessPartnerId`, and `isActive`.",
+                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100; and supplied IDs must be positive.",
                     "Invalid pagination returns 400. A page beyond the result set is empty. Active and inactive assignments are included; deleted and other-company assignments are excluded.")),
             nameof(StoreContainersController.GetSelect) => (
                 "Get containers assigned to a store",

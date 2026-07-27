@@ -20,6 +20,7 @@ public sealed class UserService(
 {
     public async Task<Result<PagedResponse<UserResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        UserFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
         if (pagination.PageNumber <= 0 ||
@@ -28,8 +29,27 @@ public sealed class UserService(
             return Result<PagedResponse<UserResponse>>.Failure(InvalidPagination());
         }
 
+        filters ??= new UserFilterRequest();
         var query = dbContext.Users
             .AsNoTracking()
+            .Where(user =>
+                string.IsNullOrWhiteSpace(filters.Search) ||
+                (user.UserName != null && user.UserName.Contains(filters.Search.Trim())) ||
+                (user.Email != null && user.Email.Contains(filters.Search.Trim())) ||
+                user.FirstName.Contains(filters.Search.Trim()) ||
+                user.LastName.Contains(filters.Search.Trim()))
+            .Where(user =>
+                string.IsNullOrWhiteSpace(filters.UserName) ||
+                (user.UserName != null && user.UserName.Contains(filters.UserName.Trim())))
+            .Where(user =>
+                string.IsNullOrWhiteSpace(filters.Email) ||
+                (user.Email != null && user.Email.Contains(filters.Email.Trim())))
+            .Where(user =>
+                string.IsNullOrWhiteSpace(filters.FirstName) ||
+                user.FirstName.Contains(filters.FirstName.Trim()))
+            .Where(user =>
+                string.IsNullOrWhiteSpace(filters.LastName) ||
+                user.LastName.Contains(filters.LastName.Trim()))
             .OrderBy(user => user.UserName)
             .ThenBy(user => user.Id);
         var totalCount = await query.CountAsync(cancellationToken);

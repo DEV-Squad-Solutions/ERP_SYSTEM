@@ -2452,6 +2452,24 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public async Task GetAll_SearchMatchesInvoiceDisplayValues()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await SeedInvoiceFilterDataAsync(database);
+
+        var result = await database.CreateService().GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest(),
+            new InvoiceFilterRequest
+            {
+                Search = "FILTER-PURCHASE"
+            });
+
+        Assert.True(result.IsSuccess);
+        var invoice = Assert.Single(result.Value.Items);
+        Assert.Equal("FILTER-PURCHASE-002", invoice.InvoiceNumber);
+    }
+
+    [Fact]
     public async Task GetAll_ReturnsSummaryForTheCompleteFilteredResult()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();

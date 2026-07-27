@@ -20,9 +20,9 @@ public sealed class DriversSwaggerDocumentation : IOperationFilter
             nameof(DriversController.GetAll) => (
                 "Get paginated drivers",
                 SwaggerOperationDescription.Create(
-                    "Returns a deterministic page of non-deleted drivers for the selected company, ordered by name and ID.",
-                    "A bearer token containing one `company_id`. Pagination fields are optional and default to page 1 with 20 items.",
-                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100.",
+                    "Returns a deterministic page of non-deleted drivers for the selected company, ordered by name and ID. Supplied filters are combined with AND.",
+                    "A bearer token containing one `company_id`. Optional query fields are `pageNumber`, `pageSize`, `search`, `code`, `name`, `licenseNumber`, `isActive`, `hasExpiredLicense`, `licenseExpiryFrom`, and `licenseExpiryTo`.",
+                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100; and the license-expiry range must be ordered.",
                     "Invalid pagination returns 400. A page beyond the result set is empty. Expired and inactive drivers remain visible in this administrative list.")),
             nameof(DriversController.GetSelect) => (
                 "Get available drivers for selection",

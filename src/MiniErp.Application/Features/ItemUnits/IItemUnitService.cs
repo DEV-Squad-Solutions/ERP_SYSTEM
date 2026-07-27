@@ -7,6 +7,7 @@ public interface IItemUnitService
 {
     Task<Result<PagedResponse<ItemUnitResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        ItemUnitFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(

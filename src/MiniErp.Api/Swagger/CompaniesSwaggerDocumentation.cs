@@ -20,8 +20,8 @@ public sealed class CompaniesSwaggerDocumentation : IOperationFilter
             nameof(CompaniesController.GetAll) => (
                 "Get all companies",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Returns a deterministic page of non-deleted companies ordered by name and ID.",
-                    "An Admin bearer token. `pageNumber` and `pageSize` are optional and default to 1 and 20.",
+                    "Admin only. Returns a deterministic page of non-deleted companies ordered by name and ID. Supplied filters are combined with AND.",
+                    "An Admin bearer token. Optional query fields are `pageNumber`, `pageSize`, `search`, `name`, `address`, `commercialRegister`, `taxNumber`, and `managerName`.",
                     "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100.",
                     "Invalid pagination returns 400. A page beyond the available data returns an empty item list with valid pagination metadata.")),
             nameof(CompaniesController.GetSelect) => (

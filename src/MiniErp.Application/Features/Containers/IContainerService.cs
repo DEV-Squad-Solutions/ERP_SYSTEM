@@ -7,6 +7,7 @@ public interface IContainerService
 {
     Task<Result<PagedResponse<ContainerResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        ContainerFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(

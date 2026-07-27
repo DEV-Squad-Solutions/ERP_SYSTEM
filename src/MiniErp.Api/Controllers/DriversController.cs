@@ -16,10 +16,12 @@ public sealed class DriversController(IDriverService driverService)
     [ProducesResponseType<PagedResponse<DriverResponse>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] DriverFilterRequest filters,
         CancellationToken cancellationToken)
     {
         var result = await driverService.GetAllAsync(
             pagination,
+            filters,
             cancellationToken);
         return this.ToActionResult(result);
     }

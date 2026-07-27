@@ -21,9 +21,9 @@ public sealed class StockOpeningBalancesSwaggerDocumentation : IOperationFilter
             nameof(StockOpeningBalancesController.GetAll) => (
                 "Get paginated stock opening balances",
                 SwaggerOperationDescription.Create(
-                    "Returns one deterministic page of stock opening balances owned by the selected company. Every item includes its complete ordered line details, nullable item-unit information, calculated quantity and total, line count, and row-version token.",
-                    "A bearer token containing one validated `company_id`; `pageNumber` and `pageSize` are optional.",
-                    "`pageNumber` must be greater than zero and `pageSize` must be between 1 and 100.",
+                    "Returns one deterministic page of stock opening balances owned by the selected company. Supplied filters are combined with AND. Every item includes its complete ordered line details and row-version token.",
+                    "A bearer token containing one validated `company_id`; optional query fields are `pageNumber`, `pageSize`, `documentNumber`, `storeId`, `fromDate`, and `toDate`.",
+                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100; `storeId` must be positive; and `toDate` must not precede `fromDate`.",
                     "Invalid pagination returns 400. Empty and later pages return an empty `items` array. Deleted and other-company records are excluded.")),
             nameof(StockOpeningBalancesController.GetById) => (
                 "Get a stock opening balance",

@@ -20,9 +20,9 @@ public sealed class UsersSwaggerDocumentation : IOperationFilter
             nameof(UsersController.GetAll) => (
                 "Get paginated users",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Returns users with all assigned roles and active companies, ordered by username and ID.",
-                    "An Admin bearer token. Pagination fields are optional and default to page 1 with 20 items.",
-                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100.",
+                    "Admin only. Returns users with all assigned roles and active companies, ordered by username and ID. Supplied filters are combined with AND.",
+                    "An Admin bearer token. Optional query fields are `pageNumber`, `pageSize`, `search`, `userName`, `email`, `firstName`, and `lastName`.",
+                    "`pageNumber` must be greater than zero and `pageSize` must be between 1 and 100.",
                     "Invalid pagination returns 400. A page beyond the result set returns an empty item list with valid metadata.")),
             nameof(UsersController.GetRoles) => (
                 "Get available roles",

@@ -20,8 +20,8 @@ public sealed class ItemUnitsSwaggerDocumentation : IOperationFilter
             nameof(ItemUnitsController.GetAll) => (
                 "Get paginated item units",
                 SwaggerOperationDescription.Create(
-                    "Returns one deterministic page of non-deleted item units for the selected company with total-count metadata.",
-                    "A bearer token containing one `company_id`. Pagination fields are optional and default to page 1 with 20 items.",
+                    "Returns one deterministic page of non-deleted item units for the selected company with total-count metadata. Supplied filters are combined with AND.",
+                    "A bearer token containing one `company_id`. Optional query fields are `pageNumber`, `pageSize`, `search`, `name`, and `isActive`.",
                     "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100.",
                     "Invalid pagination returns 400. A page beyond the result set is empty. Other-company and soft-deleted units are excluded.")),
             nameof(ItemUnitsController.GetSelect) => (

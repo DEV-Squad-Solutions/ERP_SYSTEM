@@ -20,11 +20,31 @@ public sealed class PartnerOpeningBalanceService(
 
     public async Task<Result<PagedResponse<PartnerOpeningBalanceResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        PartnerOpeningBalanceFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
+        filters ??= new PartnerOpeningBalanceFilterRequest();
         var query = dbContext.PartnerOpeningBalances
             .AsNoTracking()
             .Where(balance => balance.CompanyId == companyId)
+            .Where(balance =>
+                string.IsNullOrWhiteSpace(filters.DocumentNumber) ||
+                balance.DocumentNumber.Contains(filters.DocumentNumber.Trim()))
+            .Where(balance =>
+                !filters.BusinessPartnerId.HasValue ||
+                balance.BusinessPartnerId == filters.BusinessPartnerId.Value)
+            .Where(balance =>
+                !filters.Currency.HasValue ||
+                balance.Currency == filters.Currency.Value)
+            .Where(balance =>
+                !filters.BalanceType.HasValue ||
+                balance.BalanceType == filters.BalanceType.Value)
+            .Where(balance =>
+                !filters.FromDate.HasValue ||
+                balance.DocumentDate >= filters.FromDate.Value)
+            .Where(balance =>
+                !filters.ToDate.HasValue ||
+                balance.DocumentDate <= filters.ToDate.Value)
             .OrderByDescending(balance => balance.DocumentDate)
             .ThenByDescending(balance => balance.Id);
 

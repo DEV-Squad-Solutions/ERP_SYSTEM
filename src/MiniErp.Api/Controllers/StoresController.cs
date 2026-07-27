@@ -18,9 +18,13 @@ public sealed class StoresController(IStoreService storeService)
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] StoreFilterRequest filters,
         CancellationToken cancellationToken)
     {
-        var result = await storeService.GetAllAsync(pagination, cancellationToken);
+        var result = await storeService.GetAllAsync(
+            pagination,
+            filters,
+            cancellationToken);
         return this.ToActionResult(result);
     }
 

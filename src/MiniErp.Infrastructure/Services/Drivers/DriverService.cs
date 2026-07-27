@@ -20,11 +20,48 @@ public sealed class DriverService(
 
     public async Task<Result<PagedResponse<DriverResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        DriverFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
+        filters ??= new DriverFilterRequest();
+        var today = DateOnly.FromDateTime(
+            timeProvider.GetUtcNow().UtcDateTime);
         var query = dbContext.Drivers
             .AsNoTracking()
             .Where(driver => driver.CompanyId == companyId)
+            .Where(driver =>
+                string.IsNullOrWhiteSpace(filters.Search) ||
+                driver.Code.Contains(filters.Search.Trim()) ||
+                driver.Name.Contains(filters.Search.Trim()) ||
+                driver.LicenseNumber.Contains(filters.Search.Trim()) ||
+                (driver.PhoneNumber != null &&
+                 driver.PhoneNumber.Contains(filters.Search.Trim())) ||
+                (driver.NationalId != null &&
+                 driver.NationalId.Contains(filters.Search.Trim())))
+            .Where(driver =>
+                string.IsNullOrWhiteSpace(filters.Code) ||
+                driver.Code.Contains(filters.Code.Trim()))
+            .Where(driver =>
+                string.IsNullOrWhiteSpace(filters.Name) ||
+                driver.Name.Contains(filters.Name.Trim()))
+            .Where(driver =>
+                string.IsNullOrWhiteSpace(filters.LicenseNumber) ||
+                driver.LicenseNumber.Contains(filters.LicenseNumber.Trim()))
+            .Where(driver =>
+                !filters.IsActive.HasValue ||
+                driver.IsActive == filters.IsActive.Value)
+            .Where(driver =>
+                !filters.HasExpiredLicense.HasValue ||
+                (driver.LicenseExpiryDate.HasValue &&
+                 driver.LicenseExpiryDate.Value < today) == filters.HasExpiredLicense.Value)
+            .Where(driver =>
+                !filters.LicenseExpiryFrom.HasValue ||
+                (driver.LicenseExpiryDate.HasValue &&
+                 driver.LicenseExpiryDate.Value >= filters.LicenseExpiryFrom.Value))
+            .Where(driver =>
+                !filters.LicenseExpiryTo.HasValue ||
+                (driver.LicenseExpiryDate.HasValue &&
+                 driver.LicenseExpiryDate.Value <= filters.LicenseExpiryTo.Value))
             .OrderBy(driver => driver.Name)
             .ThenBy(driver => driver.Id);
 

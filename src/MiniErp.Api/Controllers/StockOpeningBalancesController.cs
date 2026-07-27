@@ -18,10 +18,12 @@ public sealed class StockOpeningBalancesController(
         StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] StockOpeningBalanceFilterRequest filters,
         CancellationToken cancellationToken)
     {
         var result = await stockOpeningBalanceService.GetAllAsync(
             pagination,
+            filters,
             cancellationToken);
         return this.ToActionResult(result);
     }

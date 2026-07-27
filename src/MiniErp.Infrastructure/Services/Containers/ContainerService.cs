@@ -19,11 +19,28 @@ public sealed class ContainerService(
 
     public async Task<Result<PagedResponse<ContainerResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        ContainerFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
+        filters ??= new ContainerFilterRequest();
         var query = dbContext.Containers
             .AsNoTracking()
             .Where(container => container.CompanyId == companyId)
+            .Where(container =>
+                string.IsNullOrWhiteSpace(filters.Search) ||
+                container.Code.Contains(filters.Search.Trim()) ||
+                container.Name.Contains(filters.Search.Trim()) ||
+                (container.Description != null &&
+                 container.Description.Contains(filters.Search.Trim())))
+            .Where(container =>
+                string.IsNullOrWhiteSpace(filters.Code) ||
+                container.Code.Contains(filters.Code.Trim()))
+            .Where(container =>
+                string.IsNullOrWhiteSpace(filters.Name) ||
+                container.Name.Contains(filters.Name.Trim()))
+            .Where(container =>
+                !filters.IsActive.HasValue ||
+                container.IsActive == filters.IsActive.Value)
             .OrderBy(container => container.Name)
             .ThenBy(container => container.Id);
 

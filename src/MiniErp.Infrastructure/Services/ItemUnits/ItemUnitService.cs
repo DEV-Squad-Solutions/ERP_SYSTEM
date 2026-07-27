@@ -19,11 +19,22 @@ public sealed class ItemUnitService(
 
     public async Task<Result<PagedResponse<ItemUnitResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        ItemUnitFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
+        filters ??= new ItemUnitFilterRequest();
         var query = dbContext.ItemUnits
             .AsNoTracking()
             .Where(itemUnit => itemUnit.CompanyId == companyId)
+            .Where(itemUnit =>
+                string.IsNullOrWhiteSpace(filters.Search) ||
+                itemUnit.Name.Contains(filters.Search.Trim()))
+            .Where(itemUnit =>
+                string.IsNullOrWhiteSpace(filters.Name) ||
+                itemUnit.Name.Contains(filters.Name.Trim()))
+            .Where(itemUnit =>
+                !filters.IsActive.HasValue ||
+                itemUnit.IsActive == filters.IsActive.Value)
             .OrderBy(itemUnit => itemUnit.Name)
             .ThenBy(itemUnit => itemUnit.Id);
 

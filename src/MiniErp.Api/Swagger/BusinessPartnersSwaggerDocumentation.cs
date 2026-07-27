@@ -20,9 +20,9 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
             nameof(BusinessPartnersController.GetAll) => (
                 "Get paginated business partners",
                 SwaggerOperationDescription.Create(
-                    "Returns a deterministic page of shared customer/supplier records for the selected company, ordered by name and ID. Each item also includes its active container Store, when present, and only the active Containers assigned to that Store. Every returned Container has `isAssigned: true` and its `storeContainerId`.",
-                    "A bearer token containing one `company_id`. Pagination fields are optional and default to page 1 with 20 items.",
-                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100.",
+                    "Returns a deterministic page of shared customer/supplier records for the selected company, ordered by name and ID. Supplied filters are combined with AND. Each item also includes its active container Store and active assigned Containers.",
+                    "A bearer token containing one `company_id`. Optional query fields are `pageNumber`, `pageSize`, `search`, `code`, `name`, `taxNumber`, `currency`, and `isActive`.",
+                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100; and enum values must be supported.",
                     "Invalid pagination returns 400. Pages beyond the result set are empty. Records from other companies and soft-deleted records are never returned. Partners without an active container Store or active assignments return an empty `containers` array.")),
             nameof(BusinessPartnersController.GetSelect) => (
                 "Get active business partners for selection",

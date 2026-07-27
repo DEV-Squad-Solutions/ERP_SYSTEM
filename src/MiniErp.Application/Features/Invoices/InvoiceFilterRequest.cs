@@ -9,6 +9,7 @@ public enum InvoicePriceStatus
 }
 
 public sealed record InvoiceFilterRequest(
+    string? Search = null,
     string? InvoiceNumber = null,
     InvoiceType? InvoiceType = null,
     int? BusinessPartnerId = null,

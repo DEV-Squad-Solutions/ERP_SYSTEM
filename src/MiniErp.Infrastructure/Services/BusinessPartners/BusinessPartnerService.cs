@@ -21,11 +21,15 @@ public sealed class BusinessPartnerService(
 
     public async Task<Result<PagedResponse<BusinessPartnerResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        BusinessPartnerFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
-        var query = dbContext.BusinessPartners
+        filters ??= new BusinessPartnerFilterRequest();
+        var query = ApplyFilters(
+            dbContext.BusinessPartners
             .AsNoTracking()
-            .Where(partner => partner.CompanyId == companyId)
+            .Where(partner => partner.CompanyId == companyId),
+            filters)
             .OrderBy(partner => partner.Name)
             .ThenBy(partner => partner.Id);
 
@@ -87,6 +91,53 @@ public sealed class BusinessPartnerService(
 
         return Result<PagedResponse<BusinessPartnerResponse>>.Success(
             pageResult.Value with { Items = enrichedItems });
+    }
+
+    private static IQueryable<BusinessPartner> ApplyFilters(
+        IQueryable<BusinessPartner> query,
+        BusinessPartnerFilterRequest filters)
+    {
+        var search = filters.Search?.Trim();
+        if (!string.IsNullOrEmpty(search))
+        {
+            query = query.Where(partner =>
+                partner.Code.Contains(search) ||
+                partner.Name.Contains(search) ||
+                (partner.PhoneNumber != null && partner.PhoneNumber.Contains(search)) ||
+                (partner.Email != null && partner.Email.Contains(search)) ||
+                (partner.TaxNumber != null && partner.TaxNumber.Contains(search)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(filters.Code))
+        {
+            query = query.Where(partner =>
+                partner.Code.Contains(filters.Code.Trim()));
+        }
+
+        if (!string.IsNullOrWhiteSpace(filters.Name))
+        {
+            query = query.Where(partner =>
+                partner.Name.Contains(filters.Name.Trim()));
+        }
+
+        if (!string.IsNullOrWhiteSpace(filters.TaxNumber))
+        {
+            query = query.Where(partner =>
+                partner.TaxNumber != null &&
+                partner.TaxNumber.Contains(filters.TaxNumber.Trim()));
+        }
+
+        if (filters.Currency.HasValue)
+        {
+            query = query.Where(partner => partner.Currency == filters.Currency.Value);
+        }
+
+        if (filters.IsActive.HasValue)
+        {
+            query = query.Where(partner => partner.IsActive == filters.IsActive.Value);
+        }
+
+        return query;
     }
 
     public async Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(

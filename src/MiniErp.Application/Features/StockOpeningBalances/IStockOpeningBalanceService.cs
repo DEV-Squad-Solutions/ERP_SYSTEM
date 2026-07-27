@@ -7,6 +7,7 @@ public interface IStockOpeningBalanceService
 {
     Task<Result<PagedResponse<StockOpeningBalanceListResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        StockOpeningBalanceFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<StockOpeningBalanceResponse>> GetByIdAsync(

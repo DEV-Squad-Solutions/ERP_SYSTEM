@@ -7,6 +7,7 @@ public interface ICountryService
 {
     Task<Result<PagedResponse<CountryResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        CountryFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(

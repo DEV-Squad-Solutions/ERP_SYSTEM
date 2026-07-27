@@ -18,10 +18,12 @@ public sealed class StoreContainersController(
         StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] StoreContainerFilterRequest filters,
         CancellationToken cancellationToken)
     {
         var result = await storeContainerService.GetAllAsync(
             pagination,
+            filters,
             cancellationToken);
         return this.ToActionResult(result);
     }

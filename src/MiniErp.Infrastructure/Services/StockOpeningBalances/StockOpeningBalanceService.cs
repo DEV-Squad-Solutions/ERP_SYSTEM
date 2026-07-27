@@ -19,11 +19,25 @@ public sealed class StockOpeningBalanceService(
 
     public async Task<Result<PagedResponse<StockOpeningBalanceListResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        StockOpeningBalanceFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
+        filters ??= new StockOpeningBalanceFilterRequest();
         var query = dbContext.StockOpeningBalances
             .AsNoTracking()
             .Where(balance => balance.CompanyId == companyId)
+            .Where(balance =>
+                string.IsNullOrWhiteSpace(filters.DocumentNumber) ||
+                balance.DocumentNumber.Contains(filters.DocumentNumber.Trim()))
+            .Where(balance =>
+                !filters.StoreId.HasValue ||
+                balance.StoreId == filters.StoreId.Value)
+            .Where(balance =>
+                !filters.FromDate.HasValue ||
+                balance.DocumentDate >= filters.FromDate.Value)
+            .Where(balance =>
+                !filters.ToDate.HasValue ||
+                balance.DocumentDate <= filters.ToDate.Value)
             .OrderByDescending(balance => balance.DocumentDate)
             .ThenByDescending(balance => balance.Id);
 

@@ -11,6 +11,42 @@ public sealed partial class InvoiceService
         IQueryable<Invoice> query,
         InvoiceFilterRequest filters)
     {
+        var search = filters.Search?.Trim();
+        if (!string.IsNullOrEmpty(search))
+        {
+            query = query.Where(invoice =>
+                invoice.InvoiceNumber.Contains(search) ||
+                (invoice.ExportInvoiceCode != null &&
+                 invoice.ExportInvoiceCode.Contains(search)) ||
+                invoice.BusinessPartner.Code.Contains(search) ||
+                invoice.BusinessPartner.Name.Contains(search) ||
+                invoice.Store.Code.Contains(search) ||
+                invoice.Store.Name.Contains(search) ||
+                (invoice.ContainerStore != null &&
+                 (invoice.ContainerStore.Code.Contains(search) ||
+                  invoice.ContainerStore.Name.Contains(search))) ||
+                (invoice.Country != null &&
+                 (invoice.Country.Code.Contains(search) ||
+                  invoice.Country.Name.Contains(search) ||
+                  invoice.Country.ArabicName.Contains(search))) ||
+                (invoice.Driver != null &&
+                 (invoice.Driver.Code.Contains(search) ||
+                  invoice.Driver.Name.Contains(search))) ||
+                (invoice.ActualDriver != null &&
+                 (invoice.ActualDriver.Code.Contains(search) ||
+                  invoice.ActualDriver.Name.Contains(search))) ||
+                (invoice.ExternalDriverName != null &&
+                 invoice.ExternalDriverName.Contains(search)) ||
+                (invoice.VehicleNumber != null &&
+                 invoice.VehicleNumber.Contains(search)) ||
+                invoice.Lines.Any(line =>
+                    line.Item.Code.Contains(search) ||
+                    line.Item.Name.Contains(search)) ||
+                invoice.ContainerLines.Any(line =>
+                    line.Container.Code.Contains(search) ||
+                    line.Container.Name.Contains(search)));
+        }
+
         var invoiceNumber = filters.InvoiceNumber?.Trim();
         if (!string.IsNullOrEmpty(invoiceNumber))
         {
