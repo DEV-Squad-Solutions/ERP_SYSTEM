@@ -82,6 +82,39 @@ public sealed partial class InvoiceService
         return query;
     }
 
+    private static async Task<(int TotalCount, InvoiceSummaryResponse Summary)>
+        GetSummaryAsync(
+            IQueryable<Invoice> query,
+            CancellationToken cancellationToken)
+    {
+        var totals = await query
+            .GroupBy(_ => 1)
+            .Select(invoices => new
+            {
+                TotalCount = invoices.Count(),
+                Subtotal = invoices.Sum(invoice =>
+                    invoice.Total + invoice.DiscountAmount),
+                DiscountAmount = invoices.Sum(invoice =>
+                    invoice.DiscountAmount),
+                Total = invoices.Sum(invoice => invoice.Total),
+                PaidAmount = invoices.Sum(invoice => invoice.PaidAmount),
+                RemainingAmount = invoices.Sum(invoice =>
+                    invoice.Total - invoice.PaidAmount)
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return totals is null
+            ? (0, new InvoiceSummaryResponse(0m, 0m, 0m, 0m, 0m))
+            : (
+                totals.TotalCount,
+                new InvoiceSummaryResponse(
+                    totals.Subtotal,
+                    totals.DiscountAmount,
+                    totals.Total,
+                    totals.PaidAmount,
+                    totals.RemainingAmount));
+    }
+
     private IQueryable<InvoiceResponse> ProjectResponseQuery(int id) =>
         dbContext.Invoices
             .Where(invoice =>

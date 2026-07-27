@@ -19,7 +19,7 @@ public sealed partial class InvoiceService(
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
 
-    public async Task<Result<PagedResponse<InvoiceListResponse>>> GetAllAsync(
+    public async Task<Result<InvoicePagedResponse>> GetAllAsync(
         PaginationRequest pagination,
         InvoiceFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
@@ -28,7 +28,7 @@ public sealed partial class InvoiceService(
         var filterError = ValidateFilters(filters);
         if (filterError is not null)
         {
-            return Result<PagedResponse<InvoiceListResponse>>.Failure(
+            return Result<InvoicePagedResponse>.Failure(
                 filterError);
         }
 
@@ -42,12 +42,30 @@ public sealed partial class InvoiceService(
             .OrderByDescending(invoice => invoice.InvoiceDate)
             .ThenByDescending(invoice => invoice.Id);
 
-        return await paginationService.PaginateAsync<
+        var aggregate = await GetSummaryAsync(query, cancellationToken);
+        var pageResult = await paginationService.PaginateAsync<
             Invoice,
             InvoiceListResponse>(
             orderedQuery,
             pagination,
+            aggregate.TotalCount,
             cancellationToken);
+
+        if (pageResult.IsFailure)
+        {
+            return Result<InvoicePagedResponse>.Failure(pageResult.Error);
+        }
+
+        var page = pageResult.Value;
+
+        return Result<InvoicePagedResponse>.Success(
+            new InvoicePagedResponse(
+                page.Items,
+                page.PageNumber,
+                page.PageSize,
+                page.TotalCount,
+                page.TotalPages,
+                aggregate.Summary));
     }
 
     public async Task<Result<InvoiceResponse>> GetByIdAsync(

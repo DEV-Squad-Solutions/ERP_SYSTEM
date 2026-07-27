@@ -111,13 +111,7 @@ public sealed class InvoiceMappingRegister : IRegister
                 invoice => invoice.Lines.Count)
             .Map(
                 response => response.ContainerLineCount,
-                invoice => invoice.ContainerLines.Count)
-            .Map(
-                response => response.Lines,
-                invoice => invoice.Lines.OrderBy(line => line.Id))
-            .Map(
-                response => response.ContainerLines,
-                invoice => invoice.ContainerLines.OrderBy(line => line.Id));
+                invoice => invoice.ContainerLines.Count);
     }
 
     private static void RegisterDetailsMapping(TypeAdapterConfig config)

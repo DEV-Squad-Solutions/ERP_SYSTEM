@@ -14,7 +14,7 @@ public sealed class InvoicesController(
     : ApiControllerBase
 {
     [HttpGet]
-    [ProducesResponseType<PagedResponse<InvoiceListResponse>>(
+    [ProducesResponseType<InvoicePagedResponse>(
         StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,

@@ -62,9 +62,22 @@ public sealed record InvoiceListResponse(
     string? Notes,
     int LineCount,
     int ContainerLineCount,
-    byte[] RowVersion,
-    IReadOnlyList<InvoiceLineResponse> Lines,
-    IReadOnlyList<InvoiceContainerLineResponse> ContainerLines);
+    byte[] RowVersion);
+
+public sealed record InvoiceSummaryResponse(
+    decimal Subtotal,
+    decimal DiscountAmount,
+    decimal Total,
+    decimal PaidAmount,
+    decimal RemainingAmount);
+
+public sealed record InvoicePagedResponse(
+    IReadOnlyList<InvoiceListResponse> Items,
+    int PageNumber,
+    int PageSize,
+    int TotalCount,
+    int TotalPages,
+    InvoiceSummaryResponse Summary);
 
 public sealed record InvoiceResponse(
     int Id,

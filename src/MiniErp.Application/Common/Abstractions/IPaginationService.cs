@@ -9,4 +9,10 @@ public interface IPaginationService
         IOrderedQueryable<TEntity> query,
         PaginationRequest pagination,
         CancellationToken cancellationToken = default);
+
+    Task<Result<PagedResponse<TResponse>>> PaginateAsync<TEntity, TResponse>(
+        IOrderedQueryable<TEntity> query,
+        PaginationRequest pagination,
+        int totalCount,
+        CancellationToken cancellationToken = default);
 }

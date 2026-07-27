@@ -2452,6 +2452,73 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public async Task GetAll_ReturnsSummaryForTheCompleteFilteredResult()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                discountAmount: 2m,
+                paidAmount: 5m));
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                discountAmount: 4m,
+                paidAmount: 0m));
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Cash));
+
+        var result = await service.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageSize = 1
+            },
+            new InvoiceFilterRequest
+            {
+                InvoiceType = InvoiceType.SalesReturn
+            });
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(result.Value.Items);
+        Assert.Equal(2, result.Value.TotalCount);
+        Assert.Equal(40m, result.Value.Summary.Subtotal);
+        Assert.Equal(6m, result.Value.Summary.DiscountAmount);
+        Assert.Equal(34m, result.Value.Summary.Total);
+        Assert.Equal(5m, result.Value.Summary.PaidAmount);
+        Assert.Equal(29m, result.Value.Summary.RemainingAmount);
+    }
+
+    [Fact]
+    public async Task GetAll_ReturnsZeroSummaryWhenNoInvoiceMatches()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        await service.AddAsync(CreateRequest(InvoiceType.Purchase));
+
+        var result = await service.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest(),
+            new InvoiceFilterRequest
+            {
+                InvoiceNumber = "DOES-NOT-EXIST"
+            });
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(result.Value.Items);
+        Assert.Equal(0, result.Value.TotalCount);
+        Assert.Equal(0m, result.Value.Summary.Subtotal);
+        Assert.Equal(0m, result.Value.Summary.DiscountAmount);
+        Assert.Equal(0m, result.Value.Summary.Total);
+        Assert.Equal(0m, result.Value.Summary.PaidAmount);
+        Assert.Equal(0m, result.Value.Summary.RemainingAmount);
+    }
+
+    [Fact]
     public async Task GetAll_RejectsUnsupportedInvoiceTypeFilter()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
@@ -2605,8 +2672,6 @@ public sealed class InvoiceServiceTests
         Assert.Equal(13m, item.RemainingAmount);
         Assert.Equal(1, item.LineCount);
         Assert.Equal(0, item.ContainerLineCount);
-        Assert.Single(item.Lines);
-        Assert.Empty(item.ContainerLines);
     }
 
     [Fact]
@@ -3141,10 +3206,6 @@ public sealed class InvoiceServiceTests
         Assert.Equal(1m, listResponse.RemainingAmount);
         Assert.Equal(2, listResponse.LineCount);
         Assert.Equal(2, listResponse.ContainerLineCount);
-        Assert.Equal([1, 2], listResponse.Lines.Select(line => line.Id));
-        Assert.Equal(
-            [1, 2],
-            listResponse.ContainerLines.Select(line => line.Id));
     }
 
     [Fact]

@@ -5,7 +5,7 @@ namespace MiniErp.Application.Features.Invoices;
 
 public interface IInvoiceService
 {
-    Task<Result<PagedResponse<InvoiceListResponse>>> GetAllAsync(
+    Task<Result<InvoicePagedResponse>> GetAllAsync(
         PaginationRequest pagination,
         InvoiceFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
