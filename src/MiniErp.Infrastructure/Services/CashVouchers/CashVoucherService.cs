@@ -140,9 +140,7 @@ public sealed class CashVoucherService(
         if (preparation.Value.BusinessPartner is not null)
         {
             dbContext.BusinessPartnerMovements.Add(
-                CreatePartnerMovement(
-                    voucher,
-                    preparation.Value.MovementType));
+                CreatePartnerMovement(voucher));
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -212,7 +210,6 @@ public sealed class CashVoucherService(
         {
             await SynchronizePartnerMovementAsync(
                 voucher,
-                preparation.Value.MovementType,
                 preparation.Value.BusinessPartner is not null,
                 cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -292,21 +289,6 @@ public sealed class CashVoucherService(
         CashVoucher? currentVoucher,
         CancellationToken cancellationToken)
     {
-        var duplicateExists = await dbContext.CashVouchers
-            .AsNoTracking()
-            .AnyAsync(
-                voucher =>
-                    voucher.CompanyId == companyId &&
-                    voucher.VoucherNumber == request.VoucherNumber.Trim() &&
-                    (currentVoucher == null ||
-                     voucher.Id != currentVoucher.Id),
-                cancellationToken);
-        if (duplicateExists)
-        {
-            return Result<VoucherPreparation>.Failure(
-                VoucherNumberExists(request.VoucherNumber.Trim()));
-        }
-
         var cashbox = await dbContext.Cashboxes
             .FirstOrDefaultAsync(
                 entity =>
@@ -358,7 +340,7 @@ public sealed class CashVoucherService(
             if (movementType.PartnerEffect == PartnerAccountEffect.None)
             {
                 return Result<VoucherPreparation>.Failure(
-                    PartnerEffectRequired());
+                    MovementTypeNotForPartner());
             }
 
             partner = await dbContext.BusinessPartners
@@ -384,7 +366,7 @@ public sealed class CashVoucherService(
         else if (movementType.PartnerEffect != PartnerAccountEffect.None)
         {
             return Result<VoucherPreparation>.Failure(
-                PartnerTypeRequired());
+                MovementTypeForPartnerOnly());
         }
 
         Driver? driver = null;
@@ -436,7 +418,6 @@ public sealed class CashVoucherService(
         return Result<VoucherPreparation>.Success(
             new VoucherPreparation(
                 cashbox,
-                movementType,
                 partner,
                 driver));
     }
@@ -526,15 +507,12 @@ public sealed class CashVoucherService(
     }
 
     private BusinessPartnerMovement CreatePartnerMovement(
-        CashVoucher voucher,
-        CashMovementType movementType)
+        CashVoucher voucher)
     {
-        var debit = movementType.PartnerEffect ==
-            PartnerAccountEffect.Debit
+        var debit = voucher.Direction == CashDirection.Payment
             ? voucher.Amount
             : 0m;
-        var credit = movementType.PartnerEffect ==
-            PartnerAccountEffect.Credit
+        var credit = voucher.Direction == CashDirection.Receipt
             ? voucher.Amount
             : 0m;
 
@@ -558,7 +536,6 @@ public sealed class CashVoucherService(
 
     private async Task SynchronizePartnerMovementAsync(
         CashVoucher voucher,
-        CashMovementType movementType,
         bool shouldExist,
         CancellationToken cancellationToken)
     {
@@ -582,7 +559,7 @@ public sealed class CashVoucherService(
         if (existing is null)
         {
             dbContext.BusinessPartnerMovements.Add(
-                CreatePartnerMovement(voucher, movementType));
+                CreatePartnerMovement(voucher));
             return;
         }
 
@@ -593,12 +570,10 @@ public sealed class CashVoucherService(
                 : BusinessPartnerMovementType.CashPayment;
         existing.MovementDate = voucher.VoucherDate;
         existing.Currency = voucher.Currency;
-        existing.Debit = movementType.PartnerEffect ==
-            PartnerAccountEffect.Debit
+        existing.Debit = voucher.Direction == CashDirection.Payment
             ? voucher.Amount
             : 0m;
-        existing.Credit = movementType.PartnerEffect ==
-            PartnerAccountEffect.Credit
+        existing.Credit = voucher.Direction == CashDirection.Receipt
             ? voucher.Amount
             : 0m;
         existing.Description = voucher.Description ??
@@ -614,7 +589,6 @@ public sealed class CashVoucherService(
 
     private sealed record VoucherPreparation(
         Cashbox Cashbox,
-        CashMovementType MovementType,
         BusinessPartner? BusinessPartner,
         Driver? Driver);
 
@@ -638,12 +612,6 @@ public sealed class CashVoucherService(
         Error.Conflict(
             "CashVouchers.Concurrency",
             "تم تعديل سند النقدية بواسطة مستخدم آخر. أعد تحميل السند ثم حاول مرة أخرى.");
-
-    private static Error VoucherNumberExists(string voucherNumber) =>
-        Error.Conflict(
-            "CashVouchers.VoucherNumberExists",
-            $"رقم سند النقدية '{voucherNumber}' مستخدم بالفعل.",
-            nameof(CashVoucherRequest.VoucherNumber));
 
     private static Error CashboxNotFound(int id) =>
         Error.NotFound(
@@ -675,16 +643,16 @@ public sealed class CashVoucherService(
             "اتجاه نوع الحركة النقدية لا يطابق اتجاه السند.",
             nameof(CashVoucherRequest.CashMovementTypeId));
 
-    private static Error PartnerEffectRequired() =>
+    private static Error MovementTypeNotForPartner() =>
         Error.Conflict(
-            "CashVouchers.PartnerEffectRequired",
-            "نوع الحركة المختار لا يحدد أثر حساب الشريك.",
+            "CashVouchers.MovementTypeNotForPartner",
+            "نوع الحركة النقدية المختار غير مخصص لحسابات العملاء أو الموردين.",
             nameof(CashVoucherRequest.CashMovementTypeId));
 
-    private static Error PartnerTypeRequired() =>
+    private static Error MovementTypeForPartnerOnly() =>
         Error.Conflict(
-            "CashVouchers.PartnerTypeRequired",
-            "نوع الحركة المختار مخصص لحركات الشركاء.",
+            "CashVouchers.MovementTypeForPartnerOnly",
+            "نوع الحركة النقدية المختار مخصص للعملاء أو الموردين فقط.",
             nameof(CashVoucherRequest.PartyType));
 
     private static Error PartnerNotFound(int? id) =>

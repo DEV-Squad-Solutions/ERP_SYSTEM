@@ -6,15 +6,12 @@ public sealed record CashboxStatementItemResponse(
     int CashVoucherId,
     DateOnly Date,
     string VoucherNumber,
-    CashDirection Direction,
-    int CashMovementTypeId,
-    string CashMovementTypeName,
+    string MovementName,
     string? Description,
-    CashPartyType PartyType,
     string? PartyName,
-    decimal ReceivedAmount,
-    decimal PaidAmount,
-    decimal RunningBalance,
+    decimal ReceiptAmount,
+    decimal PaymentAmount,
+    decimal Balance,
     string? ReferenceNumber);
 
 public sealed record CashboxStatementSummaryResponse(
@@ -24,6 +21,9 @@ public sealed record CashboxStatementSummaryResponse(
     decimal ClosingBalance);
 
 public sealed record CashboxStatementResponse(
+    int CashboxId,
+    string CashboxName,
+    CurrencyCode Currency,
     IReadOnlyList<CashboxStatementItemResponse> Items,
     int PageNumber,
     int PageSize,
@@ -32,24 +32,26 @@ public sealed record CashboxStatementResponse(
     CashboxStatementSummaryResponse Summary);
 
 public sealed record PartnerStatementItemResponse(
-    int SourceId,
-    PartnerStatementSourceType SourceType,
     DateOnly Date,
     string DocumentNumber,
-    BusinessPartnerMovementType? MovementType,
+    string MovementName,
     string? Description,
-    decimal Debit,
-    decimal Credit,
-    decimal RunningBalance,
+    decimal DebitAmount,
+    decimal CreditAmount,
+    decimal BalanceAmount,
+    string BalanceDescription,
     string? ReferenceNumber);
 
 public sealed record PartnerStatementSummaryResponse(
-    decimal OpeningBalance,
-    decimal TotalDebit,
-    decimal TotalCredit,
-    decimal ClosingBalance);
+    decimal OpeningBalanceAmount,
+    string OpeningBalanceDescription,
+    decimal ClosingBalanceAmount,
+    string ClosingBalanceDescription);
 
 public sealed record PartnerStatementResponse(
+    int BusinessPartnerId,
+    string BusinessPartnerName,
+    CurrencyCode Currency,
     IReadOnlyList<PartnerStatementItemResponse> Items,
     int PageNumber,
     int PageSize,
@@ -59,29 +61,34 @@ public sealed record PartnerStatementResponse(
 
 public sealed record DriverStatementItemResponse(
     int SourceId,
-    DriverStatementSourceType SourceType,
     DateOnly Date,
-    string SourceNumber,
+    string DocumentNumber,
+    string SourceName,
     string? InvoiceNumber,
     int? DriverTripId,
     string? DriverTripNumber,
-    string? MovementTypeName,
+    string MovementName,
     string? Description,
-    decimal CashPaidToDriver,
-    decimal CashReceivedFromDriver,
-    decimal DriverTripCost,
-    decimal RunningBalance,
+    decimal AmountPaidToDriver,
+    decimal AmountReceivedFromDriver,
+    decimal TripCost,
+    decimal BalanceAmount,
+    string BalanceDescription,
     string? CashboxName,
     string? ReferenceNumber);
 
 public sealed record DriverStatementSummaryResponse(
-    decimal OpeningBalance,
-    decimal TotalCashPaid,
-    decimal TotalCashReceived,
+    decimal OpeningBalanceAmount,
+    string OpeningBalanceDescription,
+    decimal TotalPaidToDriver,
+    decimal TotalReceivedFromDriver,
     decimal TotalTripCost,
-    decimal ClosingBalance);
+    decimal ClosingBalanceAmount,
+    string ClosingBalanceDescription);
 
 public sealed record DriverStatementResponse(
+    int DriverId,
+    string DriverName,
     IReadOnlyList<DriverStatementItemResponse> Items,
     int PageNumber,
     int PageSize,

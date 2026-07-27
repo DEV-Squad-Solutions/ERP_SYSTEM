@@ -31,14 +31,14 @@ public sealed class CashManagementValidatorTests
     }
 
     [Fact]
-    public void MovementTypeValidator_RejectsUndefinedDirectionAndEffect()
+    public void MovementTypeValidator_RejectsUndefinedDirection()
     {
         var validator = new CashMovementTypeRequestValidator();
         var result = validator.Validate(
             new CashMovementTypeRequest(
                 "Type",
                 (CashDirection)999,
-                (PartnerAccountEffect)999,
+                ForPartner: true,
                 true,
                 null));
 
@@ -47,11 +47,6 @@ public sealed class CashManagementValidatorTests
             error =>
                 error.PropertyName ==
                 nameof(CashMovementTypeRequest.Direction));
-        Assert.Contains(
-            result.Errors,
-            error =>
-                error.PropertyName ==
-                nameof(CashMovementTypeRequest.PartnerEffect));
     }
 
     [Theory]
@@ -141,7 +136,7 @@ public sealed class CashManagementValidatorTests
                 new CashMovementTypeUpdateRequest(
                     "Type",
                     CashDirection.Receipt,
-                    PartnerAccountEffect.None,
+                    ForPartner: false,
                     true,
                     null,
                     null));

@@ -62,7 +62,6 @@ public sealed class CashVoucherConfiguration
             voucher.CompanyId,
             voucher.VoucherNumber
         })
-            .IsUnique()
             .HasFilter("[IsDeleted] = 0");
 
         builder.Property(voucher => voucher.VoucherDate)

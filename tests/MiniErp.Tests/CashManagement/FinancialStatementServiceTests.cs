@@ -54,13 +54,16 @@ public sealed class FinancialStatementServiceTests
                     ToDate: new DateOnly(2026, 7, 31)));
 
         Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value.CashboxId);
+        Assert.Equal("Main Cashbox", result.Value.CashboxName);
+        Assert.Equal(CurrencyCode.EGP, result.Value.Currency);
         Assert.Equal(1100m, result.Value.Summary.OpeningBalance);
         Assert.Equal(25m, result.Value.Summary.TotalReceipts);
         Assert.Equal(40m, result.Value.Summary.TotalPayments);
         Assert.Equal(1085m, result.Value.Summary.ClosingBalance);
         Assert.Equal(
             [1060m, 1085m],
-            result.Value.Items.Select(item => item.RunningBalance).ToArray());
+            result.Value.Items.Select(item => item.Balance).ToArray());
     }
 
     [Fact]
@@ -83,15 +86,24 @@ public sealed class FinancialStatementServiceTests
 
         Assert.True(voucher.IsSuccess);
         Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value.BusinessPartnerId);
+        Assert.Equal("Customer One", result.Value.BusinessPartnerName);
+        Assert.Equal(CurrencyCode.EGP, result.Value.Currency);
         Assert.Equal(3, result.Value.TotalCount);
         Assert.Single(
             result.Value.Items,
             item =>
-                item.SourceType ==
-                PartnerStatementSourceType.CashVoucher);
-        Assert.Equal(300m, result.Value.Summary.TotalDebit);
-        Assert.Equal(50m, result.Value.Summary.TotalCredit);
-        Assert.Equal(250m, result.Value.Summary.ClosingBalance);
+                item.MovementName == "سند قبض" &&
+                item.DebitAmount == 0m &&
+                item.CreditAmount == 50m);
+        Assert.Equal(250m, result.Value.Summary.ClosingBalanceAmount);
+        Assert.Equal(
+            "عليه",
+            result.Value.Summary.ClosingBalanceDescription);
+        Assert.All(
+            result.Value.Items,
+            item => Assert.False(string.IsNullOrWhiteSpace(
+                item.MovementName)));
     }
 
     [Fact]
@@ -142,17 +154,30 @@ public sealed class FinancialStatementServiceTests
                 DriverTripId: 1));
 
         Assert.True(overall.IsSuccess);
+        Assert.Equal(1, overall.Value.DriverId);
+        Assert.Equal("Driver One", overall.Value.DriverName);
         Assert.Equal(3, overall.Value.TotalCount);
-        Assert.Equal(100m, overall.Value.Summary.TotalCashPaid);
-        Assert.Equal(20m, overall.Value.Summary.TotalCashReceived);
+        Assert.Equal(100m, overall.Value.Summary.TotalPaidToDriver);
+        Assert.Equal(20m, overall.Value.Summary.TotalReceivedFromDriver);
         Assert.Equal(60m, overall.Value.Summary.TotalTripCost);
-        Assert.Equal(20m, overall.Value.Summary.ClosingBalance);
+        Assert.Equal(20m, overall.Value.Summary.ClosingBalanceAmount);
+        Assert.Equal(
+            "مبلغ مطلوب من السائق",
+            overall.Value.Summary.ClosingBalanceDescription);
 
         Assert.Equal(2, tripSpecific.Value.TotalCount);
-        Assert.Equal(0m, tripSpecific.Value.Summary.TotalCashPaid);
-        Assert.Equal(20m, tripSpecific.Value.Summary.TotalCashReceived);
+        Assert.Equal(0m, tripSpecific.Value.Summary.TotalPaidToDriver);
+        Assert.Equal(20m, tripSpecific.Value.Summary.TotalReceivedFromDriver);
         Assert.Equal(60m, tripSpecific.Value.Summary.TotalTripCost);
-        Assert.Equal(-80m, tripSpecific.Value.Summary.ClosingBalance);
+        Assert.Equal(80m, tripSpecific.Value.Summary.ClosingBalanceAmount);
+        Assert.Equal(
+            "مبلغ مطلوب دفعه للسائق",
+            tripSpecific.Value.Summary.ClosingBalanceDescription);
+        Assert.Contains(
+            overall.Value.Items,
+            item =>
+                item.SourceName == "رحلة سائق" &&
+                item.MovementName == "تكلفة رحلة");
     }
 
     [Fact]

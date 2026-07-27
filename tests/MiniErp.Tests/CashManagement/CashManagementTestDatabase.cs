@@ -313,7 +313,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 IsDeleted INTEGER NOT NULL
             );
 
-            CREATE UNIQUE INDEX UX_CashVouchers_Company_Number
+            CREATE INDEX IX_CashVouchers_Company_Number
             ON CashVouchers (CompanyId, VoucherNumber)
             WHERE IsDeleted = 0;
 

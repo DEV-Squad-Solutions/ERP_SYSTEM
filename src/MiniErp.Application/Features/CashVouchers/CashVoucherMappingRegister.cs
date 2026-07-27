@@ -46,9 +46,6 @@ public sealed class CashVoucherMappingRegister : IRegister
                 response => response.CashMovementTypeName,
                 voucher => voucher.CashMovementType.Name)
             .Map(
-                response => response.PartnerEffect,
-                voucher => voucher.CashMovementType.PartnerEffect)
-            .Map(
                 response => response.BusinessPartnerName,
                 voucher => voucher.BusinessPartner == null
                     ? null

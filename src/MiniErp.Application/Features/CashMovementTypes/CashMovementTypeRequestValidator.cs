@@ -14,9 +14,6 @@ public sealed class CashMovementTypeRequestValidator
         RuleFor(request => request.Direction)
             .IsInEnum();
 
-        RuleFor(request => request.PartnerEffect)
-            .IsInEnum();
-
         RuleFor(request => request.Notes)
             .MaximumLength(CashMovementTypeRequest.NotesMaximumLength);
     }
@@ -32,9 +29,6 @@ public sealed class CashMovementTypeUpdateRequestValidator
             .MaximumLength(CashMovementTypeRequest.NameMaximumLength);
 
         RuleFor(request => request.Direction)
-            .IsInEnum();
-
-        RuleFor(request => request.PartnerEffect)
             .IsInEnum();
 
         RuleFor(request => request.Notes)

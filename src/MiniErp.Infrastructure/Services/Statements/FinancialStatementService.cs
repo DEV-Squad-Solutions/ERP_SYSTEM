@@ -35,6 +35,8 @@ public sealed class FinancialStatementService(
             .Select(entity => new
             {
                 entity.Id,
+                entity.Name,
+                entity.Currency,
                 entity.OpeningBalance
             })
             .FirstOrDefaultAsync(cancellationToken);
@@ -160,22 +162,19 @@ public sealed class FinancialStatementService(
                     CashVoucherId = voucher.Id,
                     Date = voucher.VoucherDate,
                     VoucherNumber = voucher.VoucherNumber,
-                    Direction = voucher.Direction,
-                    CashMovementTypeId = voucher.CashMovementTypeId,
-                    CashMovementTypeName =
+                    MovementName =
                         voucher.CashMovementType.Name,
                     Description = voucher.Description,
-                    PartyType = voucher.PartyType,
                     PartyName = voucher.BusinessPartner != null
                         ? voucher.BusinessPartner.Name
                         : voucher.Driver != null
                             ? voucher.Driver.Name
                             : voucher.ExternalPartyName,
-                    ReceivedAmount =
+                    ReceiptAmount =
                         voucher.Direction == CashDirection.Receipt
                             ? voucher.Amount
                             : 0m,
-                    PaidAmount =
+                    PaymentAmount =
                         voucher.Direction == CashDirection.Payment
                             ? voucher.Amount
                             : 0m,
@@ -186,25 +185,25 @@ public sealed class FinancialStatementService(
         var runningBalance = openingBalance + precedingEffect;
         var items = pageRows.Select(row =>
         {
-            runningBalance += row.ReceivedAmount - row.PaidAmount;
+            runningBalance += row.ReceiptAmount - row.PaymentAmount;
             return new CashboxStatementItemResponse(
                 row.CashVoucherId,
                 row.Date,
                 row.VoucherNumber,
-                row.Direction,
-                row.CashMovementTypeId,
-                row.CashMovementTypeName,
+                row.MovementName,
                 row.Description,
-                row.PartyType,
                 row.PartyName,
-                row.ReceivedAmount,
-                row.PaidAmount,
+                row.ReceiptAmount,
+                row.PaymentAmount,
                 runningBalance,
                 row.ReferenceNumber);
         }).ToList();
 
         return Result<CashboxStatementResponse>.Success(
             new CashboxStatementResponse(
+                cashbox.Id,
+                cashbox.Name,
+                cashbox.Currency,
                 items,
                 pagination.PageNumber,
                 pagination.PageSize,
@@ -229,14 +228,19 @@ public sealed class FinancialStatementService(
             return Result<PartnerStatementResponse>.Failure(paginationError);
         }
 
-        var partnerExists = await dbContext.BusinessPartners
+        var partner = await dbContext.BusinessPartners
             .AsNoTracking()
-            .AnyAsync(
-                partner =>
-                    partner.CompanyId == companyId &&
-                    partner.Id == filters.BusinessPartnerId,
-                cancellationToken);
-        if (!partnerExists)
+            .Where(entity =>
+                entity.CompanyId == companyId &&
+                entity.Id == filters.BusinessPartnerId)
+            .Select(entity => new
+            {
+                entity.Id,
+                entity.Name,
+                entity.Currency
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (partner is null)
         {
             return Result<PartnerStatementResponse>.Failure(
                 PartnerNotFound(filters.BusinessPartnerId));
@@ -314,30 +318,34 @@ public sealed class FinancialStatementService(
         {
             runningBalance += row.Debit - row.Credit;
             return new PartnerStatementItemResponse(
-                row.SourceId,
-                row.SourceType,
                 row.Date,
                 row.DocumentNumber,
-                row.MovementType,
+                PartnerMovementName(row.MovementType),
                 row.Description,
                 row.Debit,
                 row.Credit,
-                runningBalance,
+                Math.Abs(runningBalance),
+                PartnerBalanceDescription(runningBalance),
                 row.ReferenceNumber);
         }).ToList();
 
+        var closingBalance =
+            openingBalance + totalDebit - totalCredit;
         return Result<PartnerStatementResponse>.Success(
             new PartnerStatementResponse(
+                partner.Id,
+                partner.Name,
+                partner.Currency,
                 items,
                 pagination.PageNumber,
                 pagination.PageSize,
                 totalCount,
                 GetTotalPages(totalCount, pagination.PageSize),
                 new PartnerStatementSummaryResponse(
-                    openingBalance,
-                    totalDebit,
-                    totalCredit,
-                    openingBalance + totalDebit - totalCredit)));
+                    Math.Abs(openingBalance),
+                    PartnerBalanceDescription(openingBalance),
+                    Math.Abs(closingBalance),
+                    PartnerBalanceDescription(closingBalance))));
     }
 
     public async Task<Result<DriverStatementResponse>>
@@ -352,14 +360,18 @@ public sealed class FinancialStatementService(
             return Result<DriverStatementResponse>.Failure(paginationError);
         }
 
-        var driverExists = await dbContext.Drivers
+        var driver = await dbContext.Drivers
             .AsNoTracking()
-            .AnyAsync(
-                driver =>
-                    driver.CompanyId == companyId &&
-                    driver.Id == filters.DriverId,
-                cancellationToken);
-        if (!driverExists)
+            .Where(entity =>
+                entity.CompanyId == companyId &&
+                entity.Id == filters.DriverId)
+            .Select(entity => new
+            {
+                entity.Id,
+                entity.Name
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (driver is null)
         {
             return Result<DriverStatementResponse>.Failure(
                 DriverNotFound(filters.DriverId));
@@ -465,40 +477,49 @@ public sealed class FinancialStatementService(
                 row.CashPaid - row.CashReceived - row.TripCost;
             return new DriverStatementItemResponse(
                 row.SourceId,
-                row.SourceType,
                 row.Date,
                 row.SourceNumber,
+                DriverSourceName(row.SourceType),
                 row.InvoiceNumber,
                 row.DriverTripId,
                 row.DriverTripId.HasValue
                     ? $"TR-{row.DriverTripId.Value}"
                     : null,
-                row.MovementTypeName,
+                row.SourceType == DriverStatementSourceType.DriverTrip
+                    ? "تكلفة رحلة"
+                    : row.MovementTypeName ?? "سند نقدية",
                 row.Description,
                 row.CashPaid,
                 row.CashReceived,
                 row.TripCost,
-                runningBalance,
+                Math.Abs(runningBalance),
+                DriverBalanceDescription(runningBalance),
                 row.CashboxName,
                 row.ReferenceNumber);
         }).ToList();
 
+        var closingBalance =
+            openingBalance +
+            totalCashPaid -
+            totalCashReceived -
+            totalTripCost;
         return Result<DriverStatementResponse>.Success(
             new DriverStatementResponse(
+                driver.Id,
+                driver.Name,
                 items,
                 pagination.PageNumber,
                 pagination.PageSize,
                 totalCount,
                 GetTotalPages(totalCount, pagination.PageSize),
                 new DriverStatementSummaryResponse(
-                    openingBalance,
+                    Math.Abs(openingBalance),
+                    DriverBalanceDescription(openingBalance),
                     totalCashPaid,
                     totalCashReceived,
                     totalTripCost,
-                    openingBalance +
-                    totalCashPaid -
-                    totalCashReceived -
-                    totalTripCost)));
+                    Math.Abs(closingBalance),
+                    DriverBalanceDescription(closingBalance))));
     }
 
     private IQueryable<PartnerStatementRaw> CreatePartnerRows(
@@ -644,6 +665,42 @@ public sealed class FinancialStatementService(
     private static int GetTotalPages(int totalCount, int pageSize) =>
         (int)Math.Ceiling(totalCount / (double)pageSize);
 
+    private static string PartnerMovementName(
+        BusinessPartnerMovementType? movementType) =>
+        movementType switch
+        {
+            null => "رصيد افتتاحي",
+            BusinessPartnerMovementType.Sales => "فاتورة بيع",
+            BusinessPartnerMovementType.SalesReturn => "مرتجع بيع",
+            BusinessPartnerMovementType.Purchase => "فاتورة شراء",
+            BusinessPartnerMovementType.PurchaseReturn => "مرتجع شراء",
+            BusinessPartnerMovementType.CashReceipt => "سند قبض",
+            BusinessPartnerMovementType.CashPayment => "سند صرف",
+            _ => "حركة حساب"
+        };
+
+    private static string DriverSourceName(
+        DriverStatementSourceType sourceType) =>
+        sourceType == DriverStatementSourceType.DriverTrip
+            ? "رحلة سائق"
+            : "سند نقدية";
+
+    private static string PartnerBalanceDescription(decimal balance) =>
+        balance switch
+        {
+            > 0m => "عليه",
+            < 0m => "له",
+            _ => "مسدد"
+        };
+
+    private static string DriverBalanceDescription(decimal balance) =>
+        balance switch
+        {
+            > 0m => "مبلغ مطلوب من السائق",
+            < 0m => "مبلغ مطلوب دفعه للسائق",
+            _ => "لا يوجد مبلغ مستحق"
+        };
+
     private static Error CashboxNotFound(int id) =>
         Error.NotFound(
             "Statements.CashboxNotFound",
@@ -664,14 +721,11 @@ public sealed class FinancialStatementService(
         public int CashVoucherId { get; init; }
         public DateOnly Date { get; init; }
         public string VoucherNumber { get; init; } = string.Empty;
-        public CashDirection Direction { get; init; }
-        public int CashMovementTypeId { get; init; }
-        public string CashMovementTypeName { get; init; } = string.Empty;
+        public string MovementName { get; init; } = string.Empty;
         public string? Description { get; init; }
-        public CashPartyType PartyType { get; init; }
         public string? PartyName { get; init; }
-        public decimal ReceivedAmount { get; init; }
-        public decimal PaidAmount { get; init; }
+        public decimal ReceiptAmount { get; init; }
+        public decimal PaymentAmount { get; init; }
         public string? ReferenceNumber { get; init; }
     }
 

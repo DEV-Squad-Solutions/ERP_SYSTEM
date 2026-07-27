@@ -51,7 +51,7 @@ public static class ArabicValidationConfiguration
             ["NationalId"] = "الرقم القومي",
             ["PageNumber"] = "رقم الصفحة",
             ["PageSize"] = "حجم الصفحة",
-            ["PartnerEffect"] = "أثر حساب الشريك",
+            ["ForPartner"] = "مخصص للعميل أو المورد",
             ["PartyType"] = "نوع الطرف",
             ["PaymentTerm"] = "شرط السداد",
             ["DiscountAmount"] = "قيمة الخصم",

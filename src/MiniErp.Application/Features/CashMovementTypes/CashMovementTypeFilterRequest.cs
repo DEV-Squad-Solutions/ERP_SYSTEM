@@ -6,7 +6,7 @@ public sealed record CashMovementTypeFilterRequest(
     string? Search = null,
     string? Name = null,
     CashDirection? Direction = null,
-    PartnerAccountEffect? PartnerEffect = null,
+    bool? ForPartner = null,
     bool? IsActive = null);
 
 public sealed record CashMovementTypeSelectRequest(

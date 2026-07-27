@@ -123,6 +123,35 @@ public sealed class CashVoucherServiceTests
             crossCompanyPartner.Error.Code);
     }
 
+    [Fact]
+    public async Task VoucherRequiresMovementTypeMatchingPartyUsage()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+
+        var partnerWithGeneralType = await service.AddAsync(
+            CreatePartnerRequest(
+                "CV-PARTNER-GENERAL-TYPE",
+                CashDirection.Receipt,
+                movementTypeId: 3,
+                partnerId: 1,
+                amount: 10m));
+        var generalWithPartnerType = await service.AddAsync(
+            CreateRequest(
+                "CV-GENERAL-PARTNER-TYPE",
+                CashDirection.Receipt,
+                movementTypeId: 1,
+                amount: 10m));
+
+        Assert.Equal(
+            "CashVouchers.MovementTypeNotForPartner",
+            partnerWithGeneralType.Error.Code);
+        Assert.Equal(
+            "CashVouchers.MovementTypeForPartnerOnly",
+            generalWithPartnerType.Error.Code);
+    }
+
     [Theory]
     [InlineData(
         CashDirection.Receipt,
@@ -325,7 +354,7 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
-    public async Task DuplicateRetryDoesNotDuplicateCashOrPartnerEffect()
+    public async Task DuplicateVoucherNumbersAreAllowed()
     {
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
@@ -338,16 +367,20 @@ public sealed class CashVoucherServiceTests
             amount: 20m);
 
         var first = await service.AddAsync(request);
-        var retry = await service.AddAsync(request);
+        var second = await service.AddAsync(request);
         var cashbox = await database.CreateCashboxService(1).GetByIdAsync(1);
 
         Assert.True(first.IsSuccess);
-        Assert.Equal("CashVouchers.VoucherNumberExists", retry.Error.Code);
-        Assert.Equal(1020m, cashbox.Value.CurrentBalance);
+        Assert.True(second.IsSuccess);
+        Assert.NotEqual(first.Value.Id, second.Value.Id);
+        Assert.Equal(first.Value.VoucherNumber, second.Value.VoucherNumber);
+        Assert.Equal(1040m, cashbox.Value.CurrentBalance);
         Assert.Equal(
-            1,
+            2,
             await database.Context.BusinessPartnerMovements.CountAsync(
-                item => item.CashVoucherId == first.Value.Id));
+                item =>
+                    item.CashVoucherId == first.Value.Id ||
+                    item.CashVoucherId == second.Value.Id));
     }
 
     [Fact]

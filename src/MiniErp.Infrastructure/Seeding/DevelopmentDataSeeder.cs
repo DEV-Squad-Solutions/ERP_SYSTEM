@@ -820,14 +820,24 @@ public static class DevelopmentDataSeeder
         {
             var seed = seedBalances[index];
             var partner = partners[index];
-            var exists = await dbContext.PartnerOpeningBalances
+            var notes = seed.BalanceType == PartnerBalanceType.Receivable
+                ? "رصيد افتتاحي تجريبي مطلوب من العميل أو المورد"
+                : "رصيد افتتاحي تجريبي مطلوب دفعه للعميل أو المورد";
+            var existingBalance = await dbContext.PartnerOpeningBalances
                 .IgnoreQueryFilters()
-                .AnyAsync(balance =>
+                .FirstOrDefaultAsync(balance =>
                     balance.CompanyId == company.Id &&
                     balance.DocumentNumber == seed.DocumentNumber,
                     cancellationToken);
-            if (exists)
+            if (existingBalance is not null)
             {
+                var oldNotes =
+                    $"Seed {seed.BalanceType} for Company {company.Id}";
+                if (existingBalance.Notes == oldNotes)
+                {
+                    existingBalance.Notes = notes;
+                }
+
                 continue;
             }
 
@@ -840,7 +850,7 @@ public static class DevelopmentDataSeeder
                 Currency = partner.Currency,
                 BalanceType = seed.BalanceType,
                 Amount = seed.Amount,
-                Notes = $"Seed {seed.BalanceType} for Company {company.Id}"
+                Notes = notes
             });
         }
 
@@ -1105,13 +1115,20 @@ public static class DevelopmentDataSeeder
                 }
             }
 
-            var hasPartnerMovement =
-                await dbContext.BusinessPartnerMovements.AnyAsync(
+            var partnerMovement =
+                await dbContext.BusinessPartnerMovements.FirstOrDefaultAsync(
                     movement =>
                         movement.CompanyId == company.Id &&
                         movement.InvoiceId == invoice.Id,
                     cancellationToken);
-            if (!hasPartnerMovement &&
+            if (partnerMovement is not null &&
+                partnerMovement.Description ==
+                $"Invoice {invoice.InvoiceNumber}")
+            {
+                partnerMovement.Description =
+                    $"فاتورة {invoice.InvoiceNumber}";
+            }
+            else if (partnerMovement is null &&
                 InvoiceMovementRules.ShouldCreatePartnerMovement(
                     invoice.RemainingAmount))
             {
@@ -1133,7 +1150,7 @@ public static class DevelopmentDataSeeder
                         Currency = invoice.Currency,
                         Debit = debit,
                         Credit = credit,
-                        Description = $"Invoice {invoice.InvoiceNumber}"
+                        Description = $"فاتورة {invoice.InvoiceNumber}"
                     });
             }
         }
@@ -1180,7 +1197,7 @@ public static class DevelopmentDataSeeder
             {
                 Name = "Supplier Refund",
                 Direction = CashDirection.Receipt,
-                PartnerEffect = PartnerAccountEffect.Debit
+                PartnerEffect = PartnerAccountEffect.Credit
             },
             new
             {
@@ -1198,7 +1215,7 @@ public static class DevelopmentDataSeeder
             {
                 Name = "Customer Refund",
                 Direction = CashDirection.Payment,
-                PartnerEffect = PartnerAccountEffect.Credit
+                PartnerEffect = PartnerAccountEffect.Debit
             },
             new
             {
@@ -1278,12 +1295,25 @@ public static class DevelopmentDataSeeder
                 Amount = 1_000m,
                 Currency = cashbox.Currency,
                 ReferenceNumber = $"SEED-REF-{company.Id}",
-                Description = "Seed customer collection",
-                Notes = "Development seed voucher"
+                Description = "تحصيل تجريبي من العميل",
+                Notes = "سند نقدية تجريبي"
             };
             voucher.Touch(DateTime.UtcNow);
             dbContext.CashVouchers.Add(voucher);
             await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        if (voucher is not null)
+        {
+            if (voucher.Description == "Seed customer collection")
+            {
+                voucher.Description = "تحصيل تجريبي من العميل";
+            }
+
+            if (voucher.Notes == "Development seed voucher")
+            {
+                voucher.Notes = "سند نقدية تجريبي";
+            }
         }
 
         if (voucher is null ||
@@ -1293,16 +1323,23 @@ public static class DevelopmentDataSeeder
             return;
         }
 
-        var movementExists = await dbContext.BusinessPartnerMovements
+        var existingMovement = await dbContext.BusinessPartnerMovements
             .IgnoreQueryFilters()
-            .AnyAsync(
+            .FirstOrDefaultAsync(
                 movement =>
                     movement.CompanyId == company.Id &&
                     movement.CashVoucherId == voucher.Id &&
                     !movement.IsDeleted,
                 cancellationToken);
-        if (movementExists)
+        if (existingMovement is not null)
         {
+            if (existingMovement.Description == "Seed customer collection")
+            {
+                existingMovement.Description =
+                    "تحصيل تجريبي من العميل";
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
             return;
         }
 

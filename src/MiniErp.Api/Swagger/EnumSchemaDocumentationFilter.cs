@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.OpenApi;
+using MiniErp.Domain.Enums;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace MiniErp.Api.Swagger;
@@ -19,10 +20,38 @@ public sealed class EnumSchemaDocumentationFilter : ISchemaFilter
         var enumDocumentation =
             $"Accepted JSON names: {EnumDocumentationFormatter.FormatValues(enumType)}. " +
             "Send the name; numeric values are documentation references only.";
+        var businessMeaning = GetBusinessMeaning(enumType);
+        if (businessMeaning is not null)
+        {
+            enumDocumentation = $"{businessMeaning}\n\n{enumDocumentation}";
+        }
 
         openApiSchema.Description = string.IsNullOrWhiteSpace(openApiSchema.Description)
             ? enumDocumentation
             : $"{openApiSchema.Description.TrimEnd()}\n\n{enumDocumentation}";
+    }
+
+    private static string? GetBusinessMeaning(Type enumType)
+    {
+        if (enumType == typeof(CashDirection))
+        {
+            return "Receipt increases the cashbox balance. Payment decreases " +
+                   "the cashbox balance. In accounting terms, Receipt means " +
+                   "Debit Cash and Payment means Credit Cash. This describes " +
+                   "the cash side. For a normal partner settlement, the other " +
+                   "side is Credit Partner for Receipt and Debit Partner for " +
+                   "Payment.";
+        }
+
+        if (enumType == typeof(CashPartyType))
+        {
+            return "Controls the party fields shown by the frontend: None uses " +
+                   "no party field; Partner requires businessPartnerId; Driver " +
+                   "requires driverId and allows an optional driverTripId; Other " +
+                   "requires externalPartyName.";
+        }
+
+        return null;
     }
 }
 

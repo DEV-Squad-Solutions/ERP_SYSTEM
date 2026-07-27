@@ -5,7 +5,7 @@ namespace MiniErp.Application.Features.CashMovementTypes;
 public sealed record CashMovementTypeRequest(
     string Name,
     CashDirection Direction,
-    PartnerAccountEffect PartnerEffect,
+    bool ForPartner,
     bool IsActive,
     string? Notes)
 {
@@ -17,7 +17,7 @@ public sealed record CashMovementTypeRequest(
 public sealed record CashMovementTypeUpdateRequest(
     string Name,
     CashDirection Direction,
-    PartnerAccountEffect PartnerEffect,
+    bool ForPartner,
     bool IsActive,
     string? Notes,
     byte[]? RowVersion);

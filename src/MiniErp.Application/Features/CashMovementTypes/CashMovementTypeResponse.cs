@@ -7,7 +7,7 @@ public sealed record CashMovementTypeResponse(
     int CompanyId,
     string Name,
     CashDirection Direction,
-    PartnerAccountEffect PartnerEffect,
+    bool ForPartner,
     bool IsActive,
     string? Notes,
     byte[] RowVersion);
@@ -15,5 +15,4 @@ public sealed record CashMovementTypeResponse(
 public sealed record CashMovementTypeSelectResponse(
     int Id,
     string Name,
-    CashDirection Direction,
-    PartnerAccountEffect PartnerEffect);
+    CashDirection Direction);

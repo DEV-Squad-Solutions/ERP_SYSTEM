@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.CashMovementTypes;
@@ -109,7 +110,7 @@ public sealed class CashMasterServiceTests
             new CashMovementTypeRequest(
                 " customer collection ",
                 CashDirection.Receipt,
-                PartnerAccountEffect.Credit,
+                ForPartner: true,
                 true,
                 null));
         var createdVoucher = await vouchers.AddAsync(
@@ -125,7 +126,7 @@ public sealed class CashMasterServiceTests
             new CashMovementTypeUpdateRequest(
                 movementType.Value.Name,
                 CashDirection.Payment,
-                PartnerAccountEffect.None,
+                ForPartner: false,
                 true,
                 movementType.Value.Notes,
                 movementType.Value.RowVersion));
@@ -160,9 +161,6 @@ public sealed class CashMasterServiceTests
             item =>
             {
                 Assert.Equal(CashDirection.Receipt, item.Direction);
-                Assert.NotEqual(
-                    PartnerAccountEffect.None,
-                    item.PartnerEffect);
             });
         Assert.Contains(
             generalPayments.Value,
@@ -170,6 +168,49 @@ public sealed class CashMasterServiceTests
         Assert.DoesNotContain(
             generalPayments.Value,
             item => item.Name == "Inactive Payment");
+    }
+
+    [Theory]
+    [InlineData(
+        CashDirection.Receipt,
+        true,
+        PartnerAccountEffect.Credit)]
+    [InlineData(
+        CashDirection.Payment,
+        true,
+        PartnerAccountEffect.Debit)]
+    [InlineData(
+        CashDirection.Receipt,
+        false,
+        PartnerAccountEffect.None)]
+    [InlineData(
+        CashDirection.Payment,
+        false,
+        PartnerAccountEffect.None)]
+    public async Task MovementType_DerivesPartnerEffect(
+        CashDirection direction,
+        bool forPartner,
+        PartnerAccountEffect expectedEffect)
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateMovementTypeService(companyId: 1);
+
+        var result = await service.AddAsync(
+            new CashMovementTypeRequest(
+                $"Derived {direction} {forPartner}",
+                direction,
+                forPartner,
+                true,
+                null));
+        var storedEffect = await database.Context.CashMovementTypes
+            .Where(entity => entity.Id == result.Value.Id)
+            .Select(entity => entity.PartnerEffect)
+            .SingleAsync();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(forPartner, result.Value.ForPartner);
+        Assert.Equal(expectedEffect, storedEffect);
     }
 
     private static CashboxRequest CreateCashbox(

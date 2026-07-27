@@ -12,7 +12,6 @@ public sealed record CashVoucherResponse(
     string CashboxName,
     int CashMovementTypeId,
     string CashMovementTypeName,
-    PartnerAccountEffect PartnerEffect,
     CashPartyType PartyType,
     int? BusinessPartnerId,
     string? BusinessPartnerName,

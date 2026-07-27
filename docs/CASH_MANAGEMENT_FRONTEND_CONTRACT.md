@@ -267,6 +267,10 @@ Create:
 }
 ```
 
+`voucherNumber` is required for each voucher, but it is not unique. The user may
+save more than one voucher with the same number; use the voucher `id` as the
+record identifier.
+
 Update sends the complete same shape plus `rowVersion`.
 
 Response:
@@ -415,9 +419,11 @@ Summary:
 }
 ```
 
-Each item includes `cashVoucherId`, date, voucher number, direction, movement
-type, description, party type/name, received amount, paid amount, running
-balance, and reference number. Use `cashVoucherId` to navigate to the voucher.
+The response also returns `cashboxId`, `cashboxName`, and `currency`. Each item
+uses the direct display fields `movementName`, `partyName`, `receiptAmount`,
+`paymentAmount`, and `balance`. The frontend does not need to translate cash
+direction or party-type enums to render the table. Use `cashVoucherId` to
+navigate to the voucher.
 
 ### Partner Statement
 
@@ -430,10 +436,24 @@ Required: `businessPartnerId`.
 Optional: `search`, `fromDate`, `toDate`, `sourceType`, `movementType`,
 `cashMovementTypeId`.
 
-Summary includes `openingBalance`, `totalDebit`, `totalCredit`,
-`closingBalance`. Rows include `sourceId`, `sourceType`, date, document
-number, movement type, description, debit, credit, running balance, and
-reference. Use `sourceType` plus `sourceId` for source navigation.
+The response returns `businessPartnerId`, `businessPartnerName`, and
+`currency`. It intentionally avoids Debit/Credit wording in the user-facing
+contract.
+
+```json
+{
+  "openingBalanceAmount": 0,
+  "openingBalanceDescription": "مسدد",
+  "closingBalanceAmount": 250,
+  "closingBalanceDescription": "عليه"
+}
+```
+
+Each row returns `debitAmount` for the Arabic `عليه` column and `creditAmount`
+for the Arabic `له` column. Display zero as a dash. Its Arabic `movementName`
+explains whether it is an opening balance, invoice, return, receipt, or
+payment. Always display the non-negative `balanceAmount` together with
+`balanceDescription`, which is `عليه`, `له`, or `مسدد`.
 
 ### Driver Statement
 
@@ -447,13 +467,25 @@ Optional: `search`, `fromDate`, `toDate`, `direction`,
 `cashMovementTypeId`, `driverTripId`, `invoiceNumber`,
 `transactionsWithoutTrip`, `hasCost`.
 
-Summary includes `openingBalance`, `totalCashPaid`, `totalCashReceived`,
-`totalTripCost`, and `closingBalance`.
+The response returns `driverId` and `driverName`.
 
-Rows clearly separate `cashPaidToDriver`, `cashReceivedFromDriver`, and
-`driverTripCost`. A DriverTrip cost row is operational and has no cashbox
-effect. General driver vouchers with no trip affect only the overall driver
-balance.
+```json
+{
+  "openingBalanceAmount": 0,
+  "openingBalanceDescription": "لا يوجد مبلغ مستحق",
+  "totalPaidToDriver": 100,
+  "totalReceivedFromDriver": 20,
+  "totalTripCost": 60,
+  "closingBalanceAmount": 20,
+  "closingBalanceDescription": "مبلغ مطلوب من السائق"
+}
+```
+
+Rows return Arabic `sourceName` and `movementName`, and clearly separate
+`amountPaidToDriver`, `amountReceivedFromDriver`, and `tripCost`. Display the
+non-negative `balanceAmount` with its Arabic `balanceDescription`. A
+DriverTrip cost row is operational and has no cashbox effect. General driver
+vouchers with no trip affect only the overall driver balance.
 
 ## ProblemDetails and UI behavior
 
@@ -494,12 +526,11 @@ CashMovementTypes.HasVouchers
 CashMovementTypes.UsedSemanticsChangeNotAllowed
 CashMovementTypes.Concurrency
 
-CashVouchers.VoucherNumberExists
 CashVouchers.CashboxInactive
 CashVouchers.MovementTypeInactive
 CashVouchers.MovementTypeDirectionMismatch
-CashVouchers.PartnerEffectRequired
-CashVouchers.PartnerTypeRequired
+CashVouchers.MovementTypeNotForPartner
+CashVouchers.MovementTypeForPartnerOnly
 CashVouchers.PartnerCurrencyMismatch
 CashVouchers.InsufficientCashboxBalance
 CashVouchers.Concurrency

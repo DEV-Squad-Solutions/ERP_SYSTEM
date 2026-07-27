@@ -29,21 +29,21 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Returns one voucher with cashbox, type, party, derived currency, and concurrency token.",
                     "A positive route id.",
-                    "CompanyId and currency are server-controlled.",
+                    "CompanyId, currency, and partner Debit/Credit are server-controlled. The frontend does not send or display an accounting-side selector.",
                     "Missing or other-company vouchers return 404.")),
             nameof(CashVouchersController.Create) => (
                 "Create a cash voucher",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Saves the voucher immediately and creates exactly one existing-table partner movement when PartyType is Partner.",
+                    "Admin only. Saves the voucher and its cash/partner effects atomically.",
                     "Voucher number/date, Receipt or Payment, active cashbox, matching active movement type, party fields, positive amount, and optional reference/description/notes.",
-                    "DriverTripId is always optional and a voucher never creates a trip. Partner currency must match cashbox currency. Payment cannot make the cashbox balance negative.",
-                    "Relationship failures return 404/409; the full operation is atomic.")),
+                    "Voucher number is required but may be duplicated. Choose direction and partyType, then load /CashMovementTypes/select using direction and forPartner=(partyType == Partner).",
+                    "The server posts partner Receipt as Credit and partner Payment as Debit. DriverTripId is optional, non-partner vouchers create no partner movement, and Payment cannot make the cashbox negative.")),
             nameof(CashVouchersController.Update) => (
                 "Update a cash voucher",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Replaces voucher values and its partner effect atomically.",
+                    "Admin only. Replaces voucher values and all derived effects atomically.",
                     "Editable fields plus the original base64 rowVersion.",
-                    "The old cashbox/partner effect is removed and the new effect is applied exactly once.",
+                    "Apply the same conditional UI fields and movement-type filtering as Create. The old effects are removed and the new effects are applied exactly once.",
                     "A stale token returns CashVouchers.Concurrency.")),
             nameof(CashVouchersController.Delete) => (
                 "Delete a cash voucher",
