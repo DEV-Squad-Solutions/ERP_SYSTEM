@@ -645,6 +645,20 @@ public sealed partial class InvoiceService
             .Select(key => key.ItemId)
             .Distinct()
             .ToArray();
+        var itemNames = await dbContext.Items
+            .AsNoTracking()
+            .Where(item =>
+                item.CompanyId == companyId &&
+                itemIdArray.Contains(item.Id))
+            .Select(item => new
+            {
+                item.Id,
+                item.Name
+            })
+            .ToDictionaryAsync(
+                item => item.Id,
+                item => item.Name,
+                cancellationToken);
         var movementQuery = dbContext.ItemMovements
             .AsNoTracking()
             .Where(movement =>
@@ -698,6 +712,9 @@ public sealed partial class InvoiceService
         // 9. Build and validate only the exact affected store/item timelines.
         foreach (var (storeId, itemId) in affectedStockKeys)
         {
+            var itemName = itemNames.GetValueOrDefault(itemId) ??
+                itemId.ToString();
+
             // The proposed movement belongs only to the requested store.
             // Removed items and items in the old store have quantity zero.
             var requestedQuantity =
@@ -801,7 +818,7 @@ public sealed partial class InvoiceService
                 {
                     return Error.Conflict(
                         "Inventory.InsufficientStock",
-                        $"الكمية المتاحة للصنف {itemId} في المخزن " +
+                        $"الكمية المتاحة للصنف {itemName} (رقم {itemId}) في المخزن " +
                         $"{storeId} بتاريخ " +
                         $"{stockEvent.Date:yyyy-MM-dd} هي " +
                         $"{availableBeforeMovement}، ولا يمكن صرف " +
@@ -815,7 +832,7 @@ public sealed partial class InvoiceService
                     "Inventory.HistoricalStockConflict",
                     $"{operationDescription} بتاريخ " +
                     $"{invoice.InvoiceDate:yyyy-MM-dd} سيؤدي إلى " +
-                    $"عجز في رصيد الصنف {itemId} في المخزن {storeId} " +
+                    $"عجز في رصيد الصنف {itemName} (رقم {itemId}) في المخزن {storeId} " +
                     $"بتاريخ {stockEvent.Date:yyyy-MM-dd}. الرصيد قبل " +
                     $"حركة الصرف هو {availableBeforeMovement}، وكمية " +
                     $"الحركة هي {stockEvent.QuantityOut}.",

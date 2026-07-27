@@ -71,6 +71,16 @@ public sealed record InvoiceSummaryResponse(
     decimal PaidAmount,
     decimal RemainingAmount);
 
+public sealed record InvoiceItemBalanceResponse(
+    int StoreId,
+    string StoreName,
+    int ItemId,
+    string ItemName,
+    int ItemUnitId,
+    string ItemUnitName,
+    DateOnly AsOfDate,
+    decimal Balance);
+
 public sealed record InvoicePagedResponse(
     IReadOnlyList<InvoiceListResponse> Items,
     int PageNumber,

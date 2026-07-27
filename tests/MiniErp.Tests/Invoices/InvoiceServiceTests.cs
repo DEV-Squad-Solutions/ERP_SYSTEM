@@ -250,7 +250,8 @@ public sealed class InvoiceServiceTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("Inventory.InsufficientStock", result.Error.Code);
-        Assert.Contains("للصنف 1", result.Error.Description);
+        Assert.Contains("Item 1", result.Error.Description);
+        Assert.Contains("(رقم 1)", result.Error.Description);
         Assert.Contains("في المخزن 1", result.Error.Description);
         Assert.Contains("2026-07-25", result.Error.Description);
         Assert.Contains("10", result.Error.Description);
@@ -404,6 +405,7 @@ public sealed class InvoiceServiceTests
         Assert.StartsWith(
             "إضافة الفاتورة بتاريخ 2026-01-02",
             result.Error.Description);
+        Assert.Contains("Item 1", result.Error.Description);
         Assert.DoesNotContain("تعديل الفاتورة", result.Error.Description);
     }
 
@@ -2449,6 +2451,100 @@ public sealed class InvoiceServiceTests
         Assert.True(result.IsSuccess);
         var invoice = Assert.Single(result.Value.Items);
         Assert.Equal(InvoiceType.Purchase, invoice.InvoiceType);
+    }
+
+    [Fact]
+    public async Task GetItemBalance_ReturnsBalanceThroughTheSelectedDate()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await AddMovementAsync(
+            database,
+            storeId: 1,
+            itemId: 1,
+            movementType: ItemMovementType.Purchase,
+            referenceId: 940,
+            referenceNumber: "PURCHASE-940",
+            movementDate: new DateOnly(2026, 7, 24),
+            quantityIn: 3m);
+        await AddMovementAsync(
+            database,
+            storeId: 1,
+            itemId: 1,
+            movementType: ItemMovementType.Sales,
+            referenceId: 941,
+            referenceNumber: "SALE-941",
+            movementDate: new DateOnly(2026, 7, 25),
+            quantityOut: 4m);
+        await AddMovementAsync(
+            database,
+            storeId: 1,
+            itemId: 1,
+            movementType: ItemMovementType.Sales,
+            referenceId: 942,
+            referenceNumber: "SALE-942",
+            movementDate: new DateOnly(2026, 7, 26),
+            quantityOut: 5m);
+
+        var result = await database.CreateService().GetItemBalanceAsync(
+            storeId: 1,
+            itemId: 1,
+            asOfDate: new DateOnly(2026, 7, 25));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Product Store", result.Value.StoreName);
+        Assert.Equal("Item 1", result.Value.ItemName);
+        Assert.Equal("Unit", result.Value.ItemUnitName);
+        Assert.Equal(9m, result.Value.Balance);
+    }
+
+    [Fact]
+    public async Task GetItemBalance_CanExcludeTheInvoiceBeingEdited()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var invoice = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)]))).Value;
+
+        var currentBalance = await service.GetItemBalanceAsync(
+            storeId: 1,
+            itemId: 1,
+            asOfDate: invoice.InvoiceDate);
+        var availableForReplacement = await service.GetItemBalanceAsync(
+            storeId: 1,
+            itemId: 1,
+            asOfDate: invoice.InvoiceDate,
+            invoiceId: invoice.Id);
+
+        Assert.True(currentBalance.IsSuccess);
+        Assert.True(availableForReplacement.IsSuccess);
+        Assert.Equal(8m, currentBalance.Value.Balance);
+        Assert.Equal(10m, availableForReplacement.Value.Balance);
+    }
+
+    [Fact]
+    public async Task GetItemBalance_DoesNotExposeAnotherCompanyStore()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Stores (
+                Id, CompanyId, BusinessPartnerId, Code, Name, Address,
+                IsContainerStore, IsActive, IsDeleted)
+            VALUES (
+                20, 2, NULL, 'OTHER-STORE', 'Other company store', NULL,
+                0, 1, 0);
+            """);
+        database.Context.ChangeTracker.Clear();
+
+        var result = await database.CreateService().GetItemBalanceAsync(
+            storeId: 20,
+            itemId: 1,
+            asOfDate: new DateOnly(2026, 7, 25));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.StoreNotFound", result.Error.Code);
     }
 
     [Fact]

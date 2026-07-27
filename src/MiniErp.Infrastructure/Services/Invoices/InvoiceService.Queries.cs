@@ -1,5 +1,6 @@
 using Mapster;
 using Microsoft.EntityFrameworkCore;
+using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Invoicing;
 
@@ -149,6 +150,190 @@ public sealed partial class InvoiceService
                     totals.Total,
                     totals.PaidAmount,
                     totals.RemainingAmount));
+    }
+
+    public async Task<Result<InvoiceItemBalanceResponse>> GetItemBalanceAsync(
+        int storeId,
+        int itemId,
+        DateOnly asOfDate,
+        int? invoiceId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (storeId <= 0)
+        {
+            return Result<InvoiceItemBalanceResponse>.Failure(
+                Error.Validation(
+                    "Invoices.ItemBalanceStoreInvalid",
+                    "يجب أن يكون رقم المخزن أكبر من صفر.",
+                    nameof(InvoiceItemBalanceResponse.StoreId)));
+        }
+
+        if (itemId <= 0)
+        {
+            return Result<InvoiceItemBalanceResponse>.Failure(
+                Error.Validation(
+                    "Invoices.ItemBalanceItemInvalid",
+                    "يجب أن يكون رقم الصنف أكبر من صفر.",
+                    nameof(InvoiceItemBalanceResponse.ItemId)));
+        }
+
+        if (asOfDate == DateOnly.MinValue)
+        {
+            return Result<InvoiceItemBalanceResponse>.Failure(
+                Error.Validation(
+                    "Invoices.ItemBalanceDateRequired",
+                    "يجب تحديد تاريخ الفاتورة لحساب الرصيد.",
+                    nameof(InvoiceItemBalanceResponse.AsOfDate)));
+        }
+
+        if (invoiceId is <= 0)
+        {
+            return Result<InvoiceItemBalanceResponse>.Failure(
+                Error.Validation(
+                    "Invoices.ItemBalanceInvoiceInvalid",
+                    "يجب أن يكون رقم الفاتورة المستبعدة أكبر من صفر.",
+                    "InvoiceId"));
+        }
+
+        var store = await dbContext.Stores
+            .AsNoTracking()
+            .Where(candidate =>
+                candidate.CompanyId == companyId &&
+                candidate.Id == storeId)
+            .Select(candidate => new
+            {
+                candidate.Name,
+                candidate.IsActive,
+                candidate.IsContainerStore
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (store is null)
+        {
+            return Result<InvoiceItemBalanceResponse>.Failure(
+                Error.NotFound(
+                    "Invoices.StoreNotFound",
+                    "لم يتم العثور على المخزن المحدد.",
+                    nameof(InvoiceItemBalanceResponse.StoreId)));
+        }
+
+        if (!store.IsActive)
+        {
+            return Result<InvoiceItemBalanceResponse>.Failure(
+                Error.Conflict(
+                    "Invoices.StoreInactive",
+                    "لا يمكن حساب رصيد مخزن غير نشط.",
+                    nameof(InvoiceItemBalanceResponse.StoreId)));
+        }
+
+        if (store.IsContainerStore)
+        {
+            return Result<InvoiceItemBalanceResponse>.Failure(
+                Error.Conflict(
+                    "Invoices.ContainerStoreNotAllowed",
+                    "رصيد الأصناف متاح لمخازن المنتجات فقط.",
+                    nameof(InvoiceItemBalanceResponse.StoreId)));
+        }
+
+        var item = await dbContext.Items
+            .AsNoTracking()
+            .Where(candidate =>
+                candidate.CompanyId == companyId &&
+                candidate.Id == itemId)
+            .Select(candidate => new
+            {
+                candidate.Name,
+                candidate.ItemUnitId,
+                ItemUnitName = candidate.ItemUnit.Name,
+                candidate.IsActive,
+                ItemUnitIsActive = candidate.ItemUnit.IsActive
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (item is null)
+        {
+            return Result<InvoiceItemBalanceResponse>.Failure(
+                Error.NotFound(
+                    "Invoices.ItemNotFound",
+                    "لم يتم العثور على الصنف المحدد.",
+                    nameof(InvoiceItemBalanceResponse.ItemId)));
+        }
+
+        if (!item.IsActive)
+        {
+            return Result<InvoiceItemBalanceResponse>.Failure(
+                Error.Conflict(
+                    "Invoices.ItemInactive",
+                    "لا يمكن حساب رصيد صنف غير نشط.",
+                    nameof(InvoiceItemBalanceResponse.ItemId)));
+        }
+
+        if (!item.ItemUnitIsActive)
+        {
+            return Result<InvoiceItemBalanceResponse>.Failure(
+                Error.Conflict(
+                    "Invoices.ItemUnitInactive",
+                    "لا يمكن حساب رصيد صنف وحدته غير نشطة.",
+                    nameof(InvoiceItemBalanceResponse.ItemId)));
+        }
+
+        string? excludedInvoiceNumber = null;
+        if (invoiceId is int currentInvoiceId)
+        {
+            excludedInvoiceNumber = await dbContext.Invoices
+                .AsNoTracking()
+                .Where(candidate =>
+                    candidate.CompanyId == companyId &&
+                    candidate.Id == currentInvoiceId)
+                .Select(candidate => candidate.InvoiceNumber)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (excludedInvoiceNumber is null)
+            {
+                return Result<InvoiceItemBalanceResponse>.Failure(
+                    NotFound(currentInvoiceId));
+            }
+        }
+
+        var openingBalance = await dbContext.StockOpeningBalanceLines
+            .AsNoTracking()
+            .Where(line =>
+                line.CompanyId == companyId &&
+                line.ItemId == itemId &&
+                line.StockOpeningBalance.CompanyId == companyId &&
+                line.StockOpeningBalance.StoreId == storeId &&
+                line.StockOpeningBalance.DocumentDate <= asOfDate)
+            .SumAsync(
+                line => (decimal?)line.Quantity,
+                cancellationToken) ?? 0m;
+
+        var movementQuery = dbContext.ItemMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.StoreId == storeId &&
+                movement.ItemId == itemId &&
+                movement.MovementDate <= asOfDate);
+        if (invoiceId is int excludedInvoiceId)
+        {
+            movementQuery = movementQuery.Where(movement =>
+                movement.ReferenceId != excludedInvoiceId ||
+                movement.ReferenceNumber != excludedInvoiceNumber);
+        }
+
+        var movementBalance = await movementQuery
+            .SumAsync(
+                movement => (decimal?)(
+                    movement.QuantityIn - movement.QuantityOut),
+                cancellationToken) ?? 0m;
+
+        return Result<InvoiceItemBalanceResponse>.Success(
+            new InvoiceItemBalanceResponse(
+                storeId,
+                store.Name,
+                itemId,
+                item.Name,
+                item.ItemUnitId,
+                item.ItemUnitName,
+                asOfDate,
+                openingBalance + movementBalance));
     }
 
     private IQueryable<InvoiceResponse> ProjectResponseQuery(int id) =>

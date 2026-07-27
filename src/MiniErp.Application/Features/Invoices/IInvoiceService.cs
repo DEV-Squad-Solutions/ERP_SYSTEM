@@ -14,6 +14,13 @@ public interface IInvoiceService
         int id,
         CancellationToken cancellationToken = default);
 
+    Task<Result<InvoiceItemBalanceResponse>> GetItemBalanceAsync(
+        int storeId,
+        int itemId,
+        DateOnly asOfDate,
+        int? invoiceId = null,
+        CancellationToken cancellationToken = default);
+
     Task<Result<InvoiceResponse>> AddAsync(
         InvoiceRequest request,
         CancellationToken cancellationToken = default);

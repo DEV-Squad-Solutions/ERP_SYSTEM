@@ -28,6 +28,27 @@ public sealed class InvoicesController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("item-balance")]
+    [ProducesResponseType<InvoiceItemBalanceResponse>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> GetItemBalance(
+        [FromQuery] int storeId,
+        [FromQuery] int itemId,
+        [FromQuery] DateOnly asOfDate,
+        [FromQuery] int? invoiceId,
+        CancellationToken cancellationToken)
+    {
+        var result = await invoiceService.GetItemBalanceAsync(
+            storeId,
+            itemId,
+            asOfDate,
+            invoiceId,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("{id:int}")]
     [ProducesResponseType<InvoiceResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

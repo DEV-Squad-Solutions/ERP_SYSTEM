@@ -24,6 +24,13 @@ public sealed class InvoicesSwaggerDocumentation : IOperationFilter
                     "A bearer token containing one validated `company_id`. Optional query fields are `pageNumber`, `pageSize`, `search`, partial `invoiceNumber`, `invoiceType`, `businessPartnerId`, `countryId`, `storeId`, responsible `driverId`, `paymentTerm`, `priceStatus`, inclusive `fromDate`, and inclusive `toDate`. `search` matches invoice, partner, store, country, driver, vehicle, product, and container display values. `priceStatus` accepts `HasMissingPrice` (`Price == 0` on any line) or `AllItemsPriced` (every line has `Price > 0`). Date filters accept ISO, day-first, month-first, named-month, alternate-separator, and Arabic/Persian-digit forms; ISO `yyyy-MM-dd` remains preferred.",
                     "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100; IDs must be positive; enum values must be supported; and `toDate` must not precede `fromDate`. Ambiguous numeric dates are interpreted day-first, so `01/02/2026` means 1 February 2026.",
                     "Invalid pagination or filters return 400. Empty and later pages return an empty `items` array. A filter with no matches returns zero summary amounts. Deleted and other-company records are excluded.")),
+            nameof(InvoicesController.GetItemBalance) => (
+                "Get item balance for an invoice",
+                SwaggerOperationDescription.Create(
+                    "Returns the selected item's available balance in one product store at the end of the supplied invoice date. The balance is derived from active stock opening balances plus active item movements through that date.",
+                    "Positive `storeId` and `itemId`, plus required `asOfDate`. During invoice editing, send the optional current `invoiceId` so that invoice's existing movement is excluded and the displayed quantity is available to the replacement invoice.",
+                    "The store and item must be active, belong to the selected company, and the store must be a product store. This informational balance does not replace the full historical stock validation performed when the invoice is saved.",
+                    "Invalid values return 400. Missing or other-company records return 404. Inactive references or a container store return 409.")),
             nameof(InvoicesController.GetById) => (
                 "Get an invoice",
                 SwaggerOperationDescription.Create(
