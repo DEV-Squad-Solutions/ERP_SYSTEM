@@ -266,6 +266,9 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Property<int>("BusinessPartnerId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("CashVoucherId")
+                        .HasColumnType("int");
+
                     b.Property<int>("CompanyId")
                         .HasColumnType("int");
 
@@ -308,7 +311,7 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
-                    b.Property<int>("InvoiceId")
+                    b.Property<int?>("InvoiceId")
                         .HasColumnType("int");
 
                     b.Property<bool>("IsDeleted")
@@ -335,9 +338,13 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
 
                     b.HasAlternateKey("CompanyId", "Id");
 
+                    b.HasIndex("CompanyId", "CashVoucherId")
+                        .IsUnique()
+                        .HasFilter("[CashVoucherId] IS NOT NULL AND [IsDeleted] = 0");
+
                     b.HasIndex("CompanyId", "InvoiceId")
                         .IsUnique()
-                        .HasFilter("[IsDeleted] = 0");
+                        .HasFilter("[InvoiceId] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.HasIndex("CompanyId", "BusinessPartnerId", "Currency", "MovementDate", "Id");
 
@@ -346,6 +353,8 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_BusinessPartnerMovements_Amounts_NonNegative", "[Debit] >= 0 AND [Credit] >= 0");
 
                             t.HasCheckConstraint("CK_BusinessPartnerMovements_ExactlyOneAmount", "([Debit] > 0 AND [Credit] = 0) OR ([Debit] = 0 AND [Credit] > 0)");
+
+                            t.HasCheckConstraint("CK_BusinessPartnerMovements_ExactlyOneSource", "([InvoiceId] IS NOT NULL AND [CashVoucherId] IS NULL) OR ([InvoiceId] IS NULL AND [CashVoucherId] IS NOT NULL)");
                         });
                 });
 
@@ -440,6 +449,331 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("PartnerOpeningBalances", (string)null);
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.CashManagement.CashMovementType", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Direction")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("PartnerEffect")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Direction", "Name")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "Direction", "IsActive", "Name", "Id");
+
+                    b.ToTable("CashMovementTypes", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_CashMovementTypes_Direction", "[Direction] IN (1, 2)");
+
+                            t.HasCheckConstraint("CK_CashMovementTypes_PartnerEffect", "[PartnerEffect] IN (0, 1, 2)");
+                        });
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.CashManagement.CashVoucher", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("BusinessPartnerId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CashMovementTypeId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CashboxId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Currency")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("Direction")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("DriverId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("DriverTripId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ExternalPartyName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("LastModifiedAt")
+                        .HasColumnType("datetime2(7)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("PartyType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReferenceNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateOnly>("VoucherDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("VoucherNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "VoucherNumber")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "BusinessPartnerId", "VoucherDate", "Id");
+
+                    b.HasIndex("CompanyId", "CashMovementTypeId", "VoucherDate", "Id");
+
+                    b.HasIndex("CompanyId", "CashboxId", "VoucherDate", "Id");
+
+                    b.HasIndex("CompanyId", "DriverId", "VoucherDate", "Id");
+
+                    b.HasIndex("CompanyId", "DriverTripId", "VoucherDate", "Id");
+
+                    b.ToTable("CashVouchers", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_CashVouchers_Amount_Positive", "[Amount] > 0");
+
+                            t.HasCheckConstraint("CK_CashVouchers_Direction", "[Direction] IN (1, 2)");
+
+                            t.HasCheckConstraint("CK_CashVouchers_PartyShape", "([PartyType] = 1 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 2 AND [BusinessPartnerId] IS NOT NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 3 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NOT NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 4 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_CashVouchers_PartyType", "[PartyType] IN (1, 2, 3, 4)");
+                        });
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.CashManagement.Cashbox", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Currency")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<decimal>("OpeningBalance")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Code")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "Name")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "IsActive", "Name", "Id");
+
+                    b.ToTable("Cashboxes", (string)null);
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.Catalog.Item", b =>
@@ -1766,6 +2100,14 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Property<int>("CompanyId")
                         .HasColumnType("int");
 
+                    b.Property<decimal?>("Cost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("CostNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<string>("CreatedById")
                         .IsRequired()
                         .HasMaxLength(450)
@@ -1812,6 +2154,12 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<DateOnly>("TripDate")
                         .HasColumnType("date");
 
@@ -1827,8 +2175,6 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
-
-                    b.HasAlternateKey("CompanyId", "Id");
 
                     b.HasIndex("CompanyId", "ActualDriverId");
 
@@ -2136,14 +2482,21 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.CashManagement.CashVoucher", "CashVoucher")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "CashVoucherId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("MiniErp.Domain.Entities.Invoicing.Invoice", "Invoice")
                         .WithMany()
                         .HasForeignKey("CompanyId", "InvoiceId")
                         .HasPrincipalKey("CompanyId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("BusinessPartner");
+
+                    b.Navigation("CashVoucher");
 
                     b.Navigation("Company");
 
@@ -2166,6 +2519,81 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("BusinessPartner");
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.CashManagement.CashMovementType", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.CashManagement.CashVoucher", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.BusinessPartners.BusinessPartner", "BusinessPartner")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "BusinessPartnerId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("MiniErp.Domain.Entities.CashManagement.CashMovementType", "CashMovementType")
+                        .WithMany("Vouchers")
+                        .HasForeignKey("CompanyId", "CashMovementTypeId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.CashManagement.Cashbox", "Cashbox")
+                        .WithMany("Vouchers")
+                        .HasForeignKey("CompanyId", "CashboxId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Logistics.Driver", "Driver")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "DriverId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("MiniErp.Domain.Entities.Logistics.DriverTrip", "DriverTrip")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "DriverTripId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("BusinessPartner");
+
+                    b.Navigation("CashMovementType");
+
+                    b.Navigation("Cashbox");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Driver");
+
+                    b.Navigation("DriverTrip");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.CashManagement.Cashbox", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Company");
                 });
@@ -2620,6 +3048,16 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Navigation("Company");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.CashManagement.CashMovementType", b =>
+                {
+                    b.Navigation("Vouchers");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.CashManagement.Cashbox", b =>
+                {
+                    b.Navigation("Vouchers");
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.Catalog.ItemUnit", b =>

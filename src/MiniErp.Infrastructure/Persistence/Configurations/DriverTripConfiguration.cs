@@ -54,6 +54,16 @@ public sealed class DriverTripConfiguration : AuditableEntityConfiguration<Drive
         builder.Property(trip => trip.Price)
             .HasPrecision(18, 2);
 
+        builder.Property(trip => trip.Cost)
+            .HasPrecision(18, 2);
+
+        builder.Property(trip => trip.CostNotes)
+            .HasMaxLength(1_000);
+
+        builder.Property(trip => trip.RowVersion)
+            .IsRowVersion()
+            .IsRequired();
+
         builder.HasIndex(trip => new
         {
             trip.CompanyId,

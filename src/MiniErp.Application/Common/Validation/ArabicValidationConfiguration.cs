@@ -26,6 +26,8 @@ public static class ArabicValidationConfiguration
             ["ArabicName"] = "الاسم بالعربية",
             ["BalanceType"] = "نوع رصيد الشريك",
             ["BusinessPartnerId"] = "العميل أو المورد",
+            ["CashboxId"] = "صندوق النقدية",
+            ["CashMovementTypeId"] = "نوع الحركة النقدية",
             ["Code"] = "الكود",
             ["CommercialRegister"] = "السجل التجاري",
             ["CompanyId"] = "الشركة",
@@ -35,6 +37,9 @@ public static class ArabicValidationConfiguration
             ["CreditLimit"] = "حد الائتمان",
             ["Currency"] = "العملة",
             ["Description"] = "الوصف",
+            ["Direction"] = "الاتجاه",
+            ["DriverId"] = "السائق",
+            ["DriverTripId"] = "رحلة السائق",
             ["Email"] = "البريد الإلكتروني",
             ["FirstName"] = "الاسم الأول",
             ["IsContainerStore"] = "نوع المخزن",
@@ -46,6 +51,8 @@ public static class ArabicValidationConfiguration
             ["NationalId"] = "الرقم القومي",
             ["PageNumber"] = "رقم الصفحة",
             ["PageSize"] = "حجم الصفحة",
+            ["PartnerEffect"] = "أثر حساب الشريك",
+            ["PartyType"] = "نوع الطرف",
             ["PaymentTerm"] = "شرط السداد",
             ["DiscountAmount"] = "قيمة الخصم",
             ["PaidAmount"] = "المبلغ المدفوع",
@@ -56,7 +63,13 @@ public static class ArabicValidationConfiguration
             ["SelectionToken"] = "رمز اختيار الشركة",
             ["StoreId"] = "المخزن",
             ["TaxNumber"] = "الرقم الضريبي",
-            ["UserName"] = "اسم المستخدم"
+            ["UserName"] = "اسم المستخدم",
+            ["VoucherDate"] = "تاريخ السند",
+            ["VoucherNumber"] = "رقم السند",
+            ["ExternalPartyName"] = "اسم الطرف الخارجي",
+            ["ReferenceNumber"] = "الرقم المرجعي",
+            ["Cost"] = "تكلفة الرحلة",
+            ["Items"] = "العناصر"
         };
 
     public static void Configure()

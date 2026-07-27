@@ -135,4 +135,25 @@ public sealed partial class InvoiceService
         dbContext.BusinessPartnerMovements.RemoveRange(partnerMovements);
         dbContext.DriverTrips.RemoveRange(driverTrips);
     }
+
+    private async Task<bool> HasCashVoucherTripReferencesAsync(
+        int invoiceId,
+        CancellationToken cancellationToken)
+    {
+        var tripIds = dbContext.DriverTrips
+            .IgnoreQueryFilters()
+            .Where(trip =>
+                trip.CompanyId == companyId &&
+                trip.InvoiceId == invoiceId)
+            .Select(trip => trip.Id);
+
+        return await dbContext.CashVouchers
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                voucher =>
+                    voucher.CompanyId == companyId &&
+                    voucher.DriverTripId.HasValue &&
+                    tripIds.Contains(voucher.DriverTripId.Value),
+                cancellationToken);
+    }
 }

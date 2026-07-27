@@ -1,4 +1,5 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
@@ -17,9 +18,13 @@ public sealed class BusinessPartnerMovement : AuditableEntity
 
     public BusinessPartner BusinessPartner { get; set; } = null!;
 
-    public int InvoiceId { get; set; }
+    public int? InvoiceId { get; set; }
 
-    public Invoice Invoice { get; set; } = null!;
+    public Invoice? Invoice { get; set; }
+
+    public int? CashVoucherId { get; set; }
+
+    public CashVoucher? CashVoucher { get; set; }
 
     public BusinessPartnerMovementType MovementType { get; set; }
 

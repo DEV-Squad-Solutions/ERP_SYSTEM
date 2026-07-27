@@ -643,6 +643,13 @@ public sealed class BusinessPartnerService(
                     balance.CompanyId == companyId &&
                     balance.BusinessPartnerId == businessPartnerId,
                 cancellationToken) ||
+        await dbContext.CashVouchers
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                voucher =>
+                    voucher.CompanyId == companyId &&
+                    voucher.BusinessPartnerId == businessPartnerId,
+                cancellationToken) ||
         await dbContext.BusinessPartnerMovements
             .IgnoreQueryFilters()
             .AnyAsync(

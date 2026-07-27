@@ -20,6 +20,11 @@ public sealed partial class InvoiceService
             "Invoices.Concurrency",
             "تم تعديل الفاتورة بواسطة مستخدم آخر. أعد تحميل الفاتورة ثم حاول مرة أخرى.");
 
+    private static Error DriverTripHasCashVouchers() =>
+        Error.Conflict(
+            "Invoices.DriverTripHasCashVouchers",
+            "لا يمكن تعديل الفاتورة أو حذفها لأن رحلة السائق المرتبطة بها مستخدمة في سندات نقدية حالية أو تاريخية.");
+
     private sealed record PreparedInvoice(
         CurrencyCode Currency,
         IReadOnlyDictionary<int, int> ItemUnitIds);

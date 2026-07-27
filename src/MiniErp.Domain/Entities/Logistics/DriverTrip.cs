@@ -37,4 +37,10 @@ public sealed class DriverTrip : AuditableEntity
 
     public decimal? Price { get; set; }
 
+    public decimal? Cost { get; set; }
+
+    public string? CostNotes { get; set; }
+
+    public byte[] RowVersion { get; private set; } = [];
+
 }

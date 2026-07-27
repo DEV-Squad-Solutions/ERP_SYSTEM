@@ -171,6 +171,12 @@ public sealed partial class InvoiceService(
             return Result<InvoiceResponse>.Failure(Concurrency());
         }
 
+        if (await HasCashVoucherTripReferencesAsync(id, cancellationToken))
+        {
+            return Result<InvoiceResponse>.Failure(
+                DriverTripHasCashVouchers());
+        }
+
         var entry = dbContext.Entry(invoice);
         entry.Property(item => item.RowVersion).OriginalValue = request.RowVersion;
 
@@ -244,6 +250,11 @@ public sealed partial class InvoiceService(
         if (invoice is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        if (await HasCashVoucherTripReferencesAsync(id, cancellationToken))
+        {
+            return Result.Failure(DriverTripHasCashVouchers());
         }
 
         if (InvoiceMovementRules.IsInbound(invoice.InvoiceType))

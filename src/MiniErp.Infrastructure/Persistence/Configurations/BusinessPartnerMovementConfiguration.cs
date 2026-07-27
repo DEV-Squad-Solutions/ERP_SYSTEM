@@ -23,6 +23,10 @@ public sealed class BusinessPartnerMovementConfiguration
                     "CK_BusinessPartnerMovements_ExactlyOneAmount",
                     "([Debit] > 0 AND [Credit] = 0) OR " +
                     "([Debit] = 0 AND [Credit] > 0)");
+                table.HasCheckConstraint(
+                    "CK_BusinessPartnerMovements_ExactlyOneSource",
+                    "([InvoiceId] IS NOT NULL AND [CashVoucherId] IS NULL) OR " +
+                    "([InvoiceId] IS NULL AND [CashVoucherId] IS NOT NULL)");
             });
         builder.HasKey(movement => movement.Id);
 
@@ -41,8 +45,9 @@ public sealed class BusinessPartnerMovementConfiguration
         builder.Property(movement => movement.BusinessPartnerId)
             .IsRequired();
 
-        builder.Property(movement => movement.InvoiceId)
-            .IsRequired();
+        builder.Property(movement => movement.InvoiceId);
+
+        builder.Property(movement => movement.CashVoucherId);
 
         builder.Property(movement => movement.MovementType)
             .HasConversion<int>()
@@ -73,7 +78,15 @@ public sealed class BusinessPartnerMovementConfiguration
             movement.InvoiceId
         })
             .IsUnique()
-            .HasFilter("[IsDeleted] = 0");
+            .HasFilter("[InvoiceId] IS NOT NULL AND [IsDeleted] = 0");
+
+        builder.HasIndex(movement => new
+        {
+            movement.CompanyId,
+            movement.CashVoucherId
+        })
+            .IsUnique()
+            .HasFilter("[CashVoucherId] IS NOT NULL AND [IsDeleted] = 0");
 
         builder.HasIndex(movement => new
         {
@@ -115,6 +128,22 @@ public sealed class BusinessPartnerMovementConfiguration
                 invoice.CompanyId,
                 invoice.Id
             })
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(movement => movement.CashVoucher)
+            .WithMany()
+            .HasForeignKey(movement => new
+            {
+                movement.CompanyId,
+                movement.CashVoucherId
+            })
+            .HasPrincipalKey(voucher => new
+            {
+                voucher.CompanyId,
+                voucher.Id
+            })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

@@ -3867,7 +3867,8 @@ public sealed class InvoiceServiceTests
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
                     BusinessPartnerId INTEGER NOT NULL,
-                    InvoiceId INTEGER NOT NULL,
+                    InvoiceId INTEGER NULL,
+                    CashVoucherId INTEGER NULL,
                     MovementType INTEGER NOT NULL,
                     MovementDate TEXT NOT NULL,
                     Currency INTEGER NOT NULL,
@@ -3897,6 +3898,9 @@ public sealed class InvoiceServiceTests
                     ExportInvoiceCode TEXT NULL,
                     TripDate TEXT NOT NULL,
                     Price NUMERIC NULL,
+                    Cost NUMERIC NULL,
+                    CostNotes TEXT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
                     CreatedByPc TEXT NOT NULL,
@@ -3909,10 +3913,25 @@ public sealed class InvoiceServiceTests
                     IsDeleted INTEGER NOT NULL
                 );
 
+                CREATE TABLE CashVouchers (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    DriverTripId INTEGER NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
                 CREATE TRIGGER AdvanceInvoiceRowVersion
                 AFTER UPDATE ON Invoices
                 BEGIN
                     UPDATE Invoices
+                    SET RowVersion = randomblob(8)
+                    WHERE Id = NEW.Id;
+                END;
+
+                CREATE TRIGGER AdvanceDriverTripRowVersion
+                AFTER UPDATE ON DriverTrips
+                BEGIN
+                    UPDATE DriverTrips
                     SET RowVersion = randomblob(8)
                     WHERE Id = NEW.Id;
                 END;

@@ -1,0 +1,23 @@
+using MiniErp.Domain.Enums;
+
+namespace MiniErp.Application.Features.CashMovementTypes;
+
+public sealed record CashMovementTypeRequest(
+    string Name,
+    CashDirection Direction,
+    PartnerAccountEffect PartnerEffect,
+    bool IsActive,
+    string? Notes)
+{
+    public const int NameMaximumLength = 200;
+
+    public const int NotesMaximumLength = 1_000;
+}
+
+public sealed record CashMovementTypeUpdateRequest(
+    string Name,
+    CashDirection Direction,
+    PartnerAccountEffect PartnerEffect,
+    bool IsActive,
+    string? Notes,
+    byte[]? RowVersion);

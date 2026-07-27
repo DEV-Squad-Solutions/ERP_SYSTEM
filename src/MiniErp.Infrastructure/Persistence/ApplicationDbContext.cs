@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Containers;
@@ -20,6 +21,13 @@ public sealed class ApplicationDbContext(
     public DbSet<Company> Companies => Set<Company>();
 
     public DbSet<BusinessPartner> BusinessPartners => Set<BusinessPartner>();
+
+    public DbSet<Cashbox> Cashboxes => Set<Cashbox>();
+
+    public DbSet<CashMovementType> CashMovementTypes =>
+        Set<CashMovementType>();
+
+    public DbSet<CashVoucher> CashVouchers => Set<CashVoucher>();
 
     public DbSet<PartnerOpeningBalance> PartnerOpeningBalances =>
         Set<PartnerOpeningBalance>();

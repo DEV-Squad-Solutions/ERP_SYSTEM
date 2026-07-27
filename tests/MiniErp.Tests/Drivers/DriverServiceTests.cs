@@ -488,6 +488,13 @@ public sealed class DriverServiceTests
                     ActualDriverId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );
+
+                CREATE TABLE CashVouchers (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    DriverId INTEGER NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
                 """);
         }
 

@@ -1,11 +1,12 @@
-# MiniErp Invoice Sidebar Tasks
+# MiniErp Invoice and Cash Sidebar Tasks
 
-This file consolidates the current approved instructions for the Invoice tasks
-shown in the Codex sidebar. It is the implementation checklist for Tasks 0–7
-and supersedes the older lifecycle, posting, cancellation, reversal, and
-movement instructions that may still appear in an earlier task preview.
+This file consolidates the current approved instructions for the Invoice and
+Cash tasks shown in the Codex sidebar. It is the implementation checklist for
+Tasks 0–7 and supersedes older lifecycle, posting, cancellation, reversal, and
+duplicate-movement instructions that may still appear in an earlier task
+preview.
 
-Last reviewed: 2026-07-25
+Last reviewed: 2026-07-27
 
 ## Portable handoff for another PC
 
@@ -106,11 +107,11 @@ development and verification policy.
 | 0 | Invoice 0 – Reference Data | `019f97eb-c87d-7211-afbf-bc9bb1e69f96` | Implemented |
 | 1 | Invoice 1 – Stock Opening Balances | `019f97eb-f38e-7610-a2cf-8537d71a1238` | Implemented and verified; Step 2 still requires explicit user confirmation |
 | 2 | Invoice 2 – Partner Opening Balances | `019f97ec-202f-7563-9a7e-d0be18849b4a` | Waiting for Step 1 confirmation |
-| 3 | Invoice 3 – Invoice Workflow | `019f97ec-5302-7c20-9d9e-55719e500014` | Waiting for Step 2 completion |
-| 4 | Invoice 4 – Stock Adjustments | `019f97ec-7c06-7342-a0ce-2a8ed6273769` | Waiting for Step 3 completion |
-| 5 | Invoice 5 – Receipt and Payment Vouchers | `019f97ec-ada6-72b3-843b-4350de7c7c0e` | Waiting for Step 4 completion |
-| 6 | Invoice 6 – Balance Reports | `019f97ec-d7ae-79f0-a695-e3c5e1d1e962` | Deferred pending Step 5 and source-of-truth approval |
-| 7 | Invoice 7 – Driver Trips | `019f97ed-0535-7e53-94e9-43d9bfd00a7d` | Deferred pending Step 6 and separate approval |
+| 3 | Invoice 3 – Invoice Workflow | `019f97ec-5302-7c20-9d9e-55719e500014` | Waiting for Step 2 completion; finish the invoice vertical slice, including the existing partner-movement and internal-DriverTrip workflows |
+| 4 | Invoice 4 – Stock Adjustments | `019f97ec-7c06-7342-a0ce-2a8ed6273769` | Explicitly deferred by the client; do not start until the deferral is lifted |
+| 5 | Invoice 5 – Cashbox and Unified Cash Vouchers | `019f97ec-ada6-72b3-843b-4350de7c7c0e` | Backend, tests, seed, Swagger, frontend contract, and client screens implemented; migration intentionally waiting for explicit approval |
+| 6 | Invoice 6 – Additional Balance Reports | `019f97ec-d7ae-79f0-a695-e3c5e1d1e962` | Deferred; Cashbox, Partner, and Driver Statements are delivered in Step 5, while additional reports still require source-of-truth approval |
+| 7 | Invoice 7 – Standalone Driver Trips | `019f97ed-0535-7e53-94e9-43d9bfd00a7d` | Deferred; invoice-created trips and DriverTrip cost entry are covered by Steps 3 and 5, with no duplicate trip workflow |
 
 Only the user can confirm that a prerequisite task is complete and authorize
 the next task to start.
@@ -133,16 +134,17 @@ To Invoice 3:
 latest prepared instructions.
 
 To Invoice 4:
-“Invoice 3 – Invoice Workflow” is complete. Start Step 4 using the latest
-prepared instructions.
+“Invoice 3 – Invoice Workflow” is complete. Step 4 remains deferred unless the
+client explicitly lifts the deferral.
 
 To Invoice 5:
-“Invoice 4 – Stock Adjustments” is complete. Start Step 5 using the latest
-prepared instructions.
+“Invoice 3 – Invoice Workflow” is complete. Start Step 5 using the latest
+Cashbox and Unified Cash Voucher instructions; Step 4 is intentionally deferred.
 ```
 
-For Steps 6 and 7, prerequisite completion is not enough. The task must stop
-and obtain the separate approval described in its section.
+For Steps 4, 6, and 7, prerequisite completion is not enough. The task must
+stop and obtain the deferral-lift or separate approval described in its
+section.
 
 At the beginning of each task:
 
@@ -263,6 +265,27 @@ Standard paginated shape:
 Sort by business date/number as appropriate and then by `Id` to guarantee
 deterministic ordering.
 
+### Unified paginated `GetAll` filters
+
+Every paginated `GetAll` endpoint must use the same filter shape:
+
+```text
+pageNumber
+pageSize
+search                 optional common text search
+<feature-specific filters>  optional typed filters
+```
+
+`search` is available on every list and searches the documented display values
+for that feature. Feature-specific filters remain typed and independently
+optional; they must be combined with `search` using the existing request
+validation and tenant-safe query conventions. Swagger and the frontend
+contract must document every available filter, its default, and its effect.
+Do not create separate ad-hoc search query parameters when the common `search`
+field can express the same behavior. Search and all typed filters must be
+applied server-side before pagination, with deterministic ordering after the
+filter is applied.
+
 ## Rules shared by all document tasks
 
 Before implementation, read these files completely:
@@ -276,8 +299,11 @@ Apply these approved simple-application rules:
 1. Implement editable aggregate CRUD only.
 2. Do not add `DocumentStatus`, draft/posted/cancelled states, post or cancel
    endpoints, reversal workflows, or posting/cancellation audit fields.
-3. Do not generate item, partner, container, driver-trip, or reversal
-   movements.
+3. Do not introduce duplicate movement tables or new posting, cancellation,
+   reversal, or settlement workflows. Preserve the existing approved Invoice
+   side effects (partner-account movement and internal DriverTrip
+   synchronization) exactly once, and integrate Cash Vouchers with the same
+   existing partner-account table without duplicating those effects.
 4. Save the complete aggregate in an explicit atomic transaction for create,
    update, and soft delete.
 5. Let `AuditableEntityInterceptor` populate audit fields. Feature services
@@ -1029,7 +1055,9 @@ container-line collections. Count fields may remain but do not replace them.
 
 ### Prerequisite
 
-Do not start until Step 3 is complete.
+Do not start until Step 3 is complete and the client explicitly lifts the
+current deferral. Step 5 may proceed after Step 3 without waiting for this
+step.
 
 ### Aggregate
 
@@ -1092,137 +1120,298 @@ single `Quantity` design or adopt the Invoice-style
 `Count`/`Weight`/calculated `Quantity`/`Price`/`Total` design. Do not invent
 that change during implementation without user approval.
 
-## Step 5 — Receipt and Payment Vouchers
+## Step 5 — Cashbox and Unified Cash Vouchers
 
-### Prerequisite
+### Prerequisite and sequencing
 
-Do not start until Step 4 is complete.
+Start after Step 3 is complete. Step 4 is intentionally deferred by the
+client, so Step 5 must not wait for Stock Adjustments.
 
-### Aggregate
+Before implementation, inspect the existing invoice partner-account and
+DriverTrip workflows and reuse them. Do not change or duplicate the existing
+invoice-created effects.
 
-- `BusinessPartnerVoucher`
-- `BusinessPartnerVoucherAllocation`
+### Minimal new persistence
 
-Current voucher header scaffold:
+Add only these new company-owned tables unless the design review proves an
+existing table can safely satisfy the requirement:
+
+- `Cashbox`
+- `CashMovementType`
+- `CashVoucher`
+
+Reuse the existing partner-account transactions table and existing
+`DriverTrip` table. Do not add a Cashbox Transaction table, driver ledger,
+driver custody, driver settlement, trip-expense, duplicate partner-account,
+separate receipt/payment voucher, chart-of-accounts, journal-entry, or
+general-ledger table.
+
+Implementation decision confirmed during design review: the current project has
+no Branch entity, so Step 5 does not invent `BranchId`. Company isolation is
+enforced directly. Money uses the existing `decimal(18,2)` convention.
+
+### Cashbox aggregate
+
+The header should follow the existing entity conventions and contain, as
+applicable:
 
 ```text
 Id
 CompanyId / Company
-BusinessPartnerId / BusinessPartner
-VoucherNumber
-VoucherType
-VoucherDate
-Currency
-Amount
+BranchId / Branch (nullable when branch-independent)
+Code
+Name
+Currency (only if already supported)
+OpeningBalance
+IsActive
 Notes?
-RowVersion
-Allocations
-Movements (future placeholder only; do not configure or write)
-Audit fields
+RowVersion and audit fields according to the guide
 ```
 
-Current allocation scaffold:
+Calculate the current balance; do not expose a freely editable cached balance:
+
+```text
+OpeningBalance + active Receipt Cash Vouchers - active Payment Cash Vouchers
+```
+
+Code and name are unique within a company. Inactive cashboxes cannot be used
+in new vouchers. A cashbox with vouchers cannot be hard-deleted, and its
+opening balance cannot change after movements exist unless an approved
+correction workflow is designed. Validate branch and company relationships,
+and enforce the existing policy for insufficient payment or negative balances.
+
+### Cash movement types
+
+Use one lookup for both directions:
 
 ```text
 Id
 CompanyId / Company
-BusinessPartnerVoucherId / BusinessPartnerVoucher
-InvoiceId / Invoice
-Amount
+Name
+Direction: Receipt | Payment
+IsActive
+Notes?
 Audit fields
 ```
 
-### Required behavior
+Type names are unique within company and direction. New vouchers may use only
+active types from the current company, and the type direction must match the
+voucher direction. Existing vouchers retain their historical type when it is
+deactivated.
 
-- Simple receipt/payment voucher aggregate CRUD.
-- Query outstanding invoices where still applicable.
-- Validate company, partner, currency, allocation limits, and allowed
-  unallocated amount.
-- Explicit atomic create, update, and soft-delete transactions.
-- Add `LastModifiedAt`/`Touch` to the voucher header.
-- Keep `.IsRowVersion()` only on the voucher header.
-- Any allocation addition, change, or removal touches the header.
-- Return `BusinessPartnerVouchers.Concurrency` for stale updates.
-- No status, posting, cancellation, reversal, or partner movements.
+### Unified CashVoucher aggregate
 
-Planned routes:
+Do not create separate receipt and payment tables. The header should contain,
+as applicable:
 
 ```text
-GET    /api/v1/BusinessPartnerVouchers
-GET    /api/v1/BusinessPartnerVouchers/{id}
-GET    /api/v1/BusinessPartnerVouchers/outstanding-invoices
-POST   /api/v1/BusinessPartnerVouchers
-PUT    /api/v1/BusinessPartnerVouchers/{id}
-DELETE /api/v1/BusinessPartnerVouchers/{id}
+Id
+CompanyId / Company
+BranchId / Branch (nullable when applicable)
+VoucherNumber
+VoucherDate
+Direction: Receipt | Payment
+CashboxId / Cashbox
+CashMovementTypeId / CashMovementType
+PartyType: None | Partner | Driver | Other
+PartnerId / BusinessPartner (nullable)
+DriverId / Driver (nullable)
+DriverTripId / DriverTrip (nullable)
+ExternalPartyName (nullable)
+Amount
+Currency (only if already supported)
+ReferenceNumber (nullable)
+Description (nullable)
+Notes (nullable)
+RowVersion and audit fields according to the guide
 ```
 
-Voucher validation:
+`DriverTripId` is always optional. A Cash Voucher never creates a DriverTrip.
+External party names belong only to the voucher; internal drivers remain in
+the existing Driver table.
 
-- `Receipt` is used for customer receipts.
-- `Payment` is used for supplier payments.
-- Partner and every allocated invoice belong to the selected company.
-- Allocated invoices match the voucher partner and currency.
-- Each allocation amount is positive.
-- Allocations cannot exceed the invoice's approved outstanding amount.
-- Total allocations cannot exceed voucher amount.
-- `Amount - SUM(Allocations)` may remain unallocated.
-- Duplicate invoice allocation rows are rejected.
-- No allocation row is independently editable.
-- Outstanding-invoice calculations must be implemented only from approved
-  existing CRUD data; do not silently reintroduce partner movements.
+Party rules:
 
-### Response contract
+- `None`: all partner, driver, trip, and external-name fields are null.
+- `Partner`: PartnerId is required; all driver, trip, and external-name fields
+  are null; create the related movement in the existing partner-account table.
+- `Driver`: DriverId is required; PartnerId and external-name fields are null;
+  DriverTripId is optional and, when supplied, must belong to that driver and
+  company.
+- `Other`: ExternalPartyName is required; partner, driver, and trip fields are
+  null.
 
-Every paginated voucher item contains its complete deterministically ordered
-allocation collection. An allocation count may remain but does not replace the
-collection.
+Validate active cashbox, direction-matching active movement type, positive
+amount, company and branch isolation, valid voucher number, and the existing
+negative-balance policy. All referenced entities must belong to the current
+company; unavailable cross-company IDs return the standard not-found result.
 
-## Step 6 — Balance Reports
+### Immediate atomic financial behavior
+
+There are no Draft or Posted states. A successful voucher takes effect
+immediately in one database transaction:
+
+- Save the CashVoucher and apply its derived cashbox effect.
+- For a partner voucher, create exactly one corresponding movement in the
+  existing partner-account transactions table using the current debit/credit
+  convention and source-document pattern.
+- For a driver voucher, include the voucher in driver calculations; do not add
+  a separate driver transaction table.
+- Do not modify the original invoice movement and do not create a DriverTrip.
+
+On update, load the original aggregate, reverse or replace its existing
+cashbox and partner effect, validate the new values, apply the new effect, and
+save everything atomically. Support changing direction, cashbox, movement
+type, party, partner, driver, optional trip, amount, date, and description
+without applying the financial effect twice. On soft delete, reverse or remove
+the related effects atomically while preserving audit information. Exclude
+deleted vouchers from balances and statements.
+
+Use the existing header-only concurrency design: the client-supplied original
+RowVersion is EF's tracked OriginalValue, stale header-only and child/related
+changes fail with the documented Cash Vouchers concurrency message, and every
+successful aggregate update returns a new token. Audit fields remain owned by
+`AuditableEntityInterceptor`.
+
+### DriverTrip cost entry
+
+Add cost information to the existing `DriverTrip` only if the current model
+does not already support it (`Cost`, optional notes, and existing audit or
+update metadata as appropriate). Cost is operational data, not a cashbox
+movement:
+
+- Invoice saving may create a DriverTrip without a cost.
+- Cost is optional at trip creation and cannot be negative.
+- Updating cost never creates a Cash Voucher, changes Cashbox, changes partner
+  accounts, or modifies the invoice.
+- Provide a paginated cost-entry query filtered by date range, driver, invoice
+  number, trip number, and has-cost state.
+- Provide an atomic bulk update with at least one unique row, all-row
+  validation before writes, company checks, concurrency, and updated rows in
+  the response. One invalid row must roll back the whole request.
+
+### Statements and calculations
+
+Implement these in Step 5 so later tasks do not duplicate them:
+
+- Cashbox Statement from active CashVoucher records, with opening balance,
+  receipts, payments, closing/running balance, deterministic ordering, and
+  filters for company/branch, cashbox, date range, direction, movement type,
+  party type, partner, driver, trip, and voucher number.
+- Partner Statement from the existing partner-account transactions table,
+  combining invoice/credit/debit sources and partner Cash Vouchers exactly
+  once. Follow the existing debit/credit convention.
+- Driver Statement from driver Cash Vouchers and DriverTrip costs, including
+  vouchers with and without a trip. Distinguish cash paid, cash returned, and
+  operational trip cost; a cost row is not a cashbox movement.
+
+Driver overall balance is calculated from driver payments, driver receipts, and
+DriverTrip costs. Trip-specific calculations include only explicitly linked
+vouchers and that trip's cost; general driver vouchers without DriverTripId
+must not be auto-allocated to a trip.
+
+All statements are tenant-safe, server-calculated, deterministically ordered,
+and use the unified paginated filter shape, including `search` where it is
+meaningful. Do not store editable current balances or add a separate ledger.
+
+### Planned route families
+
+Confirm exact controller casing and existing route conventions during analysis,
+then expose the following capabilities:
+
+```text
+GET/POST/PUT/DELETE /api/v1/Cashboxes
+GET/POST/PUT/DELETE /api/v1/CashMovementTypes
+GET/POST/PUT/DELETE /api/v1/CashVouchers
+GET                /api/v1/DriverTrips/cost-entry
+PUT                /api/v1/DriverTrips/bulk-costs
+GET                /api/v1/Statements/cashbox
+GET                /api/v1/Statements/partner
+GET                /api/v1/Statements/driver
+```
+
+Use existing authorization, Result-to-ProblemDetails, Swagger, pagination,
+select-endpoint, and Arabic-message conventions. Add permissions for viewing
+and managing cashboxes, movement types, and vouchers; viewing the three
+statements; and viewing/updating DriverTrip costs.
+
+### Frontend contract
+
+Provide screens for Cashbox list/form, Cash Movement Type list/form, Cash
+Voucher list/create/edit, Cashbox Statement, Partner Statement, Driver
+Statement, and bulk DriverTrip Cost Entry. The voucher form filters movement
+types by direction, conditionally shows Partner/Driver/optional DriverTrip or
+ExternalPartyName, clears fields that no longer apply, and never requires a
+DriverTrip for a driver voucher. Document every route, permission, filter,
+request, response, enum, calculated field, RowVersion behavior, Arabic error,
+empty state, and reused select endpoint.
+
+### Required verification
+
+Cover duplicate and inactive Cashbox/MovementType rules, direction mismatch,
+insufficient payment, receipt/payment cash effects, partner movement creation
+exactly once, driver vouchers with and without trips, cross-company rejection,
+amount/cashbox/party updates, deletion reversal, retry idempotency, optional
+DriverTrip, cost entry and atomic bulk cost updates, cashbox/partner/driver
+statements, running/opening/closing balances, deleted-voucher exclusion, and
+all concurrency, tenant, authorization, Swagger, seed, frontend-contract,
+build, migration, and Release-test checks required by this file.
+
+Review the entity and EF design with the user before creating a migration.
+
+## Step 6 — Additional Balance Reports
 
 ### Prerequisite and approval gate
 
 - Wait for Step 5 completion.
-- Then require separate user approval for the report source of truth.
+- Cashbox, Partner, and Driver Statements are already part of Step 5 and must
+  not be reimplemented here.
+- Require separate user approval for every additional report source of truth.
 
 ### Current decision
 
-Movement-based stock, partner, and container reports are deferred because the
-approved simple CRUD workflow does not generate movements.
+Additional movement-based stock, partner, and container reports remain
+deferred until their source of truth is approved. Do not infer movement writes,
+add mutable current-balance columns, or implement a report against an
+unapproved source.
 
-Do not:
+After approval, implement only the approved read-only reports using tenant-safe
+server-side projection, efficient indexed queries, deterministic pagination
+where applicable, Swagger, verification, and frontend contracts.
 
-- Infer or introduce movement writes.
-- Add mutable current-balance columns to master data.
-- Implement reports against an unapproved source of truth.
-
-After approval, implement only the approved read-only reports using
-tenant-safe server-side projection, efficient indexed queries, deterministic
-pagination where applicable, Swagger, verification, and frontend contracts.
-
-## Step 7 — Driver Trips
+## Step 7 — Standalone Driver Trips
 
 ### Prerequisite and approval gate
 
-- Wait for Step 6.
-- Then require separate user approval.
+- Wait for the separate approval for standalone DriverTrip requirements.
+- Do not duplicate the invoice-created DriverTrip workflow or the Step 5
+  DriverTrip cost-entry workflow.
 
 ### Current decision
 
-Invoice CRUD creates one `DriverTrip` when an internal driver is supplied.
-The trip is synchronized on update and soft-deleted with the invoice. External
-driver data remains on the invoice only.
+Invoice CRUD creates or synchronizes one internal-driver `DriverTrip` according
+to the approved existing workflow, without requiring a cost. Cash Vouchers may
+optionally reference an existing trip but never create one. External driver
+names remain on Invoice or CashVoucher only; internal drivers remain in Driver.
 
 ## Completion gate for Steps 2–5
 
 Before declaring a document step complete:
 
-- Confirm no status/post/cancel/reversal/voucher/allocation logic was added.
-- Confirm invoice side-effect rows are synchronized atomically.
+- For Invoice and Stock Adjustment documents, confirm no status, posting,
+  cancellation, reversal, or unrelated voucher workflow was added.
+- For Invoice 3, confirm the existing partner-account and internal DriverTrip
+  side effects are synchronized exactly once and atomically.
+- For Cash Voucher, confirm there are no status, posting, cancellation,
+  reversal, duplicate ledger, or separate settlement workflows; its immediate
+  cash and partner effects are atomic.
 - Confirm all company-owned reads and writes are tenant-filtered.
 - Confirm aggregate writes are atomic.
 - Confirm header-only concurrency and stale child-only conflicts.
 - Confirm audit remains interceptor-owned.
-- Confirm list responses contain complete child details.
+- Confirm every paginated master-detail response contains complete ordered child
+  details, and every paginated `GetAll` exposes the unified filter shape with
+  `search` plus documented feature-specific filters.
 - Review the entity/EF design before migration creation.
 - Review the migration for unrelated changes.
 - Verify seed idempotency for fresh and existing databases.
@@ -1329,13 +1518,19 @@ Do not silently decide these while implementing:
 3. Invoice number generation format and concurrency-safe sequence. **Resolved
    for Step 3:** `INV-{CompanyId}-{UTC yyyyMMddHHmmssfff}-{8-char GUID
    suffix}`, with a company-scoped unique filtered index.
-4. Exact decimal precision and rounding for Invoice and voucher money.
+4. Exact decimal precision and rounding for Invoice and cash-voucher money.
    **Resolved for Step 3 invoices:** quantity `decimal(18,6)`, money
    `decimal(18,2)`, line totals rounded away from zero to two decimals.
+   Cashbox/CashVoucher amounts must follow the guide's existing decimal
+   configuration and be confirmed before the Step 5 migration.
 5. Whether delete requests also require a row version. Update requests
    definitely require it.
-6. Balance-report source of truth after movements were removed.
-7. DriverTrip source and lifecycle after invoice posting was removed.
+6. Source of truth for additional stock, partner, and container reports after
+   the Step 5 statements are complete.
+7. **Resolved for Steps 3 and 5:** Invoice remains the source of the existing
+   internal-driver DriverTrip workflow and creates a trip without requiring a
+   cost. Cash Vouchers may reference an existing trip but never create one;
+   DriverTrip cost is entered later and has no direct cashbox effect.
 
 Record each approved answer in this file, the shared specification, Swagger,
 tests, and frontend contract before implementation is considered complete.

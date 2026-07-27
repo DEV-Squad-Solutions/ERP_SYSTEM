@@ -199,6 +199,13 @@ public sealed class DriverService(
                         trip.CompanyId == companyId &&
                         (trip.DriverId == id ||
                          trip.ActualDriverId == id),
+                    cancellationToken) ||
+            await dbContext.CashVouchers
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    voucher =>
+                        voucher.CompanyId == companyId &&
+                        voucher.DriverId == id,
                     cancellationToken);
         if (hasDependencies)
         {
@@ -294,5 +301,5 @@ public sealed class DriverService(
     private static Error HasDependencies() =>
         Error.Conflict(
             "Drivers.HasDependencies",
-            "لا يمكن حذف السائق لارتباطه بفواتير أو رحلات حالية أو تاريخية.");
+            "لا يمكن حذف السائق لارتباطه بفواتير أو رحلات أو سندات نقدية حالية أو تاريخية.");
 }

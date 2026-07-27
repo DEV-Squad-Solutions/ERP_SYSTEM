@@ -197,6 +197,17 @@ public sealed class CompanyService(
             await dbContext.Containers
                 .IgnoreQueryFilters()
                 .AnyAsync(container => container.CompanyId == id, cancellationToken) ||
+            await dbContext.Cashboxes
+                .IgnoreQueryFilters()
+                .AnyAsync(cashbox => cashbox.CompanyId == id, cancellationToken) ||
+            await dbContext.CashMovementTypes
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    movementType => movementType.CompanyId == id,
+                    cancellationToken) ||
+            await dbContext.CashVouchers
+                .IgnoreQueryFilters()
+                .AnyAsync(voucher => voucher.CompanyId == id, cancellationToken) ||
             await dbContext.StoreContainers
                 .IgnoreQueryFilters()
                 .AnyAsync(

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Containers;
@@ -215,6 +216,11 @@ public static class DevelopmentDataSeeder
                 cancellationToken);
 
             await SeedInvoicesAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
+            await SeedCashManagementAsync(
                 dbContext,
                 company,
                 cancellationToken);
@@ -1132,6 +1138,187 @@ public static class DevelopmentDataSeeder
             }
         }
 
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedCashManagementAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var cashbox = await dbContext.Cashboxes
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                entity =>
+                    entity.CompanyId == company.Id &&
+                    entity.Code == "CASH-MAIN",
+                cancellationToken);
+        if (cashbox is null)
+        {
+            cashbox = new Cashbox
+            {
+                CompanyId = company.Id,
+                Code = "CASH-MAIN",
+                Name = "Main Cashbox",
+                Currency = CurrencyCode.EGP,
+                OpeningBalance = 100_000m,
+                IsActive = true,
+                Notes = "Development seed cashbox"
+            };
+            dbContext.Cashboxes.Add(cashbox);
+        }
+
+        var movementTypeSeeds = new[]
+        {
+            new
+            {
+                Name = "Customer Collection",
+                Direction = CashDirection.Receipt,
+                PartnerEffect = PartnerAccountEffect.Credit
+            },
+            new
+            {
+                Name = "Supplier Refund",
+                Direction = CashDirection.Receipt,
+                PartnerEffect = PartnerAccountEffect.Debit
+            },
+            new
+            {
+                Name = "Other Receipt",
+                Direction = CashDirection.Receipt,
+                PartnerEffect = PartnerAccountEffect.None
+            },
+            new
+            {
+                Name = "Supplier Payment",
+                Direction = CashDirection.Payment,
+                PartnerEffect = PartnerAccountEffect.Debit
+            },
+            new
+            {
+                Name = "Customer Refund",
+                Direction = CashDirection.Payment,
+                PartnerEffect = PartnerAccountEffect.Credit
+            },
+            new
+            {
+                Name = "Driver Advance",
+                Direction = CashDirection.Payment,
+                PartnerEffect = PartnerAccountEffect.None
+            },
+            new
+            {
+                Name = "Other Payment",
+                Direction = CashDirection.Payment,
+                PartnerEffect = PartnerAccountEffect.None
+            }
+        };
+
+        var existingMovementTypes = await dbContext.CashMovementTypes
+            .IgnoreQueryFilters()
+            .Where(entity => entity.CompanyId == company.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var seed in movementTypeSeeds)
+        {
+            if (existingMovementTypes.Any(entity =>
+                    entity.Direction == seed.Direction &&
+                    entity.Name == seed.Name))
+            {
+                continue;
+            }
+
+            var movementType = new CashMovementType
+            {
+                CompanyId = company.Id,
+                Name = seed.Name,
+                Direction = seed.Direction,
+                PartnerEffect = seed.PartnerEffect,
+                IsActive = true,
+                Notes = "Development seed movement type"
+            };
+            dbContext.CashMovementTypes.Add(movementType);
+            existingMovementTypes.Add(movementType);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        const string voucherNumberPrefix = "SEED-CASH-RECEIPT";
+        var voucherNumber = $"{voucherNumberPrefix}-{company.Id}";
+        var voucher = await dbContext.CashVouchers
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                entity =>
+                    entity.CompanyId == company.Id &&
+                    entity.VoucherNumber == voucherNumber,
+                cancellationToken);
+        var partner = await dbContext.BusinessPartners
+            .Where(entity =>
+                entity.CompanyId == company.Id &&
+                entity.IsActive &&
+                entity.Currency == cashbox.Currency)
+            .OrderBy(entity => entity.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        var collectionType = existingMovementTypes.Single(entity =>
+            entity.Direction == CashDirection.Receipt &&
+            entity.Name == "Customer Collection");
+
+        if (voucher is null && partner is not null)
+        {
+            voucher = new CashVoucher
+            {
+                CompanyId = company.Id,
+                VoucherNumber = voucherNumber,
+                VoucherDate = new DateOnly(2026, 7, 26),
+                Direction = CashDirection.Receipt,
+                CashboxId = cashbox.Id,
+                CashMovementTypeId = collectionType.Id,
+                PartyType = CashPartyType.Partner,
+                BusinessPartnerId = partner.Id,
+                Amount = 1_000m,
+                Currency = cashbox.Currency,
+                ReferenceNumber = $"SEED-REF-{company.Id}",
+                Description = "Seed customer collection",
+                Notes = "Development seed voucher"
+            };
+            voucher.Touch(DateTime.UtcNow);
+            dbContext.CashVouchers.Add(voucher);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        if (voucher is null ||
+            voucher.IsDeleted ||
+            voucher.BusinessPartnerId is null)
+        {
+            return;
+        }
+
+        var movementExists = await dbContext.BusinessPartnerMovements
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                movement =>
+                    movement.CompanyId == company.Id &&
+                    movement.CashVoucherId == voucher.Id &&
+                    !movement.IsDeleted,
+                cancellationToken);
+        if (movementExists)
+        {
+            return;
+        }
+
+        dbContext.BusinessPartnerMovements.Add(
+            new BusinessPartnerMovement
+            {
+                CompanyId = company.Id,
+                BusinessPartnerId = voucher.BusinessPartnerId.Value,
+                CashVoucherId = voucher.Id,
+                MovementType = BusinessPartnerMovementType.CashReceipt,
+                MovementDate = voucher.VoucherDate,
+                Currency = voucher.Currency,
+                Debit = 0m,
+                Credit = voucher.Amount,
+                Description = voucher.Description
+            });
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 

@@ -311,6 +311,24 @@ public sealed class CompanyServiceTests
                     CompanyId INTEGER NOT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
+
+                CREATE TABLE Cashboxes (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE CashMovementTypes (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE CashVouchers (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
                 """);
         }
 

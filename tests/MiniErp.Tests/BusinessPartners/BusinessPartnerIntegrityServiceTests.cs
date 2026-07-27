@@ -314,6 +314,13 @@ public sealed class BusinessPartnerIntegrityServiceTests
                     BusinessPartnerId INTEGER NOT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
+
+                CREATE TABLE CashVouchers (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    BusinessPartnerId INTEGER NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
                 """);
         }
 
