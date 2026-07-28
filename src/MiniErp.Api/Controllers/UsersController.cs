@@ -17,9 +17,13 @@ public sealed class UsersController(IUserService userService) : ApiControllerBas
     [ProducesResponseType<PagedResponse<UserResponse>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] UserFilterRequest filters,
         CancellationToken cancellationToken)
     {
-        var result = await userService.GetAllAsync(pagination, cancellationToken);
+        var result = await userService.GetAllAsync(
+            pagination,
+            filters,
+            cancellationToken);
         return this.ToActionResult(result);
     }
 

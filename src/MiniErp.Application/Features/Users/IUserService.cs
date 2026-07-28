@@ -8,6 +8,7 @@ public interface IUserService : IScopedService
 {
     Task<Result<PagedResponse<UserResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        UserFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<UserResponse>> GetByIdAsync(

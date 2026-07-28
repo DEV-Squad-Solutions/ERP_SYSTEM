@@ -4,7 +4,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Companies;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.Companies;
 using MiniErp.Infrastructure.Identity;
 using MiniErp.Infrastructure.Persistence;
 
@@ -18,10 +18,34 @@ public sealed class CompanyService(
 {
     public async Task<Result<PagedResponse<CompanyResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        CompanyFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
+        filters ??= new CompanyFilterRequest();
         var query = dbContext.Companies
             .AsNoTracking()
+            .Where(company =>
+                string.IsNullOrWhiteSpace(filters.Search) ||
+                company.Name.Contains(filters.Search.Trim()) ||
+                company.Address.Contains(filters.Search.Trim()) ||
+                company.CommercialRegister.Contains(filters.Search.Trim()) ||
+                company.TaxNumber.Contains(filters.Search.Trim()) ||
+                company.ManagerName.Contains(filters.Search.Trim()))
+            .Where(company =>
+                string.IsNullOrWhiteSpace(filters.Name) ||
+                company.Name.Contains(filters.Name.Trim()))
+            .Where(company =>
+                string.IsNullOrWhiteSpace(filters.Address) ||
+                company.Address.Contains(filters.Address.Trim()))
+            .Where(company =>
+                string.IsNullOrWhiteSpace(filters.CommercialRegister) ||
+                company.CommercialRegister.Contains(filters.CommercialRegister.Trim()))
+            .Where(company =>
+                string.IsNullOrWhiteSpace(filters.TaxNumber) ||
+                company.TaxNumber.Contains(filters.TaxNumber.Trim()))
+            .Where(company =>
+                string.IsNullOrWhiteSpace(filters.ManagerName) ||
+                company.ManagerName.Contains(filters.ManagerName.Trim()))
             .OrderBy(company => company.Name)
             .ThenBy(company => company.Id);
 
@@ -161,16 +185,41 @@ public sealed class CompanyService(
             await dbContext.ItemUnits
                 .IgnoreQueryFilters()
                 .AnyAsync(itemUnit => itemUnit.CompanyId == id, cancellationToken) ||
+            await dbContext.BusinessPartners
+                .IgnoreQueryFilters()
+                .AnyAsync(partner => partner.CompanyId == id, cancellationToken) ||
+            await dbContext.Drivers
+                .IgnoreQueryFilters()
+                .AnyAsync(driver => driver.CompanyId == id, cancellationToken) ||
             await dbContext.Stores
                 .IgnoreQueryFilters()
-                .AnyAsync(store => store.CompanyId == id, cancellationToken);
+                .AnyAsync(store => store.CompanyId == id, cancellationToken) ||
+            await dbContext.Containers
+                .IgnoreQueryFilters()
+                .AnyAsync(container => container.CompanyId == id, cancellationToken) ||
+            await dbContext.Cashboxes
+                .IgnoreQueryFilters()
+                .AnyAsync(cashbox => cashbox.CompanyId == id, cancellationToken) ||
+            await dbContext.CashMovementTypes
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    movementType => movementType.CompanyId == id,
+                    cancellationToken) ||
+            await dbContext.CashVouchers
+                .IgnoreQueryFilters()
+                .AnyAsync(voucher => voucher.CompanyId == id, cancellationToken) ||
+            await dbContext.StoreContainers
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    assignment => assignment.CompanyId == id,
+                    cancellationToken);
 
         if (hasDependencies)
         {
             return Result.Failure(
                 Error.Conflict(
                     "Companies.HasDependencies",
-                    "The company cannot be deleted because it has assigned users or current/historical business data."));
+                    "لا يمكن حذف الشركة لوجود مستخدمين مرتبطين بها أو بيانات حالية أو تاريخية تخصها."));
         }
 
         dbContext.Companies.Remove(company);
@@ -195,7 +244,8 @@ public sealed class CompanyService(
         {
             return Error.Conflict(
                 "Companies.CommercialRegisterExists",
-                $"Commercial register '{commercialRegister}' already exists.");
+                $"السجل التجاري '{commercialRegister}' مستخدم بالفعل.",
+                nameof(CompanyRequest.CommercialRegister));
         }
 
         var taxNumberExists = await dbContext.Companies.AnyAsync(
@@ -207,13 +257,14 @@ public sealed class CompanyService(
         return taxNumberExists
             ? Error.Conflict(
                 "Companies.TaxNumberExists",
-                $"Tax number '{taxNumber}' already exists.")
+                $"الرقم الضريبي '{taxNumber}' مستخدم بالفعل.",
+                nameof(CompanyRequest.TaxNumber))
             : null;
     }
 
     private static Error InvalidId() =>
-        Error.Validation("Companies.InvalidId", "Company ID must be greater than zero.");
+        Error.Validation("Companies.InvalidId", "يجب أن يكون رقم الشركة أكبر من صفر.");
 
     private static Error NotFound(int id) =>
-        Error.NotFound("Companies.NotFound", $"Company with ID {id} was not found.");
+        Error.NotFound("Companies.NotFound", $"لم يتم العثور على الشركة رقم {id}.");
 }

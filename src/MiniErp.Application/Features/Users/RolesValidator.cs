@@ -21,6 +21,6 @@ internal sealed class RolesValidator : AbstractValidator<IReadOnlyCollection<str
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .Count())
             .When(roles => roles is not null)
-            .WithMessage("Roles must not contain duplicates.");
+            .WithMessage("يجب ألا تحتوي الأدوار على قيم مكررة.");
     }
 }

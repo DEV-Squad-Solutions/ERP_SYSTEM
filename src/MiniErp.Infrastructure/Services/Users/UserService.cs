@@ -20,6 +20,7 @@ public sealed class UserService(
 {
     public async Task<Result<PagedResponse<UserResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        UserFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
         if (pagination.PageNumber <= 0 ||
@@ -28,8 +29,27 @@ public sealed class UserService(
             return Result<PagedResponse<UserResponse>>.Failure(InvalidPagination());
         }
 
+        filters ??= new UserFilterRequest();
         var query = dbContext.Users
             .AsNoTracking()
+            .Where(user =>
+                string.IsNullOrWhiteSpace(filters.Search) ||
+                (user.UserName != null && user.UserName.Contains(filters.Search.Trim())) ||
+                (user.Email != null && user.Email.Contains(filters.Search.Trim())) ||
+                user.FirstName.Contains(filters.Search.Trim()) ||
+                user.LastName.Contains(filters.Search.Trim()))
+            .Where(user =>
+                string.IsNullOrWhiteSpace(filters.UserName) ||
+                (user.UserName != null && user.UserName.Contains(filters.UserName.Trim())))
+            .Where(user =>
+                string.IsNullOrWhiteSpace(filters.Email) ||
+                (user.Email != null && user.Email.Contains(filters.Email.Trim())))
+            .Where(user =>
+                string.IsNullOrWhiteSpace(filters.FirstName) ||
+                user.FirstName.Contains(filters.FirstName.Trim()))
+            .Where(user =>
+                string.IsNullOrWhiteSpace(filters.LastName) ||
+                user.LastName.Contains(filters.LastName.Trim()))
             .OrderBy(user => user.UserName)
             .ThenBy(user => user.Id);
         var totalCount = await query.CountAsync(cancellationToken);
@@ -282,7 +302,7 @@ public sealed class UserService(
             return Result.Failure(
                 Error.Conflict(
                     "Users.CannotDeleteCurrentUser",
-                    "The currently logged-in user cannot delete their own account."));
+                    "لا يمكن للمستخدم الحالي حذف حسابه بنفسه."));
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -344,14 +364,16 @@ public sealed class UserService(
         {
             return Error.Conflict(
                 "Users.UserNameExists",
-                $"Username '{userName}' already exists.");
+                $"اسم المستخدم '{userName}' مستخدم بالفعل.",
+                nameof(UserCreateRequest.UserName));
         }
 
         var userWithEmail = await userManager.FindByEmailAsync(email);
         return userWithEmail is not null && userWithEmail.Id != excludedId
             ? Error.Conflict(
                 "Users.EmailExists",
-                $"Email '{email}' already exists.")
+                $"البريد الإلكتروني '{email}' مستخدم بالفعل.",
+                nameof(UserCreateRequest.Email))
             : null;
     }
 
@@ -386,7 +408,7 @@ public sealed class UserService(
         return Result<List<string>>.Failure(
             Error.NotFound(
                 "Users.RolesNotFound",
-                $"Roles were not found: {string.Join(", ", missingRoles)}."));
+                $"لم يتم العثور على الأدوار التالية: {string.Join(", ", missingRoles)}."));
     }
 
     private async Task<Result<List<UserCompanyResponse>>> GetCompaniesAsync(
@@ -412,7 +434,7 @@ public sealed class UserService(
         return Result<List<UserCompanyResponse>>.Failure(
             Error.NotFound(
                 "Users.CompaniesNotFound",
-                $"Companies were not found or are deleted: {string.Join(", ", missingIds)}."));
+                $"الشركات التالية غير موجودة أو محذوفة: {string.Join(", ", missingIds)}."));
     }
 
     private async Task SyncCompaniesAsync(
@@ -480,6 +502,15 @@ public sealed class UserService(
             }
         }
 
+        if (rolesToRemove.Length > 0 || rolesToAdd.Length > 0)
+        {
+            var stampResult = await userManager.UpdateSecurityStampAsync(user);
+            if (!stampResult.Succeeded)
+            {
+                return Result.Failure(IdentityError(stampResult));
+            }
+        }
+
         return Result.Success();
     }
 
@@ -513,26 +544,46 @@ public sealed class UserService(
             roles,
             companies);
 
-    private static Error IdentityError(IdentityResult result) =>
-        Error.Validation(
-            "Users.IdentityValidation",
-            string.Join(
-                "; ",
-                result.Errors.Select(error => $"{error.Code}: {error.Description}")));
+    private static Error IdentityError(IdentityResult result)
+    {
+        var errors = result.Errors.ToArray();
+        var duplicateUserName = errors.FirstOrDefault(error =>
+            error.Code == nameof(IdentityErrorDescriber.DuplicateUserName));
+        if (duplicateUserName is not null)
+        {
+            return Error.Conflict(
+                "Users.UserNameExists",
+                duplicateUserName.Description,
+                nameof(UserCreateRequest.UserName));
+        }
+
+        var duplicateEmail = errors.FirstOrDefault(error =>
+            error.Code == nameof(IdentityErrorDescriber.DuplicateEmail));
+        return duplicateEmail is not null
+            ? Error.Conflict(
+                "Users.EmailExists",
+                duplicateEmail.Description,
+                nameof(UserCreateRequest.Email))
+            : Error.Validation(
+                "Users.IdentityValidation",
+                string.Join(
+                    "; ",
+                    errors.Select(error => error.Description)));
+    }
 
     private static Error InvalidId() =>
-        Error.Validation("Users.InvalidId", "User ID must not be empty.");
+        Error.Validation("Users.InvalidId", "رقم المستخدم مطلوب.");
 
     private static Error NotFound(Guid id) =>
-        Error.NotFound("Users.NotFound", $"User with ID {id} was not found.");
+        Error.NotFound("Users.NotFound", $"لم يتم العثور على المستخدم رقم {id}.");
 
     private static Error InvalidPagination() =>
         Error.Validation(
             "Pagination.Invalid",
-            $"Page number must be greater than zero and page size must be between 1 and {PaginationRequest.MaxPageSize}.");
+            $"يجب أن يكون رقم الصفحة أكبر من صفر، وأن يكون حجم الصفحة بين 1 و{PaginationRequest.MaxPageSize}.");
 
     private static Error LastAdminError() =>
         Error.Conflict(
             "Users.LastAdmin",
-            "The last Admin user cannot be deleted, and the Admin role cannot be removed from that account.");
+            "لا يمكن حذف آخر مستخدم مسؤول أو إزالة دور المسؤول من حسابه.");
 }

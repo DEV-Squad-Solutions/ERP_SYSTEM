@@ -1,5 +1,5 @@
 using Mapster;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.Catalog;
 
 namespace MiniErp.Application.Features.ItemUnits;
 

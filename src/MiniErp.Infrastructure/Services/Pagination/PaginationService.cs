@@ -13,16 +13,50 @@ public sealed class PaginationService : IPaginationService, IScopedService
         PaginationRequest pagination,
         CancellationToken cancellationToken = default)
     {
-        if (pagination.PageNumber <= 0 ||
-            pagination.PageSize is <= 0 or > PaginationRequest.MaxPageSize)
+        if (IsInvalid(pagination))
         {
             return Result<PagedResponse<TResponse>>.Failure(
                 Error.Validation(
                     "Pagination.Invalid",
-                    $"Page number must be greater than zero and page size must be between 1 and {PaginationRequest.MaxPageSize}."));
+                    $"يجب أن يكون رقم الصفحة أكبر من صفر، وأن يكون حجم الصفحة بين 1 و{PaginationRequest.MaxPageSize}."));
         }
 
         var totalCount = await query.CountAsync(cancellationToken);
+        return await CreatePageAsync<TEntity, TResponse>(
+            query,
+            pagination,
+            totalCount,
+            cancellationToken);
+    }
+
+    public async Task<Result<PagedResponse<TResponse>>> PaginateAsync<TEntity, TResponse>(
+        IOrderedQueryable<TEntity> query,
+        PaginationRequest pagination,
+        int totalCount,
+        CancellationToken cancellationToken = default)
+    {
+        if (IsInvalid(pagination))
+        {
+            return await PaginateAsync<TEntity, TResponse>(
+                query,
+                pagination,
+                cancellationToken);
+        }
+
+        return await CreatePageAsync<TEntity, TResponse>(
+            query,
+            pagination,
+            totalCount,
+            cancellationToken);
+    }
+
+    private static async Task<Result<PagedResponse<TResponse>>>
+        CreatePageAsync<TEntity, TResponse>(
+            IOrderedQueryable<TEntity> query,
+            PaginationRequest pagination,
+            int totalCount,
+            CancellationToken cancellationToken)
+    {
         var offset = (long)(pagination.PageNumber - 1) * pagination.PageSize;
         IReadOnlyList<TResponse> items = offset >= totalCount
             ? []
@@ -42,4 +76,8 @@ public sealed class PaginationService : IPaginationService, IScopedService
                 totalCount,
                 totalPages));
     }
+
+    private static bool IsInvalid(PaginationRequest pagination) =>
+        pagination.PageNumber <= 0 ||
+        pagination.PageSize is <= 0 or > PaginationRequest.MaxPageSize;
 }

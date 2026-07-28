@@ -7,12 +7,17 @@ public interface IBusinessPartnerService
 {
     Task<Result<PagedResponse<BusinessPartnerResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        BusinessPartnerFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
         CancellationToken cancellationToken = default);
 
     Task<Result<BusinessPartnerResponse>> GetByIdAsync(
+        int id,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<BusinessPartnerContainerStoreResponse>> GetContainerStoreAsync(
         int id,
         CancellationToken cancellationToken = default);
 

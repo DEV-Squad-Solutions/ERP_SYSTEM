@@ -18,6 +18,6 @@ public sealed class CurrentUserService(IHttpContextAccessor httpContextAccessor)
             : Result<Guid>.Failure(
                 Error.Unauthorized(
                     "Authentication.InvalidUserContext",
-                    "The authenticated user ID is missing or invalid."));
+                    "رقم المستخدم المسجل دخوله غير موجود أو غير صالح."));
     }
 }

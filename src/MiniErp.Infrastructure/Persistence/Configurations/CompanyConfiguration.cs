@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.Companies;
 
 namespace MiniErp.Infrastructure.Persistence.Configurations;
 

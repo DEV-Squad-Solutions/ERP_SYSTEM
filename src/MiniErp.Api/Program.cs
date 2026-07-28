@@ -1,11 +1,16 @@
 using System.Text.Json.Serialization;
 using FluentValidation;
 using Asp.Versioning;
+using Microsoft.AspNetCore.Mvc;
+using MiniErp.Api.Errors;
 using MiniErp.Api.Exceptions;
+using MiniErp.Api.ModelBinding;
 using MiniErp.Api.Swagger;
+using MiniErp.Api.Validation;
 using MiniErp.Application;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
+using MiniErp.Application.Common.Validation;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Seeding;
@@ -16,9 +21,13 @@ const string AllowAnyFrontendPolicy = "AllowAnyFrontend";
 var builder = WebApplication.CreateBuilder(args);
 
 MappingConfiguration.Register(typeof(InfrastructureAssemblyMarker).Assembly);
+ArabicValidationConfiguration.Configure();
 
 builder.Services
-    .AddControllers()
+    .AddControllers(options =>
+        options.ModelBinderProviders.Insert(
+            0,
+            new FlexibleDateOnlyModelBinderProvider()))
     .AddJsonOptions(options =>
         options.JsonSerializerOptions.Converters.Add(
             new JsonStringEnumConverter(
@@ -36,6 +45,17 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.Configure<ApiBehaviorOptions>(options =>
+{
+    options.SuppressMapClientErrors = true;
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var response = ApiErrorResponseFactory.Validation(
+            context.HttpContext,
+            context.ModelState);
+        return ApiErrorResponseFactory.ToObjectResult(response);
+    };
+});
 
 builder.Services
     .AddApiVersioning(options =>
@@ -43,6 +63,7 @@ builder.Services
         options.DefaultApiVersion = new ApiVersion(1.0);
         options.AssumeDefaultVersionWhenUnspecified = true;
         options.ReportApiVersions = true;
+        options.ApiVersionReader = new UrlSegmentApiVersionReader();
     })
     .AddApiExplorer(options =>
     {
@@ -52,7 +73,11 @@ builder.Services
 builder.Services.AddValidatorsFromAssemblyContaining<ApplicationAssemblyMarker>(
     ServiceLifetime.Scoped);
 builder.Services.AddFluentValidationAutoValidation(configuration =>
-    configuration.DisableBuiltInModelValidation = true);
+{
+    configuration.DisableBuiltInModelValidation = true;
+    configuration.OverrideDefaultResultFactoryWith<
+        ArabicValidationResultFactory>();
+});
 builder.Services.Scan(scan => scan
     .FromAssemblies(
         typeof(ApplicationAssemblyMarker).Assembly,
@@ -79,6 +104,15 @@ if (app.Configuration.GetValue("Seed:Enabled", false))
 }
 
 app.UseExceptionHandler();
+app.UseStatusCodePages(async context =>
+{
+    var response = ApiErrorResponseFactory.FromStatusCode(
+        context.HttpContext,
+        context.HttpContext.Response.StatusCode);
+    await ApiErrorResponseFactory.WriteAsync(
+        context.HttpContext,
+        response);
+});
 app.UseSwaggerDocumentation();
 
 app.UseHttpsRedirection();

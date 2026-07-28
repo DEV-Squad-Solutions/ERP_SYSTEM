@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.BusinessPartners;
 
 namespace MiniErp.Infrastructure.Persistence.Configurations;
 
@@ -16,6 +16,12 @@ public sealed class BusinessPartnerConfiguration
 
         builder.Property(partner => partner.Id)
             .ValueGeneratedOnAdd();
+
+        builder.HasAlternateKey(partner => new
+        {
+            partner.CompanyId,
+            partner.Id
+        });
 
         builder.Property(partner => partner.Code)
             .HasMaxLength(50)

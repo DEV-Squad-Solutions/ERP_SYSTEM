@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using MiniErp.Api.Errors;
 using MiniErp.Application.Common.Results;
 
 namespace MiniErp.Api.Extensions;
@@ -23,28 +24,9 @@ public static class ResultExtensions
         this ControllerBase controller,
         Error error)
     {
-        var statusCode = error.Type switch
-        {
-            ErrorType.Validation => StatusCodes.Status400BadRequest,
-            ErrorType.Unauthorized => StatusCodes.Status401Unauthorized,
-            ErrorType.Forbidden => StatusCodes.Status403Forbidden,
-            ErrorType.NotFound => StatusCodes.Status404NotFound,
-            ErrorType.Conflict => StatusCodes.Status409Conflict,
-            _ => StatusCodes.Status500InternalServerError
-        };
-
-        var problemDetails = new ProblemDetails
-        {
-            Status = statusCode,
-            Title = error.Code,
-            Detail = error.Description
-        };
-
-        problemDetails.Extensions["errorType"] = error.Type.ToString();
-
-        return new ObjectResult(problemDetails)
-        {
-            StatusCode = statusCode
-        };
+        var response = ApiErrorResponseFactory.FromError(
+            controller.HttpContext,
+            error);
+        return ApiErrorResponseFactory.ToObjectResult(response);
     }
 }

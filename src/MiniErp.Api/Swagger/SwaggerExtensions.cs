@@ -22,9 +22,9 @@ public static class SwaggerExtensions
                 Name = "Authorization",
                 Type = SecuritySchemeType.Http,
                 Scheme = "bearer",
-                BearerFormat = "Bearer token",
+                BearerFormat = "JWT",
                 In = ParameterLocation.Header,
-                Description = "Enter a bearer token in the format: Bearer {token}"
+                Description = "Paste the access token only. Swagger adds the Bearer prefix automatically."
             });
 
             options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
@@ -36,13 +36,25 @@ public static class SwaggerExtensions
             options.OperationFilter<AllowAnonymousOperationFilter>();
             options.OperationFilter<AuthenticationSwaggerDocumentation>();
             options.OperationFilter<BusinessPartnersSwaggerDocumentation>();
+            options.OperationFilter<CashboxesSwaggerDocumentation>();
+            options.OperationFilter<CashMovementTypesSwaggerDocumentation>();
+            options.OperationFilter<CashVouchersSwaggerDocumentation>();
             options.OperationFilter<CompaniesSwaggerDocumentation>();
+            options.OperationFilter<ContainersSwaggerDocumentation>();
+            options.OperationFilter<CountriesSwaggerDocumentation>();
             options.OperationFilter<DriversSwaggerDocumentation>();
+            options.OperationFilter<DriverTripsSwaggerDocumentation>();
             options.OperationFilter<ItemsSwaggerDocumentation>();
             options.OperationFilter<ItemUnitsSwaggerDocumentation>();
             options.OperationFilter<StoresSwaggerDocumentation>();
+            options.OperationFilter<StoreContainersSwaggerDocumentation>();
+            options.OperationFilter<StockOpeningBalancesSwaggerDocumentation>();
+            options.OperationFilter<StatementsSwaggerDocumentation>();
+            options.OperationFilter<PartnerOpeningBalancesSwaggerDocumentation>();
+            options.OperationFilter<InvoicesSwaggerDocumentation>();
             options.OperationFilter<UsersSwaggerDocumentation>();
             options.OperationFilter<EnumRequestOperationDocumentationFilter>();
+            options.OperationFilter<UnifiedErrorResponseSwaggerFilter>();
         });
 
         return services;

@@ -3,25 +3,44 @@ namespace MiniErp.Application.Common.Results;
 public sealed record Error(
     string Code,
     string Description,
-    ErrorType Type)
+    ErrorType Type,
+    string? FieldName = null)
 {
     public static readonly Error None = new(string.Empty, string.Empty, ErrorType.None);
 
-    public static Error Failure(string code, string description) =>
-        new(code, description, ErrorType.Failure);
+    public static Error Failure(
+        string code,
+        string description,
+        string? fieldName = null) =>
+        new(code, description, ErrorType.Failure, fieldName);
 
-    public static Error Validation(string code, string description) =>
-        new(code, description, ErrorType.Validation);
+    public static Error Validation(
+        string code,
+        string description,
+        string? fieldName = null) =>
+        new(code, description, ErrorType.Validation, fieldName);
 
-    public static Error NotFound(string code, string description) =>
-        new(code, description, ErrorType.NotFound);
+    public static Error NotFound(
+        string code,
+        string description,
+        string? fieldName = null) =>
+        new(code, description, ErrorType.NotFound, fieldName);
 
-    public static Error Conflict(string code, string description) =>
-        new(code, description, ErrorType.Conflict);
+    public static Error Conflict(
+        string code,
+        string description,
+        string? fieldName = null) =>
+        new(code, description, ErrorType.Conflict, fieldName);
 
-    public static Error Unauthorized(string code, string description) =>
-        new(code, description, ErrorType.Unauthorized);
+    public static Error Unauthorized(
+        string code,
+        string description,
+        string? fieldName = null) =>
+        new(code, description, ErrorType.Unauthorized, fieldName);
 
-    public static Error Forbidden(string code, string description) =>
-        new(code, description, ErrorType.Forbidden);
+    public static Error Forbidden(
+        string code,
+        string description,
+        string? fieldName = null) =>
+        new(code, description, ErrorType.Forbidden, fieldName);
 }

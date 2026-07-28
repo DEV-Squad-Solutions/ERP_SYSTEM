@@ -32,6 +32,7 @@ internal sealed class UserFieldsValidator : AbstractValidator<UserCreateRequest>
             .SetValidator(new RolesValidator());
 
         RuleFor(request => request.CompanyIds)
+            .NotNull()
             .SetValidator(new CompanyIdsValidator());
     }
 }

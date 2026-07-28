@@ -16,9 +16,13 @@ public sealed class ItemUnitsController(IItemUnitService itemUnitService) : ApiC
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] ItemUnitFilterRequest filters,
         CancellationToken cancellationToken)
     {
-        var result = await itemUnitService.GetAllAsync(pagination, cancellationToken);
+        var result = await itemUnitService.GetAllAsync(
+            pagination,
+            filters,
+            cancellationToken);
         return this.ToActionResult(result);
     }
 

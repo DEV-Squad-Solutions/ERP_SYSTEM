@@ -18,10 +18,12 @@ public sealed class BusinessPartnersController(
         StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] BusinessPartnerFilterRequest filters,
         CancellationToken cancellationToken)
     {
         var result = await businessPartnerService.GetAllAsync(
             pagination,
+            filters,
             cancellationToken);
         return this.ToActionResult(result);
     }
@@ -42,6 +44,20 @@ public sealed class BusinessPartnersController(
         CancellationToken cancellationToken)
     {
         var result = await businessPartnerService.GetByIdAsync(
+            id,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [HttpGet("{id:int}/container-store")]
+    [ProducesResponseType<BusinessPartnerContainerStoreResponse>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetContainerStore(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        var result = await businessPartnerService.GetContainerStoreAsync(
             id,
             cancellationToken);
         return this.ToActionResult(result);
@@ -88,6 +104,7 @@ public sealed class BusinessPartnersController(
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(
         int id,
         CancellationToken cancellationToken)

@@ -4,7 +4,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Items;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.Items;
@@ -19,11 +19,31 @@ public sealed class ItemService(
 
     public async Task<Result<PagedResponse<ItemResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        ItemFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
+        filters ??= new ItemFilterRequest();
         var query = dbContext.Items
             .AsNoTracking()
             .Where(item => item.CompanyId == companyId)
+            .Where(item =>
+                string.IsNullOrWhiteSpace(filters.Search) ||
+                item.Code.Contains(filters.Search.Trim()) ||
+                item.Name.Contains(filters.Search.Trim()) ||
+                (item.Description != null &&
+                 item.Description.Contains(filters.Search.Trim())))
+            .Where(item =>
+                string.IsNullOrWhiteSpace(filters.Code) ||
+                item.Code.Contains(filters.Code.Trim()))
+            .Where(item =>
+                string.IsNullOrWhiteSpace(filters.Name) ||
+                item.Name.Contains(filters.Name.Trim()))
+            .Where(item =>
+                !filters.ItemUnitId.HasValue ||
+                item.ItemUnitId == filters.ItemUnitId.Value)
+            .Where(item =>
+                !filters.IsActive.HasValue ||
+                item.IsActive == filters.IsActive.Value)
             .OrderBy(item => item.Name)
             .ThenBy(item => item.Id);
 
@@ -43,6 +63,7 @@ public sealed class ItemService(
                 item.IsActive &&
                 item.ItemUnit.IsActive)
             .OrderBy(item => item.Name)
+            .ThenBy(item => item.Id)
             .ProjectToType<SelectResponse>()
             .ToListAsync(cancellationToken);
 
@@ -86,7 +107,8 @@ public sealed class ItemService(
             return Result<ItemResponse>.Failure(
                 Error.Conflict(
                     "Items.CodeExists",
-                    $"Item code '{item.Code}' already exists."));
+                    $"كود الصنف '{item.Code}' مستخدم بالفعل.",
+                    nameof(ItemRequest.Code)));
         }
 
         var itemUnitResult = await GetActiveItemUnitAsync(
@@ -137,7 +159,8 @@ public sealed class ItemService(
             return Result<ItemResponse>.Failure(
                 Error.Conflict(
                     "Items.CodeExists",
-                    $"Item code '{normalizedItem.Code}' already exists."));
+                    $"كود الصنف '{normalizedItem.Code}' مستخدم بالفعل.",
+                    nameof(ItemRequest.Code)));
         }
 
         var itemUnitResult = await GetActiveItemUnitAsync(
@@ -174,6 +197,32 @@ public sealed class ItemService(
             return Result.Failure(NotFound(id));
         }
 
+        var isInUse = await dbContext.InvoiceLines
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                line =>
+                    line.CompanyId == companyId &&
+                    line.ItemId == id,
+                cancellationToken) ||
+            await dbContext.StockOpeningBalanceLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.ItemId == id,
+                    cancellationToken) ||
+            await dbContext.ItemMovements
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    movement =>
+                        movement.CompanyId == companyId &&
+                        movement.ItemId == id,
+                    cancellationToken);
+        if (isInUse)
+        {
+            return Result.Failure(InUse());
+        }
+
         item.IsActive = false;
         dbContext.Items.Remove(item);
 
@@ -182,10 +231,15 @@ public sealed class ItemService(
     }
 
     private static Error InvalidId() =>
-        Error.Validation("Items.InvalidId", "Item ID must be greater than zero.");
+        Error.Validation("Items.InvalidId", "يجب أن يكون رقم الصنف أكبر من صفر.");
 
     private static Error NotFound(int id) =>
-        Error.NotFound("Items.NotFound", $"Item with ID {id} was not found.");
+        Error.NotFound("Items.NotFound", $"لم يتم العثور على الصنف رقم {id}.");
+
+    private static Error InUse() =>
+        Error.Conflict(
+            "Items.InUse",
+            "لا يمكن حذف الصنف لارتباطه بمستندات أو حركات حالية أو تاريخية.");
 
     private async Task<Result<ItemUnit>> GetActiveItemUnitAsync(
         int itemUnitId,
@@ -203,14 +257,14 @@ public sealed class ItemService(
             return Result<ItemUnit>.Failure(
                 Error.NotFound(
                     "ItemUnits.NotFound",
-                    $"Item unit with ID {itemUnitId} was not found."));
+                    $"لم يتم العثور على وحدة الصنف رقم {itemUnitId}."));
         }
 
         return !itemUnit.IsActive
             ? Result<ItemUnit>.Failure(
                 Error.Conflict(
                     "ItemUnits.Inactive",
-                    $"Item unit with ID {itemUnitId} is inactive."))
+                    $"وحدة الصنف رقم {itemUnitId} غير نشطة."))
             : Result<ItemUnit>.Success(itemUnit);
     }
 }

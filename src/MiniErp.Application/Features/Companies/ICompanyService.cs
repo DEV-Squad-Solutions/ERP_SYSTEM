@@ -7,6 +7,7 @@ public interface ICompanyService
 {
     Task<Result<PagedResponse<CompanyResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        CompanyFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(

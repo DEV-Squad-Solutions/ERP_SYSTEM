@@ -4,7 +4,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Drivers;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.Logistics;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.Drivers;
@@ -20,11 +20,48 @@ public sealed class DriverService(
 
     public async Task<Result<PagedResponse<DriverResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        DriverFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
+        filters ??= new DriverFilterRequest();
+        var today = DateOnly.FromDateTime(
+            timeProvider.GetUtcNow().UtcDateTime);
         var query = dbContext.Drivers
             .AsNoTracking()
             .Where(driver => driver.CompanyId == companyId)
+            .Where(driver =>
+                string.IsNullOrWhiteSpace(filters.Search) ||
+                driver.Code.Contains(filters.Search.Trim()) ||
+                driver.Name.Contains(filters.Search.Trim()) ||
+                driver.LicenseNumber.Contains(filters.Search.Trim()) ||
+                (driver.PhoneNumber != null &&
+                 driver.PhoneNumber.Contains(filters.Search.Trim())) ||
+                (driver.NationalId != null &&
+                 driver.NationalId.Contains(filters.Search.Trim())))
+            .Where(driver =>
+                string.IsNullOrWhiteSpace(filters.Code) ||
+                driver.Code.Contains(filters.Code.Trim()))
+            .Where(driver =>
+                string.IsNullOrWhiteSpace(filters.Name) ||
+                driver.Name.Contains(filters.Name.Trim()))
+            .Where(driver =>
+                string.IsNullOrWhiteSpace(filters.LicenseNumber) ||
+                driver.LicenseNumber.Contains(filters.LicenseNumber.Trim()))
+            .Where(driver =>
+                !filters.IsActive.HasValue ||
+                driver.IsActive == filters.IsActive.Value)
+            .Where(driver =>
+                !filters.HasExpiredLicense.HasValue ||
+                (driver.LicenseExpiryDate.HasValue &&
+                 driver.LicenseExpiryDate.Value < today) == filters.HasExpiredLicense.Value)
+            .Where(driver =>
+                !filters.LicenseExpiryFrom.HasValue ||
+                (driver.LicenseExpiryDate.HasValue &&
+                 driver.LicenseExpiryDate.Value >= filters.LicenseExpiryFrom.Value))
+            .Where(driver =>
+                !filters.LicenseExpiryTo.HasValue ||
+                (driver.LicenseExpiryDate.HasValue &&
+                 driver.LicenseExpiryDate.Value <= filters.LicenseExpiryTo.Value))
             .OrderBy(driver => driver.Name)
             .ThenBy(driver => driver.Id);
 
@@ -147,6 +184,34 @@ public sealed class DriverService(
             return Result.Failure(NotFound(id));
         }
 
+        var hasDependencies = await dbContext.Invoices
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                invoice =>
+                    invoice.CompanyId == companyId &&
+                    (invoice.DriverId == id ||
+                     invoice.ActualDriverId == id),
+                cancellationToken) ||
+            await dbContext.DriverTrips
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    trip =>
+                        trip.CompanyId == companyId &&
+                        (trip.DriverId == id ||
+                         trip.ActualDriverId == id),
+                    cancellationToken) ||
+            await dbContext.CashVouchers
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    voucher =>
+                        voucher.CompanyId == companyId &&
+                        voucher.DriverId == id,
+                    cancellationToken);
+        if (hasDependencies)
+        {
+            return Result.Failure(HasDependencies());
+        }
+
         driver.IsActive = false;
         dbContext.Drivers.Remove(driver);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -185,7 +250,8 @@ public sealed class DriverService(
         {
             return Error.Conflict(
                 "Drivers.NameExists",
-                $"Driver name '{driver.Name}' already exists.");
+                $"اسم السائق '{driver.Name}' موجود بالفعل.",
+                nameof(DriverRequest.Name));
         }
 
         if (duplicates.Any(entity => string.Equals(
@@ -195,7 +261,8 @@ public sealed class DriverService(
         {
             return Error.Conflict(
                 "Drivers.CodeExists",
-                $"Driver code '{driver.Code}' already exists.");
+                $"كود السائق '{driver.Code}' مستخدم بالفعل.",
+                nameof(DriverRequest.Code));
         }
 
         if (duplicates.Any(entity => string.Equals(
@@ -205,7 +272,8 @@ public sealed class DriverService(
         {
             return Error.Conflict(
                 "Drivers.LicenseNumberExists",
-                $"Driver licence number '{driver.LicenseNumber}' already exists.");
+                $"رقم رخصة السائق '{driver.LicenseNumber}' مستخدم بالفعل.",
+                nameof(DriverRequest.LicenseNumber));
         }
 
         return driver.NationalId is not null &&
@@ -215,17 +283,23 @@ public sealed class DriverService(
                    StringComparison.OrdinalIgnoreCase))
             ? Error.Conflict(
                 "Drivers.NationalIdExists",
-                "A driver with the same national ID already exists.")
+                "يوجد سائق آخر يحمل الرقم القومي نفسه.",
+                nameof(DriverRequest.NationalId))
             : null;
     }
 
     private static Error InvalidId() =>
         Error.Validation(
             "Drivers.InvalidId",
-            "Driver ID must be greater than zero.");
+            "يجب أن يكون رقم السائق أكبر من صفر.");
 
     private static Error NotFound(int id) =>
         Error.NotFound(
             "Drivers.NotFound",
-            $"Driver with ID {id} was not found.");
+            $"لم يتم العثور على السائق رقم {id}.");
+
+    private static Error HasDependencies() =>
+        Error.Conflict(
+            "Drivers.HasDependencies",
+            "لا يمكن حذف السائق لارتباطه بفواتير أو رحلات أو سندات نقدية حالية أو تاريخية.");
 }

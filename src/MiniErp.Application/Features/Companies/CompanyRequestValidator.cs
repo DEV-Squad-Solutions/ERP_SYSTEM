@@ -8,22 +8,27 @@ public sealed class CompanyRequestValidator : AbstractValidator<CompanyRequest>
     {
         RuleFor(request => request.Name)
             .NotEmpty()
-            .MaximumLength(200);
+            .Must(value => value is null || value.Trim().Length <= 200)
+            .WithMessage("يجب ألا يتجاوز طول اسم الشركة 200 حرفًا.");
 
         RuleFor(request => request.Address)
             .NotEmpty()
-            .MaximumLength(500);
+            .Must(value => value is null || value.Trim().Length <= 500)
+            .WithMessage("يجب ألا يتجاوز طول العنوان 500 حرفًا.");
 
         RuleFor(request => request.CommercialRegister)
             .NotEmpty()
-            .MaximumLength(50);
+            .Must(value => value is null || value.Trim().Length <= 50)
+            .WithMessage("يجب ألا يتجاوز طول السجل التجاري 50 حرفًا.");
 
         RuleFor(request => request.TaxNumber)
             .NotEmpty()
-            .MaximumLength(50);
+            .Must(value => value is null || value.Trim().Length <= 50)
+            .WithMessage("يجب ألا يتجاوز طول الرقم الضريبي 50 حرفًا.");
 
         RuleFor(request => request.ManagerName)
             .NotEmpty()
-            .MaximumLength(200);
+            .Must(value => value is null || value.Trim().Length <= 200)
+            .WithMessage("يجب ألا يتجاوز طول اسم المدير 200 حرفًا.");
     }
 }

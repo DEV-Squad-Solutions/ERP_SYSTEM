@@ -16,10 +16,12 @@ public sealed class DriversController(IDriverService driverService)
     [ProducesResponseType<PagedResponse<DriverResponse>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] DriverFilterRequest filters,
         CancellationToken cancellationToken)
     {
         var result = await driverService.GetAllAsync(
             pagination,
+            filters,
             cancellationToken);
         return this.ToActionResult(result);
     }
@@ -82,6 +84,7 @@ public sealed class DriversController(IDriverService driverService)
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(
         int id,
         CancellationToken cancellationToken)

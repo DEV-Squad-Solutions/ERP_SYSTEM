@@ -36,6 +36,7 @@ public static class DependencyInjection
         services
             .AddIdentityCore<ApplicationUser>()
             .AddRoles<IdentityRole<Guid>>()
+            .AddErrorDescriber<ArabicIdentityErrorDescriber>()
             .AddEntityFrameworkStores<ApplicationDbContext>()
             .AddSignInManager()
             .AddDefaultTokenProviders();
@@ -77,7 +78,7 @@ public static class DependencyInjection
                 };
                 options.Events = new JwtBearerEvents
                 {
-                    OnTokenValidated = context =>
+                    OnTokenValidated = async context =>
                     {
                         var tokenUse = context.Principal?
                             .FindFirst(CustomClaimTypes.TokenUse)?
@@ -87,19 +88,60 @@ public static class DependencyInjection
                                 CustomClaimTypes.AccessTokenUse,
                                 StringComparison.Ordinal))
                         {
-                            context.Fail("The token is not an access token.");
-                            return Task.CompletedTask;
+                            context.Fail("الرمز المستخدم ليس رمز وصول.");
+                            return;
                         }
 
                         if (!CompanyClaimResolver.TryGetCompanyId(
                                 context.Principal,
-                                out _))
+                                out var companyId))
                         {
                             context.Fail(
-                                "The access token must contain exactly one valid company_id claim.");
+                                "يجب أن يحتوي رمز الوصول على قيمة company_id واحدة وصحيحة.");
+                            return;
                         }
 
-                        return Task.CompletedTask;
+                        var userIdValue = context.Principal?
+                            .FindFirst("sub")?
+                            .Value;
+                        if (!Guid.TryParse(userIdValue, out var userId) ||
+                            userId == Guid.Empty)
+                        {
+                            context.Fail(
+                                "يجب أن يحتوي رمز الوصول على رقم مستخدم صحيح.");
+                            return;
+                        }
+
+                        var tokenSecurityStamp = context.Principal?
+                            .FindFirst(CustomClaimTypes.SecurityStamp)?
+                            .Value;
+                        if (string.IsNullOrEmpty(tokenSecurityStamp))
+                        {
+                            context.Fail(
+                                "رمز الوصول لا يحتوي على بيانات الجلسة المطلوبة.");
+                            return;
+                        }
+
+                        var dbContext = context.HttpContext.RequestServices
+                            .GetRequiredService<ApplicationDbContext>();
+                        var currentSecurityStamp = await dbContext.UserCompanies
+                            .AsNoTracking()
+                            .Where(userCompany =>
+                                    userCompany.UserId == userId &&
+                                    userCompany.CompanyId == companyId)
+                            .Select(userCompany =>
+                                userCompany.User.SecurityStamp)
+                            .SingleOrDefaultAsync(
+                                context.HttpContext.RequestAborted);
+
+                        if (!string.Equals(
+                                currentSecurityStamp,
+                                tokenSecurityStamp,
+                                StringComparison.Ordinal))
+                        {
+                            context.Fail(
+                                "انتهت صلاحية الجلسة أو لم يعد المستخدم يملك صلاحية الوصول إلى الشركة.");
+                        }
                     }
                 };
             });

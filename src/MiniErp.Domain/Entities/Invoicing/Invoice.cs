@@ -1,0 +1,103 @@
+using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Inventory;
+using MiniErp.Domain.Entities.Logistics;
+using MiniErp.Domain.Entities.ReferenceData;
+using MiniErp.Domain.Enums;
+
+namespace MiniErp.Domain.Entities.Invoicing;
+
+public sealed class Invoice : AuditableEntity
+{
+    public int Id { get; set; }
+
+    public int CompanyId { get; set; }
+
+    public Company Company { get; set; } = null!;
+
+    public string InvoiceNumber { get; set; } = string.Empty;
+
+    public string? ExportInvoiceCode { get; set; }
+
+    public InvoiceType InvoiceType { get; set; }
+
+    public PaymentTerm PaymentTerm { get; set; } = PaymentTerm.Cash;
+
+    public DateOnly InvoiceDate { get; set; }
+
+    public DateOnly? DueDate { get; set; }
+
+    public int BusinessPartnerId { get; set; }
+
+    public BusinessPartner BusinessPartner { get; set; } = null!;
+
+    public int StoreId { get; set; }
+
+    public Store Store { get; set; } = null!;
+
+    public int? ContainerStoreId { get; set; }
+
+    public Store? ContainerStore { get; set; }
+
+    public int? CountryId { get; set; }
+
+    public Country? Country { get; set; }
+
+    public CurrencyCode Currency { get; set; } = CurrencyCode.EGP;
+
+    public int? DriverId { get; set; }
+    public Driver? Driver { get; set; }
+
+    public int? ActualDriverId { get; set; }
+    public Driver? ActualDriver { get; set; }
+
+    public bool UsesExternalDriver { get; set; }
+    public string? ExternalDriverName { get; set; }
+    public string? VehicleNumber { get; set; }
+
+    public decimal DiscountAmount { get; set; }
+
+    public decimal PaidAmount { get; set; }
+
+    public decimal Total { get; private set; }
+
+    public decimal Subtotal =>
+        Lines.Sum(line => line.Total);
+
+    public decimal RemainingAmount =>
+        Total - PaidAmount;
+
+    public string? Notes { get; set; }
+
+    public DateTime LastModifiedAt { get; private set; }
+
+    public byte[] RowVersion { get; private set; } = [];
+
+    public ICollection<InvoiceLine> Lines { get; set; } = [];
+
+    public ICollection<InvoiceContainerLine> ContainerLines { get; set; } = [];
+
+    public void CalculateTotal()
+    {
+        foreach (var line in Lines)
+        {
+            line.CalculateAmounts();
+        }
+
+        Total = decimal.Round(
+            Subtotal - DiscountAmount,
+            InvoiceAmountRules.MoneyScale,
+            MidpointRounding.AwayFromZero);
+    }
+
+    public void Touch(DateTime utcNow)
+    {
+        LastModifiedAt = utcNow;
+    }
+
+    public PaymentStatus GetPaymentStatus() =>
+        RemainingAmount <= 0m
+            ? PaymentStatus.Paid
+            : PaymentStatus.Unpaid;
+}

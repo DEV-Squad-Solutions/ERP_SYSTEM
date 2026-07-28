@@ -3,7 +3,15 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using MiniErp.Domain.Entities;
+using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.CashManagement;
+using MiniErp.Domain.Entities.Catalog;
+using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Containers;
+using MiniErp.Domain.Entities.Inventory;
+using MiniErp.Domain.Entities.Invoicing;
+using MiniErp.Domain.Entities.Logistics;
+using MiniErp.Domain.Entities.ReferenceData;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Identity;
 using MiniErp.Infrastructure.Persistence;
@@ -65,6 +73,32 @@ public static class DevelopmentDataSeeder
         new("RETURNS", "Returns Store")
     ];
 
+    private static readonly SeedStore ContainerStore =
+        new("CONTAINERS", "Container Store");
+
+    private static readonly (int Count, decimal Weight, decimal Price)[]
+        StockOpeningLineAmounts =
+        [
+            (10, 2.50m, 12.00m),
+            (6, 4.00m, 15.50m),
+            (20, 1.25m, 8.75m)
+        ];
+
+    private static readonly SeedCountry[] DefaultCountries =
+    [
+        new("EG", "Egypt", "\u0645\u0635\u0631"),
+        new("SA", "Saudi Arabia", "\u0627\u0644\u0633\u0639\u0648\u062f\u064a\u0629"),
+        new("AE", "United Arab Emirates", "\u0627\u0644\u0625\u0645\u0627\u0631\u0627\u062a"),
+        new("US", "United States", "\u0627\u0644\u0648\u0644\u0627\u064a\u0627\u062a \u0627\u0644\u0645\u062a\u062d\u062f\u0629")
+    ];
+
+    private static readonly SeedContainer[] DefaultContainers =
+    [
+        new("CTN-001", "Small Crate", "Reusable small crate"),
+        new("CTN-002", "Large Crate", "Reusable large crate"),
+        new("CTN-003", "Pallet", "Reusable pallet")
+    ];
+
     private static readonly SeedDriver[] DefaultDrivers =
     [
         new(
@@ -115,6 +149,8 @@ public static class DevelopmentDataSeeder
         var userManager = scope.ServiceProvider
             .GetRequiredService<UserManager<ApplicationUser>>();
 
+        await SeedCountriesAsync(dbContext, cancellationToken);
+
         var primaryCompany = await SeedCompaniesAsync(
             dbContext,
             cancellationToken);
@@ -133,7 +169,32 @@ public static class DevelopmentDataSeeder
 
         foreach (var company in companies)
         {
+            await SeedBusinessPartnersAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
+            await SeedPartnerOpeningBalancesAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
             await SeedStoresAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
+            await SeedContainerStoreAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
+            await SeedContainersAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
+            await SeedStoreContainersAsync(
                 dbContext,
                 company,
                 cancellationToken);
@@ -143,17 +204,65 @@ public static class DevelopmentDataSeeder
                 company,
                 cancellationToken);
 
-            await SeedBusinessPartnersAsync(
-                dbContext,
-                company,
-                cancellationToken);
-
             await SeedCatalogAsync(
                 dbContext,
                 company.Id,
                 itemCount,
                 cancellationToken);
+
+            await SeedStockOpeningBalancesAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
+            await SeedInvoicesAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
+            await SeedCashManagementAsync(
+                dbContext,
+                company,
+                cancellationToken);
         }
+    }
+
+    private static async Task SeedCountriesAsync(
+        ApplicationDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var countryCodes = DefaultCountries
+            .Select(country => country.Code)
+            .ToArray();
+        var existingCodes = (await dbContext.Countries
+                .IgnoreQueryFilters()
+                .Where(country => countryCodes.Contains(country.Code))
+                .Select(country => country.Code)
+                .ToListAsync(cancellationToken))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var createdOn = DateTime.UtcNow;
+        var createdByPc = Environment.MachineName;
+
+        foreach (var seedCountry in DefaultCountries)
+        {
+            if (existingCodes.Contains(seedCountry.Code))
+            {
+                continue;
+            }
+
+            dbContext.Countries.Add(new Country
+            {
+                Code = seedCountry.Code,
+                Name = seedCountry.Name,
+                ArabicName = seedCountry.ArabicName,
+                IsActive = true,
+                CreatedById = SeedActor,
+                CreatedByPc = createdByPc,
+                CreatedOn = createdOn
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private static async Task SeedIdentityAsync(
@@ -299,6 +408,7 @@ public static class DevelopmentDataSeeder
             .Select(seedStore => seedStore.Code)
             .ToArray();
         var existingCodes = await dbContext.Stores
+            .IgnoreQueryFilters()
             .Where(store =>
                 store.CompanyId == company.Id &&
                 seedStoreCodes.Contains(store.Code))
@@ -324,6 +434,163 @@ public static class DevelopmentDataSeeder
                 CreatedById = SeedActor,
                 CreatedByPc = createdByPc,
                 CreatedOn = createdOn
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedContainerStoreAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var existingStore = await dbContext.Stores
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                store =>
+                    store.CompanyId == company.Id &&
+                    store.Code == ContainerStore.Code,
+                cancellationToken);
+        if (existingStore is not null)
+        {
+            return;
+        }
+
+        var businessPartnerId = await dbContext.BusinessPartners
+            .Where(partner =>
+                partner.CompanyId == company.Id &&
+                partner.IsActive &&
+                !dbContext.Stores.Any(store =>
+                    store.CompanyId == company.Id &&
+                    store.BusinessPartnerId == partner.Id &&
+                    store.IsContainerStore &&
+                    store.IsActive))
+            .OrderBy(partner => partner.Id)
+            .Select(partner => (int?)partner.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!businessPartnerId.HasValue)
+        {
+            return;
+        }
+
+        dbContext.Stores.Add(new Store
+        {
+            CompanyId = company.Id,
+            Code = ContainerStore.Code,
+            Name = $"{ContainerStore.Name} - Company {company.Id}",
+            Address = company.Address,
+            IsContainerStore = true,
+            BusinessPartnerId = businessPartnerId.Value,
+            IsActive = true,
+            CreatedById = SeedActor,
+            CreatedByPc = Environment.MachineName,
+            CreatedOn = DateTime.UtcNow
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedContainersAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var containerCodes = DefaultContainers
+            .Select(container => container.Code)
+            .ToArray();
+        var existingCodes = (await dbContext.Containers
+                .IgnoreQueryFilters()
+                .Where(container =>
+                    container.CompanyId == company.Id &&
+                    containerCodes.Contains(container.Code))
+                .Select(container => container.Code)
+                .ToListAsync(cancellationToken))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var createdOn = DateTime.UtcNow;
+        var createdByPc = Environment.MachineName;
+
+        foreach (var seedContainer in DefaultContainers)
+        {
+            if (existingCodes.Contains(seedContainer.Code))
+            {
+                continue;
+            }
+
+            dbContext.Containers.Add(new Container
+            {
+                CompanyId = company.Id,
+                Code = seedContainer.Code,
+                Name = $"{seedContainer.Name} - Company {company.Id}",
+                Description = seedContainer.Description,
+                IsActive = true,
+                CreatedById = SeedActor,
+                CreatedByPc = createdByPc,
+                CreatedOn = createdOn
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedStoreContainersAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var containerStore = await dbContext.Stores
+            .Where(store =>
+                store.CompanyId == company.Id &&
+                store.Code == ContainerStore.Code &&
+                store.IsActive &&
+                store.IsContainerStore)
+            .Select(store => new { store.Id })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (containerStore is null)
+        {
+            return;
+        }
+
+        var containerCodes = DefaultContainers
+            .Select(container => container.Code)
+            .ToArray();
+        var containers = await dbContext.Containers
+            .Where(container =>
+                container.CompanyId == company.Id &&
+                container.IsActive &&
+                containerCodes.Contains(container.Code))
+            .Select(container => new { container.Id })
+            .ToListAsync(cancellationToken);
+        if (containers.Count == 0)
+        {
+            return;
+        }
+
+        var containerIds = containers
+            .Select(container => container.Id)
+            .ToArray();
+        var existingContainerIds = (await dbContext.StoreContainers
+                .IgnoreQueryFilters()
+                .Where(assignment =>
+                    assignment.CompanyId == company.Id &&
+                    assignment.StoreId == containerStore.Id &&
+                    containerIds.Contains(assignment.ContainerId))
+                .Select(assignment => assignment.ContainerId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        foreach (var containerId in containerIds.Where(
+                     containerId => !existingContainerIds.Contains(containerId)))
+        {
+            dbContext.StoreContainers.Add(new StoreContainer
+            {
+                CompanyId = company.Id,
+                StoreId = containerStore.Id,
+                ContainerId = containerId,
+                IsActive = true,
+                CreatedById = SeedActor,
+                CreatedByPc = Environment.MachineName,
+                CreatedOn = DateTime.UtcNow
             });
         }
 
@@ -525,6 +792,584 @@ public static class DevelopmentDataSeeder
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    private static async Task SeedPartnerOpeningBalancesAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var seedBalances = new (string DocumentNumber, PartnerBalanceType BalanceType, decimal Amount)[]
+        {
+            ("PARTNER-OPEN-001", PartnerBalanceType.Receivable, 2_500m),
+            ("PARTNER-OPEN-002", PartnerBalanceType.Payable, 1_750m)
+        };
+
+        var partners = await dbContext.BusinessPartners
+            .Where(partner =>
+                partner.CompanyId == company.Id &&
+                partner.IsActive)
+            .OrderBy(partner => partner.Id)
+            .Take(seedBalances.Length)
+            .Select(partner => new
+            {
+                partner.Id,
+                partner.Currency
+            })
+            .ToListAsync(cancellationToken);
+
+        for (var index = 0; index < partners.Count; index++)
+        {
+            var seed = seedBalances[index];
+            var partner = partners[index];
+            var notes = seed.BalanceType == PartnerBalanceType.Receivable
+                ? "رصيد افتتاحي تجريبي مطلوب من العميل أو المورد"
+                : "رصيد افتتاحي تجريبي مطلوب دفعه للعميل أو المورد";
+            var existingBalance = await dbContext.PartnerOpeningBalances
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(balance =>
+                    balance.CompanyId == company.Id &&
+                    balance.DocumentNumber == seed.DocumentNumber,
+                    cancellationToken);
+            if (existingBalance is not null)
+            {
+                var oldNotes =
+                    $"Seed {seed.BalanceType} for Company {company.Id}";
+                if (existingBalance.Notes == oldNotes)
+                {
+                    existingBalance.Notes = notes;
+                }
+
+                continue;
+            }
+
+            dbContext.PartnerOpeningBalances.Add(new PartnerOpeningBalance
+            {
+                CompanyId = company.Id,
+                BusinessPartnerId = partner.Id,
+                DocumentNumber = seed.DocumentNumber,
+                DocumentDate = new DateOnly(2026, 1, 1),
+                Currency = partner.Currency,
+                BalanceType = seed.BalanceType,
+                Amount = seed.Amount,
+                Notes = notes
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedStockOpeningBalancesAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        const string documentNumber = "OPEN-001";
+        var seedNotes = $"Seed draft for Company {company.Id}";
+
+        var existingBalance = await dbContext.StockOpeningBalances
+            .IgnoreQueryFilters()
+            .Include(balance => balance.Lines)
+            .FirstOrDefaultAsync(
+                balance =>
+                    balance.CompanyId == company.Id &&
+                    balance.DocumentNumber == documentNumber,
+                cancellationToken);
+        if (existingBalance is not null)
+        {
+            if (existingBalance.IsDeleted ||
+                existingBalance.Notes != seedNotes)
+            {
+                return;
+            }
+
+            var existingSeedLines = existingBalance.Lines
+                .Where(line =>
+                    !line.IsDeleted &&
+                    line.Notes == "Seed draft line")
+                .OrderBy(line => line.Id)
+                .Take(StockOpeningLineAmounts.Length)
+                .ToList();
+
+            for (var index = 0; index < existingSeedLines.Count; index++)
+            {
+                ApplyStockOpeningSeedAmounts(
+                    existingSeedLines[index],
+                    index);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
+        var store = await dbContext.Stores
+            .Where(store =>
+                store.CompanyId == company.Id &&
+                store.Code == "MAIN" &&
+                store.IsActive &&
+                !store.IsContainerStore)
+            .Select(store => new { store.Id })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (store is null)
+        {
+            return;
+        }
+
+        var items = await dbContext.Items
+            .Where(item =>
+                item.CompanyId == company.Id &&
+                item.IsActive &&
+                item.ItemUnit.IsActive)
+            .OrderBy(item => item.Id)
+            .Take(3)
+            .Select(item => new
+            {
+                item.Id,
+                item.ItemUnitId
+            })
+            .ToListAsync(cancellationToken);
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        var balance = new StockOpeningBalance
+        {
+            CompanyId = company.Id,
+            StoreId = store.Id,
+            DocumentNumber = documentNumber,
+            DocumentDate = new DateOnly(2026, 1, 1),
+            Notes = seedNotes
+        };
+
+        for (var index = 0; index < items.Count; index++)
+        {
+            var item = items[index];
+            var line = new StockOpeningBalanceLine
+            {
+                CompanyId = company.Id,
+                ItemId = item.Id,
+                ItemUnitId = item.ItemUnitId,
+                Notes = "Seed draft line"
+            };
+            ApplyStockOpeningSeedAmounts(line, index);
+            balance.Lines.Add(line);
+        }
+
+        dbContext.StockOpeningBalances.Add(balance);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedInvoicesAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var existingExportCodes = await dbContext.Invoices
+            .IgnoreQueryFilters()
+            .Where(invoice =>
+                invoice.CompanyId == company.Id &&
+                (invoice.ExportInvoiceCode == "SEED-CASH" ||
+                 invoice.ExportInvoiceCode == "SEED-CREDIT"))
+            .Select(invoice => invoice.ExportInvoiceCode)
+            .ToHashSetAsync(cancellationToken);
+
+        var partner = await dbContext.BusinessPartners
+            .Where(candidate =>
+                candidate.CompanyId == company.Id &&
+                candidate.IsActive)
+            .OrderBy(candidate => candidate.Id)
+            .Select(candidate => new
+            {
+                candidate.Id,
+                candidate.Currency
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+        var store = await dbContext.Stores
+            .Where(candidate =>
+                candidate.CompanyId == company.Id &&
+                candidate.Code == "MAIN" &&
+                candidate.IsActive &&
+                !candidate.IsContainerStore)
+            .Select(candidate => new { candidate.Id })
+            .FirstOrDefaultAsync(cancellationToken);
+        var item = await dbContext.Items
+            .Where(candidate =>
+                candidate.CompanyId == company.Id &&
+                candidate.IsActive &&
+                candidate.ItemUnit.IsActive)
+            .OrderBy(candidate => candidate.Id)
+            .Select(candidate => new
+            {
+                candidate.Id,
+                candidate.ItemUnitId
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (partner is null || store is null || item is null)
+        {
+            return;
+        }
+
+        var seeds = new[]
+        {
+            (
+                ExportCode: "SEED-CASH",
+                InvoiceNumber: $"SEED-{company.Id}-CASH",
+                PaymentTerm: PaymentTerm.Cash,
+                DueDate: (DateOnly?)null),
+            (
+                ExportCode: "SEED-CREDIT",
+                InvoiceNumber: $"SEED-{company.Id}-CREDIT",
+                PaymentTerm: PaymentTerm.Credit,
+                DueDate: (DateOnly?)new DateOnly(2026, 8, 24))
+        };
+
+        foreach (var seed in seeds)
+        {
+            if (existingExportCodes.Contains(seed.ExportCode))
+            {
+                continue;
+            }
+
+            var invoice = new Invoice
+            {
+                CompanyId = company.Id,
+                InvoiceNumber = seed.InvoiceNumber,
+                ExportInvoiceCode = seed.ExportCode,
+                InvoiceType = InvoiceType.Sales,
+                PaymentTerm = seed.PaymentTerm,
+                InvoiceDate = new DateOnly(2026, 7, 25),
+                DueDate = seed.DueDate,
+                BusinessPartnerId = partner.Id,
+                StoreId = store.Id,
+                Currency = partner.Currency,
+                Notes = $"Seed {seed.PaymentTerm} invoice for Company {company.Id}",
+                CreatedById = SeedActor,
+                CreatedByPc = Environment.MachineName,
+                CreatedOn = DateTime.UtcNow
+            };
+            var line = new InvoiceLine
+            {
+                CompanyId = company.Id,
+                ItemId = item.Id,
+                ItemUnitId = item.ItemUnitId,
+                Count = 1,
+                Weight = 1m,
+                Price = 100m,
+                Notes = "Seed invoice line"
+            };
+            line.CalculateAmounts();
+            invoice.Lines.Add(line);
+            invoice.CalculateTotal();
+            if (invoice.PaymentTerm == PaymentTerm.Cash)
+            {
+                invoice.PaidAmount = invoice.Total;
+            }
+
+            invoice.Touch(DateTime.UtcNow);
+            dbContext.Invoices.Add(invoice);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var seededInvoices = await dbContext.Invoices
+            .Include(invoice => invoice.Lines)
+            .Where(invoice =>
+                invoice.CompanyId == company.Id &&
+                (invoice.ExportInvoiceCode == "SEED-CASH" ||
+                 invoice.ExportInvoiceCode == "SEED-CREDIT"))
+            .ToListAsync(cancellationToken);
+
+        foreach (var invoice in seededInvoices)
+        {
+            var hasItemMovements = await dbContext.ItemMovements.AnyAsync(
+                movement =>
+                    movement.CompanyId == company.Id &&
+                    movement.ReferenceId == invoice.Id &&
+                    movement.ReferenceNumber == invoice.InvoiceNumber,
+                cancellationToken);
+            if (!hasItemMovements)
+            {
+                var itemMovementType =
+                    InvoiceMovementRules.GetItemMovementType(
+                        invoice.InvoiceType);
+                var inbound = InvoiceMovementRules.IsInbound(
+                    invoice.InvoiceType);
+
+                foreach (var line in invoice.Lines)
+                {
+                    dbContext.ItemMovements.Add(
+                        new ItemMovement
+                        {
+                            CompanyId = company.Id,
+                            StoreId = invoice.StoreId,
+                            ItemId = line.ItemId,
+                            ItemUnitId = line.ItemUnitId,
+                            MovementType = itemMovementType,
+                            ReferenceId = invoice.Id,
+                            ReferenceNumber = invoice.InvoiceNumber,
+                            MovementDate = invoice.InvoiceDate,
+                            QuantityIn = inbound ? line.Quantity : 0m,
+                            QuantityOut = inbound ? 0m : line.Quantity,
+                            Description = $"Invoice {invoice.InvoiceNumber}"
+                        });
+                }
+            }
+
+            var partnerMovement =
+                await dbContext.BusinessPartnerMovements.FirstOrDefaultAsync(
+                    movement =>
+                        movement.CompanyId == company.Id &&
+                        movement.InvoiceId == invoice.Id,
+                    cancellationToken);
+            if (partnerMovement is not null &&
+                partnerMovement.Description ==
+                $"Invoice {invoice.InvoiceNumber}")
+            {
+                partnerMovement.Description =
+                    $"فاتورة {invoice.InvoiceNumber}";
+            }
+            else if (partnerMovement is null &&
+                InvoiceMovementRules.ShouldCreatePartnerMovement(
+                    invoice.RemainingAmount))
+            {
+                var movementType =
+                    InvoiceMovementRules.GetPartnerMovementType(
+                        invoice.InvoiceType);
+                var (debit, credit) =
+                    InvoiceMovementRules.GetPartnerAmounts(
+                        invoice.InvoiceType,
+                        invoice.RemainingAmount);
+                dbContext.BusinessPartnerMovements.Add(
+                    new BusinessPartnerMovement
+                    {
+                        CompanyId = company.Id,
+                        BusinessPartnerId = invoice.BusinessPartnerId,
+                        InvoiceId = invoice.Id,
+                        MovementType = movementType,
+                        MovementDate = invoice.InvoiceDate,
+                        Currency = invoice.Currency,
+                        Debit = debit,
+                        Credit = credit,
+                        Description = $"فاتورة {invoice.InvoiceNumber}"
+                    });
+            }
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedCashManagementAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var cashbox = await dbContext.Cashboxes
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                entity =>
+                    entity.CompanyId == company.Id &&
+                    entity.Code == "CASH-MAIN",
+                cancellationToken);
+        if (cashbox is null)
+        {
+            cashbox = new Cashbox
+            {
+                CompanyId = company.Id,
+                Code = "CASH-MAIN",
+                Name = "Main Cashbox",
+                Currency = CurrencyCode.EGP,
+                OpeningBalance = 100_000m,
+                IsActive = true,
+                Notes = "Development seed cashbox"
+            };
+            dbContext.Cashboxes.Add(cashbox);
+        }
+
+        var movementTypeSeeds = new[]
+        {
+            new
+            {
+                Name = "Customer Collection",
+                Direction = CashDirection.Receipt,
+                PartnerEffect = PartnerAccountEffect.Credit
+            },
+            new
+            {
+                Name = "Supplier Refund",
+                Direction = CashDirection.Receipt,
+                PartnerEffect = PartnerAccountEffect.Credit
+            },
+            new
+            {
+                Name = "Other Receipt",
+                Direction = CashDirection.Receipt,
+                PartnerEffect = PartnerAccountEffect.None
+            },
+            new
+            {
+                Name = "Supplier Payment",
+                Direction = CashDirection.Payment,
+                PartnerEffect = PartnerAccountEffect.Debit
+            },
+            new
+            {
+                Name = "Customer Refund",
+                Direction = CashDirection.Payment,
+                PartnerEffect = PartnerAccountEffect.Debit
+            },
+            new
+            {
+                Name = "Driver Advance",
+                Direction = CashDirection.Payment,
+                PartnerEffect = PartnerAccountEffect.None
+            },
+            new
+            {
+                Name = "Other Payment",
+                Direction = CashDirection.Payment,
+                PartnerEffect = PartnerAccountEffect.None
+            }
+        };
+
+        var existingMovementTypes = await dbContext.CashMovementTypes
+            .IgnoreQueryFilters()
+            .Where(entity => entity.CompanyId == company.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var seed in movementTypeSeeds)
+        {
+            if (existingMovementTypes.Any(entity =>
+                    entity.Direction == seed.Direction &&
+                    entity.Name == seed.Name))
+            {
+                continue;
+            }
+
+            var movementType = new CashMovementType
+            {
+                CompanyId = company.Id,
+                Name = seed.Name,
+                Direction = seed.Direction,
+                PartnerEffect = seed.PartnerEffect,
+                IsActive = true,
+                Notes = "Development seed movement type"
+            };
+            dbContext.CashMovementTypes.Add(movementType);
+            existingMovementTypes.Add(movementType);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        const string voucherNumberPrefix = "SEED-CASH-RECEIPT";
+        var voucherNumber = $"{voucherNumberPrefix}-{company.Id}";
+        var voucher = await dbContext.CashVouchers
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                entity =>
+                    entity.CompanyId == company.Id &&
+                    entity.VoucherNumber == voucherNumber,
+                cancellationToken);
+        var partner = await dbContext.BusinessPartners
+            .Where(entity =>
+                entity.CompanyId == company.Id &&
+                entity.IsActive &&
+                entity.Currency == cashbox.Currency)
+            .OrderBy(entity => entity.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        var collectionType = existingMovementTypes.Single(entity =>
+            entity.Direction == CashDirection.Receipt &&
+            entity.Name == "Customer Collection");
+
+        if (voucher is null && partner is not null)
+        {
+            voucher = new CashVoucher
+            {
+                CompanyId = company.Id,
+                VoucherNumber = voucherNumber,
+                VoucherDate = new DateOnly(2026, 7, 26),
+                Direction = CashDirection.Receipt,
+                CashboxId = cashbox.Id,
+                CashMovementTypeId = collectionType.Id,
+                PartyType = CashPartyType.Partner,
+                BusinessPartnerId = partner.Id,
+                Amount = 1_000m,
+                Currency = cashbox.Currency,
+                ReferenceNumber = $"SEED-REF-{company.Id}",
+                Description = "تحصيل تجريبي من العميل",
+                Notes = "سند نقدية تجريبي"
+            };
+            voucher.Touch(DateTime.UtcNow);
+            dbContext.CashVouchers.Add(voucher);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        if (voucher is not null)
+        {
+            if (voucher.Description == "Seed customer collection")
+            {
+                voucher.Description = "تحصيل تجريبي من العميل";
+            }
+
+            if (voucher.Notes == "Development seed voucher")
+            {
+                voucher.Notes = "سند نقدية تجريبي";
+            }
+        }
+
+        if (voucher is null ||
+            voucher.IsDeleted ||
+            voucher.BusinessPartnerId is null)
+        {
+            return;
+        }
+
+        var existingMovement = await dbContext.BusinessPartnerMovements
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                movement =>
+                    movement.CompanyId == company.Id &&
+                    movement.CashVoucherId == voucher.Id &&
+                    !movement.IsDeleted,
+                cancellationToken);
+        if (existingMovement is not null)
+        {
+            if (existingMovement.Description == "Seed customer collection")
+            {
+                existingMovement.Description =
+                    "تحصيل تجريبي من العميل";
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
+        dbContext.BusinessPartnerMovements.Add(
+            new BusinessPartnerMovement
+            {
+                CompanyId = company.Id,
+                BusinessPartnerId = voucher.BusinessPartnerId.Value,
+                CashVoucherId = voucher.Id,
+                MovementType = BusinessPartnerMovementType.CashReceipt,
+                MovementDate = voucher.VoucherDate,
+                Currency = voucher.Currency,
+                Debit = 0m,
+                Credit = voucher.Amount,
+                Description = voucher.Description
+            });
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void ApplyStockOpeningSeedAmounts(
+        StockOpeningBalanceLine line,
+        int index)
+    {
+        var amount = StockOpeningLineAmounts[index];
+        line.Count = amount.Count;
+        line.Weight = amount.Weight;
+        line.Price = amount.Price;
+        line.CalculateAmounts();
+    }
+
     private static async Task<IReadOnlyList<Company>> SeedAdditionalCompaniesAsync(
         ApplicationDbContext dbContext,
         CancellationToken cancellationToken)
@@ -634,6 +1479,16 @@ public static class DevelopmentDataSeeder
     private sealed record SeedStore(
         string Code,
         string Name);
+
+    private sealed record SeedCountry(
+        string Code,
+        string Name,
+        string ArabicName);
+
+    private sealed record SeedContainer(
+        string Code,
+        string Name,
+        string Description);
 
     private sealed record SeedDriver(
         string Code,

@@ -18,9 +18,13 @@ public sealed class StoresController(IStoreService storeService)
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] StoreFilterRequest filters,
         CancellationToken cancellationToken)
     {
-        var result = await storeService.GetAllAsync(pagination, cancellationToken);
+        var result = await storeService.GetAllAsync(
+            pagination,
+            filters,
+            cancellationToken);
         return this.ToActionResult(result);
     }
 
@@ -30,6 +34,16 @@ public sealed class StoresController(IStoreService storeService)
     public async Task<IActionResult> GetSelect(CancellationToken cancellationToken)
     {
         var result = await storeService.GetSelectAsync(cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [HttpGet("container-select")]
+    [ProducesResponseType<IReadOnlyList<SelectResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetContainerSelect(
+        CancellationToken cancellationToken)
+    {
+        var result = await storeService.GetContainerSelectAsync(cancellationToken);
         return this.ToActionResult(result);
     }
 
@@ -52,6 +66,7 @@ public sealed class StoresController(IStoreService storeService)
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Create(
         StoreRequest request,
@@ -91,6 +106,7 @@ public sealed class StoresController(IStoreService storeService)
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(
         int id,
         CancellationToken cancellationToken)

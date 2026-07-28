@@ -7,6 +7,7 @@ public interface IDriverService
 {
     Task<Result<PagedResponse<DriverResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        DriverFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(

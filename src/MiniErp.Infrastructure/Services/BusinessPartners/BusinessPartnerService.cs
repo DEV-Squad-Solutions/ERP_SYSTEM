@@ -4,7 +4,9 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.BusinessPartners;
-using MiniErp.Domain.Entities;
+using MiniErp.Application.Features.Stores;
+using MiniErp.Application.Features.StoreContainers;
+using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.BusinessPartners;
@@ -19,20 +21,123 @@ public sealed class BusinessPartnerService(
 
     public async Task<Result<PagedResponse<BusinessPartnerResponse>>> GetAllAsync(
         PaginationRequest pagination,
+        BusinessPartnerFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
-        var query = dbContext.BusinessPartners
+        filters ??= new BusinessPartnerFilterRequest();
+        var query = ApplyFilters(
+            dbContext.BusinessPartners
             .AsNoTracking()
-            .Where(partner => partner.CompanyId == companyId)
+            .Where(partner => partner.CompanyId == companyId),
+            filters)
             .OrderBy(partner => partner.Name)
             .ThenBy(partner => partner.Id);
 
-        return await paginationService.PaginateAsync<
+        var pageResult = await paginationService.PaginateAsync<
             BusinessPartner,
             BusinessPartnerResponse>(
             query,
             pagination,
             cancellationToken);
+
+        if (pageResult.IsFailure || pageResult.Value.Items.Count == 0)
+        {
+            return pageResult;
+        }
+
+        var partnerIds = pageResult.Value.Items
+            .Select(partner => partner.Id)
+            .ToArray();
+
+        var containerStores = await dbContext.Stores
+            .AsNoTracking()
+            .Where(store =>
+                store.CompanyId == companyId &&
+                store.BusinessPartnerId.HasValue &&
+                partnerIds.Contains(store.BusinessPartnerId.Value) &&
+                store.IsContainerStore &&
+                store.IsActive)
+            .OrderBy(store => store.Id)
+            .ProjectToType<StoreResponse>()
+            .ToListAsync(cancellationToken);
+
+        var storeByPartnerId = containerStores
+            .Where(store => store.BusinessPartnerId.HasValue)
+            .GroupBy(store => store.BusinessPartnerId!.Value)
+            .ToDictionary(group => group.Key, group => group.First());
+
+        var containersByStoreId = await GetAssignedContainersAsync(
+            containerStores.Select(store => store.Id).ToArray(),
+            cancellationToken);
+
+        var enrichedItems = pageResult.Value.Items
+            .Select(partner =>
+            {
+                storeByPartnerId.TryGetValue(partner.Id, out var containerStore);
+                var containers = containerStore is not null &&
+                    containersByStoreId.TryGetValue(
+                        containerStore.Id,
+                        out var assignedContainers)
+                    ? assignedContainers
+                    : [];
+
+                return partner with
+                {
+                    ContainerStore = containerStore,
+                    Containers = containers
+                };
+            })
+            .ToList();
+
+        return Result<PagedResponse<BusinessPartnerResponse>>.Success(
+            pageResult.Value with { Items = enrichedItems });
+    }
+
+    private static IQueryable<BusinessPartner> ApplyFilters(
+        IQueryable<BusinessPartner> query,
+        BusinessPartnerFilterRequest filters)
+    {
+        var search = filters.Search?.Trim();
+        if (!string.IsNullOrEmpty(search))
+        {
+            query = query.Where(partner =>
+                partner.Code.Contains(search) ||
+                partner.Name.Contains(search) ||
+                (partner.PhoneNumber != null && partner.PhoneNumber.Contains(search)) ||
+                (partner.Email != null && partner.Email.Contains(search)) ||
+                (partner.TaxNumber != null && partner.TaxNumber.Contains(search)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(filters.Code))
+        {
+            query = query.Where(partner =>
+                partner.Code.Contains(filters.Code.Trim()));
+        }
+
+        if (!string.IsNullOrWhiteSpace(filters.Name))
+        {
+            query = query.Where(partner =>
+                partner.Name.Contains(filters.Name.Trim()));
+        }
+
+        if (!string.IsNullOrWhiteSpace(filters.TaxNumber))
+        {
+            query = query.Where(partner =>
+                partner.TaxNumber != null &&
+                partner.TaxNumber.Contains(filters.TaxNumber.Trim()));
+        }
+
+        if (filters.Currency.HasValue)
+        {
+            query = query.Where(partner => partner.Currency == filters.Currency.Value);
+        }
+
+        if (filters.IsActive.HasValue)
+        {
+            query = query.Where(partner => partner.IsActive == filters.IsActive.Value);
+        }
+
+        return query;
     }
 
     public async Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
@@ -68,10 +173,291 @@ public sealed class BusinessPartnerService(
             .ProjectToType<BusinessPartnerResponse>()
             .FirstOrDefaultAsync(cancellationToken);
 
-        return response is null
-            ? Result<BusinessPartnerResponse>.Failure(NotFound(id))
-            : Result<BusinessPartnerResponse>.Success(response);
+        if (response is null)
+        {
+            return Result<BusinessPartnerResponse>.Failure(NotFound(id));
+        }
+
+        var containerStore = await dbContext.Stores
+            .AsNoTracking()
+            .Where(store =>
+                store.CompanyId == companyId &&
+                store.BusinessPartnerId == id &&
+                store.IsContainerStore &&
+                store.IsActive)
+            .OrderBy(store => store.Id)
+            .ProjectToType<StoreResponse>()
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var containers = await GetContainerWorkspaceAsync(
+            containerStore?.Id,
+            cancellationToken);
+
+        return Result<BusinessPartnerResponse>.Success(
+            response with
+            {
+                ContainerStore = containerStore,
+                Containers = containers
+            });
     }
+
+    public async Task<Result<BusinessPartnerContainerStoreResponse>>
+        GetContainerStoreAsync(
+            int id,
+            CancellationToken cancellationToken = default)
+    {
+        if (id <= 0)
+        {
+            return Result<BusinessPartnerContainerStoreResponse>.Failure(
+                InvalidId());
+        }
+
+        var partnerExists = await dbContext.BusinessPartners
+            .AsNoTracking()
+            .AnyAsync(
+                partner =>
+                    partner.Id == id &&
+                    partner.CompanyId == companyId,
+                cancellationToken);
+
+        if (!partnerExists)
+        {
+            return Result<BusinessPartnerContainerStoreResponse>.Failure(
+                NotFound(id));
+        }
+
+        var containerStore = await dbContext.Stores
+            .AsNoTracking()
+            .Where(store =>
+                store.CompanyId == companyId &&
+                store.BusinessPartnerId == id &&
+                store.IsContainerStore &&
+                store.IsActive)
+            .OrderBy(store => store.Id)
+            .ProjectToType<StoreResponse>()
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (containerStore is null)
+        {
+            return Result<BusinessPartnerContainerStoreResponse>.Failure(
+                ContainerStoreNotFound(id));
+        }
+
+        var containers = await GetAssignedContainersAsync(
+            containerStore.Id,
+            cancellationToken);
+
+        return Result<BusinessPartnerContainerStoreResponse>.Success(
+            new BusinessPartnerContainerStoreResponse(
+                containerStore,
+                containers));
+    }
+
+    private async Task<IReadOnlyList<StoreContainerWorkspaceContainerResponse>>
+        GetAssignedContainersAsync(
+            int storeId,
+            CancellationToken cancellationToken)
+    {
+        var containersByStoreId = await GetAssignedContainersAsync(
+            [storeId],
+            cancellationToken);
+
+        return containersByStoreId.TryGetValue(storeId, out var containers)
+            ? containers
+            : [];
+    }
+
+    private async Task<Dictionary<
+        int,
+        IReadOnlyList<StoreContainerWorkspaceContainerResponse>>>
+        GetAssignedContainersAsync(
+            IReadOnlyCollection<int> storeIds,
+            CancellationToken cancellationToken)
+    {
+        var distinctStoreIds = storeIds
+            .Where(storeId => storeId > 0)
+            .Distinct()
+            .ToArray();
+
+        if (distinctStoreIds.Length == 0)
+        {
+            return [];
+        }
+
+        var assignments = await dbContext.StoreContainers
+            .AsNoTracking()
+            .Where(assignment =>
+                assignment.CompanyId == companyId &&
+                distinctStoreIds.Contains(assignment.StoreId) &&
+                assignment.IsActive &&
+                assignment.Container.IsActive)
+            .OrderBy(assignment => assignment.StoreId)
+            .ThenBy(assignment => assignment.Container.Name)
+            .ThenBy(assignment => assignment.ContainerId)
+            .Select(assignment => new
+            {
+                assignment.StoreId,
+                StoreContainerId = assignment.Id,
+                assignment.Container.Id,
+                assignment.Container.CompanyId,
+                assignment.Container.Code,
+                assignment.Container.Name,
+                assignment.Container.Description,
+                assignment.Container.IsActive
+            })
+            .ToListAsync(cancellationToken);
+
+        var result = new Dictionary<
+            int,
+            IReadOnlyList<StoreContainerWorkspaceContainerResponse>>();
+
+        foreach (var storeId in distinctStoreIds)
+        {
+            result[storeId] = assignments
+                .Where(assignment => assignment.StoreId == storeId)
+                .Select(assignment =>
+                    new StoreContainerWorkspaceContainerResponse(
+                        assignment.Id,
+                        assignment.CompanyId,
+                        assignment.Code,
+                        assignment.Name,
+                        assignment.Description,
+                        assignment.IsActive,
+                        true,
+                        assignment.StoreContainerId))
+                .ToList();
+        }
+
+        return result;
+    }
+
+    private async Task<IReadOnlyList<StoreContainerWorkspaceContainerResponse>>
+        GetContainerWorkspaceAsync(
+            int? storeId,
+            CancellationToken cancellationToken)
+    {
+        if (!storeId.HasValue)
+        {
+            return [];
+        }
+
+        var workspaces = await GetContainerWorkspacesAsync(
+            [storeId.Value],
+            cancellationToken);
+
+        return workspaces.TryGetValue(storeId.Value, out var containers)
+            ? containers
+            : [];
+    }
+
+    private async Task<Dictionary<int, IReadOnlyList<StoreContainerWorkspaceContainerResponse>>>
+        GetContainerWorkspacesAsync(
+            IReadOnlyCollection<int> storeIds,
+            CancellationToken cancellationToken)
+    {
+        var distinctStoreIds = storeIds
+            .Where(storeId => storeId > 0)
+            .Distinct()
+            .ToArray();
+
+        if (distinctStoreIds.Length == 0)
+        {
+            return [];
+        }
+
+        var containerDefinitions = await dbContext.Containers
+            .AsNoTracking()
+            .Where(container =>
+                container.CompanyId == companyId &&
+                (container.IsActive ||
+                 container.StoreContainers.Any(assignment =>
+                     assignment.CompanyId == companyId &&
+                     distinctStoreIds.Contains(assignment.StoreId) &&
+                     assignment.IsActive)))
+            .OrderBy(container => container.Name)
+            .ThenBy(container => container.Id)
+            .Select(container => new ContainerWorkspaceDefinition(
+                container.Id,
+                container.CompanyId,
+                container.Code,
+                container.Name,
+                container.Description,
+                container.IsActive))
+            .ToListAsync(cancellationToken);
+
+        var assignments = await dbContext.StoreContainers
+            .AsNoTracking()
+            .Where(assignment =>
+                assignment.CompanyId == companyId &&
+                distinctStoreIds.Contains(assignment.StoreId) &&
+                assignment.IsActive)
+            .Select(assignment => new
+            {
+                assignment.StoreId,
+                assignment.ContainerId,
+                assignment.Id
+            })
+            .ToListAsync(cancellationToken);
+
+        var assignmentByStoreAndContainer = assignments
+            .GroupBy(assignment => assignment.StoreId)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .GroupBy(assignment => assignment.ContainerId)
+                    .ToDictionary(
+                        containerGroup => containerGroup.Key,
+                        containerGroup => containerGroup
+                            .Select(assignment => assignment.Id)
+                            .First()));
+
+        var result = new Dictionary<
+            int,
+            IReadOnlyList<StoreContainerWorkspaceContainerResponse>>();
+
+        foreach (var storeId in distinctStoreIds)
+        {
+            assignmentByStoreAndContainer.TryGetValue(
+                storeId,
+                out var assignmentByContainer);
+
+            var containers = containerDefinitions
+                .Select(container =>
+                {
+                    int? storeContainerId = null;
+                    if (assignmentByContainer is not null &&
+                        assignmentByContainer.TryGetValue(
+                            container.Id,
+                            out var assignmentId))
+                    {
+                        storeContainerId = assignmentId;
+                    }
+
+                    return new StoreContainerWorkspaceContainerResponse(
+                        container.Id,
+                        container.CompanyId,
+                        container.Code,
+                        container.Name,
+                        container.Description,
+                        container.IsActive,
+                        storeContainerId.HasValue,
+                        storeContainerId);
+                })
+                .ToList();
+
+            result[storeId] = containers;
+        }
+
+        return result;
+    }
+
+    private sealed record ContainerWorkspaceDefinition(
+        int Id,
+        int CompanyId,
+        string Code,
+        string Name,
+        string? Description,
+        bool IsActive);
 
     public async Task<Result<BusinessPartnerResponse>> AddAsync(
         BusinessPartnerRequest request,
@@ -124,6 +510,13 @@ public sealed class BusinessPartnerService(
             return Result<BusinessPartnerResponse>.Failure(duplicateError);
         }
 
+        if (partner.Currency != normalizedPartner.Currency &&
+            await HasFinancialRecordsAsync(id, cancellationToken))
+        {
+            return Result<BusinessPartnerResponse>.Failure(
+                CurrencyChangeNotAllowed());
+        }
+
         request.Adapt(partner);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -148,6 +541,23 @@ public sealed class BusinessPartnerService(
             return Result.Failure(NotFound(id));
         }
 
+        var hasContainerStores = await dbContext.Stores
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                store =>
+                    store.CompanyId == companyId &&
+                    store.BusinessPartnerId == id,
+                cancellationToken);
+        if (hasContainerStores)
+        {
+            return Result.Failure(HasContainerStores());
+        }
+
+        if (await HasFinancialRecordsAsync(id, cancellationToken))
+        {
+            return Result.Failure(HasFinancialRecords());
+        }
+
         partner.IsActive = false;
         dbContext.BusinessPartners.Remove(partner);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -160,15 +570,20 @@ public sealed class BusinessPartnerService(
         int? excludedId,
         CancellationToken cancellationToken)
     {
+        var normalizedName = partner.Name.ToUpperInvariant();
+        var normalizedCode = partner.Code.ToUpperInvariant();
+        var normalizedTaxNumber = partner.TaxNumber?.ToUpperInvariant();
+
         var duplicates = await dbContext.BusinessPartners
             .AsNoTracking()
             .Where(entity =>
                 entity.CompanyId == companyId &&
                 (!excludedId.HasValue || entity.Id != excludedId.Value) &&
-                (entity.Name == partner.Name ||
-                 entity.Code == partner.Code ||
-                 (partner.TaxNumber != null &&
-                  entity.TaxNumber == partner.TaxNumber)))
+                (entity.Name.ToUpper() == normalizedName ||
+                 entity.Code.ToUpper() == normalizedCode ||
+                 (normalizedTaxNumber != null &&
+                  entity.TaxNumber != null &&
+                  entity.TaxNumber.ToUpper() == normalizedTaxNumber)))
             .Select(entity => new
             {
                 entity.Name,
@@ -184,7 +599,8 @@ public sealed class BusinessPartnerService(
         {
             return Error.Conflict(
                 "BusinessPartners.NameExists",
-                $"Business partner name '{partner.Name}' already exists.");
+                $"اسم العميل أو المورد '{partner.Name}' موجود بالفعل.",
+                nameof(BusinessPartnerRequest.Name));
         }
 
         if (duplicates.Any(entity => string.Equals(
@@ -194,7 +610,8 @@ public sealed class BusinessPartnerService(
         {
             return Error.Conflict(
                 "BusinessPartners.CodeExists",
-                $"Business partner code '{partner.Code}' already exists.");
+                $"كود العميل أو المورد '{partner.Code}' مستخدم بالفعل.",
+                nameof(BusinessPartnerRequest.Code));
         }
 
         return partner.TaxNumber is not null &&
@@ -204,17 +621,85 @@ public sealed class BusinessPartnerService(
                    StringComparison.OrdinalIgnoreCase))
             ? Error.Conflict(
                 "BusinessPartners.TaxNumberExists",
-                "A business partner with the same tax number already exists.")
+                "يوجد عميل أو مورد آخر يحمل الرقم الضريبي نفسه.",
+                nameof(BusinessPartnerRequest.TaxNumber))
             : null;
     }
+
+    private async Task<bool> HasFinancialRecordsAsync(
+        int businessPartnerId,
+        CancellationToken cancellationToken) =>
+        await dbContext.Invoices
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                invoice =>
+                    invoice.CompanyId == companyId &&
+                    invoice.BusinessPartnerId == businessPartnerId,
+                cancellationToken) ||
+        await dbContext.PartnerOpeningBalances
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                balance =>
+                    balance.CompanyId == companyId &&
+                    balance.BusinessPartnerId == businessPartnerId,
+                cancellationToken) ||
+        await dbContext.CashVouchers
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                voucher =>
+                    voucher.CompanyId == companyId &&
+                    voucher.BusinessPartnerId == businessPartnerId,
+                cancellationToken) ||
+        await dbContext.BusinessPartnerMovements
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                movement =>
+                    movement.CompanyId == companyId &&
+                    movement.BusinessPartnerId == businessPartnerId,
+                cancellationToken) ||
+        await dbContext.ContainerMovements
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                movement =>
+                    movement.CompanyId == companyId &&
+                    movement.BusinessPartnerId == businessPartnerId,
+                cancellationToken) ||
+        await dbContext.DriverTrips
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                trip =>
+                    trip.CompanyId == companyId &&
+                    trip.BusinessPartnerId == businessPartnerId,
+                cancellationToken);
 
     private static Error InvalidId() =>
         Error.Validation(
             "BusinessPartners.InvalidId",
-            "Business partner ID must be greater than zero.");
+            "يجب أن يكون رقم العميل أو المورد أكبر من صفر.");
+
+    private static Error ContainerStoreNotFound(int id) =>
+        Error.NotFound(
+            "BusinessPartners.ContainerStoreNotFound",
+            $"لم يتم العثور على مخزن عبوات نشط مرتبط بالعميل أو المورد رقم {id}.");
 
     private static Error NotFound(int id) =>
         Error.NotFound(
             "BusinessPartners.NotFound",
-            $"Business partner with ID {id} was not found.");
+            $"لم يتم العثور على العميل أو المورد رقم {id}.");
+
+    private static Error HasContainerStores() =>
+        Error.Conflict(
+            "BusinessPartners.HasContainerStores",
+            "لا يمكن حذف العميل أو المورد لارتباطه بمخزن عبوات حالي أو تاريخي.");
+
+    private static Error HasFinancialRecords() =>
+        Error.Conflict(
+            "BusinessPartners.HasFinancialRecords",
+            "لا يمكن حذف العميل أو المورد لارتباطه بسجلات مالية حالية أو تاريخية.");
+
+    private static Error CurrencyChangeNotAllowed() =>
+        Error.Conflict(
+            "BusinessPartners.CurrencyChangeNotAllowed",
+            "لا يمكن تغيير عملة العميل أو المورد بعد إنشاء سجلات مالية مرتبطة به.",
+            nameof(BusinessPartnerRequest.Currency));
 }

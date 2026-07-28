@@ -19,16 +19,32 @@ public sealed class AuthenticationSwaggerDocumentation : IOperationFilter
         {
             nameof(AuthController.Login) => (
                 "Log in",
-                "Validates credentials and returns all assigned Identity roles. A user with one company receives access and refresh tokens immediately. A user with multiple companies receives a five-minute selection token and must call select-company."),
+                SwaggerOperationDescription.Create(
+                    "Validates credentials and returns all assigned Identity roles. A user with one company receives access and refresh tokens immediately. A user with multiple companies must complete company selection.",
+                    "`userName` and `password`.",
+                    "Both values must be non-empty. Username whitespace is trimmed before lookup; the password is used exactly as supplied.",
+                    "Invalid credentials or a locked account return 401. A user without an active company assignment returns 403. Multiple companies return a five-minute selection token instead of access and refresh tokens.")),
             nameof(AuthController.SelectCompany) => (
                 "Select the session company",
-                "Validates the short-lived selection token and company assignment, then issues access and refresh tokens containing exactly one company_id claim."),
+                SwaggerOperationDescription.Create(
+                    "Validates the short-lived selection token and company assignment, then issues access and refresh tokens containing exactly one company_id claim.",
+                    "`selectionToken` and `companyId`.",
+                    "The token must be non-empty and `companyId` must be greater than zero.",
+                    "An invalid, expired, wrong-purpose, or already-invalidated selection token returns 401. Selecting an unassigned company returns 403. The token expires after five minutes.")),
             nameof(AuthController.Refresh) => (
                 "Refresh the selected-company session",
-                "Rotates a valid refresh token while preserving its selected company. Refresh fails when the user no longer has access to that company."),
+                SwaggerOperationDescription.Create(
+                    "Rotates a valid refresh token while preserving its selected company.",
+                    "`refreshToken`.",
+                    "The refresh token must be non-empty.",
+                    "Expired, revoked, concurrently reused, or unknown tokens return 401. Refresh also fails when the user is locked out or no longer has access to the token's company. A successful refresh revokes the supplied token.")),
             nameof(AuthController.Logout) => (
                 "Log out",
-                "Revokes the supplied refresh token. The operation is idempotent."),
+                SwaggerOperationDescription.Create(
+                    "Revokes the supplied refresh token. The operation is idempotent.",
+                    "`refreshToken`.",
+                    "The refresh token must be non-empty.",
+                    "An unknown or already-revoked token still returns 204. Concurrent revocation also completes successfully.")),
             _ => default
         };
 

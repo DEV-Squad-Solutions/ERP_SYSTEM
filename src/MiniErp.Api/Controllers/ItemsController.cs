@@ -16,9 +16,13 @@ public sealed class ItemsController(IItemService itemService) : ApiControllerBas
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
+        [FromQuery] ItemFilterRequest filters,
         CancellationToken cancellationToken)
     {
-        var result = await itemService.GetAllAsync(pagination, cancellationToken);
+        var result = await itemService.GetAllAsync(
+            pagination,
+            filters,
+            cancellationToken);
         return this.ToActionResult(result);
     }
 
@@ -86,6 +90,7 @@ public sealed class ItemsController(IItemService itemService) : ApiControllerBas
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(
         int id,
         CancellationToken cancellationToken)
