@@ -278,6 +278,20 @@ public sealed class StoreService(
                     balance.CompanyId == companyId &&
                     balance.StoreId == storeId,
                 cancellationToken) ||
+        await dbContext.StockAdjustments
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                adjustment =>
+                    adjustment.CompanyId == companyId &&
+                    adjustment.StoreId == storeId,
+                cancellationToken) ||
+        await dbContext.InventoryCounts
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                count =>
+                    count.CompanyId == companyId &&
+                    count.StoreId == storeId,
+                cancellationToken) ||
         await dbContext.ItemMovements
             .IgnoreQueryFilters()
             .AnyAsync(

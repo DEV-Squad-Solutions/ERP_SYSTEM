@@ -37,6 +37,10 @@ public sealed class InventoryMasterDeletionTests
             { "InvoiceContainerStore", true, "Stores.HasDependencies" },
             { "StockOpeningBalance", false, "Stores.HasDependencies" },
             { "StockOpeningBalance", true, "Stores.HasDependencies" },
+            { "StockAdjustment", false, "Stores.HasDependencies" },
+            { "StockAdjustment", true, "Stores.HasDependencies" },
+            { "InventoryCount", false, "Stores.HasDependencies" },
+            { "InventoryCount", true, "Stores.HasDependencies" },
             { "ItemMovement", false, "Stores.HasDependencies" },
             { "ItemMovement", true, "Stores.HasDependencies" },
             { "ContainerMovement", false, "Stores.HasDependencies" },
@@ -50,6 +54,10 @@ public sealed class InventoryMasterDeletionTests
             { "InvoiceLine", true },
             { "StockOpeningBalanceLine", false },
             { "StockOpeningBalanceLine", true },
+            { "StockAdjustmentLine", false },
+            { "StockAdjustmentLine", true },
+            { "InventoryCountLine", false },
+            { "InventoryCountLine", true },
             { "ItemMovement", false },
             { "ItemMovement", true }
         };
@@ -63,6 +71,10 @@ public sealed class InventoryMasterDeletionTests
             { "InvoiceLine", true },
             { "StockOpeningBalanceLine", false },
             { "StockOpeningBalanceLine", true },
+            { "StockAdjustmentLine", false },
+            { "StockAdjustmentLine", true },
+            { "InventoryCountLine", false },
+            { "InventoryCountLine", true },
             { "ItemMovement", false },
             { "ItemMovement", true }
         };
@@ -577,6 +589,20 @@ public sealed class InventoryMasterDeletionTests
                              Id, CompanyId, StoreId, IsDeleted)
                          VALUES (100, 1, 1, {isDeleted})
                          """),
+                "StockAdjustment" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockAdjustments (
+                             Id, CompanyId, StoreId, IsDeleted)
+                         VALUES (100, 1, 1, {isDeleted})
+                         """),
+                "InventoryCount" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO InventoryCounts (
+                             Id, CompanyId, StoreId, IsDeleted)
+                         VALUES (100, 1, 1, {isDeleted})
+                         """),
                 "ItemMovement" => Context.Database.ExecuteSqlInterpolatedAsync(
                     $"""
                      INSERT INTO ItemMovements (
@@ -611,6 +637,20 @@ public sealed class InventoryMasterDeletionTests
                     Context.Database.ExecuteSqlInterpolatedAsync(
                         $"""
                          INSERT INTO StockOpeningBalanceLines (
+                             Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
+                         VALUES (100, 1, 1, 1, {isDeleted})
+                         """),
+                "StockAdjustmentLine" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockAdjustmentLines (
+                             Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
+                         VALUES (100, 1, 1, 1, {isDeleted})
+                         """),
+                "InventoryCountLine" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO InventoryCountLines (
                              Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
                          VALUES (100, 1, 1, 1, {isDeleted})
                          """),
@@ -650,6 +690,20 @@ public sealed class InventoryMasterDeletionTests
                     Context.Database.ExecuteSqlInterpolatedAsync(
                         $"""
                          INSERT INTO StockOpeningBalanceLines (
+                             Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
+                         VALUES (100, 1, 1, 2, {isDeleted})
+                         """),
+                "StockAdjustmentLine" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockAdjustmentLines (
+                             Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
+                         VALUES (100, 1, 1, 2, {isDeleted})
+                         """),
+                "InventoryCountLine" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO InventoryCountLines (
                              Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
                          VALUES (100, 1, 1, 2, {isDeleted})
                          """),
@@ -787,6 +841,20 @@ public sealed class InventoryMasterDeletionTests
                     IsDeleted INTEGER NOT NULL
                 );
 
+                CREATE TABLE StockAdjustments (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE InventoryCounts (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
                 CREATE TABLE ItemMovements (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
@@ -816,6 +884,22 @@ public sealed class InventoryMasterDeletionTests
                     CompanyId INTEGER NOT NULL,
                     ItemId INTEGER NOT NULL,
                     ItemUnitId INTEGER NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE StockAdjustmentLines (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    ItemUnitId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE InventoryCountLines (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    ItemUnitId INTEGER NOT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
                 """);

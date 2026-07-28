@@ -17,6 +17,7 @@ using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
+using MiniErp.Infrastructure.Services.Inventory;
 using MiniErp.Infrastructure.Services.Invoices;
 using MiniErp.Infrastructure.Services.Pagination;
 
@@ -3693,12 +3694,17 @@ public sealed class InvoiceServiceTests
             return new InvoiceTestDatabase(connection, context);
         }
 
-        public InvoiceService CreateService() =>
-            new(
+        public InvoiceService CreateService()
+        {
+            var companyContext = new TestCurrentCompanyContext(1);
+
+            return new InvoiceService(
                 Context,
                 new PaginationService(),
-                new TestCurrentCompanyContext(1),
+                companyContext,
+                new InventoryStockService(Context, companyContext),
                 TimeProvider.System);
+        }
 
         public async ValueTask DisposeAsync()
         {

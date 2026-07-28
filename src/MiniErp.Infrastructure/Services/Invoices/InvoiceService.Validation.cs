@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Invoicing;
@@ -555,6 +556,63 @@ public sealed partial class InvoiceService
     }
 
     private async Task<Error?> ValidateStockAsync(
+        Invoice invoice,
+        IReadOnlyList<InvoiceLineRequest> lines,
+        int? currentInvoiceId,
+        string? currentInvoiceNumber,
+        CancellationToken cancellationToken)
+    {
+        var hasCurrentInvoiceId = currentInvoiceId.HasValue;
+        var hasCurrentInvoiceNumber =
+            !string.IsNullOrWhiteSpace(currentInvoiceNumber);
+        if (hasCurrentInvoiceId != hasCurrentInvoiceNumber)
+        {
+            return Error.Validation(
+                "Invoices.InvalidCurrentInvoiceReference",
+                "يجب توفير رقم تعريف الفاتورة ورقمها معًا عند التعديل.");
+        }
+
+        var stockLines = new List<InventoryStockLine>(lines.Count);
+        foreach (var line in lines)
+        {
+            if (!InvoiceAmountRules.TryCalculate(
+                    line.Count,
+                    line.Weight,
+                    0m,
+                    out var quantity,
+                    out _))
+            {
+                return Error.Validation(
+                    "Invoices.InvalidCalculatedAmounts",
+                    "نتيجة الكمية تتجاوز الدقة الرقمية المسموحة.",
+                    nameof(InvoiceRequest.Lines));
+            }
+
+            stockLines.Add(new InventoryStockLine(line.ItemId, quantity));
+        }
+
+        var replacedMovement = currentInvoiceId is int invoiceId
+            ? new InventoryMovementReference(
+                InvoiceItemMovementTypes,
+                invoiceId,
+                currentInvoiceNumber!)
+            : null;
+
+        return await inventoryStockService.ValidateTimelineAsync(
+            new InventoryStockProposal(
+                invoice.StoreId,
+                invoice.InvoiceDate,
+                InvoiceMovementRules.IsInbound(invoice.InvoiceType),
+                stockLines,
+                replacedMovement,
+                currentInvoiceId.HasValue
+                    ? $"تعديل الفاتورة {currentInvoiceNumber}"
+                    : "إضافة الفاتورة",
+                nameof(InvoiceRequest.Lines)),
+            cancellationToken);
+    }
+
+    private async Task<Error?> ValidateStockLegacyAsync(
         Invoice invoice,
         IReadOnlyList<InvoiceLineRequest> lines,
         int? currentInvoiceId,

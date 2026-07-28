@@ -108,9 +108,11 @@ public sealed partial class InvoiceService
         Invoice invoice,
         CancellationToken cancellationToken)
     {
+        var invoiceMovementTypes = InvoiceItemMovementTypes;
         var itemMovements = await dbContext.ItemMovements
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                invoiceMovementTypes.Contains(movement.MovementType) &&
                 movement.ReferenceId == invoice.Id &&
                 movement.ReferenceNumber == invoice.InvoiceNumber)
             .ToListAsync(cancellationToken);

@@ -69,7 +69,10 @@ public static class ArabicValidationConfiguration
             ["ExternalPartyName"] = "اسم الطرف الخارجي",
             ["ReferenceNumber"] = "الرقم المرجعي",
             ["Cost"] = "تكلفة الرحلة",
-            ["Items"] = "العناصر"
+            ["Items"] = "العناصر",
+            ["CountDate"] = "تاريخ الجرد",
+            ["PhysicalQuantity"] = "الكمية الفعلية",
+            ["Reason"] = "السبب"
         };
 
     public static void Configure()

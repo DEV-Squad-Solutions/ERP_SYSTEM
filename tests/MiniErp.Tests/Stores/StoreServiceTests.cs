@@ -21,6 +21,10 @@ public sealed class StoreServiceTests
             { "InvoiceProductStore", true },
             { "StockOpeningBalance", false },
             { "StockOpeningBalance", true },
+            { "StockAdjustment", false },
+            { "StockAdjustment", true },
+            { "InventoryCount", false },
+            { "InventoryCount", true },
             { "ItemMovement", false },
             { "ItemMovement", true },
             { "InvoiceContainerStore", false },
@@ -182,6 +186,8 @@ public sealed class StoreServiceTests
         var changesProductStoreRole = dependency is
             "InvoiceProductStore" or
             "StockOpeningBalance" or
+            "StockAdjustment" or
+            "InventoryCount" or
             "ItemMovement";
         var storeId = changesProductStoreRole ? 10 : 11;
         var request = changesProductStoreRole
@@ -361,6 +367,20 @@ public sealed class StoreServiceTests
                              Id, CompanyId, StoreId, IsDeleted)
                          VALUES (1, 1, 10, {deletedValue});
                          """),
+                "StockAdjustment" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockAdjustments (
+                             Id, CompanyId, StoreId, IsDeleted)
+                         VALUES (1, 1, 10, {deletedValue});
+                         """),
+                "InventoryCount" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO InventoryCounts (
+                             Id, CompanyId, StoreId, IsDeleted)
+                         VALUES (1, 1, 10, {deletedValue});
+                         """),
                 "ItemMovement" =>
                     Context.Database.ExecuteSqlInterpolatedAsync(
                         $"""
@@ -480,6 +500,20 @@ public sealed class StoreServiceTests
                 );
 
                 CREATE TABLE StockOpeningBalances (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE StockAdjustments (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE InventoryCounts (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
                     StoreId INTEGER NOT NULL,

@@ -4,7 +4,7 @@ using MiniErp.Domain.Entities.Companies;
 
 namespace MiniErp.Domain.Entities.Inventory;
 
-public sealed class StockAdjustmentLine : AuditableEntity
+public sealed class InventoryCountLine : AuditableEntity
 {
     public int Id { get; set; }
 
@@ -12,9 +12,9 @@ public sealed class StockAdjustmentLine : AuditableEntity
 
     public Company Company { get; set; } = null!;
 
-    public int StockAdjustmentId { get; set; }
+    public int InventoryCountId { get; set; }
 
-    public StockAdjustment StockAdjustment { get; set; } = null!;
+    public InventoryCount InventoryCount { get; set; } = null!;
 
     public int ItemId { get; set; }
 
@@ -24,7 +24,9 @@ public sealed class StockAdjustmentLine : AuditableEntity
 
     public ItemUnit ItemUnit { get; set; } = null!;
 
-    public decimal Quantity { get; set; }
+    public decimal SystemQuantity { get; set; }
 
-    public string? Reason { get; set; }
+    public decimal? PhysicalQuantity { get; set; }
+
+    public string? Notes { get; set; }
 }

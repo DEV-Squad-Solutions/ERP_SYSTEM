@@ -52,6 +52,18 @@ public sealed class ApplicationDbContext(
     public DbSet<StockOpeningBalanceLine> StockOpeningBalanceLines =>
         Set<StockOpeningBalanceLine>();
 
+    public DbSet<StockAdjustment> StockAdjustments =>
+        Set<StockAdjustment>();
+
+    public DbSet<StockAdjustmentLine> StockAdjustmentLines =>
+        Set<StockAdjustmentLine>();
+
+    public DbSet<InventoryCount> InventoryCounts =>
+        Set<InventoryCount>();
+
+    public DbSet<InventoryCountLine> InventoryCountLines =>
+        Set<InventoryCountLine>();
+
     public DbSet<Invoice> Invoices => Set<Invoice>();
 
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();

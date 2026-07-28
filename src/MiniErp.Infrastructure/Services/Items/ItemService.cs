@@ -211,6 +211,20 @@ public sealed class ItemService(
                         line.CompanyId == companyId &&
                         line.ItemId == id,
                     cancellationToken) ||
+            await dbContext.StockAdjustmentLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.ItemId == id,
+                    cancellationToken) ||
+            await dbContext.InventoryCountLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.ItemId == id,
+                    cancellationToken) ||
             await dbContext.ItemMovements
                 .IgnoreQueryFilters()
                 .AnyAsync(

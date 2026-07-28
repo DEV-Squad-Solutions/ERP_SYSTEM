@@ -1,5 +1,6 @@
 using Mapster;
 using Microsoft.EntityFrameworkCore;
+using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Invoicing;
@@ -292,37 +293,18 @@ public sealed partial class InvoiceService
             }
         }
 
-        var openingBalance = await dbContext.StockOpeningBalanceLines
-            .AsNoTracking()
-            .Where(line =>
-                line.CompanyId == companyId &&
-                line.ItemId == itemId &&
-                line.StockOpeningBalance.CompanyId == companyId &&
-                line.StockOpeningBalance.StoreId == storeId &&
-                line.StockOpeningBalance.DocumentDate <= asOfDate)
-            .SumAsync(
-                line => (decimal?)line.Quantity,
-                cancellationToken) ?? 0m;
-
-        var movementQuery = dbContext.ItemMovements
-            .AsNoTracking()
-            .Where(movement =>
-                movement.CompanyId == companyId &&
-                movement.StoreId == storeId &&
-                movement.ItemId == itemId &&
-                movement.MovementDate <= asOfDate);
-        if (invoiceId is int excludedInvoiceId)
-        {
-            movementQuery = movementQuery.Where(movement =>
-                movement.ReferenceId != excludedInvoiceId ||
-                movement.ReferenceNumber != excludedInvoiceNumber);
-        }
-
-        var movementBalance = await movementQuery
-            .SumAsync(
-                movement => (decimal?)(
-                    movement.QuantityIn - movement.QuantityOut),
-                cancellationToken) ?? 0m;
+        var excludedMovement = invoiceId is int excludedInvoiceId
+            ? new InventoryMovementReference(
+                InvoiceItemMovementTypes,
+                excludedInvoiceId,
+                excludedInvoiceNumber!)
+            : null;
+        var balances = await inventoryStockService.GetBalancesAsync(
+            storeId,
+            [itemId],
+            asOfDate,
+            excludedMovement,
+            cancellationToken);
 
         return Result<InvoiceItemBalanceResponse>.Success(
             new InvoiceItemBalanceResponse(
@@ -333,7 +315,7 @@ public sealed partial class InvoiceService
                 item.ItemUnitId,
                 item.ItemUnitName,
                 asOfDate,
-                openingBalance + movementBalance));
+                balances[itemId]));
     }
 
     private IQueryable<InvoiceResponse> ProjectResponseQuery(int id) =>

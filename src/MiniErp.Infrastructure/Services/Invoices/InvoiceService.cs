@@ -14,9 +14,18 @@ public sealed partial class InvoiceService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
+    IInventoryStockService inventoryStockService,
     TimeProvider timeProvider)
     : IInvoiceService, IScopedService
 {
+    private static readonly ItemMovementType[] InvoiceItemMovementTypes =
+    [
+        ItemMovementType.Sales,
+        ItemMovementType.SalesReturn,
+        ItemMovementType.Purchase,
+        ItemMovementType.PurchaseReturn
+    ];
+
     private readonly int companyId = currentCompanyContext.CompanyId;
 
     public async Task<Result<InvoicePagedResponse>> GetAllAsync(
