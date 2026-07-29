@@ -132,10 +132,21 @@ public sealed class StockAdjustmentService(
         AddLines(requested, request.Lines, preparation.Value);
 
         dbContext.StockAdjustments.Add(requested);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
 
-        AddMovements(requested);
-        await dbContext.SaveChangesAsync(cancellationToken);
+            AddMovements(requested);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception)
+            when (IsDocumentNumberConflict(exception))
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<StockAdjustmentResponse>.Failure(
+                DocumentNumberExists(requested.DocumentNumber));
+        }
 
         var response = await ProjectResponseQuery(requested.Id)
             .AsNoTracking()
@@ -246,6 +257,14 @@ public sealed class StockAdjustmentService(
             dbContext.ChangeTracker.Clear();
             return Result<StockAdjustmentResponse>.Failure(Concurrency());
         }
+        catch (DbUpdateException exception)
+            when (IsDocumentNumberConflict(exception))
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<StockAdjustmentResponse>.Failure(
+                DocumentNumberExists(requested.DocumentNumber));
+        }
 
         var response = await ProjectResponseQuery(id)
             .AsNoTracking()
@@ -278,26 +297,26 @@ public sealed class StockAdjustmentService(
             return Result.Failure(GeneratedAdjustmentImmutable());
         }
 
-        if (StockAdjustmentMovementRules.IsInbound(adjustment.Direction))
+        var stockError = await inventoryStockService.ValidateTimelineAsync(
+            new InventoryStockProposal(
+                adjustment.StoreId,
+                adjustment.DocumentDate,
+                StockAdjustmentMovementRules.IsInbound(adjustment.Direction),
+                Lines: [],
+                MovementReference(
+                    adjustment.Id,
+                    adjustment.DocumentNumber),
+                $"حذف تسوية المخزون {adjustment.DocumentNumber}",
+                nameof(StockAdjustmentRequest.Lines)),
+            cancellationToken);
+        if (stockError is not null)
         {
-            var stockError = await inventoryStockService.ValidateTimelineAsync(
-                new InventoryStockProposal(
-                    adjustment.StoreId,
-                    adjustment.DocumentDate,
-                    IsInbound: true,
-                    Lines: [],
-                    MovementReference(
-                        adjustment.Id,
-                        adjustment.DocumentNumber),
-                    $"حذف تسوية المخزون {adjustment.DocumentNumber}",
-                    nameof(StockAdjustmentRequest.Lines)),
-                cancellationToken);
-            if (stockError is not null)
-            {
-                return Result.Failure(stockError);
-            }
+            return Result.Failure(stockError);
         }
 
+        var entry = dbContext.Entry(adjustment);
+        adjustment.Touch(timeProvider.GetUtcNow().UtcDateTime);
+        entry.Property(item => item.LastModifiedAt).IsModified = true;
         var movements = await LoadMovementsAsync(
             adjustment.Id,
             adjustment.DocumentNumber,
@@ -453,29 +472,6 @@ public sealed class StockAdjustmentService(
                  adjustment.Id != excludedId.Value),
             cancellationToken);
 
-    private async Task<Error?> ValidateStockAsync(
-        StockAdjustment adjustment,
-        IReadOnlyCollection<StockAdjustmentLineRequest> lines,
-        InventoryMovementReference? replacedMovement,
-        CancellationToken cancellationToken) =>
-        await inventoryStockService.ValidateTimelineAsync(
-            new InventoryStockProposal(
-                adjustment.StoreId,
-                adjustment.DocumentDate,
-                StockAdjustmentMovementRules.IsInbound(
-                    adjustment.Direction),
-                lines
-                    .Select(line => new InventoryStockLine(
-                        line.ItemId,
-                        line.Quantity))
-                    .ToArray(),
-                replacedMovement,
-                replacedMovement is null
-                    ? $"إضافة تسوية المخزون {adjustment.DocumentNumber}"
-                    : $"تعديل تسوية المخزون {adjustment.DocumentNumber}",
-                nameof(StockAdjustmentRequest.Lines)),
-            cancellationToken);
-
     private void AddLines(
         StockAdjustment adjustment,
         IReadOnlyCollection<StockAdjustmentLineRequest> requests,
@@ -528,6 +524,29 @@ public sealed class StockAdjustmentService(
         }
     }
 
+    private async Task<Error?> ValidateStockAsync(
+        StockAdjustment adjustment,
+        IReadOnlyCollection<StockAdjustmentLineRequest> lines,
+        InventoryMovementReference? replacedMovement,
+        CancellationToken cancellationToken) =>
+        await inventoryStockService.ValidateTimelineAsync(
+            new InventoryStockProposal(
+                adjustment.StoreId,
+                adjustment.DocumentDate,
+                StockAdjustmentMovementRules.IsInbound(
+                    adjustment.Direction),
+                lines
+                    .Select(line => new InventoryStockLine(
+                        line.ItemId,
+                        line.Quantity))
+                    .ToArray(),
+                replacedMovement,
+                replacedMovement is null
+                    ? $"إضافة تسوية المخزون {adjustment.DocumentNumber}"
+                    : $"تعديل تسوية المخزون {adjustment.DocumentNumber}",
+                nameof(StockAdjustmentRequest.Lines)),
+            cancellationToken);
+
     private void AddMovements(StockAdjustment adjustment)
     {
         var inbound = StockAdjustmentMovementRules.IsInbound(
@@ -559,17 +578,14 @@ public sealed class StockAdjustmentService(
     private Task<List<ItemMovement>> LoadMovementsAsync(
         int adjustmentId,
         string documentNumber,
-        CancellationToken cancellationToken)
-    {
-        var movementTypes = AdjustmentMovementTypes;
-        return dbContext.ItemMovements
+        CancellationToken cancellationToken) =>
+        dbContext.ItemMovements
             .Where(movement =>
                 movement.CompanyId == companyId &&
-                movementTypes.Contains(movement.MovementType) &&
+                AdjustmentMovementTypes.Contains(movement.MovementType) &&
                 movement.ReferenceId == adjustmentId &&
                 movement.ReferenceNumber == documentNumber)
             .ToListAsync(cancellationToken);
-    }
 
     private static InventoryMovementReference MovementReference(
         int adjustmentId,
@@ -600,6 +616,17 @@ public sealed class StockAdjustmentService(
         int ItemUnitId,
         bool IsActive,
         bool ItemUnitIsActive);
+
+    private static bool IsDocumentNumberConflict(DbUpdateException exception)
+    {
+        var message = exception.ToString();
+        return message.Contains(
+                   "IX_StockAdjustments_CompanyId_DocumentNumber",
+                   StringComparison.OrdinalIgnoreCase) ||
+               message.Contains(
+                   "UX_StockAdjustments_Company_Document",
+                   StringComparison.OrdinalIgnoreCase);
+    }
 
     private static Error InvalidId() =>
         Error.Validation(

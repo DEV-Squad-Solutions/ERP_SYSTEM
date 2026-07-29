@@ -266,18 +266,15 @@ public sealed partial class InvoiceService(
             return Result.Failure(DriverTripHasCashVouchers());
         }
 
-        if (InvoiceMovementRules.IsInbound(invoice.InvoiceType))
+        var stockError = await ValidateStockAsync(
+            invoice,
+            [],
+            currentInvoiceId: invoice.Id,
+            currentInvoiceNumber: invoice.InvoiceNumber,
+            cancellationToken);
+        if (stockError is not null)
         {
-            var stockError = await ValidateStockAsync(
-                invoice,
-                [],
-                currentInvoiceId: invoice.Id,
-                currentInvoiceNumber: invoice.InvoiceNumber,
-                cancellationToken);
-            if (stockError is not null)
-            {
-                return Result.Failure(stockError);
-            }
+            return Result.Failure(stockError);
         }
 
         await RemoveSideEffectsAsync(invoice, cancellationToken);

@@ -411,6 +411,47 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public async Task Add_InboundInvoiceAllowsExistingHistoricalShortageBecauseItAddsStock()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        database.Context.ItemMovements.AddRange(
+            new ItemMovement
+            {
+                CompanyId = 1,
+                StoreId = 1,
+                ItemId = 1,
+                ItemUnitId = 1,
+                MovementType = ItemMovementType.Sales,
+                ReferenceId = 904,
+                ReferenceNumber = "SALE-904",
+                MovementDate = new DateOnly(2026, 1, 3),
+                QuantityOut = 12m
+            },
+            new ItemMovement
+            {
+                CompanyId = 1,
+                StoreId = 1,
+                ItemId = 1,
+                ItemUnitId = 1,
+                MovementType = ItemMovementType.Purchase,
+                ReferenceId = 905,
+                ReferenceNumber = "PURCHASE-905",
+                MovementDate = new DateOnly(2026, 1, 4),
+                QuantityIn = 10m
+            });
+        await database.Context.SaveChangesAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                invoiceDate: new DateOnly(2026, 1, 5),
+                lines: [new InvoiceLineRequest(1, 1, 1m, 10m, null)]));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(3, await database.Context.ItemMovements.CountAsync());
+    }
+
+    [Fact]
     public async Task Update_RejectsRemovingInboundLineThatWouldMakeLaterBalanceNegative()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();

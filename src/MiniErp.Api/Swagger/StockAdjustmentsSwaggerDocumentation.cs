@@ -26,13 +26,13 @@ public sealed class StockAdjustmentsSwaggerDocumentation : IOperationFilter
                 "Returns one adjustment with product store, server-derived item units, complete lines, source inventory-count ID when generated, and the base64 header row version."),
             nameof(StockAdjustmentsController.Create) => (
                 "Create a stock adjustment",
-                "Admin only. Creates a manual increase/decrease aggregate and its ItemMovement rows atomically. Lines send itemId, positive quantity, and optional reason. Company and item units are server-derived; decreases require sufficient historical stock."),
+                "Admin only. Creates a manual increase/decrease aggregate and its ItemMovement rows atomically. Lines send itemId, positive quantity, and optional reason. Company and item units are server-derived; decreases require sufficient chronological stock."),
             nameof(StockAdjustmentsController.Update) => (
                 "Replace a stock adjustment",
-                "Admin only. Replaces the complete manual adjustment and its movements atomically using the original eight-byte row version. Count-generated adjustments are immutable."),
+                "Admin only. Replaces the complete manual adjustment and its ItemMovement rows atomically using the original eight-byte row version. Line additions, changes, and removals advance the header row version; outbound changes are stock-validated. Count-generated adjustments are immutable."),
             nameof(StockAdjustmentsController.Delete) => (
                 "Delete a stock adjustment",
-                "Admin only. Soft-deletes a manual adjustment, its lines, and its adjustment movements atomically. Removing an inbound adjustment is rejected if later stock would become negative; generated adjustments cannot be deleted."),
+                "Admin only. Soft-deletes a manual adjustment, its lines, and its adjustment movements atomically after validating the complete affected stock timeline. Generated adjustments cannot be deleted."),
             _ => default
         };
 

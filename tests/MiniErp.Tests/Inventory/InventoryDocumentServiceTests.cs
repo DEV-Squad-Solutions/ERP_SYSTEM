@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Mappings;
+using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.InventoryCounts;
 using MiniErp.Application.Features.StockAdjustments;
 using MiniErp.Domain.Entities.Inventory;
@@ -72,7 +73,7 @@ public sealed class InventoryDocumentServiceTests
     }
 
     [Fact]
-    public async Task StockAdjustment_DecreaseCannotMakeHistoricalStockNegative()
+    public async Task StockAdjustment_DecreaseRejectsInsufficientStock()
     {
         await using var database =
             await InventoryDocumentTestDatabase.CreateAsync();
@@ -87,6 +88,169 @@ public sealed class InventoryDocumentServiceTests
         Assert.True(result.IsFailure);
         Assert.Equal("Inventory.InsufficientStock", result.Error.Code);
         Assert.Empty(await database.Context.StockAdjustments.ToListAsync());
+        Assert.Empty(await database.Context.ItemMovements.ToListAsync());
+    }
+
+    [Fact]
+    public async Task StockAdjustment_DecreaseUsesAvailableStockAndCreatesOutboundMovement()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        var service = database.CreateStockAdjustmentService();
+
+        var result = await service.AddAsync(
+            AdjustmentRequest(
+                "SA-OUT-VALID",
+                StockAdjustmentDirection.Decrease,
+                4m));
+
+        Assert.True(result.IsSuccess);
+        var movement = Assert.Single(
+            await database.Context.ItemMovements.AsNoTracking().ToListAsync());
+        Assert.Equal(ItemMovementType.AdjustmentDecrease, movement.MovementType);
+        Assert.Equal(4m, movement.QuantityOut);
+        Assert.Equal(0m, movement.QuantityIn);
+    }
+
+    [Fact]
+    public async Task StockAdjustment_HeaderOnlyUpdate_AdvancesVersionAndRejectsStaleHeader()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        var service = database.CreateStockAdjustmentService();
+        var created = (await service.AddAsync(
+            AdjustmentRequest("SA-HEADER", StockAdjustmentDirection.Increase, 2m))).Value;
+
+        var updated = await service.UpdateAsync(
+            created.Id,
+            new StockAdjustmentUpdateRequest(
+                created.StoreId,
+                created.DocumentNumber,
+                created.DocumentDate,
+                created.Direction,
+                "header-only change",
+                [new StockAdjustmentLineRequest(1, 2m, null)],
+                created.RowVersion));
+
+        Assert.True(updated.IsSuccess);
+        Assert.False(created.RowVersion.SequenceEqual(updated.Value.RowVersion));
+        Assert.Equal("header-only change", updated.Value.Reason);
+
+        var stale = await service.UpdateAsync(
+            created.Id,
+            new StockAdjustmentUpdateRequest(
+                created.StoreId,
+                created.DocumentNumber,
+                created.DocumentDate,
+                created.Direction,
+                "stale header change",
+                [new StockAdjustmentLineRequest(1, 2m, null)],
+                created.RowVersion));
+
+        Assert.True(stale.IsFailure);
+        Assert.Equal("StockAdjustments.Concurrency", stale.Error.Code);
+    }
+
+    [Fact]
+    public async Task StockAdjustment_UpdateReplacesAddedAndRemovedLinesAtomically()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        var service = database.CreateStockAdjustmentService();
+        var created = (await service.AddAsync(
+            new StockAdjustmentRequest(
+                1,
+                "SA-LINES",
+                new DateOnly(2026, 7, 28),
+                StockAdjustmentDirection.Increase,
+                null,
+                [
+                    new StockAdjustmentLineRequest(1, 2m, "old line"),
+                    new StockAdjustmentLineRequest(2, 4m, null)
+                ]))).Value;
+
+        var updated = await service.UpdateAsync(
+            created.Id,
+            new StockAdjustmentUpdateRequest(
+                1,
+                "SA-LINES",
+                new DateOnly(2026, 7, 28),
+                StockAdjustmentDirection.Increase,
+                null,
+                [new StockAdjustmentLineRequest(2, 5m, "new line")],
+                created.RowVersion));
+
+        Assert.True(updated.IsSuccess);
+        Assert.False(created.RowVersion.SequenceEqual(updated.Value.RowVersion));
+        var line = Assert.Single(updated.Value.Lines);
+        Assert.Equal(2, line.ItemId);
+        Assert.Equal(5m, line.Quantity);
+        Assert.Equal("new line", line.Reason);
+        var movements = await database.Context.ItemMovements
+            .AsNoTracking()
+            .ToListAsync();
+        var movement = Assert.Single(movements);
+        Assert.Equal(2, movement.ItemId);
+        Assert.Equal(5m, movement.QuantityIn);
+    }
+
+    [Fact]
+    public async Task StockAdjustment_PaginatedItemsIncludeOrderedCompleteLines()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        var service = database.CreateStockAdjustmentService();
+
+        await service.AddAsync(
+            new StockAdjustmentRequest(
+                1,
+                "SA-LIST",
+                new DateOnly(2026, 7, 28),
+                StockAdjustmentDirection.Increase,
+                null,
+                [
+                    new StockAdjustmentLineRequest(2, 4m, null),
+                    new StockAdjustmentLineRequest(1, 2m, null)
+                ]));
+
+        var page = await service.GetAllAsync(
+            new PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            });
+
+        Assert.True(page.IsSuccess);
+        var item = Assert.Single(page.Value.Items);
+        Assert.Equal(2, item.LineCount);
+        Assert.Equal([1, 2], item.Lines.Select(line => line.ItemId));
+    }
+
+    [Fact]
+    public async Task StockAdjustment_DeleteSoftDeletesAggregateAndTouchesHeader()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        var service = database.CreateStockAdjustmentService();
+        var created = (await service.AddAsync(
+            AdjustmentRequest("SA-DELETE", StockAdjustmentDirection.Increase, 2m))).Value;
+
+        var deleted = await service.DeleteAsync(created.Id);
+
+        Assert.True(deleted.IsSuccess);
+        var missing = await service.GetByIdAsync(created.Id);
+        Assert.True(missing.IsFailure);
+        Assert.Equal("StockAdjustments.NotFound", missing.Error.Code);
+
+        var stored = await database.Context.StockAdjustments
+            .IgnoreQueryFilters()
+            .SingleAsync(adjustment => adjustment.Id == created.Id);
+        var storedLine = await database.Context.StockAdjustmentLines
+            .IgnoreQueryFilters()
+            .SingleAsync(line => line.StockAdjustmentId == created.Id);
+        Assert.True(stored.IsDeleted);
+        Assert.True(storedLine.IsDeleted);
+        Assert.True(stored.LastModifiedAt > created.LastModifiedAt);
         Assert.Empty(await database.Context.ItemMovements.ToListAsync());
     }
 

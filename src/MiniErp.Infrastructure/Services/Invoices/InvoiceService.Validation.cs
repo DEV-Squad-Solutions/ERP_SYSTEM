@@ -656,8 +656,8 @@ public sealed partial class InvoiceService
                 requestedByItem.GetValueOrDefault(line.ItemId) + quantity;
         }
 
-        // 3. A valid new inbound invoice only adds stock, so it cannot
-        // create a shortage. Updates must still validate the resulting state.
+        // 3. A new inbound invoice only adds stock, so it cannot create a
+        // shortage. Updates must still validate the resulting state.
         if (isInbound &&
             currentInvoiceId is null)
         {
