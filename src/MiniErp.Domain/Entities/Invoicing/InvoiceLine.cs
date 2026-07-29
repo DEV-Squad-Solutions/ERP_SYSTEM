@@ -24,6 +24,12 @@ public sealed class InvoiceLine : AuditableEntity
 
     public ItemUnit ItemUnit { get; set; } = null!;
 
+    public int? SourceInvoiceLineId { get; set; }
+
+    public InvoiceLine? SourceInvoiceLine { get; set; }
+
+    public decimal? ReturnUnitCost { get; set; }
+
     public int Count { get; set; }
 
     public decimal Weight { get; set; }

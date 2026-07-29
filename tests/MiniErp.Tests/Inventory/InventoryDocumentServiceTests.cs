@@ -18,7 +18,7 @@ public sealed class InventoryDocumentServiceTests
     }
 
     [Fact]
-    public async Task StockAdjustment_CreateAndLineOnlyUpdate_ReplaceMovementAndAdvanceVersion()
+    public async Task StockAdjustment_CreateAndLineOnlyUpdate_PreserveMovementAndAdvanceVersion()
     {
         await using var database =
             await InventoryDocumentTestDatabase.CreateAsync();
@@ -34,6 +34,8 @@ public sealed class InventoryDocumentServiceTests
         var initialVersion = created.Value.RowVersion;
         var initialMovement = await database.Context.ItemMovements
             .AsNoTracking()
+            .Where(movement =>
+                movement.MovementType != ItemMovementType.OpeningBalance)
             .SingleAsync();
         Assert.Equal(ItemMovementType.AdjustmentIncrease, initialMovement.MovementType);
         Assert.Equal(2m, initialMovement.QuantityIn);
@@ -47,7 +49,7 @@ public sealed class InventoryDocumentServiceTests
                 new DateOnly(2026, 7, 28),
                 StockAdjustmentDirection.Increase,
                 "line-only change",
-                [new StockAdjustmentLineRequest(1, 3m, "count correction")],
+                [AdjustmentLine(1, 3m, "count correction")],
                 initialVersion));
 
         Assert.True(updated.IsSuccess);
@@ -55,7 +57,11 @@ public sealed class InventoryDocumentServiceTests
         Assert.Equal(3m, updated.Value.Lines.Single().Quantity);
         var currentMovement = await database.Context.ItemMovements
             .AsNoTracking()
+            .Where(movement =>
+                movement.MovementType != ItemMovementType.OpeningBalance)
             .SingleAsync();
+        Assert.Equal(initialMovement.Id, currentMovement.Id);
+        Assert.Equal(initialMovement.CreatedOn, currentMovement.CreatedOn);
         Assert.Equal(3m, currentMovement.QuantityIn);
 
         var staleUpdate = await service.UpdateAsync(
@@ -66,7 +72,7 @@ public sealed class InventoryDocumentServiceTests
                 new DateOnly(2026, 7, 28),
                 StockAdjustmentDirection.Increase,
                 null,
-                [new StockAdjustmentLineRequest(1, 4m, null)],
+                [AdjustmentLine(1, 4m, null)],
                 initialVersion));
 
         Assert.Equal("StockAdjustments.Concurrency", staleUpdate.Error.Code);
@@ -88,7 +94,76 @@ public sealed class InventoryDocumentServiceTests
         Assert.True(result.IsFailure);
         Assert.Equal("Inventory.InsufficientStock", result.Error.Code);
         Assert.Empty(await database.Context.StockAdjustments.ToListAsync());
-        Assert.Empty(await database.Context.ItemMovements.ToListAsync());
+        Assert.Empty(await database.Context.ItemMovements
+            .Where(movement =>
+                movement.MovementType != ItemMovementType.OpeningBalance)
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task StockAdjustment_IncreaseRequiresEnteredUnitCost()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        var result = await database.CreateStockAdjustmentService().AddAsync(
+            new StockAdjustmentRequest(
+                1,
+                "SA-COST-REQUIRED",
+                new DateOnly(2026, 7, 28),
+                StockAdjustmentDirection.Increase,
+                null,
+                [new StockAdjustmentLineRequest(1, 2m, null)]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("StockAdjustments.UnitCostRequired", result.Error.Code);
+        Assert.Empty(await database.Context.StockAdjustments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task StockAdjustment_DecreaseRejectsClientUnitCost()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        var result = await database.CreateStockAdjustmentService().AddAsync(
+            new StockAdjustmentRequest(
+                1,
+                "SA-OUT-COST",
+                new DateOnly(2026, 7, 28),
+                StockAdjustmentDirection.Decrease,
+                null,
+                [
+                    new StockAdjustmentLineRequest(1, 2m, null)
+                    {
+                        UnitCost = 99m
+                    }
+                ]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "StockAdjustments.UnitCostNotAllowed",
+            result.Error.Code);
+        Assert.Empty(await database.Context.StockAdjustments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task StockAdjustment_NoneModeSkipsOnlyBalanceValidation()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        await database.SetStockBalanceCheckModeAsync(StockBalanceCheckMode.None);
+        var service = database.CreateStockAdjustmentService();
+
+        var result = await service.AddAsync(
+            AdjustmentRequest(
+                "SA-NONE",
+                StockAdjustmentDirection.Decrease,
+                11m));
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(await database.Context.ItemMovements
+            .Where(movement =>
+                movement.MovementType != ItemMovementType.OpeningBalance)
+            .ToListAsync());
     }
 
     [Fact]
@@ -106,7 +181,12 @@ public sealed class InventoryDocumentServiceTests
 
         Assert.True(result.IsSuccess);
         var movement = Assert.Single(
-            await database.Context.ItemMovements.AsNoTracking().ToListAsync());
+            await database.Context.ItemMovements
+                .AsNoTracking()
+                .Where(candidate =>
+                    candidate.MovementType !=
+                    ItemMovementType.OpeningBalance)
+                .ToListAsync());
         Assert.Equal(ItemMovementType.AdjustmentDecrease, movement.MovementType);
         Assert.Equal(4m, movement.QuantityOut);
         Assert.Equal(0m, movement.QuantityIn);
@@ -129,7 +209,7 @@ public sealed class InventoryDocumentServiceTests
                 created.DocumentDate,
                 created.Direction,
                 "header-only change",
-                [new StockAdjustmentLineRequest(1, 2m, null)],
+                [AdjustmentLine(1, 2m, null)],
                 created.RowVersion));
 
         Assert.True(updated.IsSuccess);
@@ -144,7 +224,7 @@ public sealed class InventoryDocumentServiceTests
                 created.DocumentDate,
                 created.Direction,
                 "stale header change",
-                [new StockAdjustmentLineRequest(1, 2m, null)],
+                [AdjustmentLine(1, 2m, null)],
                 created.RowVersion));
 
         Assert.True(stale.IsFailure);
@@ -165,8 +245,8 @@ public sealed class InventoryDocumentServiceTests
                 StockAdjustmentDirection.Increase,
                 null,
                 [
-                    new StockAdjustmentLineRequest(1, 2m, "old line"),
-                    new StockAdjustmentLineRequest(2, 4m, null)
+                    AdjustmentLine(1, 2m, "old line"),
+                    AdjustmentLine(2, 4m, null)
                 ]))).Value;
 
         var updated = await service.UpdateAsync(
@@ -177,7 +257,7 @@ public sealed class InventoryDocumentServiceTests
                 new DateOnly(2026, 7, 28),
                 StockAdjustmentDirection.Increase,
                 null,
-                [new StockAdjustmentLineRequest(2, 5m, "new line")],
+                [AdjustmentLine(2, 5m, "new line")],
                 created.RowVersion));
 
         Assert.True(updated.IsSuccess);
@@ -188,6 +268,8 @@ public sealed class InventoryDocumentServiceTests
         Assert.Equal("new line", line.Reason);
         var movements = await database.Context.ItemMovements
             .AsNoTracking()
+            .Where(movement =>
+                movement.MovementType != ItemMovementType.OpeningBalance)
             .ToListAsync();
         var movement = Assert.Single(movements);
         Assert.Equal(2, movement.ItemId);
@@ -209,8 +291,8 @@ public sealed class InventoryDocumentServiceTests
                 StockAdjustmentDirection.Increase,
                 null,
                 [
-                    new StockAdjustmentLineRequest(2, 4m, null),
-                    new StockAdjustmentLineRequest(1, 2m, null)
+                    AdjustmentLine(2, 4m, null),
+                    AdjustmentLine(1, 2m, null)
                 ]));
 
         var page = await service.GetAllAsync(
@@ -251,7 +333,10 @@ public sealed class InventoryDocumentServiceTests
         Assert.True(stored.IsDeleted);
         Assert.True(storedLine.IsDeleted);
         Assert.True(stored.LastModifiedAt > created.LastModifiedAt);
-        Assert.Empty(await database.Context.ItemMovements.ToListAsync());
+        Assert.Empty(await database.Context.ItemMovements
+            .Where(movement =>
+                movement.MovementType != ItemMovementType.OpeningBalance)
+            .ToListAsync());
     }
 
     [Fact]
@@ -321,7 +406,9 @@ public sealed class InventoryDocumentServiceTests
 
         var reconciled = await countService.ReconcileAsync(
             created.Id,
-            new InventoryCountReconcileRequest(updated.RowVersion));
+            new InventoryCountReconcileRequest(
+                updated.RowVersion,
+                [new InventoryCountIncreaseCostRequest(2, 4m)]));
 
         Assert.True(reconciled.IsSuccess);
         Assert.NotNull(reconciled.Value.ReconciledAt);
@@ -340,13 +427,17 @@ public sealed class InventoryDocumentServiceTests
         var decrease = adjustments.Single(adjustment =>
             adjustment.Direction == StockAdjustmentDirection.Decrease);
         Assert.Equal(3m, increase.Lines.Single().Quantity);
+        Assert.Equal(4m, increase.Lines.Single().UnitCost);
         Assert.Equal(2m, decrease.Lines.Single().Quantity);
+        Assert.Null(decrease.Lines.Single().UnitCost);
         Assert.All(
             adjustments,
             adjustment => Assert.Equal(created.Id, adjustment.SourceInventoryCountId));
 
         var movements = await database.Context.ItemMovements
             .AsNoTracking()
+            .Where(movement =>
+                movement.MovementType != ItemMovementType.OpeningBalance)
             .OrderBy(movement => movement.MovementType)
             .ToListAsync();
         Assert.Equal(2, movements.Count);
@@ -355,7 +446,10 @@ public sealed class InventoryDocumentServiceTests
             movement =>
                 movement.MovementType == ItemMovementType.AdjustmentIncrease &&
                 movement.ItemId == 2 &&
-                movement.QuantityIn == 3m);
+                movement.QuantityIn == 3m &&
+                movement.UnitCost == 4m &&
+                movement.AverageCostAfter == 4m &&
+                movement.InventoryValueAfter == 12m);
         Assert.Contains(
             movements,
             movement =>
@@ -372,7 +466,7 @@ public sealed class InventoryDocumentServiceTests
                 increase.Direction,
                 increase.Reason,
                 increase.Lines.Select(line =>
-                    new StockAdjustmentLineRequest(
+                    AdjustmentLine(
                         line.ItemId,
                         line.Quantity,
                         line.Reason)).ToArray(),
@@ -384,6 +478,35 @@ public sealed class InventoryDocumentServiceTests
         Assert.Equal(
             "StockAdjustments.GeneratedAdjustmentImmutable",
             generatedUpdate.Error.Code);
+    }
+
+    [Fact]
+    public async Task InventoryCount_ReconcileRequiresCostForEveryIncrease()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        var service = database.CreateInventoryCountService();
+        var created = (await service.AddAsync(
+            CountRequest("COUNT-COST-REQUIRED"))).Value;
+        var updated = await UpdateCountAsync(
+            service,
+            created,
+            physicalByItem: new Dictionary<int, decimal?>
+            {
+                [1] = 10m,
+                [2] = 3m
+            });
+        database.Context.ChangeTracker.Clear();
+
+        var result = await service.ReconcileAsync(
+            created.Id,
+            new InventoryCountReconcileRequest(updated.RowVersion));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "InventoryCounts.IncreaseCostsRequired",
+            result.Error.Code);
+        Assert.Empty(await database.Context.StockAdjustments.ToListAsync());
     }
 
     [Fact]
@@ -412,7 +535,10 @@ public sealed class InventoryDocumentServiceTests
         Assert.Null(reconciled.Value.IncreaseAdjustmentId);
         Assert.Null(reconciled.Value.DecreaseAdjustmentId);
         Assert.Empty(await database.Context.StockAdjustments.ToListAsync());
-        Assert.Empty(await database.Context.ItemMovements.ToListAsync());
+        Assert.Empty(await database.Context.ItemMovements
+            .Where(movement =>
+                movement.MovementType != ItemMovementType.OpeningBalance)
+            .ToListAsync());
     }
 
     [Fact]
@@ -490,7 +616,20 @@ public sealed class InventoryDocumentServiceTests
             new DateOnly(2026, 7, 28),
             direction,
             null,
-            [new StockAdjustmentLineRequest(1, quantity, null)]);
+            [
+                direction == StockAdjustmentDirection.Increase
+                    ? AdjustmentLine(1, quantity, null)
+                    : new StockAdjustmentLineRequest(1, quantity, null)
+            ]);
+
+    private static StockAdjustmentLineRequest AdjustmentLine(
+        int itemId,
+        decimal quantity,
+        string? reason) =>
+        new(itemId, quantity, reason)
+        {
+            UnitCost = 0m
+        };
 
     private static InventoryCountRequest CountRequest(string documentNumber) =>
         new(

@@ -1007,6 +1007,19 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.ToTable("Companies", (string)null);
                 });
 
+            modelBuilder.Entity("MiniErp.Domain.Entities.Companies.CompanySettings", b =>
+                {
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("StockBalanceCheckMode")
+                        .HasColumnType("int");
+
+                    b.HasKey("CompanyId");
+
+                    b.ToTable("CompanySettings", (string)null);
+                });
+
             modelBuilder.Entity("MiniErp.Domain.Entities.Containers.Container", b =>
                 {
                     b.Property<int>("Id")
@@ -2978,6 +2991,17 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Navigation("Company");
                 });
 
+            modelBuilder.Entity("MiniErp.Domain.Entities.Companies.CompanySettings", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithOne("Settings")
+                        .HasForeignKey("MiniErp.Domain.Entities.Companies.CompanySettings", "CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
             modelBuilder.Entity("MiniErp.Domain.Entities.Containers.Container", b =>
                 {
                     b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
@@ -3536,6 +3560,11 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("MiniErp.Domain.Entities.Catalog.ItemUnit", b =>
                 {
                     b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Companies.Company", b =>
+                {
+                    b.Navigation("Settings");
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.Containers.Container", b =>

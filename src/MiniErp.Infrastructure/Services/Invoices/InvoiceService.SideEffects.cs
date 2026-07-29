@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using MiniErp.Application.Common.Abstractions;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Containers;
 using MiniErp.Domain.Entities.Invoicing;
@@ -13,28 +14,7 @@ public sealed partial class InvoiceService
         Invoice invoice,
         CancellationToken cancellationToken)
     {
-        var itemMovementType =
-            InvoiceMovementRules.GetItemMovementType(invoice.InvoiceType);
-        var inbound = InvoiceMovementRules.IsInbound(invoice.InvoiceType);
-
-        foreach (var line in invoice.Lines.Where(line => !line.IsDeleted))
-        {
-            dbContext.ItemMovements.Add(
-                new ItemMovement
-                {
-                    CompanyId = companyId,
-                    StoreId = invoice.StoreId,
-                    ItemId = line.ItemId,
-                    ItemUnitId = line.ItemUnitId,
-                    MovementType = itemMovementType,
-                    ReferenceId = invoice.Id,
-                    ReferenceNumber = invoice.InvoiceNumber,
-                    MovementDate = invoice.InvoiceDate,
-                    QuantityIn = inbound ? line.Quantity : 0m,
-                    QuantityOut = inbound ? 0m : line.Quantity,
-                    Description = $"Invoice {invoice.InvoiceNumber}"
-                });
-        }
+        await ReconcileItemMovementsAsync(invoice, cancellationToken);
 
         if (invoice.ContainerStoreId.HasValue)
         {
@@ -106,16 +86,12 @@ public sealed partial class InvoiceService
 
     private async Task RemoveSideEffectsAsync(
         Invoice invoice,
+        bool removeItemMovements,
         CancellationToken cancellationToken)
     {
-        var invoiceMovementTypes = InvoiceItemMovementTypes;
-        var itemMovements = await dbContext.ItemMovements
-            .Where(movement =>
-                movement.CompanyId == companyId &&
-                invoiceMovementTypes.Contains(movement.MovementType) &&
-                movement.ReferenceId == invoice.Id &&
-                movement.ReferenceNumber == invoice.InvoiceNumber)
-            .ToListAsync(cancellationToken);
+        var itemMovements = removeItemMovements
+            ? await LoadItemMovementsAsync(invoice.Id, cancellationToken)
+            : [];
         var containerMovements = await dbContext.ContainerMovements
             .Where(movement =>
                 movement.CompanyId == companyId &&
@@ -137,6 +113,93 @@ public sealed partial class InvoiceService
         dbContext.BusinessPartnerMovements.RemoveRange(partnerMovements);
         dbContext.DriverTrips.RemoveRange(driverTrips);
     }
+
+    private async Task ReconcileItemMovementsAsync(
+        Invoice invoice,
+        CancellationToken cancellationToken)
+    {
+        var existingMovements = await LoadItemMovementsAsync(
+            invoice.Id,
+            cancellationToken);
+        var activeLines = invoice.Lines
+            .Where(line => !line.IsDeleted)
+            .ToDictionary(line => line.ItemId);
+        var existingItemIds = new HashSet<int>();
+        var movementType =
+            InvoiceMovementRules.GetItemMovementType(invoice.InvoiceType);
+        var inbound = InvoiceMovementRules.IsInbound(invoice.InvoiceType);
+
+        foreach (var movement in existingMovements)
+        {
+            if (!activeLines.TryGetValue(movement.ItemId, out var line))
+            {
+                dbContext.ItemMovements.Remove(movement);
+                continue;
+            }
+
+            existingItemIds.Add(line.ItemId);
+            movement.StoreId = invoice.StoreId;
+            movement.ItemUnitId = line.ItemUnitId;
+            movement.MovementType = movementType;
+            movement.ReferenceNumber = invoice.InvoiceNumber;
+            movement.MovementDate = invoice.InvoiceDate;
+            movement.QuantityIn = inbound ? line.Quantity : 0m;
+            movement.QuantityOut = inbound ? 0m : line.Quantity;
+            movement.Description = $"Invoice {invoice.InvoiceNumber}";
+        }
+
+        foreach (var line in activeLines.Values.Where(line =>
+                     !existingItemIds.Contains(line.ItemId)))
+        {
+            dbContext.ItemMovements.Add(
+                new ItemMovement
+                {
+                    CompanyId = companyId,
+                    StoreId = invoice.StoreId,
+                    ItemId = line.ItemId,
+                    ItemUnitId = line.ItemUnitId,
+                    MovementType = movementType,
+                    ReferenceId = invoice.Id,
+                    ReferenceNumber = invoice.InvoiceNumber,
+                    MovementDate = invoice.InvoiceDate,
+                    QuantityIn = inbound ? line.Quantity : 0m,
+                    QuantityOut = inbound ? 0m : line.Quantity,
+                    Description = $"Invoice {invoice.InvoiceNumber}"
+                });
+        }
+    }
+
+    private Task<List<ItemMovement>> LoadItemMovementsAsync(
+        int invoiceId,
+        CancellationToken cancellationToken)
+    {
+        var movementTypes = InvoiceItemMovementTypes;
+        return dbContext.ItemMovements
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movementTypes.Contains(movement.MovementType) &&
+                movement.ReferenceId == invoiceId)
+            .ToListAsync(cancellationToken);
+    }
+
+    private static IReadOnlyCollection<InventoryCostingKey> GetCostingKeys(
+        Invoice invoice) =>
+        invoice.Lines
+            .Where(line => !line.IsDeleted)
+            .Select(line => new InventoryCostingKey(
+                invoice.StoreId,
+                line.ItemId))
+            .Distinct()
+            .ToArray();
+
+    private static IReadOnlyCollection<InventoryCostingKey> GetCostingKeys(
+        IEnumerable<ItemMovement> movements) =>
+        movements
+            .Select(movement => new InventoryCostingKey(
+                movement.StoreId,
+                movement.ItemId))
+            .Distinct()
+            .ToArray();
 
     private async Task<bool> HasCashVoucherTripReferencesAsync(
         int invoiceId,

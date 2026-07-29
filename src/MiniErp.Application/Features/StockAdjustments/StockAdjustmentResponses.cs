@@ -12,7 +12,21 @@ public sealed record StockAdjustmentLineResponse(
     int ItemUnitId,
     string ItemUnitName,
     decimal Quantity,
-    string? Reason);
+    decimal? UnitCost,
+    string? Reason)
+{
+    public InventoryCostStatus? CostStatus { get; init; }
+
+    public decimal PendingCostQuantity { get; init; }
+
+    public decimal InventoryTotalCost { get; init; }
+
+    public decimal QuantityAfter { get; init; }
+
+    public decimal AverageCostAfter { get; init; }
+
+    public decimal InventoryValueAfter { get; init; }
+}
 
 public sealed record StockAdjustmentResponse(
     int Id,

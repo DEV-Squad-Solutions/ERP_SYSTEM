@@ -1,5 +1,6 @@
 using FluentValidation;
 using MiniErp.Domain.Entities.Inventory;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.StockAdjustments;
 
@@ -16,6 +17,14 @@ public sealed class StockAdjustmentLineRequestValidator
             .PrecisionScale(
                 InventoryQuantityRules.Precision,
                 InventoryQuantityRules.Scale,
+                ignoreTrailingZeros: true);
+
+        RuleFor(line => line.UnitCost)
+            .GreaterThanOrEqualTo(0m)
+            .When(line => line.UnitCost.HasValue)
+            .PrecisionScale(
+                InventoryCostRules.UnitCostPrecision,
+                InventoryCostRules.UnitCostScale,
                 ignoreTrailingZeros: true);
 
         RuleFor(line => line.Reason)
@@ -72,6 +81,20 @@ public sealed class StockAdjustmentRequestValidator
 
         RuleForEach(request => request.Lines)
             .SetValidator(new StockAdjustmentLineRequestValidator());
+
+        RuleFor(request => request.Lines)
+            .Must(lines => lines.All(line => line.UnitCost.HasValue))
+            .When(request =>
+                request.Direction == StockAdjustmentDirection.Increase)
+            .WithMessage(
+                "يجب إدخال تكلفة الوحدة لكل سطر عند زيادة المخزون.");
+
+        RuleFor(request => request.Lines)
+            .Must(lines => lines.All(line => !line.UnitCost.HasValue))
+            .When(request =>
+                request.Direction == StockAdjustmentDirection.Decrease)
+            .WithMessage(
+                "لا يجوز إدخال تكلفة الوحدة في تسوية الخصم؛ يستخدم الخادم متوسط التكلفة الحالي.");
     }
 }
 
@@ -119,6 +142,20 @@ public sealed class StockAdjustmentUpdateRequestValidator
 
         RuleForEach(request => request.Lines)
             .SetValidator(new StockAdjustmentLineRequestValidator());
+
+        RuleFor(request => request.Lines)
+            .Must(lines => lines.All(line => line.UnitCost.HasValue))
+            .When(request =>
+                request.Direction == StockAdjustmentDirection.Increase)
+            .WithMessage(
+                "يجب إدخال تكلفة الوحدة لكل سطر عند زيادة المخزون.");
+
+        RuleFor(request => request.Lines)
+            .Must(lines => lines.All(line => !line.UnitCost.HasValue))
+            .When(request =>
+                request.Direction == StockAdjustmentDirection.Decrease)
+            .WithMessage(
+                "لا يجوز إدخال تكلفة الوحدة في تسوية الخصم؛ يستخدم الخادم متوسط التكلفة الحالي.");
 
         RuleFor(request => request.RowVersion)
             .Must(rowVersion => rowVersion is { Length: 8 })

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using MiniErp.Application.Common.Abstractions;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Catalog;
@@ -15,6 +16,7 @@ using MiniErp.Domain.Entities.ReferenceData;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Identity;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.Inventory;
 
 namespace MiniErp.Infrastructure.Seeding;
 
@@ -159,6 +161,11 @@ public static class DevelopmentDataSeeder
             dbContext,
             cancellationToken));
 
+        await SeedCompanySettingsAsync(
+            dbContext,
+            companies,
+            cancellationToken);
+
         await SeedIdentityAsync(
             dbContext,
             userManager,
@@ -218,6 +225,11 @@ public static class DevelopmentDataSeeder
             await SeedInvoicesAsync(
                 dbContext,
                 company,
+                cancellationToken);
+
+            await RecalculateSeedInventoryCostingAsync(
+                dbContext,
+                company.Id,
                 cancellationToken);
 
             await SeedCashManagementAsync(
@@ -897,6 +909,10 @@ public static class DevelopmentDataSeeder
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
+            await EnsureOpeningBalanceMovementsAsync(
+                dbContext,
+                existingBalance,
+                cancellationToken);
             return;
         }
 
@@ -955,6 +971,92 @@ public static class DevelopmentDataSeeder
         }
 
         dbContext.StockOpeningBalances.Add(balance);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await EnsureOpeningBalanceMovementsAsync(
+            dbContext,
+            balance,
+            cancellationToken);
+    }
+
+    private static async Task EnsureOpeningBalanceMovementsAsync(
+        ApplicationDbContext dbContext,
+        StockOpeningBalance balance,
+        CancellationToken cancellationToken)
+    {
+        var existingMovements = await dbContext.ItemMovements
+            .Where(movement =>
+                movement.CompanyId == balance.CompanyId &&
+                movement.MovementType == ItemMovementType.OpeningBalance &&
+                movement.ReferenceId == balance.Id)
+            .ToListAsync(cancellationToken);
+        var existing = existingMovements.ToDictionary(
+            movement => movement.ItemId);
+
+        foreach (var line in balance.Lines.Where(line => !line.IsDeleted))
+        {
+            if (existing.TryGetValue(line.ItemId, out var movement))
+            {
+                movement.StoreId = balance.StoreId;
+                movement.ItemUnitId = line.ItemUnitId;
+                movement.ReferenceNumber = balance.DocumentNumber;
+                movement.MovementDate = balance.DocumentDate;
+                movement.QuantityIn = line.Quantity;
+                movement.QuantityOut = 0m;
+                continue;
+            }
+
+            dbContext.ItemMovements.Add(
+                new ItemMovement
+                {
+                    CompanyId = balance.CompanyId,
+                    StoreId = balance.StoreId,
+                    ItemId = line.ItemId,
+                    ItemUnitId = line.ItemUnitId,
+                    MovementType = ItemMovementType.OpeningBalance,
+                    ReferenceId = balance.Id,
+                    ReferenceNumber = balance.DocumentNumber,
+                    MovementDate = balance.DocumentDate,
+                    QuantityIn = line.Quantity,
+                    QuantityOut = 0m,
+                    Description =
+                        $"Opening balance {balance.DocumentNumber}"
+                });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task RecalculateSeedInventoryCostingAsync(
+        ApplicationDbContext dbContext,
+        int companyId,
+        CancellationToken cancellationToken)
+    {
+        var keys = await dbContext.ItemMovements
+            .AsNoTracking()
+            .Where(movement => movement.CompanyId == companyId)
+            .Select(movement => new InventoryCostingKey(
+                movement.StoreId,
+                movement.ItemId))
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        if (keys.Count == 0)
+        {
+            return;
+        }
+
+        var service = new InventoryCostingService(
+            dbContext,
+            new SeedCompanyContext(companyId),
+            TimeProvider.System);
+        var error = await service.RecalculateAsync(
+            keys,
+            cancellationToken);
+        if (error is not null)
+        {
+            throw new InvalidOperationException(
+                $"Development inventory costing seed failed: {error.Code} - {error.Description}");
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -1444,6 +1546,33 @@ public static class DevelopmentDataSeeder
         return company;
     }
 
+    private static async Task SeedCompanySettingsAsync(
+        ApplicationDbContext dbContext,
+        IReadOnlyCollection<Company> companies,
+        CancellationToken cancellationToken)
+    {
+        var companyIds = companies
+            .Select(company => company.Id)
+            .Distinct()
+            .ToArray();
+        var existingCompanyIds = await dbContext.CompanySettings
+            .IgnoreQueryFilters()
+            .Where(settings => companyIds.Contains(settings.CompanyId))
+            .Select(settings => settings.CompanyId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var companyId in companyIds.Except(existingCompanyIds))
+        {
+            dbContext.CompanySettings.Add(new CompanySettings
+            {
+                CompanyId = companyId,
+                StockBalanceCheckMode = StockBalanceCheckMode.DateCheck
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     private static void EnsureSucceeded(
         IdentityResult result,
         string operation)
@@ -1502,4 +1631,7 @@ public static class DevelopmentDataSeeder
         string PhoneSuffix,
         CurrencyCode Currency,
         decimal CreditLimit);
+
+    private sealed record SeedCompanyContext(int CompanyId)
+        : ICurrentCompanyContext;
 }

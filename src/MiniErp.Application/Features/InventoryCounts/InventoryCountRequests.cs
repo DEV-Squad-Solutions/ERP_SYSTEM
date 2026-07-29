@@ -22,4 +22,9 @@ public sealed record InventoryCountUpdateRequest(
     byte[]? RowVersion);
 
 public sealed record InventoryCountReconcileRequest(
-    byte[]? RowVersion);
+    byte[]? RowVersion,
+    IReadOnlyList<InventoryCountIncreaseCostRequest>? IncreaseCosts = null);
+
+public sealed record InventoryCountIncreaseCostRequest(
+    int ItemId,
+    decimal UnitCost);

@@ -25,6 +25,11 @@ public sealed partial class InvoiceService
             "Invoices.DriverTripHasCashVouchers",
             "لا يمكن تعديل الفاتورة أو حذفها لأن رحلة السائق المرتبطة بها مستخدمة في سندات نقدية حالية أو تاريخية.");
 
+    private static Error LinkedSalesReturnsExist() =>
+        Error.Conflict(
+            "Invoices.LinkedSalesReturnsExist",
+            "لا يمكن حذف فاتورة البيع لأن هناك مرتجع بيع نشطاً مرتبطاً بأحد سطورها.");
+
     private sealed record PreparedInvoice(
         CurrencyCode Currency,
         IReadOnlyDictionary<int, int> ItemUnitIds);

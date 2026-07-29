@@ -1,3 +1,4 @@
+using System.Data;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -15,6 +16,7 @@ public sealed partial class InvoiceService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     IInventoryStockService inventoryStockService,
+    IInventoryCostingService inventoryCostingService,
     TimeProvider timeProvider)
     : IInvoiceService, IScopedService
 {
@@ -86,9 +88,7 @@ public sealed partial class InvoiceService(
             return Result<InvoiceResponse>.Failure(InvalidId());
         }
 
-        var response = await ProjectResponseQuery(id)
-            .AsNoTracking()
-            .FirstOrDefaultAsync(cancellationToken);
+        var response = await GetResponseAsync(id, cancellationToken);
 
         return response is null
             ? Result<InvoiceResponse>.Failure(NotFound(id))
@@ -101,7 +101,18 @@ public sealed partial class InvoiceService(
     {
         var invoice = request.Adapt<Invoice>();
 
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
+        await inventoryCostingService.LockAsync(
+            request.Lines
+                .Select(line => new InventoryCostingKey(
+                    request.StoreId,
+                    line.ItemId))
+                .Distinct()
+                .ToArray(),
             cancellationToken);
 
         var preparation = await PrepareAsync(
@@ -137,12 +148,24 @@ public sealed partial class InvoiceService(
 
         await SaveSideEffectsAsync(invoice, cancellationToken);
 
-        var response = await ProjectResponseQuery(invoice.Id)
-            .AsNoTracking()
-            .FirstAsync(cancellationToken);
+        var costingError = await inventoryCostingService.RecalculateAsync(
+            GetCostingKeys(invoice),
+            cancellationToken);
+        if (costingError is not null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<InvoiceResponse>.Failure(costingError);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var response = await GetResponseAsync(
+            invoice.Id,
+            cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
-        return Result<InvoiceResponse>.Success(response);
+        return Result<InvoiceResponse>.Success(response!);
     }
 
     public async Task<Result<InvoiceResponse>> UpdateAsync(
@@ -166,8 +189,10 @@ public sealed partial class InvoiceService(
 
         var requestedValues = request.Adapt<Invoice>();
 
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(
-            cancellationToken);
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var invoice = await LoadForWriteAsync(id, cancellationToken);
         if (invoice is null)
@@ -185,6 +210,20 @@ public sealed partial class InvoiceService(
             return Result<InvoiceResponse>.Failure(
                 DriverTripHasCashVouchers());
         }
+
+        var oldItemMovements = await LoadItemMovementsAsync(
+            id,
+            cancellationToken);
+        var oldCostingKeys = GetCostingKeys(oldItemMovements);
+        await inventoryCostingService.LockAsync(
+            oldCostingKeys
+                .Concat(request.Lines.Select(line =>
+                    new InventoryCostingKey(
+                        request.StoreId,
+                        line.ItemId)))
+                .Distinct()
+                .ToArray(),
+            cancellationToken);
 
         var entry = dbContext.Entry(invoice);
         entry.Property(item => item.RowVersion).OriginalValue = request.RowVersion;
@@ -223,10 +262,28 @@ public sealed partial class InvoiceService(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            await RemoveSideEffectsAsync(invoice, cancellationToken);
+            await RemoveSideEffectsAsync(
+                invoice,
+                removeItemMovements: false,
+                cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
 
             await SaveSideEffectsAsync(invoice, cancellationToken);
+
+            var costingError = await inventoryCostingService.RecalculateAsync(
+                oldCostingKeys
+                    .Concat(GetCostingKeys(invoice))
+                    .Distinct()
+                    .ToArray(),
+                cancellationToken);
+            if (costingError is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<InvoiceResponse>.Failure(costingError);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -235,12 +292,10 @@ public sealed partial class InvoiceService(
             return Result<InvoiceResponse>.Failure(Concurrency());
         }
 
-        var response = await ProjectResponseQuery(id)
-            .AsNoTracking()
-            .FirstAsync(cancellationToken);
+        var response = await GetResponseAsync(id, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
-        return Result<InvoiceResponse>.Success(response);
+        return Result<InvoiceResponse>.Success(response!);
     }
 
     public async Task<Result> DeleteAsync(
@@ -252,8 +307,10 @@ public sealed partial class InvoiceService(
             return Result.Failure(InvalidId());
         }
 
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(
-            cancellationToken);
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var invoice = await LoadForWriteAsync(id, cancellationToken);
         if (invoice is null)
@@ -266,6 +323,21 @@ public sealed partial class InvoiceService(
             return Result.Failure(DriverTripHasCashVouchers());
         }
 
+        if (await HasActiveLinkedSalesReturnsAsync(
+                invoice.Lines.Select(line => line.Id).ToArray(),
+                cancellationToken))
+        {
+            return Result.Failure(LinkedSalesReturnsExist());
+        }
+
+        var oldItemMovements = await LoadItemMovementsAsync(
+            id,
+            cancellationToken);
+        var costingKeys = GetCostingKeys(oldItemMovements);
+        await inventoryCostingService.LockAsync(
+            costingKeys,
+            cancellationToken);
+
         var stockError = await ValidateStockAsync(
             invoice,
             [],
@@ -277,12 +349,27 @@ public sealed partial class InvoiceService(
             return Result.Failure(stockError);
         }
 
-        await RemoveSideEffectsAsync(invoice, cancellationToken);
+        await RemoveSideEffectsAsync(
+            invoice,
+            removeItemMovements: true,
+            cancellationToken);
         dbContext.InvoiceLines.RemoveRange(invoice.Lines);
         dbContext.InvoiceContainerLines.RemoveRange(invoice.ContainerLines);
         dbContext.Invoices.Remove(invoice);
         try
         {
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            var costingError = await inventoryCostingService.RecalculateAsync(
+                costingKeys,
+                cancellationToken);
+            if (costingError is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result.Failure(costingError);
+            }
+
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)

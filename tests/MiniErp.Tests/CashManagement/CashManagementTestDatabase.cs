@@ -127,6 +127,12 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 IsDeleted INTEGER NOT NULL
             );
 
+            CREATE TABLE CompanySettings (
+                CompanyId INTEGER NOT NULL PRIMARY KEY,
+                StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
+            );
+
             CREATE TABLE BusinessPartners (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,

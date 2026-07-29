@@ -1,3 +1,4 @@
+using System.Data;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -15,6 +16,7 @@ public sealed class StockAdjustmentService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     IInventoryStockService inventoryStockService,
+    IInventoryCostingService inventoryCostingService,
     TimeProvider timeProvider)
     : IStockAdjustmentService, IScopedService
 {
@@ -62,12 +64,25 @@ public sealed class StockAdjustmentService(
             .OrderByDescending(adjustment => adjustment.DocumentDate)
             .ThenByDescending(adjustment => adjustment.Id);
 
-        return await paginationService.PaginateAsync<
+        var result = await paginationService.PaginateAsync<
             StockAdjustment,
             StockAdjustmentListResponse>(
                 query,
                 pagination,
                 cancellationToken);
+        if (result.IsFailure)
+        {
+            return result;
+        }
+
+        var enrichedItems = await EnrichListResponsesAsync(
+            result.Value.Items,
+            cancellationToken);
+        return Result<PagedResponse<StockAdjustmentListResponse>>.Success(
+            result.Value with
+            {
+                Items = enrichedItems
+            });
     }
 
     public async Task<Result<StockAdjustmentResponse>> GetByIdAsync(
@@ -82,6 +97,12 @@ public sealed class StockAdjustmentService(
         var response = await ProjectResponseQuery(id)
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
+        if (response is not null)
+        {
+            response = await EnrichResponseAsync(
+                response,
+                cancellationToken);
+        }
 
         return response is null
             ? Result<StockAdjustmentResponse>.Failure(NotFound(id))
@@ -95,7 +116,9 @@ public sealed class StockAdjustmentService(
         var requested = request.Adapt<StockAdjustment>();
 
         await using var transaction = await dbContext.Database
-            .BeginTransactionAsync(cancellationToken);
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var preparation = await ValidateRequestAsync(
             requested.StoreId,
@@ -115,6 +138,15 @@ public sealed class StockAdjustmentService(
             return Result<StockAdjustmentResponse>.Failure(
                 DocumentNumberExists(requested.DocumentNumber));
         }
+
+        await inventoryCostingService.LockAsync(
+            request.Lines
+                .Select(line => new InventoryCostingKey(
+                    requested.StoreId,
+                    line.ItemId))
+                .Distinct()
+                .ToArray(),
+            cancellationToken);
 
         var stockError = await ValidateStockAsync(
             requested,
@@ -138,6 +170,18 @@ public sealed class StockAdjustmentService(
 
             AddMovements(requested);
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            var costingError = await inventoryCostingService.RecalculateAsync(
+                GetCostingKeys(requested),
+                cancellationToken);
+            if (costingError is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<StockAdjustmentResponse>.Failure(costingError);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateException exception)
             when (IsDocumentNumberConflict(exception))
@@ -151,6 +195,7 @@ public sealed class StockAdjustmentService(
         var response = await ProjectResponseQuery(requested.Id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
+        response = await EnrichResponseAsync(response, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
         return Result<StockAdjustmentResponse>.Success(response);
@@ -175,7 +220,9 @@ public sealed class StockAdjustmentService(
         var requested = request.Adapt<StockAdjustment>();
 
         await using var transaction = await dbContext.Database
-            .BeginTransactionAsync(cancellationToken);
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var adjustment = await LoadForWriteAsync(id, cancellationToken);
         if (adjustment is null)
@@ -216,6 +263,20 @@ public sealed class StockAdjustmentService(
         var replacedMovement = MovementReference(
             adjustment.Id,
             adjustment.DocumentNumber);
+        var oldMovements = await LoadMovementsAsync(
+            adjustment.Id,
+            adjustment.DocumentNumber,
+            cancellationToken);
+        var oldCostingKeys = GetCostingKeys(oldMovements);
+        await inventoryCostingService.LockAsync(
+            oldCostingKeys
+                .Concat(request.Lines.Select(line =>
+                    new InventoryCostingKey(
+                        requested.StoreId,
+                        line.ItemId)))
+                .Distinct()
+                .ToArray(),
+            cancellationToken);
         var stockError = await ValidateStockAsync(
             requested,
             request.Lines,
@@ -238,17 +299,25 @@ public sealed class StockAdjustmentService(
         adjustment.Touch(timeProvider.GetUtcNow().UtcDateTime);
         entry.Property(item => item.LastModifiedAt).IsModified = true;
 
-        var oldMovements = await LoadMovementsAsync(
-            adjustment.Id,
-            replacedMovement.ReferenceNumber,
-            cancellationToken);
-        dbContext.ItemMovements.RemoveRange(oldMovements);
+        ReconcileMovements(adjustment, oldMovements);
 
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            AddMovements(adjustment);
+            var costingError = await inventoryCostingService.RecalculateAsync(
+                oldCostingKeys
+                    .Concat(GetCostingKeys(adjustment))
+                    .Distinct()
+                    .ToArray(),
+                cancellationToken);
+            if (costingError is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<StockAdjustmentResponse>.Failure(costingError);
+            }
+
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
@@ -269,6 +338,7 @@ public sealed class StockAdjustmentService(
         var response = await ProjectResponseQuery(id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
+        response = await EnrichResponseAsync(response, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
         return Result<StockAdjustmentResponse>.Success(response);
@@ -284,7 +354,9 @@ public sealed class StockAdjustmentService(
         }
 
         await using var transaction = await dbContext.Database
-            .BeginTransactionAsync(cancellationToken);
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var adjustment = await LoadForWriteAsync(id, cancellationToken);
         if (adjustment is null)
@@ -296,6 +368,15 @@ public sealed class StockAdjustmentService(
         {
             return Result.Failure(GeneratedAdjustmentImmutable());
         }
+
+        var movements = await LoadMovementsAsync(
+            adjustment.Id,
+            adjustment.DocumentNumber,
+            cancellationToken);
+        var costingKeys = GetCostingKeys(movements);
+        await inventoryCostingService.LockAsync(
+            costingKeys,
+            cancellationToken);
 
         var stockError = await inventoryStockService.ValidateTimelineAsync(
             new InventoryStockProposal(
@@ -317,16 +398,24 @@ public sealed class StockAdjustmentService(
         var entry = dbContext.Entry(adjustment);
         adjustment.Touch(timeProvider.GetUtcNow().UtcDateTime);
         entry.Property(item => item.LastModifiedAt).IsModified = true;
-        var movements = await LoadMovementsAsync(
-            adjustment.Id,
-            adjustment.DocumentNumber,
-            cancellationToken);
         dbContext.ItemMovements.RemoveRange(movements);
         dbContext.StockAdjustmentLines.RemoveRange(adjustment.Lines);
         dbContext.StockAdjustments.Remove(adjustment);
 
         try
         {
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            var costingError = await inventoryCostingService.RecalculateAsync(
+                costingKeys,
+                cancellationToken);
+            if (costingError is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result.Failure(costingError);
+            }
+
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
@@ -346,6 +435,118 @@ public sealed class StockAdjustmentService(
                 adjustment.CompanyId == companyId &&
                 adjustment.Id == id)
             .ProjectToType<StockAdjustmentResponse>();
+
+    private async Task<StockAdjustmentResponse> EnrichResponseAsync(
+        StockAdjustmentResponse response,
+        CancellationToken cancellationToken)
+    {
+        var snapshots = await LoadCostSnapshotsAsync(
+            [response.Id],
+            cancellationToken);
+        return response with
+        {
+            Lines = response.Lines
+                .Select(line => EnrichLine(
+                    response.Id,
+                    line,
+                    snapshots))
+                .ToArray()
+        };
+    }
+
+    private async Task<IReadOnlyList<StockAdjustmentListResponse>>
+        EnrichListResponsesAsync(
+            IReadOnlyList<StockAdjustmentListResponse> responses,
+            CancellationToken cancellationToken)
+    {
+        var snapshots = await LoadCostSnapshotsAsync(
+            responses.Select(response => response.Id).ToArray(),
+            cancellationToken);
+        return responses
+            .Select(response => response with
+            {
+                Lines = response.Lines
+                    .Select(line => EnrichLine(
+                        response.Id,
+                        line,
+                        snapshots))
+                    .ToArray()
+            })
+            .ToArray();
+    }
+
+    private async Task<IReadOnlyDictionary<
+        (int ReferenceId, int ItemId),
+        MovementCostSnapshot>> LoadCostSnapshotsAsync(
+            IReadOnlyCollection<int> adjustmentIds,
+            CancellationToken cancellationToken)
+    {
+        if (adjustmentIds.Count == 0)
+        {
+            return new Dictionary<
+                (int ReferenceId, int ItemId),
+                MovementCostSnapshot>();
+        }
+
+        var movementTypes = AdjustmentMovementTypes;
+        var movements = await dbContext.ItemMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movementTypes.Contains(movement.MovementType) &&
+                adjustmentIds.Contains(movement.ReferenceId))
+            .Select(movement => new MovementCostSnapshot(
+                movement.ReferenceId,
+                movement.ItemId,
+                movement.CostStatus,
+                movement.PendingCostQuantity,
+                movement.UnitCost,
+                movement.TotalCost,
+                movement.QuantityAfter,
+                movement.AverageCostAfter,
+                movement.InventoryValueAfter))
+            .ToListAsync(cancellationToken);
+
+        return movements.ToDictionary(
+            movement => (movement.ReferenceId, movement.ItemId));
+    }
+
+    private static StockAdjustmentLineResponse EnrichLine(
+        int adjustmentId,
+        StockAdjustmentLineResponse line,
+        IReadOnlyDictionary<
+            (int ReferenceId, int ItemId),
+            MovementCostSnapshot> snapshots)
+    {
+        if (!snapshots.TryGetValue(
+                (adjustmentId, line.ItemId),
+                out var snapshot))
+        {
+            return line;
+        }
+
+        return line with
+        {
+            CostStatus = snapshot.CostStatus,
+            PendingCostQuantity = snapshot.PendingCostQuantity,
+            UnitCost = line.UnitCost ?? snapshot.UnitCost,
+            InventoryTotalCost = snapshot.TotalCost,
+            QuantityAfter = snapshot.QuantityAfter,
+            AverageCostAfter = snapshot.AverageCostAfter,
+            InventoryValueAfter = snapshot.InventoryValueAfter
+        };
+    }
+
+    private sealed record MovementCostSnapshot(
+        int ReferenceId,
+        int ItemId,
+        InventoryCostStatus CostStatus,
+        decimal PendingCostQuantity,
+        decimal? UnitCost,
+        decimal TotalCost,
+        decimal QuantityAfter,
+        decimal AverageCostAfter,
+        decimal InventoryValueAfter);
 
     private Task<StockAdjustment?> LoadForWriteAsync(
         int id,
@@ -383,6 +584,35 @@ public sealed class StockAdjustmentService(
                     "StockAdjustments.LinesInvalid",
                     "يجب إرسال سطور تسوية صحيحة بأصناف غير مكررة وكميات موجبة.",
                     nameof(StockAdjustmentRequest.Lines)));
+        }
+
+        if (direction == StockAdjustmentDirection.Increase &&
+            lines.Any(line => !line.UnitCost.HasValue))
+        {
+            return Result<IReadOnlyDictionary<int, ItemSnapshot>>.Failure(
+                Error.Validation(
+                    "StockAdjustments.UnitCostRequired",
+                    "يجب إدخال تكلفة الوحدة لكل سطر عند زيادة المخزون.",
+                    nameof(StockAdjustmentLineRequest.UnitCost)));
+        }
+
+        if (direction == StockAdjustmentDirection.Decrease &&
+            lines.Any(line => line.UnitCost.HasValue))
+        {
+            return Result<IReadOnlyDictionary<int, ItemSnapshot>>.Failure(
+                Error.Validation(
+                    "StockAdjustments.UnitCostNotAllowed",
+                    "لا يجوز إدخال تكلفة الوحدة في تسوية الخصم؛ يستخدم الخادم متوسط التكلفة الحالي.",
+                    nameof(StockAdjustmentLineRequest.UnitCost)));
+        }
+
+        if (lines.Any(line => line.UnitCost < 0m))
+        {
+            return Result<IReadOnlyDictionary<int, ItemSnapshot>>.Failure(
+                Error.Validation(
+                    "StockAdjustments.UnitCostInvalid",
+                    "يجب ألا تقل تكلفة الوحدة عن صفر.",
+                    nameof(StockAdjustmentLineRequest.UnitCost)));
         }
 
         var store = await dbContext.Stores
@@ -483,6 +713,10 @@ public sealed class StockAdjustmentService(
             var line = request.Adapt<StockAdjustmentLine>();
             line.CompanyId = companyId;
             line.ItemUnitId = item.ItemUnitId;
+            line.UnitCost =
+                adjustment.Direction == StockAdjustmentDirection.Increase
+                    ? request.UnitCost
+                    : null;
             adjustment.Lines.Add(line);
         }
     }
@@ -506,6 +740,10 @@ public sealed class StockAdjustmentService(
 
             existingLine.ItemUnitId = items[incoming.ItemId].ItemUnitId;
             existingLine.Quantity = incoming.Quantity;
+            existingLine.UnitCost =
+                adjustment.Direction == StockAdjustmentDirection.Increase
+                    ? incoming.UnitCost
+                    : null;
             existingLine.Reason = string.IsNullOrWhiteSpace(incoming.Reason)
                 ? null
                 : incoming.Reason.Trim();
@@ -520,6 +758,10 @@ public sealed class StockAdjustmentService(
             var line = incoming.Adapt<StockAdjustmentLine>();
             line.CompanyId = companyId;
             line.ItemUnitId = items[incoming.ItemId].ItemUnitId;
+            line.UnitCost =
+                adjustment.Direction == StockAdjustmentDirection.Increase
+                    ? incoming.UnitCost
+                    : null;
             adjustment.Lines.Add(line);
         }
     }
@@ -575,6 +817,61 @@ public sealed class StockAdjustmentService(
         }
     }
 
+    private void ReconcileMovements(
+        StockAdjustment adjustment,
+        IReadOnlyCollection<ItemMovement> existingMovements)
+    {
+        var activeLines = adjustment.Lines
+            .Where(line => !line.IsDeleted)
+            .ToDictionary(line => line.ItemId);
+        var existingItemIds = new HashSet<int>();
+        var inbound = StockAdjustmentMovementRules.IsInbound(
+            adjustment.Direction);
+        var movementType = StockAdjustmentMovementRules.GetMovementType(
+            adjustment.Direction);
+
+        foreach (var movement in existingMovements)
+        {
+            if (!activeLines.TryGetValue(movement.ItemId, out var line))
+            {
+                dbContext.ItemMovements.Remove(movement);
+                continue;
+            }
+
+            existingItemIds.Add(line.ItemId);
+            movement.StoreId = adjustment.StoreId;
+            movement.ItemUnitId = line.ItemUnitId;
+            movement.MovementType = movementType;
+            movement.ReferenceNumber = adjustment.DocumentNumber;
+            movement.MovementDate = adjustment.DocumentDate;
+            movement.QuantityIn = inbound ? line.Quantity : 0m;
+            movement.QuantityOut = inbound ? 0m : line.Quantity;
+            movement.Description =
+                $"Stock adjustment {adjustment.DocumentNumber}";
+        }
+
+        foreach (var line in activeLines.Values.Where(line =>
+                     !existingItemIds.Contains(line.ItemId)))
+        {
+            dbContext.ItemMovements.Add(
+                new ItemMovement
+                {
+                    CompanyId = companyId,
+                    StoreId = adjustment.StoreId,
+                    ItemId = line.ItemId,
+                    ItemUnitId = line.ItemUnitId,
+                    MovementType = movementType,
+                    ReferenceId = adjustment.Id,
+                    ReferenceNumber = adjustment.DocumentNumber,
+                    MovementDate = adjustment.DocumentDate,
+                    QuantityIn = inbound ? line.Quantity : 0m,
+                    QuantityOut = inbound ? 0m : line.Quantity,
+                    Description =
+                        $"Stock adjustment {adjustment.DocumentNumber}"
+                });
+        }
+    }
+
     private Task<List<ItemMovement>> LoadMovementsAsync(
         int adjustmentId,
         string documentNumber,
@@ -586,6 +883,25 @@ public sealed class StockAdjustmentService(
                 movement.ReferenceId == adjustmentId &&
                 movement.ReferenceNumber == documentNumber)
             .ToListAsync(cancellationToken);
+
+    private static IReadOnlyCollection<InventoryCostingKey> GetCostingKeys(
+        StockAdjustment adjustment) =>
+        adjustment.Lines
+            .Where(line => !line.IsDeleted)
+            .Select(line => new InventoryCostingKey(
+                adjustment.StoreId,
+                line.ItemId))
+            .Distinct()
+            .ToArray();
+
+    private static IReadOnlyCollection<InventoryCostingKey> GetCostingKeys(
+        IEnumerable<ItemMovement> movements) =>
+        movements
+            .Select(movement => new InventoryCostingKey(
+                movement.StoreId,
+                movement.ItemId))
+            .Distinct()
+            .ToArray();
 
     private static InventoryMovementReference MovementReference(
         int adjustmentId,

@@ -1,4 +1,5 @@
 using FluentValidation;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.Companies;
 
@@ -30,5 +31,8 @@ public sealed class CompanyRequestValidator : AbstractValidator<CompanyRequest>
             .NotEmpty()
             .Must(value => value is null || value.Trim().Length <= 200)
             .WithMessage("يجب ألا يتجاوز طول اسم المدير 200 حرفًا.");
+        RuleFor(request => request.StockBalanceCheckMode)
+            .Must(mode => !mode.HasValue || Enum.IsDefined(mode.Value))
+            .WithMessage("Stock balance check mode is invalid.");
     }
 }

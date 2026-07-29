@@ -16,7 +16,26 @@ public sealed record InvoiceLineResponse(
     decimal Quantity,
     decimal Price,
     decimal Total,
-    string? Notes);
+    string? Notes)
+{
+    public int? SourceInvoiceLineId { get; init; }
+
+    public decimal? ReturnUnitCost { get; init; }
+
+    public InventoryCostStatus? CostStatus { get; init; }
+
+    public decimal PendingCostQuantity { get; init; }
+
+    public decimal? UnitCost { get; init; }
+
+    public decimal InventoryTotalCost { get; init; }
+
+    public decimal QuantityAfter { get; init; }
+
+    public decimal AverageCostAfter { get; init; }
+
+    public decimal InventoryValueAfter { get; init; }
+}
 
 public sealed record InvoiceContainerLineResponse(
     int Id,
@@ -79,7 +98,9 @@ public sealed record InvoiceItemBalanceResponse(
     int ItemUnitId,
     string ItemUnitName,
     DateOnly AsOfDate,
-    decimal Balance);
+    decimal Balance,
+    decimal AverageCost,
+    decimal InventoryValue);
 
 public sealed record InvoicePagedResponse(
     IReadOnlyList<InvoiceListResponse> Items,

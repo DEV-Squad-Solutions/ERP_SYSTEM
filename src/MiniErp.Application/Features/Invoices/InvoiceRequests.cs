@@ -7,7 +7,12 @@ public sealed record InvoiceLineRequest(
     int Count,
     decimal Weight,
     decimal Price,
-    string? Notes);
+    string? Notes)
+{
+    public int? SourceInvoiceLineId { get; init; }
+
+    public decimal? ReturnUnitCost { get; init; }
+}
 
 public sealed record InvoiceContainerLineRequest(
     int ContainerId,

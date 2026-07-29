@@ -4,6 +4,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Invoicing;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Infrastructure.Services.Invoices;
 
@@ -305,6 +306,12 @@ public sealed partial class InvoiceService
             asOfDate,
             excludedMovement,
             cancellationToken);
+        var costSnapshots = await inventoryCostingService.GetSnapshotsAsync(
+            storeId,
+            [itemId],
+            asOfDate,
+            cancellationToken);
+        var costSnapshot = costSnapshots[itemId];
 
         return Result<InvoiceItemBalanceResponse>.Success(
             new InvoiceItemBalanceResponse(
@@ -315,7 +322,9 @@ public sealed partial class InvoiceService
                 item.ItemUnitId,
                 item.ItemUnitName,
                 asOfDate,
-                balances[itemId]));
+                balances[itemId],
+                costSnapshot.AverageCost,
+                costSnapshot.InventoryValue));
     }
 
     private IQueryable<InvoiceResponse> ProjectResponseQuery(int id) =>
@@ -324,6 +333,67 @@ public sealed partial class InvoiceService
                 invoice.CompanyId == companyId &&
                 invoice.Id == id)
             .ProjectToType<InvoiceResponse>();
+
+    private async Task<InvoiceResponse?> GetResponseAsync(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        var response = await ProjectResponseQuery(id)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken);
+        if (response is null)
+        {
+            return null;
+        }
+
+        var movementTypes = InvoiceItemMovementTypes;
+        var movements = await dbContext.ItemMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movementTypes.Contains(movement.MovementType) &&
+                movement.ReferenceId == id)
+            .Select(movement => new InvoiceLineCostSnapshot(
+                movement.ItemId,
+                movement.CostStatus,
+                movement.PendingCostQuantity,
+                movement.UnitCost,
+                movement.TotalCost,
+                movement.QuantityAfter,
+                movement.AverageCostAfter,
+                movement.InventoryValueAfter))
+            .ToDictionaryAsync(
+                movement => movement.ItemId,
+                cancellationToken);
+
+        return response with
+        {
+            Lines = response.Lines
+                .Select(line =>
+                {
+                    if (!movements.TryGetValue(
+                            line.ItemId,
+                            out var movement))
+                    {
+                        return line;
+                    }
+
+                    return line with
+                    {
+                        CostStatus = movement.CostStatus,
+                        PendingCostQuantity =
+                            movement.PendingCostQuantity,
+                        UnitCost = movement.UnitCost,
+                        InventoryTotalCost = movement.TotalCost,
+                        QuantityAfter = movement.QuantityAfter,
+                        AverageCostAfter = movement.AverageCostAfter,
+                        InventoryValueAfter =
+                            movement.InventoryValueAfter
+                    };
+                })
+                .ToArray()
+        };
+    }
 
     private async Task<Invoice?> LoadForWriteAsync(
         int id,
@@ -337,4 +407,28 @@ public sealed partial class InvoiceService
                     invoice.CompanyId == companyId &&
                     invoice.Id == id,
                 cancellationToken);
+
+    private Task<bool> HasActiveLinkedSalesReturnsAsync(
+        IReadOnlyCollection<int> sourceLineIds,
+        CancellationToken cancellationToken) =>
+        sourceLineIds.Count > 0
+            ? dbContext.InvoiceLines.AnyAsync(
+                line =>
+                    line.CompanyId == companyId &&
+                    line.SourceInvoiceLineId.HasValue &&
+                    sourceLineIds.Contains(
+                        line.SourceInvoiceLineId.Value) &&
+                    line.Invoice.InvoiceType == InvoiceType.SalesReturn,
+                cancellationToken)
+            : Task.FromResult(false);
+
+    private sealed record InvoiceLineCostSnapshot(
+        int ItemId,
+        InventoryCostStatus CostStatus,
+        decimal PendingCostQuantity,
+        decimal? UnitCost,
+        decimal TotalCost,
+        decimal QuantityAfter,
+        decimal AverageCostAfter,
+        decimal InventoryValueAfter);
 }

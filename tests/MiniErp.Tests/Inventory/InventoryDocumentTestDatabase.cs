@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
+using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
 using MiniErp.Infrastructure.Services.Inventory;
@@ -52,12 +53,17 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
         var stockService = new InventoryStockService(
             Context,
             currentCompany);
+        var costingService = new InventoryCostingService(
+            Context,
+            currentCompany,
+            TimeProvider.System);
 
         return new StockAdjustmentService(
             Context,
             new PaginationService(),
             currentCompany,
             stockService,
+            costingService,
             TimeProvider.System);
     }
 
@@ -68,14 +74,25 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
         var stockService = new InventoryStockService(
             Context,
             currentCompany);
+        var costingService = new InventoryCostingService(
+            Context,
+            currentCompany,
+            TimeProvider.System);
 
         return new InventoryCountService(
             Context,
             new PaginationService(),
             currentCompany,
             stockService,
+            costingService,
             TimeProvider.System);
     }
+
+    public Task SetStockBalanceCheckModeAsync(
+        StockBalanceCheckMode mode,
+        int companyId = 1) =>
+        Context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO CompanySettings (CompanyId, StockBalanceCheckMode) VALUES ({companyId}, {(int)mode}) ON CONFLICT(CompanyId) DO UPDATE SET StockBalanceCheckMode = excluded.StockBalanceCheckMode;");
 
     public async ValueTask DisposeAsync()
     {
@@ -105,6 +122,12 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
                 DeletedOn TEXT NULL,
                 DeletedByPc TEXT NULL,
                 IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE TABLE CompanySettings (
+                CompanyId INTEGER NOT NULL PRIMARY KEY,
+                StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
             );
 
             CREATE TABLE Stores (
@@ -221,6 +244,13 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
                 MovementDate TEXT NOT NULL,
                 QuantityIn NUMERIC NOT NULL,
                 QuantityOut NUMERIC NOT NULL,
+                CostStatus INTEGER NOT NULL DEFAULT 1,
+                PendingCostQuantity NUMERIC NOT NULL DEFAULT 0,
+                UnitCost NUMERIC NULL,
+                TotalCost NUMERIC NOT NULL DEFAULT 0,
+                QuantityAfter NUMERIC NOT NULL DEFAULT 0,
+                AverageCostAfter NUMERIC NOT NULL DEFAULT 0,
+                InventoryValueAfter NUMERIC NOT NULL DEFAULT 0,
                 Description TEXT NULL,
                 CreatedById TEXT NOT NULL,
                 CreatedOn TEXT NOT NULL,
@@ -232,6 +262,49 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
                 DeletedOn TEXT NULL,
                 DeletedByPc TEXT NULL,
                 IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE UNIQUE INDEX UX_ItemMovements_Company_Id
+            ON ItemMovements (CompanyId, Id);
+
+            CREATE TABLE InventoryCostAllocations (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                StoreId INTEGER NOT NULL,
+                ItemId INTEGER NOT NULL,
+                OutboundMovementId INTEGER NOT NULL,
+                InboundMovementId INTEGER NOT NULL,
+                Quantity NUMERIC NOT NULL,
+                UnitCost NUMERIC NOT NULL,
+                TotalCost NUMERIC NOT NULL,
+                CreatedOn TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX UX_InventoryCostAllocations_Pair
+            ON InventoryCostAllocations (
+                CompanyId,
+                OutboundMovementId,
+                InboundMovementId);
+
+            CREATE TABLE ItemStoreBalances (
+                CompanyId INTEGER NOT NULL,
+                StoreId INTEGER NOT NULL,
+                ItemId INTEGER NOT NULL,
+                Quantity NUMERIC NOT NULL DEFAULT 0,
+                AverageCost NUMERIC NOT NULL DEFAULT 0,
+                InventoryValue NUMERIC NOT NULL DEFAULT 0,
+                RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL,
+                PRIMARY KEY (CompanyId, StoreId, ItemId)
             );
 
             CREATE TABLE InventoryCounts (
@@ -327,6 +400,7 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
                 ItemId INTEGER NOT NULL,
                 ItemUnitId INTEGER NOT NULL,
                 Quantity NUMERIC NOT NULL CHECK (Quantity > 0),
+                UnitCost NUMERIC NULL,
                 Reason TEXT NULL,
                 CreatedById TEXT NOT NULL,
                 CreatedOn TEXT NOT NULL,
@@ -421,6 +495,18 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
                 CreatedById, CreatedOn, CreatedByPc, IsDeleted)
             VALUES
                 (1, 1, 1, 1, 1, 1, 10, 10, 0, 0, NULL,
+                 'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO ItemMovements (
+                Id, CompanyId, StoreId, ItemId, ItemUnitId, MovementType,
+                ReferenceId, ReferenceNumber, MovementDate, QuantityIn,
+                QuantityOut, CostStatus, PendingCostQuantity, UnitCost,
+                TotalCost, QuantityAfter, AverageCostAfter,
+                InventoryValueAfter, Description, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 1, 1, 1, 5, 1, 'OPEN-1', '2026-01-01', 10,
+                 0, 1, 0, 0, 0, 10, 0, 0, 'Opening balance OPEN-1',
                  'test', '2026-01-01', 'test', 0);
             """);
     }

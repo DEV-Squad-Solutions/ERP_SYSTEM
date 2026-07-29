@@ -131,6 +131,73 @@ public sealed partial class InvoiceService
                     nameof(InvoiceRequest.InvoiceType)));
         }
 
+        if (invoice.InvoiceType != InvoiceType.SalesReturn &&
+            lines.Any(line =>
+                line.SourceInvoiceLineId.HasValue ||
+                line.ReturnUnitCost.HasValue))
+        {
+            return Failure(
+                Error.Validation(
+                    "Invoices.ReturnCostFieldsNotAllowed",
+                    "حقول تكلفة المرتجع مسموحة فقط في فاتورة مرتجع البيع.",
+                    nameof(InvoiceLineRequest.ReturnUnitCost)));
+        }
+
+        if (lines.Any(line => line.ReturnUnitCost < 0m))
+        {
+            return Failure(
+                Error.Validation(
+                    "Invoices.ReturnUnitCostInvalid",
+                    "يجب ألا تقل تكلفة وحدة المرتجع عن صفر.",
+                    nameof(InvoiceLineRequest.ReturnUnitCost)));
+        }
+
+        if (invoice.InvoiceType == InvoiceType.SalesReturn)
+        {
+            var linkedLineIds = lines
+                .Where(line => line.SourceInvoiceLineId.HasValue)
+                .Select(line => line.SourceInvoiceLineId!.Value)
+                .Distinct()
+                .ToArray();
+            if (linkedLineIds.Length > 0)
+            {
+                var validSources = await dbContext.InvoiceLines
+                    .AsNoTracking()
+                    .Where(source =>
+                        source.CompanyId == companyId &&
+                        linkedLineIds.Contains(source.Id) &&
+                        source.Invoice.CompanyId == companyId &&
+                        source.Invoice.InvoiceType == InvoiceType.Sales &&
+                        source.Invoice.StoreId == invoice.StoreId)
+                    .Select(source => new
+                    {
+                        source.Id,
+                        source.ItemId
+                    })
+                    .ToListAsync(cancellationToken);
+                var validById = validSources.ToDictionary(
+                    source => source.Id,
+                    source => source.ItemId);
+
+                var invalidLinkedLines = lines.Where(line =>
+                        line.SourceInvoiceLineId.HasValue &&
+                        (!validById.TryGetValue(
+                             line.SourceInvoiceLineId.Value,
+                             out var sourceItemId) ||
+                         sourceItemId != line.ItemId))
+                    .Select(line => line.ItemId)
+                    .ToArray();
+                if (invalidLinkedLines.Length > 0)
+                {
+                    return Failure(
+                        Error.Validation(
+                            "Invoices.InvalidSalesReturnSource",
+                            "يجب أن يشير مرتجع البيع إلى سطر بيع أصلي لنفس الشركة والمخزن والصنف.",
+                            nameof(InvoiceLineRequest.SourceInvoiceLineId)));
+                }
+            }
+        }
+
         if (!Enum.IsDefined(typeof(PaymentTerm), invoice.PaymentTerm))
         {
             return Failure(

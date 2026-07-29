@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
+using MiniErp.Domain.Enums;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Infrastructure.Persistence;
 
@@ -12,6 +13,7 @@ public sealed class InventoryStockService(
     : IInventoryStockService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
+    private StockBalanceCheckMode? balanceCheckMode;
 
     public async Task<IReadOnlyDictionary<int, decimal>> GetBalancesAsync(
         int storeId,
@@ -26,14 +28,22 @@ public sealed class InventoryStockService(
             return new Dictionary<int, decimal>();
         }
 
-        var openingBalances = await dbContext.StockOpeningBalanceLines
+        var legacyOpeningBalances = await dbContext.StockOpeningBalanceLines
             .AsNoTracking()
             .Where(line =>
                 line.CompanyId == companyId &&
                 distinctItemIds.Contains(line.ItemId) &&
                 line.StockOpeningBalance.CompanyId == companyId &&
                 line.StockOpeningBalance.StoreId == storeId &&
-                line.StockOpeningBalance.DocumentDate <= asOfDate)
+                line.StockOpeningBalance.DocumentDate <= asOfDate &&
+                !dbContext.ItemMovements.Any(movement =>
+                    movement.CompanyId == companyId &&
+                    movement.StoreId == storeId &&
+                    movement.ItemId == line.ItemId &&
+                    movement.MovementType ==
+                        ItemMovementType.OpeningBalance &&
+                    movement.ReferenceId ==
+                        line.StockOpeningBalanceId))
             .GroupBy(line => line.ItemId)
             .Select(group => new
             {
@@ -73,7 +83,7 @@ public sealed class InventoryStockService(
         return distinctItemIds.ToDictionary(
             itemId => itemId,
             itemId =>
-                openingBalances.GetValueOrDefault(itemId) +
+                legacyOpeningBalances.GetValueOrDefault(itemId) +
                 movementBalances.GetValueOrDefault(itemId));
     }
 
@@ -81,16 +91,42 @@ public sealed class InventoryStockService(
         InventoryStockProposal proposal,
         CancellationToken cancellationToken = default)
     {
+        if (proposal.IsInbound && proposal.ReplacedMovement is null)
+        {
+            return null;
+        }
+
+        var mode = await GetBalanceCheckModeAsync(cancellationToken);
+        if (mode == StockBalanceCheckMode.None)
+        {
+            return null;
+        }
+
+        if (mode is StockBalanceCheckMode.DateCheck or StockBalanceCheckMode.Both)
+        {
+            var dateError = await ValidateDateBalanceAsync(
+                proposal,
+                cancellationToken);
+            if (dateError is not null)
+            {
+                return dateError;
+            }
+        }
+
+        return mode is StockBalanceCheckMode.FinalCheck or StockBalanceCheckMode.Both
+            ? await ValidateFinalBalanceAsync(proposal, cancellationToken)
+            : null;
+    }
+
+    private async Task<Error?> ValidateDateBalanceAsync(
+        InventoryStockProposal proposal,
+        CancellationToken cancellationToken)
+    {
         var requestedByItem = proposal.Lines
             .GroupBy(line => line.ItemId)
             .ToDictionary(
                 group => group.Key,
                 group => group.Sum(line => line.Quantity));
-
-        if (proposal.IsInbound && proposal.ReplacedMovement is null)
-        {
-            return null;
-        }
 
         var currentMovements = await LoadCurrentMovementKeysAsync(
             proposal.ReplacedMovement,
@@ -154,13 +190,22 @@ public sealed class InventoryStockService(
             })
             .ToListAsync(cancellationToken);
 
-        var openingBalances = await dbContext.StockOpeningBalanceLines
+        var legacyOpeningBalances = await dbContext.StockOpeningBalanceLines
             .AsNoTracking()
             .Where(line =>
                 line.CompanyId == companyId &&
                 line.StockOpeningBalance.CompanyId == companyId &&
                 storeIds.Contains(line.StockOpeningBalance.StoreId) &&
-                itemIds.Contains(line.ItemId))
+                itemIds.Contains(line.ItemId) &&
+                !dbContext.ItemMovements.Any(movement =>
+                    movement.CompanyId == companyId &&
+                    movement.StoreId ==
+                        line.StockOpeningBalance.StoreId &&
+                    movement.ItemId == line.ItemId &&
+                    movement.MovementType ==
+                        ItemMovementType.OpeningBalance &&
+                    movement.ReferenceId ==
+                        line.StockOpeningBalanceId))
             .Select(line => new
             {
                 line.Id,
@@ -182,7 +227,7 @@ public sealed class InventoryStockService(
             var events = new List<StockEvent>();
 
             events.AddRange(
-                openingBalances
+                legacyOpeningBalances
                     .Where(line =>
                         line.StoreId == storeId &&
                         line.ItemId == itemId)
@@ -281,6 +326,122 @@ public sealed class InventoryStockService(
         }
 
         return null;
+    }
+
+    private async Task<Error?> ValidateFinalBalanceAsync(
+        InventoryStockProposal proposal,
+        CancellationToken cancellationToken)
+    {
+        var requestedByItem = proposal.Lines
+            .GroupBy(line => line.ItemId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Sum(line => line.Quantity));
+
+        var currentMovements = await LoadCurrentMovementKeysAsync(
+            proposal.ReplacedMovement,
+            cancellationToken);
+        var affectedStockKeys = currentMovements.ToHashSet();
+        foreach (var itemId in requestedByItem.Keys)
+        {
+            affectedStockKeys.Add((proposal.StoreId, itemId));
+        }
+
+        if (affectedStockKeys.Count == 0)
+        {
+            return null;
+        }
+
+        var itemIds = affectedStockKeys
+            .Select(key => key.ItemId)
+            .Distinct()
+            .ToArray();
+        var itemNames = await dbContext.Items
+            .AsNoTracking()
+            .Where(item =>
+                item.CompanyId == companyId &&
+                itemIds.Contains(item.Id))
+            .Select(item => new
+            {
+                item.Id,
+                item.Name
+            })
+            .ToDictionaryAsync(
+                item => item.Id,
+                item => item.Name,
+                cancellationToken);
+
+        foreach (var storeId in affectedStockKeys
+                     .Select(key => key.StoreId)
+                     .Distinct())
+        {
+            var storeItemIds = affectedStockKeys
+                .Where(key => key.StoreId == storeId)
+                .Select(key => key.ItemId)
+                .Distinct()
+                .ToArray();
+            var balances = await GetBalancesAsync(
+                storeId,
+                storeItemIds,
+                DateOnly.MaxValue,
+                proposal.ReplacedMovement,
+                cancellationToken);
+
+            foreach (var itemId in storeItemIds)
+            {
+                var requestedQuantity =
+                    storeId == proposal.StoreId
+                        ? requestedByItem.GetValueOrDefault(itemId)
+                        : 0m;
+                var proposedDelta = proposal.IsInbound
+                    ? requestedQuantity
+                    : -requestedQuantity;
+                var finalBalance =
+                    balances.GetValueOrDefault(itemId) + proposedDelta;
+                if (finalBalance >= 0m)
+                {
+                    continue;
+                }
+
+                var itemName = itemNames.GetValueOrDefault(itemId) ??
+                    itemId.ToString();
+                if (!proposal.IsInbound && requestedQuantity > 0m &&
+                    storeId == proposal.StoreId)
+                {
+                    return Error.Conflict(
+                        "Inventory.InsufficientStock",
+                        $"ظ„ط§ ظٹظˆط¬ط¯ ط±طµظٹط¯ ظƒط§ظپظچ ظ„ظ„طµظ†ظپ {itemName} (ط±ظ‚ظ… {itemId}) " +
+                        $"ظپظٹ ط§ظ„ظ…ط®ط²ظ† {storeId} ظ„طھظ†ظپظٹط° ط§ظ„ط­ط±ظƒط©. " +
+                        $"ط§ظ„ط±طµظٹط¯ ط§ظ„ظ†ظ‡ط§ط¦ظٹ ط§ظ„ظ…طھظˆظ‚ط¹ {finalBalance}.",
+                        proposal.ErrorFieldName);
+                }
+
+                return Error.Conflict(
+                    "Inventory.HistoricalStockConflict",
+                    $"ط§ظ„طھط¹ط¯ظٹظ„ ط³ظٹط¤ط¯ظٹ ط¥ظ„ظ‰ ط±طµظٹط¯ ظ†ظ‡ط§ط¦ظٹ ط³ط§ظ„ط¨ ظ„ظ„طµظ†ظپ {itemName} " +
+                    $"(ط±ظ‚ظ… {itemId}) ظپظٹ ط§ظ„ظ…ط®ط²ظ† {storeId}.",
+                    proposal.ErrorFieldName);
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<StockBalanceCheckMode> GetBalanceCheckModeAsync(
+        CancellationToken cancellationToken)
+    {
+        if (balanceCheckMode.HasValue)
+        {
+            return balanceCheckMode.Value;
+        }
+
+        balanceCheckMode = await dbContext.CompanySettings
+            .AsNoTracking()
+            .Where(settings => settings.CompanyId == companyId)
+            .Select(settings => (StockBalanceCheckMode?)settings.StockBalanceCheckMode)
+            .SingleOrDefaultAsync(cancellationToken) ??
+            StockBalanceCheckMode.DateCheck;
+        return balanceCheckMode.Value;
     }
 
     public async Task<bool> HasStockChangesSinceAsync(

@@ -1,3 +1,5 @@
+using MiniErp.Domain.Enums;
+
 namespace MiniErp.Application.Features.Companies;
 
 public sealed record CompanyRequest(
@@ -5,4 +7,5 @@ public sealed record CompanyRequest(
     string Address,
     string CommercialRegister,
     string TaxNumber,
-    string ManagerName);
+    string ManagerName,
+    StockBalanceCheckMode? StockBalanceCheckMode = null);

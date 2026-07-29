@@ -1,3 +1,4 @@
+using System.Data;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -5,6 +6,7 @@ using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.StockOpeningBalances;
 using MiniErp.Domain.Entities.Inventory;
+using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.StockOpeningBalances;
@@ -12,7 +14,9 @@ namespace MiniErp.Infrastructure.Services.StockOpeningBalances;
 public sealed class StockOpeningBalanceService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    IInventoryCostingService inventoryCostingService,
+    IInventoryStockService inventoryStockService)
     : IStockOpeningBalanceService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -41,12 +45,24 @@ public sealed class StockOpeningBalanceService(
             .OrderByDescending(balance => balance.DocumentDate)
             .ThenByDescending(balance => balance.Id);
 
-        return await paginationService.PaginateAsync<
+        var pageResult = await paginationService.PaginateAsync<
             StockOpeningBalance,
             StockOpeningBalanceListResponse>(
                 query,
                 pagination,
                 cancellationToken);
+        if (pageResult.IsFailure)
+        {
+            return pageResult;
+        }
+
+        var page = pageResult.Value;
+        var enrichedItems = await EnrichListResponsesAsync(
+            page.Items,
+            cancellationToken);
+
+        return Result<PagedResponse<StockOpeningBalanceListResponse>>.Success(
+            page with { Items = enrichedItems });
     }
 
     public async Task<Result<StockOpeningBalanceResponse>> GetByIdAsync(
@@ -61,6 +77,12 @@ public sealed class StockOpeningBalanceService(
         var response = await ProjectResponseQuery(id)
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
+        if (response is not null)
+        {
+            response = await EnrichResponseAsync(
+                response,
+                cancellationToken);
+        }
 
         return response is null
             ? Result<StockOpeningBalanceResponse>.Failure(NotFound(id))
@@ -71,6 +93,11 @@ public sealed class StockOpeningBalanceService(
         StockOpeningBalanceRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
         var normalized = request.Adapt<StockOpeningBalance>();
 
         var validationResult = await ValidateRequestAsync(
@@ -82,6 +109,15 @@ public sealed class StockOpeningBalanceService(
             return Result<StockOpeningBalanceResponse>.Failure(
                 validationResult.Error);
         }
+
+        await inventoryCostingService.LockAsync(
+            request.Lines
+                .Select(line => new InventoryCostingKey(
+                    normalized.StoreId,
+                    line.ItemId))
+                .Distinct()
+                .ToArray(),
+            cancellationToken);
 
         var documentNumberExists = await dbContext.StockOpeningBalances.AnyAsync(
             balance =>
@@ -107,10 +143,27 @@ public sealed class StockOpeningBalanceService(
         dbContext.StockOpeningBalances.Add(openingBalance);
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        AddMovements(openingBalance);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var costingError = await inventoryCostingService.RecalculateAsync(
+            GetCostingKeys(openingBalance),
+            cancellationToken);
+        if (costingError is not null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<StockOpeningBalanceResponse>.Failure(costingError);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
         var response = await ProjectResponseQuery(openingBalance.Id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
+        response = await EnrichResponseAsync(response, cancellationToken);
 
+        await transaction.CommitAsync(cancellationToken);
         return Result<StockOpeningBalanceResponse>.Success(response);
     }
 
@@ -133,6 +186,11 @@ public sealed class StockOpeningBalanceService(
                     nameof(StockOpeningBalanceUpdateRequest.RowVersion)));
         }
 
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
         var normalized = request.Adapt<StockOpeningBalance>();
 
         var openingBalance = await LoadForWriteAsync(id, cancellationToken);
@@ -144,6 +202,30 @@ public sealed class StockOpeningBalanceService(
         if (!openingBalance.RowVersion.SequenceEqual(request.RowVersion))
         {
             return Result<StockOpeningBalanceResponse>.Failure(Concurrency());
+        }
+
+        var oldMovements = await LoadMovementsAsync(id, cancellationToken);
+        var oldCostingKeys = GetCostingKeys(oldMovements);
+        await inventoryCostingService.LockAsync(
+            oldCostingKeys
+                .Concat(request.Lines.Select(line =>
+                    new InventoryCostingKey(
+                        normalized.StoreId,
+                        line.ItemId)))
+                .Distinct()
+                .ToArray(),
+            cancellationToken);
+
+        var stockError = await ValidateStockAsync(
+            normalized.StoreId,
+            normalized.DocumentDate,
+            request.Lines,
+            openingBalance.Id,
+            openingBalance.DocumentNumber,
+            cancellationToken);
+        if (stockError is not null)
+        {
+            return Result<StockOpeningBalanceResponse>.Failure(stockError);
         }
 
         var validationResult = await ValidateRequestAsync(
@@ -183,9 +265,26 @@ public sealed class StockOpeningBalanceService(
         openingBalanceEntry.State = EntityState.Modified;
         openingBalanceEntry.Property(balance => balance.RowVersion)
             .OriginalValue = request.RowVersion;
+        ReconcileMovements(openingBalance, oldMovements);
 
         try
         {
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            var costingError = await inventoryCostingService.RecalculateAsync(
+                oldCostingKeys
+                    .Concat(GetCostingKeys(openingBalance))
+                    .Distinct()
+                    .ToArray(),
+                cancellationToken);
+            if (costingError is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<StockOpeningBalanceResponse>.Failure(
+                    costingError);
+            }
+
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
@@ -197,7 +296,9 @@ public sealed class StockOpeningBalanceService(
         var response = await ProjectResponseQuery(id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
+        response = await EnrichResponseAsync(response, cancellationToken);
 
+        await transaction.CommitAsync(cancellationToken);
         return Result<StockOpeningBalanceResponse>.Success(response);
     }
 
@@ -210,17 +311,52 @@ public sealed class StockOpeningBalanceService(
             return Result.Failure(InvalidId());
         }
 
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
         var openingBalance = await LoadForWriteAsync(id, cancellationToken);
         if (openingBalance is null)
         {
             return Result.Failure(NotFound(id));
         }
 
+        var movements = await LoadMovementsAsync(id, cancellationToken);
+        var costingKeys = GetCostingKeys(movements);
+        await inventoryCostingService.LockAsync(
+            costingKeys,
+            cancellationToken);
+        var stockError = await ValidateStockAsync(
+            openingBalance.StoreId,
+            openingBalance.DocumentDate,
+            [],
+            openingBalance.Id,
+            openingBalance.DocumentNumber,
+            cancellationToken);
+        if (stockError is not null)
+        {
+            return Result.Failure(stockError);
+        }
+
+        dbContext.ItemMovements.RemoveRange(movements);
         dbContext.StockOpeningBalanceLines.RemoveRange(openingBalance.Lines);
         dbContext.StockOpeningBalances.Remove(openingBalance);
 
         try
         {
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            var costingError = await inventoryCostingService.RecalculateAsync(
+                costingKeys,
+                cancellationToken);
+            if (costingError is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result.Failure(costingError);
+            }
+
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
@@ -229,6 +365,7 @@ public sealed class StockOpeningBalanceService(
             return Result.Failure(Concurrency());
         }
 
+        await transaction.CommitAsync(cancellationToken);
         return Result.Success();
     }
 
@@ -238,6 +375,92 @@ public sealed class StockOpeningBalanceService(
                 balance.CompanyId == companyId &&
                 balance.Id == id)
             .ProjectToType<StockOpeningBalanceResponse>();
+
+    private async Task<IReadOnlyList<StockOpeningBalanceListResponse>>
+        EnrichListResponsesAsync(
+            IReadOnlyList<StockOpeningBalanceListResponse> responses,
+            CancellationToken cancellationToken)
+    {
+        var costs = await LoadMovementCostsAsync(
+            responses.Select(response => response.Id).ToArray(),
+            cancellationToken);
+
+        return responses
+            .Select(response => response with
+            {
+                Lines = response.Lines
+                    .OrderBy(line => line.Id)
+                    .Select(line => ApplyCost(
+                        line,
+                        costs.GetValueOrDefault(
+                            (response.Id, line.ItemId))))
+                    .ToArray()
+            })
+            .ToArray();
+    }
+
+    private async Task<StockOpeningBalanceResponse> EnrichResponseAsync(
+        StockOpeningBalanceResponse response,
+        CancellationToken cancellationToken)
+    {
+        var costs = await LoadMovementCostsAsync(
+            [response.Id],
+            cancellationToken);
+
+        return response with
+        {
+            Lines = response.Lines
+                .OrderBy(line => line.Id)
+                .Select(line => ApplyCost(
+                    line,
+                    costs.GetValueOrDefault(
+                        (response.Id, line.ItemId))))
+                .ToArray()
+        };
+    }
+
+    private async Task<Dictionary<(int ReferenceId, int ItemId),
+        OpeningMovementCost>> LoadMovementCostsAsync(
+        IReadOnlyCollection<int> referenceIds,
+        CancellationToken cancellationToken)
+    {
+        if (referenceIds.Count == 0)
+        {
+            return [];
+        }
+
+        return await dbContext.ItemMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.MovementType == ItemMovementType.OpeningBalance &&
+                referenceIds.Contains(movement.ReferenceId))
+            .ToDictionaryAsync(
+                movement => (movement.ReferenceId, movement.ItemId),
+                movement => new OpeningMovementCost(
+                    movement.CostStatus,
+                    movement.UnitCost,
+                    movement.TotalCost,
+                    movement.QuantityAfter,
+                    movement.AverageCostAfter,
+                    movement.InventoryValueAfter),
+                cancellationToken);
+    }
+
+    private static StockOpeningBalanceLineResponse ApplyCost(
+        StockOpeningBalanceLineResponse line,
+        OpeningMovementCost? cost) =>
+        cost is null
+            ? line
+            : line with
+            {
+                CostStatus = cost.CostStatus,
+                UnitCost = cost.UnitCost,
+                InventoryTotalCost = cost.TotalCost,
+                QuantityAfter = cost.QuantityAfter,
+                AverageCostAfter = cost.AverageCostAfter,
+                InventoryValueAfter = cost.InventoryValueAfter
+            };
 
     private Task<StockOpeningBalance?> LoadForWriteAsync(
         int id,
@@ -313,6 +536,126 @@ public sealed class StockOpeningBalanceService(
             openingBalance.Lines.Add(line);
         }
     }
+
+    private void AddMovements(StockOpeningBalance openingBalance)
+    {
+        foreach (var line in openingBalance.Lines.Where(line =>
+                     !line.IsDeleted))
+        {
+            dbContext.ItemMovements.Add(
+                CreateMovement(openingBalance, line));
+        }
+    }
+
+    private void ReconcileMovements(
+        StockOpeningBalance openingBalance,
+        IReadOnlyCollection<ItemMovement> existingMovements)
+    {
+        var activeLines = openingBalance.Lines
+            .Where(line => !line.IsDeleted)
+            .ToDictionary(line => line.ItemId);
+        var existingItemIds = new HashSet<int>();
+
+        foreach (var movement in existingMovements)
+        {
+            if (!activeLines.TryGetValue(movement.ItemId, out var line))
+            {
+                dbContext.ItemMovements.Remove(movement);
+                continue;
+            }
+
+            existingItemIds.Add(line.ItemId);
+            movement.StoreId = openingBalance.StoreId;
+            movement.ItemUnitId = line.ItemUnitId;
+            movement.ReferenceNumber = openingBalance.DocumentNumber;
+            movement.MovementDate = openingBalance.DocumentDate;
+            movement.QuantityIn = line.Quantity;
+            movement.QuantityOut = 0m;
+            movement.Description =
+                $"Opening balance {openingBalance.DocumentNumber}";
+        }
+
+        foreach (var line in activeLines.Values.Where(line =>
+                     !existingItemIds.Contains(line.ItemId)))
+        {
+            dbContext.ItemMovements.Add(
+                CreateMovement(openingBalance, line));
+        }
+    }
+
+    private ItemMovement CreateMovement(
+        StockOpeningBalance openingBalance,
+        StockOpeningBalanceLine line) =>
+        new()
+        {
+            CompanyId = companyId,
+            StoreId = openingBalance.StoreId,
+            ItemId = line.ItemId,
+            ItemUnitId = line.ItemUnitId,
+            MovementType = ItemMovementType.OpeningBalance,
+            ReferenceId = openingBalance.Id,
+            ReferenceNumber = openingBalance.DocumentNumber,
+            MovementDate = openingBalance.DocumentDate,
+            QuantityIn = line.Quantity,
+            QuantityOut = 0m,
+            Description =
+                $"Opening balance {openingBalance.DocumentNumber}"
+        };
+
+    private Task<List<ItemMovement>> LoadMovementsAsync(
+        int openingBalanceId,
+        CancellationToken cancellationToken) =>
+        dbContext.ItemMovements
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.MovementType ==
+                    ItemMovementType.OpeningBalance &&
+                movement.ReferenceId == openingBalanceId)
+            .ToListAsync(cancellationToken);
+
+    private static IReadOnlyCollection<InventoryCostingKey> GetCostingKeys(
+        StockOpeningBalance openingBalance) =>
+        openingBalance.Lines
+            .Where(line => !line.IsDeleted)
+            .Select(line => new InventoryCostingKey(
+                openingBalance.StoreId,
+                line.ItemId))
+            .Distinct()
+            .ToArray();
+
+    private Task<Error?> ValidateStockAsync(
+        int storeId,
+        DateOnly movementDate,
+        IReadOnlyCollection<StockOpeningBalanceLineRequest> lines,
+        int openingBalanceId,
+        string documentNumber,
+        CancellationToken cancellationToken) =>
+        inventoryStockService.ValidateTimelineAsync(
+            new InventoryStockProposal(
+                storeId,
+                movementDate,
+                IsInbound: true,
+                lines.Select(line =>
+                    new InventoryStockLine(
+                        line.ItemId,
+                        line.Count * line.Weight))
+                    .ToArray(),
+                new InventoryMovementReference(
+                    [ItemMovementType.OpeningBalance],
+                    openingBalanceId,
+                    documentNumber),
+                $"تعديل أو حذف الرصيد الافتتاحي {documentNumber}",
+                nameof(StockOpeningBalanceRequest.Lines)),
+            cancellationToken);
+
+    private static IReadOnlyCollection<InventoryCostingKey> GetCostingKeys(
+        IEnumerable<ItemMovement> movements) =>
+        movements
+            .Select(movement => new InventoryCostingKey(
+                movement.StoreId,
+                movement.ItemId))
+            .Distinct()
+            .ToArray();
 
     private async Task<Result<IReadOnlyDictionary<int, ItemSnapshot>>>
         ValidateRequestAsync(
@@ -450,6 +793,14 @@ public sealed class StockOpeningBalanceService(
         Error.Conflict(
             "StockOpeningBalances.Concurrency",
             "تم تعديل المستند بواسطة عملية أخرى؛ أعد تحميله ثم حاول مرة أخرى.");
+
+    private sealed record OpeningMovementCost(
+        InventoryCostStatus CostStatus,
+        decimal? UnitCost,
+        decimal TotalCost,
+        decimal QuantityAfter,
+        decimal AverageCostAfter,
+        decimal InventoryValueAfter);
 
     private sealed record ItemSnapshot(
         int Id,

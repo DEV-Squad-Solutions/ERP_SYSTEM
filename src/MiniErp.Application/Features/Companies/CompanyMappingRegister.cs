@@ -17,6 +17,11 @@ public sealed class CompanyMappingRegister : IRegister
             .Map(company => company.ManagerName, request => request.ManagerName.Trim());
 
         config.ForType<Company, CompanyResponse>()
-            .Map(response => response.CreatedAt, company => company.CreatedOn);
+            .Map(response => response.CreatedAt, company => company.CreatedOn)
+            .Map(
+                response => response.StockBalanceCheckMode,
+                company => company.Settings == null
+                    ? MiniErp.Domain.Enums.StockBalanceCheckMode.DateCheck
+                    : company.Settings.StockBalanceCheckMode);
     }
 }

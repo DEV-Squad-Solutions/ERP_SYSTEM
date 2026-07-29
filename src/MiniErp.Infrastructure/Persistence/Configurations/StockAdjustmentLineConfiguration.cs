@@ -40,6 +40,11 @@ public sealed class StockAdjustmentLineConfiguration
                 InventoryQuantityRules.Scale)
             .IsRequired();
 
+        builder.Property(line => line.UnitCost)
+            .HasPrecision(
+                InventoryCostRules.UnitCostPrecision,
+                InventoryCostRules.UnitCostScale);
+
         builder.Property(line => line.Reason)
             .HasMaxLength(1_000);
 

@@ -5,6 +5,7 @@ using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Companies;
 using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Identity;
 using MiniErp.Infrastructure.Persistence;
 
@@ -111,6 +112,11 @@ public sealed class CompanyService(
         }
 
         dbContext.Companies.Add(company);
+        company.Settings = new CompanySettings
+        {
+            StockBalanceCheckMode = request.StockBalanceCheckMode ??
+                StockBalanceCheckMode.DateCheck
+        };
         dbContext.UserCompanies.Add(new UserCompany
         {
             UserId = currentUserResult.Value,
@@ -153,6 +159,28 @@ public sealed class CompanyService(
         }
 
         request.Adapt(company);
+
+        var settings = await dbContext.CompanySettings
+            .SingleOrDefaultAsync(
+                entity => entity.CompanyId == id,
+                cancellationToken);
+        if (settings is null)
+        {
+            settings = new CompanySettings
+            {
+                CompanyId = id,
+                StockBalanceCheckMode = request.StockBalanceCheckMode ??
+                    StockBalanceCheckMode.DateCheck
+            };
+            dbContext.CompanySettings.Add(settings);
+        }
+        else if (request.StockBalanceCheckMode.HasValue)
+        {
+            settings.StockBalanceCheckMode = request.StockBalanceCheckMode.Value;
+        }
+
+        company.Settings = settings;
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<CompanyResponse>.Success(company.Adapt<CompanyResponse>());

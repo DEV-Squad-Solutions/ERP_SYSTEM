@@ -1,4 +1,5 @@
 using FluentValidation;
+using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
 
 namespace MiniErp.Application.Features.Invoices;
@@ -26,6 +27,18 @@ public sealed class InvoiceLineRequestValidator
             .PrecisionScale(
                 InvoiceAmountRules.MoneyPrecision,
                 InvoiceAmountRules.MoneyScale,
+                ignoreTrailingZeros: true);
+
+        RuleFor(line => line.SourceInvoiceLineId)
+            .GreaterThan(0)
+            .When(line => line.SourceInvoiceLineId.HasValue);
+
+        RuleFor(line => line.ReturnUnitCost)
+            .GreaterThanOrEqualTo(0m)
+            .When(line => line.ReturnUnitCost.HasValue)
+            .PrecisionScale(
+                InventoryCostRules.UnitCostPrecision,
+                InventoryCostRules.UnitCostScale,
                 ignoreTrailingZeros: true);
 
         RuleFor(line => line)

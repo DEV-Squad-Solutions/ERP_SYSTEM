@@ -3,9 +3,11 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
+using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Companies;
 using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
@@ -45,12 +47,74 @@ public sealed class CompanyServiceTests
         Assert.Equal("CR-NEW", result.Value.CommercialRegister);
         Assert.Equal("TAX-NEW", result.Value.TaxNumber);
         Assert.Equal("New Manager", result.Value.ManagerName);
+        Assert.Equal(StockBalanceCheckMode.DateCheck, result.Value.StockBalanceCheckMode);
 
         var assignment = await database.Context.UserCompanies
             .AsNoTracking()
             .SingleAsync(userCompany =>
                 userCompany.CompanyId == result.Value.Id);
         Assert.Equal(CurrentUserId, assignment.UserId);
+    }
+
+    [Fact]
+    public async Task AddAndUpdate_PersistTheCompanyStockBalanceCheckMode()
+    {
+        await using var database = await CompanyTestDatabase.CreateAsync();
+        var service = database.CreateService(CurrentUserId);
+
+        var added = await service.AddAsync(
+            new CompanyRequest(
+                "New Company",
+                "New Address",
+                "CR-NEW",
+                "TAX-NEW",
+                "New Manager",
+                StockBalanceCheckMode.Both));
+
+        Assert.True(added.IsSuccess);
+        Assert.Equal(StockBalanceCheckMode.Both, added.Value.StockBalanceCheckMode);
+        Assert.Equal(
+            StockBalanceCheckMode.Both,
+            await database.Context.CompanySettings
+                .Where(settings => settings.CompanyId == added.Value.Id)
+                .Select(settings => settings.StockBalanceCheckMode)
+                .SingleAsync());
+
+        var updated = await service.UpdateAsync(
+            added.Value.Id,
+            new CompanyRequest(
+                "Updated Company",
+                "Updated Address",
+                "CR-NEW",
+                "TAX-NEW",
+                "Updated Manager",
+                StockBalanceCheckMode.FinalCheck));
+
+        Assert.True(updated.IsSuccess);
+        Assert.Equal(StockBalanceCheckMode.FinalCheck, updated.Value.StockBalanceCheckMode);
+    }
+
+    [Fact]
+    public async Task GetAll_ReturnsTheStockBalanceCheckMode()
+    {
+        await using var database = await CompanyTestDatabase.CreateAsync();
+        var service = database.CreateService(CurrentUserId);
+        var created = await service.AddAsync(
+            new CompanyRequest(
+                "Configured Company",
+                "Address",
+                "CR-CONFIGURED",
+                "TAX-CONFIGURED",
+                "Manager",
+                StockBalanceCheckMode.None));
+
+        var page = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 });
+
+        Assert.True(created.IsSuccess);
+        Assert.True(page.IsSuccess);
+        var response = page.Value.Items.Single(item => item.Id == created.Value.Id);
+        Assert.Equal(StockBalanceCheckMode.None, response.StockBalanceCheckMode);
     }
 
     [Fact]
@@ -262,6 +326,12 @@ public sealed class CompanyServiceTests
                     DeletedOn TEXT NULL,
                     DeletedByPc TEXT NULL,
                     IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE CompanySettings (
+                    CompanyId INTEGER NOT NULL PRIMARY KEY,
+                    StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
+                    FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE UserCompanies (

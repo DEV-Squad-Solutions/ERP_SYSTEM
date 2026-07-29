@@ -20,6 +20,8 @@ public sealed class ApplicationDbContext(
 {
     public DbSet<Company> Companies => Set<Company>();
 
+    public DbSet<CompanySettings> CompanySettings => Set<CompanySettings>();
+
     public DbSet<BusinessPartner> BusinessPartners => Set<BusinessPartner>();
 
     public DbSet<Cashbox> Cashboxes => Set<Cashbox>();
@@ -72,6 +74,12 @@ public sealed class ApplicationDbContext(
         Set<InvoiceContainerLine>();
 
     public DbSet<ItemMovement> ItemMovements => Set<ItemMovement>();
+
+    public DbSet<InventoryCostAllocation> InventoryCostAllocations =>
+        Set<InventoryCostAllocation>();
+
+    public DbSet<ItemStoreBalance> ItemStoreBalances =>
+        Set<ItemStoreBalance>();
 
     public DbSet<ContainerMovement> ContainerMovements =>
         Set<ContainerMovement>();

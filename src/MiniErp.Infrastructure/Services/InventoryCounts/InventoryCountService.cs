@@ -16,6 +16,7 @@ public sealed class InventoryCountService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     IInventoryStockService inventoryStockService,
+    IInventoryCostingService inventoryCostingService,
     TimeProvider timeProvider)
     : IInventoryCountService, IScopedService
 {
@@ -308,6 +309,44 @@ public sealed class InventoryCountService(
             return Result<InventoryCountResponse>.Failure(SnapshotStale());
         }
 
+        var increaseItemIds = count.Lines
+            .Where(line =>
+                line.PhysicalQuantity!.Value > line.SystemQuantity)
+            .Select(line => line.ItemId)
+            .ToHashSet();
+        var requestedIncreaseCosts = request.IncreaseCosts ?? [];
+        if (requestedIncreaseCosts.Any(cost =>
+                cost.ItemId <= 0 ||
+                cost.UnitCost < 0m) ||
+            requestedIncreaseCosts
+                .Select(cost => cost.ItemId)
+                .Distinct()
+                .Count() != requestedIncreaseCosts.Count)
+        {
+            return Result<InventoryCountResponse>.Failure(
+                IncreaseCostsInvalid());
+        }
+
+        var increaseCosts = requestedIncreaseCosts.ToDictionary(
+            cost => cost.ItemId,
+            cost => cost.UnitCost);
+        if (!increaseCosts.Keys.ToHashSet().SetEquals(increaseItemIds))
+        {
+            return Result<InventoryCountResponse>.Failure(
+                IncreaseCostsRequired(increaseItemIds));
+        }
+
+        await inventoryCostingService.LockAsync(
+            count.Lines
+                .Where(line =>
+                    line.PhysicalQuantity!.Value != line.SystemQuantity)
+                .Select(line => new InventoryCostingKey(
+                    count.StoreId,
+                    line.ItemId))
+                .Distinct()
+                .ToArray(),
+            cancellationToken);
+
         var decreaseLines = count.Lines
             .Where(line =>
                 line.PhysicalQuantity!.Value < line.SystemQuantity)
@@ -340,12 +379,14 @@ public sealed class InventoryCountService(
             count,
             StockAdjustmentDirection.Increase,
             increaseNumber,
-            utcNow);
+            utcNow,
+            increaseCosts);
         var decrease = CreateGeneratedAdjustment(
             count,
             StockAdjustmentDirection.Decrease,
             decreaseNumber,
-            utcNow);
+            utcNow,
+            increaseCosts);
 
         var generatedNumbers = new[] { increase, decrease }
             .Where(adjustment => adjustment is not null)
@@ -389,6 +430,26 @@ public sealed class InventoryCountService(
             if (decrease is not null)
             {
                 AddAdjustmentMovements(decrease);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            var costingKeys = new[] { increase, decrease }
+                .Where(adjustment => adjustment is not null)
+                .SelectMany(adjustment => adjustment!.Lines.Select(line =>
+                    new InventoryCostingKey(
+                        adjustment.StoreId,
+                        line.ItemId)))
+                .Distinct()
+                .ToArray();
+            var costingError = await inventoryCostingService.RecalculateAsync(
+                costingKeys,
+                cancellationToken);
+            if (costingError is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<InventoryCountResponse>.Failure(costingError);
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -555,7 +616,8 @@ public sealed class InventoryCountService(
         InventoryCount count,
         StockAdjustmentDirection direction,
         string documentNumber,
-        DateTime utcNow)
+        DateTime utcNow,
+        IReadOnlyDictionary<int, decimal> increaseCosts)
     {
         var adjustment = new StockAdjustment
         {
@@ -588,6 +650,10 @@ public sealed class InventoryCountService(
                     ItemId = countLine.ItemId,
                     ItemUnitId = countLine.ItemUnitId,
                     Quantity = quantity,
+                    UnitCost =
+                        direction == StockAdjustmentDirection.Increase
+                            ? increaseCosts[countLine.ItemId]
+                            : null,
                     Reason = countLine.Notes
                 });
         }
@@ -718,6 +784,18 @@ public sealed class InventoryCountService(
         Error.Conflict(
             "InventoryCounts.SnapshotStale",
             "تغير رصيد المخزون بعد أخذ لقطة الجرد. أنشئ مستند جرد جديدًا ثم أعد العد.");
+
+    private static Error IncreaseCostsInvalid() =>
+        Error.Validation(
+            "InventoryCounts.IncreaseCostsInvalid",
+            "تكاليف زيادات تسوية الجرد غير صالحة أو تحتوي على أصناف مكررة.",
+            nameof(InventoryCountReconcileRequest.IncreaseCosts));
+
+    private static Error IncreaseCostsRequired(IEnumerable<int> itemIds) =>
+        Error.Validation(
+            "InventoryCounts.IncreaseCostsRequired",
+            $"يجب إدخال تكلفة الوحدة لكل صنف له زيادة في تسوية الجرد: {string.Join(", ", itemIds)}.",
+            nameof(InventoryCountReconcileRequest.IncreaseCosts));
 
     private static Error GeneratedDocumentNumberConflict() =>
         Error.Conflict(

@@ -1,3 +1,5 @@
+using MiniErp.Domain.Enums;
+
 namespace MiniErp.Application.Features.Companies;
 
 public sealed record CompanyResponse(
@@ -7,4 +9,5 @@ public sealed record CompanyResponse(
     string CommercialRegister,
     string TaxNumber,
     string ManagerName,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    StockBalanceCheckMode StockBalanceCheckMode);

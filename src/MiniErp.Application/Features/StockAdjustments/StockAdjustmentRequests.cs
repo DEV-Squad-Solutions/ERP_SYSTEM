@@ -5,7 +5,10 @@ namespace MiniErp.Application.Features.StockAdjustments;
 public sealed record StockAdjustmentLineRequest(
     int ItemId,
     decimal Quantity,
-    string? Reason);
+    string? Reason)
+{
+    public decimal? UnitCost { get; init; }
+}
 
 public sealed record StockAdjustmentRequest(
     int StoreId,

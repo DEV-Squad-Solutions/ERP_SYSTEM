@@ -239,6 +239,184 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public async Task PurchaseReturn_UsesCurrentAverageNotEnteredPurchasePrice()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 4, 1m, 99m, null)]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var line = Assert.Single(result.Value.Lines);
+        Assert.Equal(12m, line.UnitCost);
+        Assert.Equal(48m, line.InventoryTotalCost);
+        Assert.Equal(6m, line.QuantityAfter);
+        Assert.Equal(12m, line.AverageCostAfter);
+        Assert.Equal(72m, line.InventoryValueAfter);
+    }
+
+    [Fact]
+    public async Task LinkedSalesReturn_UsesFullyCostedSourceSaleCost()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+        var sale = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 30m, null)]))).Value;
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(1, 1, 1m, 30m, null)
+                    {
+                        SourceInvoiceLineId = sale.Lines.Single().Id
+                    }
+                ]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var line = Assert.Single(result.Value.Lines);
+        Assert.Equal(sale.Lines.Single().Id, line.SourceInvoiceLineId);
+        Assert.Equal(12m, line.UnitCost);
+        Assert.Equal(12m, line.AverageCostAfter);
+    }
+
+    [Fact]
+    public async Task Delete_BlocksSaleReferencedByActiveSalesReturn()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+        var sale = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 30m, null)]))).Value;
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(1, 1, 1m, 30m, null)
+                    {
+                        SourceInvoiceLineId = sale.Lines.Single().Id
+                    }
+                ]));
+
+        var result = await service.DeleteAsync(sale.Id);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.LinkedSalesReturnsExist", result.Error.Code);
+        Assert.Equal(
+            3,
+            await database.Context.Invoices.CountAsync());
+    }
+
+    [Fact]
+    public async Task LinkedSalesReturn_RejectsPendingSourceSale()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            $"INSERT INTO CompanySettings (CompanyId, StockBalanceCheckMode) VALUES (1, {(int)StockBalanceCheckMode.None});");
+        var service = database.CreateService();
+        var sale = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 30m, null)]))).Value;
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(1, 1, 1m, 30m, null)
+                    {
+                        SourceInvoiceLineId = sale.Lines.Single().Id
+                    }
+                ]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Inventory.SalesReturnSourceCostPending",
+            result.Error.Code);
+        Assert.Equal(
+            "لا يمكن احتساب تكلفة مرتجع البيع لأن حركة البيع الأصلية لم تكتمل تكلفتها بعد.",
+            result.Error.Description);
+        Assert.Equal(1, await database.Context.Invoices.CountAsync());
+    }
+
+    [Fact]
+    public async Task UnlinkedSalesReturn_UsesPositiveAverageBeforeFallbackCost()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(1, 1, 1m, 30m, null)
+                    {
+                        ReturnUnitCost = 99m
+                    }
+                ]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(12m, Assert.Single(result.Value.Lines).UnitCost);
+    }
+
+    [Fact]
+    public async Task UnlinkedSalesReturn_RequiresCostWithoutPositiveAverage()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            storeId: 2) with
+        {
+            Lines = [new InvoiceLineRequest(1, 1, 1m, 10m, null)],
+            PaidAmount = 10m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Inventory.ReturnUnitCostRequired", result.Error.Code);
+        Assert.Equal(0, await database.Context.Invoices.CountAsync());
+    }
+
+    [Fact]
     public async Task Add_BlocksPurchaseReturnWhenStockIsInsufficient()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
@@ -355,13 +533,19 @@ public sealed class InvoiceServiceTests
                 Description = "Adjustment in"
             });
         await database.Context.SaveChangesAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO StockAdjustmentLines (
+                CompanyId, StockAdjustmentId, ItemId, UnitCost, IsDeleted)
+            VALUES (1, 900, 1, 0, 0);
+            """);
 
         var result = await database.CreateService().AddAsync(
             CreateRequest(
                 InvoiceType.PurchaseReturn,
                 lines: [new InvoiceLineRequest(1, 12, 1m, 10m, null)]));
 
-        Assert.True(result.IsSuccess);
+        Assert.True(result.IsSuccess, result.Error.Description);
     }
 
     [Fact]
@@ -411,6 +595,48 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public async Task ValidateStockAsync_FinalCheckUsesTheResultingBalanceOnly()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO CompanySettings (CompanyId, StockBalanceCheckMode) VALUES (1, {(int)StockBalanceCheckMode.FinalCheck});");
+        database.Context.ItemMovements.AddRange(
+            new ItemMovement
+            {
+                CompanyId = 1,
+                StoreId = 1,
+                ItemId = 1,
+                ItemUnitId = 1,
+                MovementType = ItemMovementType.Sales,
+                ReferenceId = 911,
+                ReferenceNumber = "SALE-911",
+                MovementDate = new DateOnly(2026, 1, 3),
+                QuantityOut = 12m
+            },
+            CostedMovement(new ItemMovement
+            {
+                CompanyId = 1,
+                StoreId = 1,
+                ItemId = 1,
+                ItemUnitId = 1,
+                MovementType = ItemMovementType.Purchase,
+                ReferenceId = 912,
+                ReferenceNumber = "PURCHASE-912",
+                MovementDate = new DateOnly(2026, 1, 4),
+                QuantityIn = 10m
+            }));
+        await database.Context.SaveChangesAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                invoiceDate: new DateOnly(2026, 1, 2),
+                lines: [new InvoiceLineRequest(1, 1, 1m, 10m, null)]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+    }
+
+    [Fact]
     public async Task Add_InboundInvoiceAllowsExistingHistoricalShortageBecauseItAddsStock()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
@@ -427,7 +653,7 @@ public sealed class InvoiceServiceTests
                 MovementDate = new DateOnly(2026, 1, 3),
                 QuantityOut = 12m
             },
-            new ItemMovement
+            CostedMovement(new ItemMovement
             {
                 CompanyId = 1,
                 StoreId = 1,
@@ -438,7 +664,7 @@ public sealed class InvoiceServiceTests
                 ReferenceNumber = "PURCHASE-905",
                 MovementDate = new DateOnly(2026, 1, 4),
                 QuantityIn = 10m
-            });
+            }));
         await database.Context.SaveChangesAsync();
 
         var result = await database.CreateService().AddAsync(
@@ -522,7 +748,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         database.Context.ItemMovements.Add(
-            new ItemMovement
+            CostedMovement(new ItemMovement
             {
                 CompanyId = 1,
                 StoreId = 2,
@@ -533,7 +759,7 @@ public sealed class InvoiceServiceTests
                 ReferenceNumber = "PURCHASE-910",
                 MovementDate = new DateOnly(2026, 7, 24),
                 QuantityIn = 5m
-            });
+            }));
         await database.Context.SaveChangesAsync();
 
         var service = database.CreateService();
@@ -1419,8 +1645,8 @@ public sealed class InvoiceServiceTests
                 paidAmount: 2m))).Value;
         await database.Context.Database.ExecuteSqlRawAsync(
             """
-            CREATE TRIGGER AbortReplacementItemMovementInsert
-            BEFORE INSERT ON ItemMovements
+            CREATE TRIGGER AbortReplacementItemMovementUpdate
+            BEFORE UPDATE ON ItemMovements
             BEGIN
                 SELECT RAISE(ABORT, 'forced replacement side-effect failure');
             END;
@@ -1591,7 +1817,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         database.Context.ItemMovements.Add(
-            new ItemMovement
+            CostedMovement(new ItemMovement
             {
                 CompanyId = 1,
                 StoreId = 1,
@@ -1602,7 +1828,7 @@ public sealed class InvoiceServiceTests
                 ReferenceNumber = "SALE-913",
                 MovementDate = new DateOnly(2026, 7, 26),
                 QuantityOut = 8m
-            });
+            }));
         await database.Context.SaveChangesAsync();
 
         var service = database.CreateService();
@@ -1692,7 +1918,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         database.Context.ItemMovements.Add(
-            new ItemMovement
+            CostedMovement(new ItemMovement
             {
                 CompanyId = 1,
                 StoreId = 2,
@@ -1703,7 +1929,7 @@ public sealed class InvoiceServiceTests
                 ReferenceNumber = "PURCHASE-915",
                 MovementDate = new DateOnly(2026, 7, 25),
                 QuantityIn = 2m
-            });
+            }));
         await database.Context.SaveChangesAsync();
 
         var result = await database.CreateService().AddAsync(
@@ -3496,6 +3722,20 @@ public sealed class InvoiceServiceTests
     {
         var requestedLines =
             lines ?? [new InvoiceLineRequest(1, 2, 1m, 10m, null)];
+        if (invoiceType == InvoiceType.SalesReturn)
+        {
+            requestedLines = requestedLines
+                .Select(line =>
+                    line.SourceInvoiceLineId.HasValue ||
+                    line.ReturnUnitCost.HasValue
+                        ? line
+                        : line with
+                        {
+                            ReturnUnitCost = line.Price
+                        })
+                .ToArray();
+        }
+
         var requestedPaidAmount = paidAmount ??
             (paymentTerm == PaymentTerm.Cash
                 ? CalculateRequestTotal(requestedLines, discountAmount)
@@ -3585,6 +3825,21 @@ public sealed class InvoiceServiceTests
         decimal? discountAmount = null,
         decimal? paidAmount = null)
     {
+        var requestedInvoiceType = invoiceType ?? invoice.InvoiceType;
+        if (requestedInvoiceType == InvoiceType.SalesReturn)
+        {
+            lines = lines
+                .Select(line =>
+                    line.SourceInvoiceLineId.HasValue ||
+                    line.ReturnUnitCost.HasValue
+                        ? line
+                        : line with
+                        {
+                            ReturnUnitCost = line.Price
+                        })
+                .ToArray();
+        }
+
         var requestedPaymentTerm = paymentTerm ?? invoice.PaymentTerm;
         var requestedDiscountAmount =
             discountAmount ?? invoice.DiscountAmount;
@@ -3594,7 +3849,7 @@ public sealed class InvoiceServiceTests
                 : invoice.PaidAmount);
 
         return new InvoiceUpdateRequest(
-            invoiceType ?? invoice.InvoiceType,
+            requestedInvoiceType,
             requestedPaymentTerm,
             invoiceDate ?? invoice.InvoiceDate,
             invoice.DueDate,
@@ -3656,22 +3911,42 @@ public sealed class InvoiceServiceTests
         decimal quantityOut = 0m,
         int companyId = 1)
     {
-        database.Context.ItemMovements.Add(
-            new ItemMovement
-            {
-                CompanyId = companyId,
-                StoreId = storeId,
-                ItemId = itemId,
-                ItemUnitId = 1,
-                MovementType = movementType,
-                ReferenceId = referenceId,
-                ReferenceNumber = referenceNumber,
-                MovementDate = movementDate,
-                QuantityIn = quantityIn,
-                QuantityOut = quantityOut
-            });
+        var movement = new ItemMovement
+        {
+            CompanyId = companyId,
+            StoreId = storeId,
+            ItemId = itemId,
+            ItemUnitId = 1,
+            MovementType = movementType,
+            ReferenceId = referenceId,
+            ReferenceNumber = referenceNumber,
+            MovementDate = movementDate,
+            QuantityIn = quantityIn,
+            QuantityOut = quantityOut
+        };
+        if (quantityIn > 0m)
+        {
+            CostedMovement(movement);
+        }
+
+        database.Context.ItemMovements.Add(movement);
         await database.Context.SaveChangesAsync();
         database.Context.ChangeTracker.Clear();
+    }
+
+    private static ItemMovement CostedMovement(
+        ItemMovement movement,
+        decimal unitCost = 10m)
+    {
+        movement.ApplyCostSnapshot(
+            InventoryCostStatus.Final,
+            0m,
+            unitCost,
+            movement.QuantityIn * unitCost,
+            movement.QuantityIn,
+            unitCost,
+            movement.QuantityIn * unitCost);
+        return movement;
     }
 
     private static async Task<Error?> InvokeValidateStockAsync(
@@ -3744,6 +4019,10 @@ public sealed class InvoiceServiceTests
                 new PaginationService(),
                 companyContext,
                 new InventoryStockService(Context, companyContext),
+                new InventoryCostingService(
+                    Context,
+                    companyContext,
+                    TimeProvider.System),
                 TimeProvider.System);
         }
 
@@ -3766,6 +4045,12 @@ public sealed class InvoiceServiceTests
                     TaxNumber TEXT NOT NULL,
                     ManagerName TEXT NOT NULL,
                     IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE CompanySettings (
+                    CompanyId INTEGER NOT NULL PRIMARY KEY,
+                    StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
+                    FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE BusinessPartners (
@@ -3874,6 +4159,7 @@ public sealed class InvoiceServiceTests
                     StockOpeningBalanceId INTEGER NOT NULL,
                     ItemId INTEGER NOT NULL,
                     Quantity NUMERIC NOT NULL,
+                    Price NUMERIC NOT NULL DEFAULT 0,
                     IsDeleted INTEGER NOT NULL
                 );
 
@@ -3920,6 +4206,8 @@ public sealed class InvoiceServiceTests
                     InvoiceId INTEGER NOT NULL,
                     ItemId INTEGER NOT NULL,
                     ItemUnitId INTEGER NOT NULL,
+                    SourceInvoiceLineId INTEGER NULL,
+                    ReturnUnitCost NUMERIC NULL,
                     Count INTEGER NOT NULL,
                     Weight NUMERIC NOT NULL,
                     Quantity NUMERIC NOT NULL,
@@ -3969,6 +4257,13 @@ public sealed class InvoiceServiceTests
                     MovementDate TEXT NOT NULL,
                     QuantityIn NUMERIC NOT NULL,
                     QuantityOut NUMERIC NOT NULL,
+                    CostStatus INTEGER NOT NULL DEFAULT 1,
+                    PendingCostQuantity NUMERIC NOT NULL DEFAULT 0,
+                    UnitCost NUMERIC NULL,
+                    TotalCost NUMERIC NOT NULL DEFAULT 0,
+                    QuantityAfter NUMERIC NOT NULL DEFAULT 0,
+                    AverageCostAfter NUMERIC NOT NULL DEFAULT 0,
+                    InventoryValueAfter NUMERIC NOT NULL DEFAULT 0,
                     Description TEXT NULL,
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
@@ -3980,6 +4275,58 @@ public sealed class InvoiceServiceTests
                     DeletedOn TEXT NULL,
                     DeletedByPc TEXT NULL,
                     IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE StockAdjustmentLines (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    StockAdjustmentId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    UnitCost NUMERIC NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE UNIQUE INDEX UX_ItemMovements_Company_Id
+                ON ItemMovements (CompanyId, Id);
+
+                CREATE TABLE InventoryCostAllocations (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    OutboundMovementId INTEGER NOT NULL,
+                    InboundMovementId INTEGER NOT NULL,
+                    Quantity NUMERIC NOT NULL,
+                    UnitCost NUMERIC NOT NULL,
+                    TotalCost NUMERIC NOT NULL,
+                    CreatedOn TEXT NOT NULL
+                );
+
+                CREATE UNIQUE INDEX UX_InventoryCostAllocations_Pair
+                ON InventoryCostAllocations (
+                    CompanyId,
+                    OutboundMovementId,
+                    InboundMovementId);
+
+                CREATE TABLE ItemStoreBalances (
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    Quantity NUMERIC NOT NULL DEFAULT 0,
+                    AverageCost NUMERIC NOT NULL DEFAULT 0,
+                    InventoryValue NUMERIC NOT NULL DEFAULT 0,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL,
+                    PRIMARY KEY (CompanyId, StoreId, ItemId)
                 );
 
                 CREATE TABLE ContainerMovements (

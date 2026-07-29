@@ -1,6 +1,7 @@
 using Mapster;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Invoicing;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Infrastructure.Services.Invoices;
 
@@ -16,6 +17,10 @@ public sealed partial class InvoiceService
             var line = requestLine.Adapt<InvoiceLine>();
             line.CompanyId = companyId;
             line.ItemUnitId = preparation.ItemUnitIds[requestLine.ItemId];
+            ApplyReturnCostInput(
+                invoice.InvoiceType,
+                line,
+                requestLine);
             invoice.Lines.Add(line);
         }
     }
@@ -50,6 +55,10 @@ public sealed partial class InvoiceService
             existingLine.Count = incoming.Count;
             existingLine.Weight = incoming.Weight;
             existingLine.Price = incoming.Price;
+            ApplyReturnCostInput(
+                invoice.InvoiceType,
+                existingLine,
+                incoming);
             existingLine.Notes = string.IsNullOrWhiteSpace(incoming.Notes)
                 ? null
                 : incoming.Notes.Trim();
@@ -67,8 +76,28 @@ public sealed partial class InvoiceService
             var line = incoming.Adapt<InvoiceLine>();
             line.CompanyId = companyId;
             line.ItemUnitId = preparation.ItemUnitIds[incoming.ItemId];
+            ApplyReturnCostInput(
+                invoice.InvoiceType,
+                line,
+                incoming);
             invoice.Lines.Add(line);
         }
+    }
+
+    private static void ApplyReturnCostInput(
+        InvoiceType invoiceType,
+        InvoiceLine line,
+        InvoiceLineRequest request)
+    {
+        if (invoiceType == InvoiceType.SalesReturn)
+        {
+            line.SourceInvoiceLineId = request.SourceInvoiceLineId;
+            line.ReturnUnitCost = request.ReturnUnitCost;
+            return;
+        }
+
+        line.SourceInvoiceLineId = null;
+        line.ReturnUnitCost = null;
     }
 
     private void ReplaceContainerLines(

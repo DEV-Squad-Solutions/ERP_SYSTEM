@@ -32,7 +32,7 @@ public sealed class InventoryCountsSwaggerDocumentation : IOperationFilter
                 "Admin only. Replaces physical quantities and notes for the complete frozen item set using the original eight-byte row version. Store, date, items, units, and system quantities cannot change."),
             nameof(InventoryCountsController.Reconcile) => (
                 "Reconcile an inventory count",
-                "Admin only. Requires every physical quantity and the current row version. Rejects a stale snapshot, creates at most one Increase and one Decrease StockAdjustment, omits zero-difference lines and empty adjustments, writes ItemMovement rows, and marks the count reconciled in one transaction."),
+                "Admin only. Requires every physical quantity, the current row version, and exactly one `increaseCosts` item/unit-cost entry for every positive difference. Creates at most one Increase and one Decrease adjustment, writes movements, replays weighted-average costing, and updates balances in one Serializable transaction."),
             nameof(InventoryCountsController.Delete) => (
                 "Delete an unreconciled inventory count",
                 "Admin only. Soft-deletes only an unreconciled count and its lines. Reconciled counts and generated adjustments are immutable; corrections require a new count or manual adjustment."),

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
 
 namespace MiniErp.Infrastructure.Persistence.Configurations;
@@ -54,6 +55,13 @@ public sealed class InvoiceLineConfiguration
 
         builder.Property(line => line.ItemUnitId)
             .IsRequired();
+
+        builder.Property(line => line.SourceInvoiceLineId);
+
+        builder.Property(line => line.ReturnUnitCost)
+            .HasPrecision(
+                InventoryCostRules.UnitCostPrecision,
+                InventoryCostRules.UnitCostScale);
 
         builder.Property(line => line.Count)
             .IsRequired();
@@ -117,6 +125,27 @@ public sealed class InvoiceLineConfiguration
                 unit.Id
             })
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(line => line.SourceInvoiceLine)
+            .WithMany()
+            .HasForeignKey(line => new
+            {
+                line.CompanyId,
+                line.SourceInvoiceLineId
+            })
+            .HasPrincipalKey(source => new
+            {
+                source.CompanyId,
+                source.Id
+            })
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(line => new
+        {
+            line.CompanyId,
+            line.SourceInvoiceLineId
+        });
 
         builder.HasIndex(line => new
         {

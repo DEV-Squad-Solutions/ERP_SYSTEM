@@ -9,6 +9,7 @@ using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
+using MiniErp.Infrastructure.Services.Inventory;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.StockOpeningBalances;
 
@@ -47,6 +48,11 @@ public sealed class StockOpeningBalanceServiceTests
         Assert.Equal(20m, line.Quantity);
         Assert.Equal(3m, line.Price);
         Assert.Equal(60m, line.Total);
+        Assert.Equal(3m, line.UnitCost);
+        Assert.Equal(60m, line.InventoryTotalCost);
+        Assert.Equal(20m, line.QuantityAfter);
+        Assert.Equal(3m, line.AverageCostAfter);
+        Assert.Equal(60m, line.InventoryValueAfter);
     }
 
     [Fact]
@@ -607,11 +613,21 @@ public sealed class StockOpeningBalanceServiceTests
             return new StockOpeningBalanceTestDatabase(connection, context);
         }
 
-        public StockOpeningBalanceService CreateService(int companyId) =>
-            new(
+        public StockOpeningBalanceService CreateService(int companyId)
+        {
+            var companyContext = new TestCurrentCompanyContext(companyId);
+            return new StockOpeningBalanceService(
                 Context,
                 new PaginationService(),
-                new TestCurrentCompanyContext(companyId));
+                companyContext,
+                new InventoryCostingService(
+                    Context,
+                    companyContext,
+                    TimeProvider.System),
+                new InventoryStockService(
+                    Context,
+                    companyContext));
+        }
 
         public async ValueTask DisposeAsync()
         {
@@ -640,6 +656,12 @@ public sealed class StockOpeningBalanceServiceTests
                     DeletedOn TEXT NULL,
                     DeletedByPc TEXT NULL,
                     IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE CompanySettings (
+                    CompanyId INTEGER NOT NULL PRIMARY KEY,
+                    StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
+                    FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE Stores (
@@ -754,6 +776,81 @@ public sealed class StockOpeningBalanceServiceTests
                     StockOpeningBalanceId,
                     ItemId)
                 WHERE IsDeleted = 0;
+
+                CREATE TABLE ItemMovements (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    ItemUnitId INTEGER NULL,
+                    MovementType INTEGER NOT NULL,
+                    ReferenceId INTEGER NOT NULL,
+                    ReferenceNumber TEXT NOT NULL,
+                    MovementDate TEXT NOT NULL,
+                    QuantityIn NUMERIC NOT NULL,
+                    QuantityOut NUMERIC NOT NULL,
+                    CostStatus INTEGER NOT NULL DEFAULT 1,
+                    PendingCostQuantity NUMERIC NOT NULL DEFAULT 0,
+                    UnitCost NUMERIC NULL,
+                    TotalCost NUMERIC NOT NULL DEFAULT 0,
+                    QuantityAfter NUMERIC NOT NULL DEFAULT 0,
+                    AverageCostAfter NUMERIC NOT NULL DEFAULT 0,
+                    InventoryValueAfter NUMERIC NOT NULL DEFAULT 0,
+                    Description TEXT NULL,
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE UNIQUE INDEX UX_ItemMovements_Company_Id
+                ON ItemMovements (CompanyId, Id);
+
+                CREATE TABLE InventoryCostAllocations (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    OutboundMovementId INTEGER NOT NULL,
+                    InboundMovementId INTEGER NOT NULL,
+                    Quantity NUMERIC NOT NULL,
+                    UnitCost NUMERIC NOT NULL,
+                    TotalCost NUMERIC NOT NULL,
+                    CreatedOn TEXT NOT NULL
+                );
+
+                CREATE UNIQUE INDEX UX_InventoryCostAllocations_Pair
+                ON InventoryCostAllocations (
+                    CompanyId,
+                    OutboundMovementId,
+                    InboundMovementId);
+
+                CREATE TABLE ItemStoreBalances (
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    Quantity NUMERIC NOT NULL DEFAULT 0,
+                    AverageCost NUMERIC NOT NULL DEFAULT 0,
+                    InventoryValue NUMERIC NOT NULL DEFAULT 0,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL,
+                    PRIMARY KEY (CompanyId, StoreId, ItemId)
+                );
 
                 CREATE TRIGGER AdvanceStockOpeningBalanceRowVersion
                 AFTER UPDATE ON StockOpeningBalances

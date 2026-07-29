@@ -83,6 +83,27 @@ public sealed class InventoryCountReconcileRequestValidator
 {
     public InventoryCountReconcileRequestValidator()
     {
+        RuleFor(request => request.IncreaseCosts)
+            .Must(costs =>
+                costs is null ||
+                costs.Select(cost => cost.ItemId).Distinct().Count() ==
+                costs.Count)
+            .WithMessage(
+                "لا يجوز تكرار الصنف في تكاليف زيادات تسوية الجرد.");
+
+        RuleForEach(request => request.IncreaseCosts)
+            .ChildRules(cost =>
+            {
+                cost.RuleFor(item => item.ItemId)
+                    .GreaterThan(0);
+                cost.RuleFor(item => item.UnitCost)
+                    .GreaterThanOrEqualTo(0m)
+                    .PrecisionScale(
+                        InventoryCostRules.UnitCostPrecision,
+                        InventoryCostRules.UnitCostScale,
+                        ignoreTrailingZeros: true);
+            });
+
         RuleFor(request => request.RowVersion)
             .Must(rowVersion => rowVersion is { Length: 8 })
             .WithMessage(
