@@ -141,12 +141,29 @@ public sealed partial class InvoiceService(
             return Result<InvoiceResponse>.Failure(amountError);
         }
 
+        var paymentError = await ValidatePaymentAsync(
+            invoice,
+            request.CashboxId,
+            request.CashMovementTypeId,
+            currentInvoiceId: null,
+            cancellationToken);
+        if (paymentError is not null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<InvoiceResponse>.Failure(paymentError);
+        }
+
         invoice.Touch(timeProvider.GetUtcNow().UtcDateTime);
 
         dbContext.Invoices.Add(invoice);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        await SaveSideEffectsAsync(invoice, cancellationToken);
+        await SaveSideEffectsAsync(
+            invoice,
+            request.CashboxId,
+            request.CashMovementTypeId,
+            cancellationToken);
 
         var costingError = await inventoryCostingService.RecalculateAsync(
             GetCostingKeys(invoice),
@@ -255,6 +272,19 @@ public sealed partial class InvoiceService(
             return Result<InvoiceResponse>.Failure(amountError);
         }
 
+        var paymentError = await ValidatePaymentAsync(
+            invoice,
+            request.CashboxId,
+            request.CashMovementTypeId,
+            currentInvoiceId: id,
+            cancellationToken);
+        if (paymentError is not null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<InvoiceResponse>.Failure(paymentError);
+        }
+
         invoice.Touch(timeProvider.GetUtcNow().UtcDateTime);
         entry.Property(item => item.LastModifiedAt).IsModified = true;
 
@@ -268,7 +298,11 @@ public sealed partial class InvoiceService(
                 cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            await SaveSideEffectsAsync(invoice, cancellationToken);
+            await SaveSideEffectsAsync(
+                invoice,
+                request.CashboxId,
+                request.CashMovementTypeId,
+                cancellationToken);
 
             var costingError = await inventoryCostingService.RecalculateAsync(
                 oldCostingKeys
@@ -347,6 +381,15 @@ public sealed partial class InvoiceService(
         if (stockError is not null)
         {
             return Result.Failure(stockError);
+        }
+
+        var paymentError = await ValidatePaymentRemovalAsync(
+            invoice.Id,
+            cancellationToken);
+        if (paymentError is not null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return Result.Failure(paymentError);
         }
 
         await RemoveSideEffectsAsync(

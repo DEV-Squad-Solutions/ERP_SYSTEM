@@ -47,6 +47,10 @@ public sealed class CashVoucherService(
                   voucher.Driver.Name.Contains(search))) ||
                 (voucher.DriverTrip != null &&
                  voucher.DriverTrip.InvoiceNumber.Contains(search)) ||
+                (voucher.Invoice != null &&
+                 (voucher.Invoice.InvoiceNumber.Contains(search) ||
+                  (voucher.Invoice.PartnerInvoiceNo != null &&
+                   voucher.Invoice.PartnerInvoiceNo.Contains(search)))) ||
                 (voucher.ExternalPartyName != null &&
                  voucher.ExternalPartyName.Contains(search)) ||
                 (voucher.ReferenceNumber != null &&
@@ -187,6 +191,12 @@ public sealed class CashVoucherService(
             return Result<CashVoucherResponse>.Failure(Concurrency());
         }
 
+        if (voucher.InvoiceId.HasValue)
+        {
+            return Result<CashVoucherResponse>.Failure(
+                InvoiceGeneratedReadOnly());
+        }
+
         var preparation = await PrepareAsync(
             request,
             voucher,
@@ -249,6 +259,11 @@ public sealed class CashVoucherService(
         if (voucher is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        if (voucher.InvoiceId.HasValue)
+        {
+            return Result.Failure(InvoiceGeneratedReadOnly());
         }
 
         var balanceError = await ValidateFinalBalancesAsync(
@@ -612,6 +627,11 @@ public sealed class CashVoucherService(
         Error.Conflict(
             "CashVouchers.Concurrency",
             "تم تعديل سند النقدية بواسطة مستخدم آخر. أعد تحميل السند ثم حاول مرة أخرى.");
+
+    private static Error InvoiceGeneratedReadOnly() =>
+        Error.Conflict(
+            "CashVouchers.InvoiceGeneratedReadOnly",
+            "لا يمكن تعديل أو حذف سند السداد المنشأ تلقائياً من الفاتورة؛ عدّل الفاتورة نفسها.");
 
     private static Error CashboxNotFound(int id) =>
         Error.NotFound(

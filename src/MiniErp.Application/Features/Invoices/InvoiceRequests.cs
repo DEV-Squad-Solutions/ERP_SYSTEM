@@ -7,12 +7,9 @@ public sealed record InvoiceLineRequest(
     int Count,
     decimal Weight,
     decimal Price,
-    string? Notes)
-{
-    public int? SourceInvoiceLineId { get; init; }
-
-    public decimal? ReturnUnitCost { get; init; }
-}
+    string? Notes,
+    int? SourceInvoiceLineId = null,
+    decimal? ReturnUnitCost = null);
 
 public sealed record InvoiceContainerLineRequest(
     int ContainerId,
@@ -39,10 +36,15 @@ public sealed record InvoiceRequest(
     decimal PaidAmount,
     string? Notes,
     IReadOnlyList<InvoiceLineRequest> Lines,
-    IReadOnlyList<InvoiceContainerLineRequest> ContainerLines
-    )
+    IReadOnlyList<InvoiceContainerLineRequest> ContainerLines,
+    string? PartnerInvoiceNo = null,
+    int? CashboxId = null,
+    int? CashMovementTypeId = null,
+    InvoiceContentType ContentType = InvoiceContentType.Items)
 {
     public const int InvoiceNumberMaximumLength = 100;
+
+    public const int PartnerInvoiceNoMaximumLength = 100;
 
     public const int ExportInvoiceCodeMaximumLength = 100;
 
@@ -77,4 +79,8 @@ public sealed record InvoiceUpdateRequest(
     string? Notes,
     IReadOnlyList<InvoiceLineRequest> Lines,
     IReadOnlyList<InvoiceContainerLineRequest> ContainerLines,
-    byte[]? RowVersion);
+    byte[]? RowVersion,
+    string? PartnerInvoiceNo = null,
+    int? CashboxId = null,
+    int? CashMovementTypeId = null,
+    InvoiceContentType ContentType = InvoiceContentType.Items);

@@ -279,6 +279,7 @@ public sealed class CountryServiceTests
 
                 CREATE TABLE Invoices (
                     Id INTEGER PRIMARY KEY,
+                    ContentType INTEGER NOT NULL DEFAULT 1,
                     CountryId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );

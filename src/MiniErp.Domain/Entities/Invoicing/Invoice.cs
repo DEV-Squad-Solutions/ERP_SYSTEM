@@ -1,5 +1,6 @@
 using MiniErp.Domain.Common.Entities;
 using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Logistics;
@@ -20,7 +21,12 @@ public sealed class Invoice : AuditableEntity
 
     public string? ExportInvoiceCode { get; set; }
 
+    public string? PartnerInvoiceNo { get; set; }
+
     public InvoiceType InvoiceType { get; set; }
+
+    public InvoiceContentType ContentType { get; set; } =
+        InvoiceContentType.Items;
 
     public PaymentTerm PaymentTerm { get; set; } = PaymentTerm.Cash;
 
@@ -68,6 +74,13 @@ public sealed class Invoice : AuditableEntity
     public decimal RemainingAmount =>
         Total - PaidAmount;
 
+    public PaymentStatus PaymentStatus =>
+        PaidAmount <= 0m && Total > 0m
+            ? PaymentStatus.Unpaid
+            : RemainingAmount <= 0m
+                ? PaymentStatus.Paid
+                : PaymentStatus.PartiallyPaid;
+
     public string? Notes { get; set; }
 
     public DateTime LastModifiedAt { get; private set; }
@@ -77,6 +90,8 @@ public sealed class Invoice : AuditableEntity
     public ICollection<InvoiceLine> Lines { get; set; } = [];
 
     public ICollection<InvoiceContainerLine> ContainerLines { get; set; } = [];
+
+    public ICollection<CashVoucher> PaymentVouchers { get; set; } = [];
 
     public void CalculateTotal()
     {
@@ -96,8 +111,5 @@ public sealed class Invoice : AuditableEntity
         LastModifiedAt = utcNow;
     }
 
-    public PaymentStatus GetPaymentStatus() =>
-        RemainingAmount <= 0m
-            ? PaymentStatus.Paid
-            : PaymentStatus.Unpaid;
+    public PaymentStatus GetPaymentStatus() => PaymentStatus;
 }

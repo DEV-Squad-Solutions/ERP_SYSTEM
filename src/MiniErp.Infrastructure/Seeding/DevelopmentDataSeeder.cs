@@ -1031,15 +1031,32 @@ public static class DevelopmentDataSeeder
         int companyId,
         CancellationToken cancellationToken)
     {
-        var keys = await dbContext.ItemMovements
+        var openingBalanceKeys = await dbContext.StockOpeningBalanceLines
             .AsNoTracking()
-            .Where(movement => movement.CompanyId == companyId)
-            .Select(movement => new InventoryCostingKey(
-                movement.StoreId,
-                movement.ItemId))
-            .Distinct()
+            .Where(line =>
+                line.CompanyId == companyId &&
+                line.StockOpeningBalance.DocumentNumber == "OPEN-001" &&
+                line.StockOpeningBalance.Notes ==
+                    $"Seed draft for Company {companyId}")
+            .Select(line => new InventoryCostingKey(
+                line.StockOpeningBalance.StoreId,
+                line.ItemId))
             .ToListAsync(cancellationToken);
-        if (keys.Count == 0)
+        var invoiceKeys = await dbContext.InvoiceLines
+            .AsNoTracking()
+            .Where(line =>
+                line.CompanyId == companyId &&
+                (line.Invoice.ExportInvoiceCode == "SEED-CASH" ||
+                 line.Invoice.ExportInvoiceCode == "SEED-CREDIT"))
+            .Select(line => new InventoryCostingKey(
+                line.Invoice.StoreId,
+                line.ItemId))
+            .ToListAsync(cancellationToken);
+        var keys = openingBalanceKeys
+            .Concat(invoiceKeys)
+            .Distinct()
+            .ToArray();
+        if (keys.Length == 0)
         {
             return;
         }

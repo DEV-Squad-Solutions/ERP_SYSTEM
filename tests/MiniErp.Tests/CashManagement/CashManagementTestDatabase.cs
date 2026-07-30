@@ -183,6 +183,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,
                 InvoiceNumber TEXT NOT NULL,
+                PartnerInvoiceNo TEXT NULL,
+                ContentType INTEGER NOT NULL DEFAULT 1,
                 IsDeleted INTEGER NOT NULL
             );
 
@@ -290,6 +292,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             CREATE TABLE CashVouchers (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,
+                InvoiceId INTEGER NULL,
                 VoucherNumber TEXT NOT NULL COLLATE NOCASE,
                 VoucherDate TEXT NOT NULL,
                 Direction INTEGER NOT NULL,

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
+using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
@@ -129,6 +130,47 @@ public sealed partial class InvoiceService
                     "Invoices.InvoiceTypeInvalid",
                     "نوع الفاتورة غير مدعوم.",
                     nameof(InvoiceRequest.InvoiceType)));
+        }
+
+        if (!Enum.IsDefined(
+                typeof(InvoiceContentType),
+                invoice.ContentType))
+        {
+            return Failure(
+                Error.Validation(
+                    "Invoices.ContentTypeInvalid",
+                    "محتوى الفاتورة غير مدعوم.",
+                    nameof(InvoiceRequest.ContentType)));
+        }
+
+        if (invoice.ContentType == InvoiceContentType.Containers &&
+            lines.Count > 0)
+        {
+            return Failure(
+                Error.Validation(
+                    "Invoices.ItemLinesNotAllowedForContainerInvoice",
+                    "لا يجوز إضافة سطور أصناف إلى فاتورة محتواها عبوات.",
+                    nameof(InvoiceRequest.Lines)));
+        }
+
+        if (invoice.ContentType == InvoiceContentType.Containers &&
+            containerLines.Count == 0)
+        {
+            return Failure(
+                Error.Validation(
+                    "Invoices.ContainerLinesRequired",
+                    "يجب إضافة سطر عبوة واحد على الأقل لفاتورة العبوات.",
+                    nameof(InvoiceRequest.ContainerLines)));
+        }
+
+        if (invoice.ContentType == InvoiceContentType.Items &&
+            lines.Count == 0)
+        {
+            return Failure(
+                Error.Validation(
+                    "Invoices.ItemLinesRequired",
+                    "يجب إضافة سطر صنف واحد على الأقل لفاتورة الأصناف.",
+                    nameof(InvoiceRequest.Lines)));
         }
 
         if (invoice.InvoiceType != InvoiceType.SalesReturn &&
@@ -303,13 +345,30 @@ public sealed partial class InvoiceService
                     nameof(InvoiceRequest.StoreId)));
         }
 
-        if (store.IsContainerStore)
+        if (invoice.ContentType == InvoiceContentType.Items &&
+            store.IsContainerStore)
         {
             return Failure(
                 Error.Conflict(
                     "Invoices.ContainerStoreNotAllowed",
                     "يجب اختيار مخزن منتجات وليس مخزن عبوات.",
                     nameof(InvoiceRequest.StoreId)));
+        }
+
+        if (invoice.ContentType == InvoiceContentType.Containers &&
+            !store.IsContainerStore)
+        {
+            return Failure(
+                Error.Conflict(
+                    "Invoices.ContainerStoreRequired",
+                    "يجب اختيار مخزن عبوات في فاتورة محتواها عبوات.",
+                    nameof(InvoiceRequest.StoreId)));
+        }
+
+        if (invoice.ContentType == InvoiceContentType.Containers &&
+            !invoice.ContainerStoreId.HasValue)
+        {
+            invoice.ContainerStoreId = invoice.StoreId;
         }
 
         Store? containerStore = null;
@@ -620,6 +679,197 @@ public sealed partial class InvoiceService
         }
 
         return null;
+    }
+
+    private async Task<Error?> ValidatePaymentAsync(
+        Invoice invoice,
+        int? cashboxId,
+        int? cashMovementTypeId,
+        int? currentInvoiceId,
+        CancellationToken cancellationToken)
+    {
+        var currentVoucher = currentInvoiceId is int invoiceId
+            ? await dbContext.CashVouchers
+                .FirstOrDefaultAsync(voucher =>
+                    voucher.CompanyId == companyId &&
+                    voucher.InvoiceId == invoiceId,
+                    cancellationToken)
+            : null;
+
+        if (invoice.PaymentTerm == PaymentTerm.Cash &&
+            invoice.PaidAmount != invoice.Total)
+        {
+            return CashInvoiceMustBeFullyPaid();
+        }
+
+        if (invoice.PaymentTerm == PaymentTerm.Credit &&
+            invoice.Total > 0m &&
+            invoice.PaidAmount >= invoice.Total)
+        {
+            return CreditInvoiceCannotBeFullyPaid();
+        }
+
+        if (invoice.PaidAmount <= 0m)
+        {
+            if (cashboxId.HasValue || cashMovementTypeId.HasValue)
+            {
+                return PaymentReferencesNotAllowed();
+            }
+
+            return await ValidateFinalCashboxBalanceAsync(
+                currentVoucher,
+                proposedCashboxId: null,
+                proposedDirection: null,
+                proposedAmount: null,
+                cancellationToken);
+        }
+
+        if (!cashboxId.HasValue)
+        {
+            return CashboxRequiredForPayment();
+        }
+
+        if (!cashMovementTypeId.HasValue)
+        {
+            return CashMovementTypeRequiredForPayment();
+        }
+
+        var cashbox = await dbContext.Cashboxes
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate =>
+                candidate.CompanyId == companyId &&
+                candidate.Id == cashboxId.Value,
+                cancellationToken);
+        if (cashbox is null)
+        {
+            return CashboxNotFound(cashboxId.Value);
+        }
+
+        if (!cashbox.IsActive &&
+            (currentVoucher is null ||
+             currentVoucher.CashboxId != cashbox.Id))
+        {
+            return CashboxInactive();
+        }
+
+        if (cashbox.Currency != invoice.Currency)
+        {
+            return PaymentCurrencyMismatch();
+        }
+
+        var movementType = await dbContext.CashMovementTypes
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate =>
+                candidate.CompanyId == companyId &&
+                candidate.Id == cashMovementTypeId.Value,
+                cancellationToken);
+        if (movementType is null)
+        {
+            return CashMovementTypeNotFound(cashMovementTypeId.Value);
+        }
+
+        if (!movementType.IsActive &&
+            (currentVoucher is null ||
+             currentVoucher.CashMovementTypeId != movementType.Id))
+        {
+            return CashMovementTypeInactive();
+        }
+
+        var expectedDirection = InvoiceMovementRules.GetPaymentDirection(
+            invoice.InvoiceType);
+        if (movementType.Direction != expectedDirection)
+        {
+            return CashMovementTypeDirectionMismatch();
+        }
+
+        var expectedEffect = InvoiceMovementRules.GetPaymentPartnerEffect(
+            invoice.InvoiceType);
+        if (movementType.PartnerEffect != expectedEffect)
+        {
+            return CashMovementTypePartnerEffectMismatch();
+        }
+
+        return await ValidateFinalCashboxBalanceAsync(
+            currentVoucher,
+            cashbox.Id,
+            expectedDirection,
+            invoice.PaidAmount,
+            cancellationToken);
+    }
+
+    private async Task<Error?> ValidateFinalCashboxBalanceAsync(
+        CashVoucher? currentVoucher,
+        int? proposedCashboxId,
+        CashDirection? proposedDirection,
+        decimal? proposedAmount,
+        CancellationToken cancellationToken)
+    {
+        var affectedCashboxIds = new HashSet<int>();
+        if (currentVoucher is not null)
+        {
+            affectedCashboxIds.Add(currentVoucher.CashboxId);
+        }
+
+        if (proposedCashboxId.HasValue)
+        {
+            affectedCashboxIds.Add(proposedCashboxId.Value);
+        }
+
+        foreach (var cashboxId in affectedCashboxIds)
+        {
+            var excludedVoucherId = currentVoucher?.Id;
+            var balance = await dbContext.Cashboxes
+                .AsNoTracking()
+                .Where(cashbox =>
+                    cashbox.CompanyId == companyId &&
+                    cashbox.Id == cashboxId)
+                .Select(cashbox =>
+                    cashbox.OpeningBalance +
+                    (cashbox.Vouchers
+                        .Where(voucher =>
+                            !excludedVoucherId.HasValue ||
+                            voucher.Id != excludedVoucherId.Value)
+                        .Sum(voucher =>
+                            (decimal?)(voucher.Direction ==
+                                CashDirection.Receipt
+                                ? voucher.Amount
+                                : -voucher.Amount)) ?? 0m))
+                .SingleAsync(cancellationToken);
+
+            if (proposedCashboxId == cashboxId &&
+                proposedDirection.HasValue &&
+                proposedAmount.HasValue)
+            {
+                balance += proposedDirection == CashDirection.Receipt
+                    ? proposedAmount.Value
+                    : -proposedAmount.Value;
+            }
+
+            if (balance < 0m)
+            {
+                return InsufficientCashboxBalance(cashboxId);
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<Error?> ValidatePaymentRemovalAsync(
+        int invoiceId,
+        CancellationToken cancellationToken)
+    {
+        var currentVoucher = await dbContext.CashVouchers
+            .FirstOrDefaultAsync(voucher =>
+                voucher.CompanyId == companyId &&
+                voucher.InvoiceId == invoiceId,
+                cancellationToken);
+
+        return await ValidateFinalCashboxBalanceAsync(
+            currentVoucher,
+            proposedCashboxId: null,
+            proposedDirection: null,
+            proposedAmount: null,
+            cancellationToken);
     }
 
     private async Task<Error?> ValidateStockAsync(

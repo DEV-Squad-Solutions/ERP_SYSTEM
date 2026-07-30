@@ -67,6 +67,12 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
             TimeProvider.System);
     }
 
+    public InventoryCostReportService CreateInventoryCostReportService(
+        int companyId = 1) =>
+        new(
+            Context,
+            new TestCurrentCompanyContext(companyId));
+
     public InventoryCountService CreateInventoryCountService(
         int companyId = 1)
     {

@@ -31,6 +31,9 @@ public sealed class InvoiceMappingRegister : IRegister
                 invoice => invoice.ExportInvoiceCode,
                 request => Normalize(request.ExportInvoiceCode))
             .Map(
+                invoice => invoice.PartnerInvoiceNo,
+                request => Normalize(request.PartnerInvoiceNo))
+            .Map(
                 invoice => invoice.ExternalDriverName,
                 request => Normalize(request.ExternalDriverName))
             .Map(
@@ -47,6 +50,9 @@ public sealed class InvoiceMappingRegister : IRegister
             .Map(
                 invoice => invoice.ExportInvoiceCode,
                 request => Normalize(request.ExportInvoiceCode))
+            .Map(
+                invoice => invoice.PartnerInvoiceNo,
+                request => Normalize(request.PartnerInvoiceNo))
             .Map(
                 invoice => invoice.ExternalDriverName,
                 request => Normalize(request.ExternalDriverName))
@@ -97,9 +103,41 @@ public sealed class InvoiceMappingRegister : IRegister
                     : invoice.ActualDriver.Name)
             .Map(
                 response => response.PaymentStatus,
-                invoice => invoice.Total - invoice.PaidAmount <= 0m
+                invoice => invoice.PaidAmount <= 0m && invoice.Total > 0m
+                    ? PaymentStatus.Unpaid
+                    : invoice.Total - invoice.PaidAmount <= 0m
                     ? PaymentStatus.Paid
-                    : PaymentStatus.Unpaid)
+                    : PaymentStatus.PartiallyPaid)
+            .Map(
+                response => response.PaymentVoucherId,
+                invoice => invoice.PaymentVouchers
+                    .OrderBy(voucher => voucher.Id)
+                    .Select(voucher => (int?)voucher.Id)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashboxId,
+                invoice => invoice.PaymentVouchers
+                    .OrderBy(voucher => voucher.Id)
+                    .Select(voucher => (int?)voucher.CashboxId)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashboxName,
+                invoice => invoice.PaymentVouchers
+                    .OrderBy(voucher => voucher.Id)
+                    .Select(voucher => voucher.Cashbox.Name)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashMovementTypeId,
+                invoice => invoice.PaymentVouchers
+                    .OrderBy(voucher => voucher.Id)
+                    .Select(voucher => (int?)voucher.CashMovementTypeId)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashMovementTypeName,
+                invoice => invoice.PaymentVouchers
+                    .OrderBy(voucher => voucher.Id)
+                    .Select(voucher => voucher.CashMovementType.Name)
+                    .FirstOrDefault())
             .Map(
                 response => response.Subtotal,
                 invoice => invoice.Lines.Sum(line => line.Total))
@@ -141,9 +179,41 @@ public sealed class InvoiceMappingRegister : IRegister
                     : invoice.ActualDriver.Name)
             .Map(
                 response => response.PaymentStatus,
-                invoice => invoice.Total - invoice.PaidAmount <= 0m
+                invoice => invoice.PaidAmount <= 0m && invoice.Total > 0m
+                    ? PaymentStatus.Unpaid
+                    : invoice.Total - invoice.PaidAmount <= 0m
                     ? PaymentStatus.Paid
-                    : PaymentStatus.Unpaid)
+                    : PaymentStatus.PartiallyPaid)
+            .Map(
+                response => response.PaymentVoucherId,
+                invoice => invoice.PaymentVouchers
+                    .OrderBy(voucher => voucher.Id)
+                    .Select(voucher => (int?)voucher.Id)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashboxId,
+                invoice => invoice.PaymentVouchers
+                    .OrderBy(voucher => voucher.Id)
+                    .Select(voucher => (int?)voucher.CashboxId)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashboxName,
+                invoice => invoice.PaymentVouchers
+                    .OrderBy(voucher => voucher.Id)
+                    .Select(voucher => voucher.Cashbox.Name)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashMovementTypeId,
+                invoice => invoice.PaymentVouchers
+                    .OrderBy(voucher => voucher.Id)
+                    .Select(voucher => (int?)voucher.CashMovementTypeId)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashMovementTypeName,
+                invoice => invoice.PaymentVouchers
+                    .OrderBy(voucher => voucher.Id)
+                    .Select(voucher => voucher.CashMovementType.Name)
+                    .FirstOrDefault())
             .Map(
                 response => response.Subtotal,
                 invoice => invoice.Lines.Sum(line => line.Total))

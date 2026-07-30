@@ -1,6 +1,7 @@
 using FluentValidation;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.Invoices;
 
@@ -120,6 +121,9 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.InvoiceType)
             .IsInEnum();
 
+        validator.RuleFor(request => request.ContentType)
+            .IsInEnum();
+
         validator.RuleFor(request => request.PaymentTerm)
             .IsInEnum();
 
@@ -168,6 +172,11 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.ExportInvoiceCode)
             .MaximumLength(InvoiceRequest.ExportInvoiceCodeMaximumLength);
 
+        validator.RuleFor(request => request.PartnerInvoiceNo)
+            .MaximumLength(InvoiceRequest.PartnerInvoiceNoMaximumLength);
+
+        AddPaymentVoucherShapeRules(validator);
+
         validator.RuleFor(request => request.Notes)
             .MaximumLength(InvoiceRequest.NotesMaximumLength);
 
@@ -190,6 +199,7 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.Lines)
             .NotNull()
             .NotEmpty()
+            .When(request => request.ContentType == InvoiceContentType.Items)
             .Must(lines => lines is not null &&
                 lines.Count <= InvoiceRequest.MaximumLineCount)
             .WithMessage(
@@ -204,6 +214,8 @@ internal static class InvoiceValidationRules
 
         validator.RuleFor(request => request.ContainerLines)
             .NotNull()
+            .NotEmpty()
+            .When(request => request.ContentType == InvoiceContentType.Containers)
             .Must(lines => lines is not null &&
                 lines.Count <= InvoiceRequest.MaximumContainerLineCount)
             .WithMessage(
@@ -239,6 +251,9 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.InvoiceType)
             .IsInEnum();
 
+        validator.RuleFor(request => request.ContentType)
+            .IsInEnum();
+
         validator.RuleFor(request => request.PaymentTerm)
             .IsInEnum();
 
@@ -287,6 +302,11 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.ExportInvoiceCode)
             .MaximumLength(InvoiceRequest.ExportInvoiceCodeMaximumLength);
 
+        validator.RuleFor(request => request.PartnerInvoiceNo)
+            .MaximumLength(InvoiceRequest.PartnerInvoiceNoMaximumLength);
+
+        AddPaymentVoucherShapeRules(validator);
+
         validator.RuleFor(request => request.Notes)
             .MaximumLength(InvoiceRequest.NotesMaximumLength);
 
@@ -309,6 +329,7 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.Lines)
             .NotNull()
             .NotEmpty()
+            .When(request => request.ContentType == InvoiceContentType.Items)
             .Must(lines => lines is not null &&
                 lines.Count <= InvoiceRequest.MaximumLineCount)
             .WithMessage(
@@ -323,6 +344,8 @@ internal static class InvoiceValidationRules
 
         validator.RuleFor(request => request.ContainerLines)
             .NotNull()
+            .NotEmpty()
+            .When(request => request.ContentType == InvoiceContentType.Containers)
             .Must(lines => lines is not null &&
                 lines.Count <= InvoiceRequest.MaximumContainerLineCount)
             .WithMessage(
@@ -378,6 +401,31 @@ internal static class InvoiceValidationRules
             .WithMessage(
                 "المبلغ المدفوع يجب ألا يكون سالبًا ولا يمكن أن يتجاوز صافي الفاتورة.")
             .WithErrorCode("Invoices.InvalidPaidAmount");
+
+        validator.RuleFor(request => request.PaidAmount)
+            .Must((request, paidAmount) =>
+                !TryCalculateNetTotal(
+                    request.Lines,
+                    request.DiscountAmount,
+                    out _,
+                    out var total) ||
+                request.PaymentTerm != PaymentTerm.Cash ||
+                paidAmount == total)
+            .WithMessage("الفاتورة النقدية يجب أن تكون مدفوعة بالكامل.")
+            .WithErrorCode("Invoices.CashInvoiceMustBeFullyPaid");
+
+        validator.RuleFor(request => request.PaidAmount)
+            .Must((request, paidAmount) =>
+                !TryCalculateNetTotal(
+                    request.Lines,
+                    request.DiscountAmount,
+                    out _,
+                    out var total) ||
+                request.PaymentTerm != PaymentTerm.Credit ||
+                total <= 0m ||
+                paidAmount < total)
+            .WithMessage("الفاتورة الآجلة لا تقبل السداد الكامل؛ استخدم الفاتورة النقدية.")
+            .WithErrorCode("Invoices.CreditInvoiceCannotBeFullyPaid");
     }
 
     private static void AddAmountRules(
@@ -406,6 +454,103 @@ internal static class InvoiceValidationRules
             .WithMessage(
                 "المبلغ المدفوع يجب ألا يكون سالبًا ولا يمكن أن يتجاوز صافي الفاتورة.")
             .WithErrorCode("Invoices.InvalidPaidAmount");
+
+        validator.RuleFor(request => request.PaidAmount)
+            .Must((request, paidAmount) =>
+                !TryCalculateNetTotal(
+                    request.Lines,
+                    request.DiscountAmount,
+                    out _,
+                    out var total) ||
+                request.PaymentTerm != PaymentTerm.Cash ||
+                paidAmount == total)
+            .WithMessage("الفاتورة النقدية يجب أن تكون مدفوعة بالكامل.")
+            .WithErrorCode("Invoices.CashInvoiceMustBeFullyPaid");
+
+        validator.RuleFor(request => request.PaidAmount)
+            .Must((request, paidAmount) =>
+                !TryCalculateNetTotal(
+                    request.Lines,
+                    request.DiscountAmount,
+                    out _,
+                    out var total) ||
+                request.PaymentTerm != PaymentTerm.Credit ||
+                total <= 0m ||
+                paidAmount < total)
+            .WithMessage("الفاتورة الآجلة لا تقبل السداد الكامل؛ استخدم الفاتورة النقدية.")
+            .WithErrorCode("Invoices.CreditInvoiceCannotBeFullyPaid");
+    }
+
+    private static void AddPaymentVoucherShapeRules(
+        AbstractValidator<InvoiceRequest> validator)
+    {
+        validator.RuleFor(request => request.CashboxId)
+            .GreaterThan(0)
+            .When(request => request.CashboxId.HasValue);
+
+        validator.RuleFor(request => request.CashMovementTypeId)
+            .GreaterThan(0)
+            .When(request => request.CashMovementTypeId.HasValue);
+
+        validator.RuleFor(request => request.CashboxId)
+            .NotNull()
+            .When(request => request.PaidAmount > 0m)
+            .WithMessage("صندوق النقدية مطلوب عند تسجيل دفعة.")
+            .WithErrorCode("Invoices.CashboxRequiredForPayment");
+
+        validator.RuleFor(request => request.CashMovementTypeId)
+            .NotNull()
+            .When(request => request.PaidAmount > 0m)
+            .WithMessage("نوع الحركة النقدية مطلوب عند تسجيل دفعة.")
+            .WithErrorCode("Invoices.CashMovementTypeRequiredForPayment");
+
+        validator.RuleFor(request => request.CashboxId)
+            .Null()
+            .When(request => request.PaidAmount <= 0m)
+            .WithMessage("لا يجوز تحديد صندوق نقدية دون دفعة.")
+            .WithErrorCode("Invoices.CashboxNotAllowedWithoutPayment");
+
+        validator.RuleFor(request => request.CashMovementTypeId)
+            .Null()
+            .When(request => request.PaidAmount <= 0m)
+            .WithMessage("لا يجوز تحديد نوع حركة نقدية دون دفعة.")
+            .WithErrorCode("Invoices.CashMovementTypeNotAllowedWithoutPayment");
+    }
+
+    private static void AddPaymentVoucherShapeRules(
+        AbstractValidator<InvoiceUpdateRequest> validator)
+    {
+        validator.RuleFor(request => request.CashboxId)
+            .GreaterThan(0)
+            .When(request => request.CashboxId.HasValue);
+
+        validator.RuleFor(request => request.CashMovementTypeId)
+            .GreaterThan(0)
+            .When(request => request.CashMovementTypeId.HasValue);
+
+        validator.RuleFor(request => request.CashboxId)
+            .NotNull()
+            .When(request => request.PaidAmount > 0m)
+            .WithMessage("صندوق النقدية مطلوب عند تسجيل دفعة.")
+            .WithErrorCode("Invoices.CashboxRequiredForPayment");
+
+        validator.RuleFor(request => request.CashMovementTypeId)
+            .NotNull()
+            .When(request => request.PaidAmount > 0m)
+            .WithMessage("نوع الحركة النقدية مطلوب عند تسجيل دفعة.")
+            .WithErrorCode("Invoices.CashMovementTypeRequiredForPayment");
+
+        validator.RuleFor(request => request.CashboxId)
+            .Null()
+            .When(request => request.PaidAmount <= 0m)
+            .WithMessage("لا يجوز تحديد صندوق نقدية دون دفعة.")
+            .WithErrorCode("Invoices.CashboxNotAllowedWithoutPayment");
+
+        validator.RuleFor(request => request.CashMovementTypeId)
+            .Null()
+            .When(request => request.PaidAmount <= 0m)
+            .WithMessage("لا يجوز تحديد نوع حركة نقدية دون دفعة.")
+            .WithErrorCode("Invoices.CashMovementTypeNotAllowedWithoutPayment");
     }
 
     private static bool TryCalculateNetTotal(

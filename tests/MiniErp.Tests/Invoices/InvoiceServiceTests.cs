@@ -104,6 +104,37 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public async Task Add_ContainerContentTypeCreatesContainerOnlyInvoice()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var request = CreateRequest(
+            InvoiceType.Sales,
+            storeId: 3,
+            containerStoreId: 3,
+            containerLines:
+            [
+                new InvoiceContainerLineRequest(1, 1, 0)
+            ]) with
+        {
+            ContentType = InvoiceContentType.Containers,
+            Lines = [],
+            PaidAmount = 0m,
+            CashboxId = null,
+            CashMovementTypeId = null
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsSuccess, result.IsFailure ? result.Error.Description : null);
+        Assert.Equal(InvoiceContentType.Containers, result.Value.ContentType);
+        Assert.Empty(result.Value.Lines);
+        Assert.Single(result.Value.ContainerLines);
+        Assert.Empty(await database.Context.ItemMovements.ToListAsync());
+        Assert.Single(await database.Context.ContainerMovements.ToListAsync());
+    }
+
+    [Fact]
     public async Task Add_UsesEnteredInvoiceNumberAndDoesNotDuplicateChildren()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
@@ -286,10 +317,13 @@ public sealed class InvoiceServiceTests
                 storeId: 2,
                 lines:
                 [
-                    new InvoiceLineRequest(1, 1, 1m, 30m, null)
-                    {
-                        SourceInvoiceLineId = sale.Lines.Single().Id
-                    }
+                    new InvoiceLineRequest(
+                        1,
+                        1,
+                        1m,
+                        30m,
+                        null,
+                        sale.Lines.Single().Id)
                 ]));
 
         Assert.True(result.IsSuccess, result.Error.Description);
@@ -320,10 +354,13 @@ public sealed class InvoiceServiceTests
                 storeId: 2,
                 lines:
                 [
-                    new InvoiceLineRequest(1, 1, 1m, 30m, null)
-                    {
-                        SourceInvoiceLineId = sale.Lines.Single().Id
-                    }
+                    new InvoiceLineRequest(
+                        1,
+                        1,
+                        1m,
+                        30m,
+                        null,
+                        sale.Lines.Single().Id)
                 ]));
 
         var result = await service.DeleteAsync(sale.Id);
@@ -354,10 +391,13 @@ public sealed class InvoiceServiceTests
                 storeId: 2,
                 lines:
                 [
-                    new InvoiceLineRequest(1, 1, 1m, 30m, null)
-                    {
-                        SourceInvoiceLineId = sale.Lines.Single().Id
-                    }
+                    new InvoiceLineRequest(
+                        1,
+                        1,
+                        1m,
+                        30m,
+                        null,
+                        sale.Lines.Single().Id)
                 ]));
 
         Assert.True(result.IsFailure);
@@ -387,10 +427,14 @@ public sealed class InvoiceServiceTests
                 storeId: 2,
                 lines:
                 [
-                    new InvoiceLineRequest(1, 1, 1m, 30m, null)
-                    {
-                        ReturnUnitCost = 99m
-                    }
+                    new InvoiceLineRequest(
+                        1,
+                        1,
+                        1m,
+                        30m,
+                        null,
+                        null,
+                        99m)
                 ]));
 
         Assert.True(result.IsSuccess, result.Error.Description);
@@ -1429,7 +1473,7 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task Update_CreditToCashRemovesPartnerMovement()
+    public async Task Update_CreditToCashCreatesFullAndPaymentMovements()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -1447,8 +1491,9 @@ public sealed class InvoiceServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(
-            0,
+            2,
             await database.Context.BusinessPartnerMovements.CountAsync());
+        Assert.Single(await database.Context.CashVouchers.ToListAsync());
     }
 
     [Fact]
@@ -1684,7 +1729,7 @@ public sealed class InvoiceServiceTests
             .SingleAsync();
         var partnerMovement = await database.Context.BusinessPartnerMovements
             .AsNoTracking()
-            .SingleAsync();
+            .SingleAsync(movement => movement.InvoiceId.HasValue);
         var driverTrip = await database.Context.DriverTrips
             .AsNoTracking()
             .SingleAsync();
@@ -1703,7 +1748,7 @@ public sealed class InvoiceServiceTests
         Assert.Equal(1, containerMovement.OutgoingUnits);
         Assert.Equal(0, containerMovement.IncomingUnits);
         Assert.Equal(1, partnerMovement.BusinessPartnerId);
-        Assert.Equal(17m, partnerMovement.Credit);
+        Assert.Equal(19m, partnerMovement.Credit);
         Assert.Equal(1, driverTrip.DriverId);
     }
 
@@ -2224,7 +2269,7 @@ public sealed class InvoiceServiceTests
     [Theory]
     [InlineData(InvoiceType.SalesReturn)]
     [InlineData(InvoiceType.PurchaseReturn)]
-    public async Task Add_CashReturnCreatesNoOutstandingPartnerMovement(
+    public async Task Add_CashReturnCreatesSettledPartnerMovements(
         InvoiceType invoiceType)
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
@@ -2233,9 +2278,13 @@ public sealed class InvoiceServiceTests
         var result = await service.AddAsync(CreateRequest(invoiceType));
 
         Assert.True(result.IsSuccess);
+        var movements = await database.Context.BusinessPartnerMovements
+            .ToListAsync();
+        Assert.Equal(2, movements.Count);
         Assert.Equal(
-            0,
-            await database.Context.BusinessPartnerMovements.CountAsync());
+            0m,
+            movements.Sum(movement =>
+                movement.Credit - movement.Debit));
     }
 
     [Theory]
@@ -2318,9 +2367,19 @@ public sealed class InvoiceServiceTests
         Assert.Equal(18m, result.Value.Total);
         Assert.Equal(18m, result.Value.PaidAmount);
         Assert.Equal(0m, result.Value.RemainingAmount);
+        Assert.Equal(PaymentStatus.Paid, result.Value.PaymentStatus);
         Assert.Equal(
-            0,
+            2,
             await database.Context.BusinessPartnerMovements.CountAsync());
+        var voucher = await database.Context.CashVouchers.SingleAsync();
+        Assert.Equal(result.Value.Id, voucher.InvoiceId);
+        Assert.Equal(voucher.Id, result.Value.PaymentVoucherId);
+        Assert.Equal(voucher.CashboxId, result.Value.CashboxId);
+        Assert.Equal(
+            voucher.CashMovementTypeId,
+            result.Value.CashMovementTypeId);
+        Assert.Equal(18m, voucher.Amount);
+        Assert.Equal(CashDirection.Payment, voucher.Direction);
 
         database.Context.ChangeTracker.Clear();
         var persisted = await database.Context.Invoices.SingleAsync();
@@ -2329,12 +2388,43 @@ public sealed class InvoiceServiceTests
         Assert.Equal(18m, persisted.Total);
     }
 
+    [Fact]
+    public async Task Add_PersistsNormalizedPartnerInvoiceNumberInContracts()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit) with
+        {
+            PartnerInvoiceNo = "  PARTNER-INV-42  "
+        };
+
+        var created = await service.AddAsync(request);
+        var details = await service.GetByIdAsync(created.Value.Id);
+        var list = await service.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest());
+
+        Assert.True(created.IsSuccess);
+        Assert.Equal("PARTNER-INV-42", created.Value.PartnerInvoiceNo);
+        Assert.Equal("PARTNER-INV-42", details.Value.PartnerInvoiceNo);
+        Assert.Equal(
+            "PARTNER-INV-42",
+            Assert.Single(list.Value.Items).PartnerInvoiceNo);
+
+        database.Context.ChangeTracker.Clear();
+        Assert.Equal(
+            "PARTNER-INV-42",
+            await database.Context.Invoices
+                .Select(invoice => invoice.PartnerInvoiceNo)
+                .SingleAsync());
+    }
+
     [Theory]
-    [InlineData(0, 20)]
-    [InlineData(7, 13)]
-    public async Task Add_CashInvoiceAllowsOutstandingPaidAmount(
-        decimal paidAmount,
-        decimal expectedRemaining)
+    [InlineData(0)]
+    [InlineData(7)]
+    public async Task Add_CashInvoiceRejectsOutstandingPaidAmount(
+        decimal paidAmount)
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
 
@@ -2344,13 +2434,12 @@ public sealed class InvoiceServiceTests
                 PaymentTerm.Cash,
                 paidAmount: paidAmount));
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal(paidAmount, result.Value.PaidAmount);
-        Assert.Equal(expectedRemaining, result.Value.RemainingAmount);
-        var movement =
-            await database.Context.BusinessPartnerMovements.SingleAsync();
-        Assert.Equal(0m, movement.Debit);
-        Assert.Equal(expectedRemaining, movement.Credit);
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.CashInvoiceMustBeFullyPaid",
+            result.Error.Code);
+        Assert.Empty(await database.Context.Invoices.ToListAsync());
+        Assert.Empty(await database.Context.CashVouchers.ToListAsync());
     }
 
     [Fact]
@@ -2376,9 +2465,8 @@ public sealed class InvoiceServiceTests
 
     [Theory]
     [InlineData(0, 20, 1)]
-    [InlineData(7, 13, 1)]
-    [InlineData(20, 0, 0)]
-    public async Task Add_CreditInvoiceUsesOnlyRemainingAmountForPartnerMovement(
+    [InlineData(7, 13, 2)]
+    public async Task Add_CreditInvoiceUsesFullAndPaymentPartnerMovements(
         decimal paidAmount,
         decimal expectedRemaining,
         int expectedMovementCount)
@@ -2396,19 +2484,40 @@ public sealed class InvoiceServiceTests
         var movements = await database.Context.BusinessPartnerMovements
             .ToListAsync();
         Assert.Equal(expectedMovementCount, movements.Count);
-        if (expectedMovementCount == 1)
-        {
-            var movement = Assert.Single(movements);
-            Assert.Equal(0m, movement.Debit);
-            Assert.Equal(expectedRemaining, movement.Credit);
-        }
+        var netCredit = movements.Sum(movement =>
+            movement.Credit - movement.Debit);
+        Assert.Equal(expectedRemaining, netCredit);
+        var invoiceMovement = Assert.Single(
+            movements,
+            movement => movement.InvoiceId.HasValue);
+        Assert.Equal(20m, invoiceMovement.Credit);
+        Assert.Equal(
+            paidAmount > 0m ? 1 : 0,
+            await database.Context.CashVouchers.CountAsync());
+    }
+
+    [Fact]
+    public async Task Add_FullyPaidCreditInvoiceIsRejected()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                paidAmount: 20m));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.CreditInvoiceCannotBeFullyPaid",
+            result.Error.Code);
     }
 
     [Theory]
-    [InlineData(InvoiceType.Sales, 13, 0)]
-    [InlineData(InvoiceType.SalesReturn, 0, 13)]
-    [InlineData(InvoiceType.Purchase, 0, 13)]
-    [InlineData(InvoiceType.PurchaseReturn, 13, 0)]
+    [InlineData(InvoiceType.Sales, 18, 0)]
+    [InlineData(InvoiceType.SalesReturn, 0, 18)]
+    [InlineData(InvoiceType.Purchase, 0, 18)]
+    [InlineData(InvoiceType.PurchaseReturn, 18, 0)]
     public async Task Add_PartiallySettledCreditInvoiceKeepsPartnerDirection(
         InvoiceType invoiceType,
         decimal expectedDebit,
@@ -2427,10 +2536,31 @@ public sealed class InvoiceServiceTests
             result.IsSuccess,
             result.IsFailure ? result.Error.Description : null);
         Assert.Equal(13m, result.Value.RemainingAmount);
-        var movement =
-            await database.Context.BusinessPartnerMovements.SingleAsync();
+        Assert.Equal(PaymentStatus.PartiallyPaid, result.Value.PaymentStatus);
+        var movement = await database.Context.BusinessPartnerMovements
+            .SingleAsync(candidate => candidate.InvoiceId.HasValue);
         Assert.Equal(expectedDebit, movement.Debit);
         Assert.Equal(expectedCredit, movement.Credit);
+        var paymentMovement = await database.Context.BusinessPartnerMovements
+            .SingleAsync(candidate => candidate.CashVoucherId.HasValue);
+        var voucher = await database.Context.CashVouchers.SingleAsync();
+        var expectedPaymentDirection = invoiceType is
+            InvoiceType.Sales or InvoiceType.PurchaseReturn
+                ? CashDirection.Receipt
+                : CashDirection.Payment;
+        Assert.Equal(expectedPaymentDirection, voucher.Direction);
+        Assert.Equal(result.Value.PaymentVoucherId, voucher.Id);
+        Assert.Equal(
+            expectedPaymentDirection == CashDirection.Payment ? 5m : 0m,
+            paymentMovement.Debit);
+        Assert.Equal(
+            expectedPaymentDirection == CashDirection.Receipt ? 5m : 0m,
+            paymentMovement.Credit);
+        Assert.Equal(
+            13m,
+            Math.Abs(
+                (movement.Credit - movement.Debit) +
+                (paymentMovement.Credit - paymentMovement.Debit)));
     }
 
     [Theory]
@@ -2465,13 +2595,20 @@ public sealed class InvoiceServiceTests
         Assert.Equal(updatedDiscount, result.Value.DiscountAmount);
         Assert.Equal(updatedPaid, result.Value.PaidAmount);
         Assert.Equal(expectedRemaining, result.Value.RemainingAmount);
-        var movement =
-            await database.Context.BusinessPartnerMovements.SingleAsync();
-        Assert.Equal(expectedRemaining, movement.Credit);
+        var movements = await database.Context.BusinessPartnerMovements
+            .ToListAsync();
+        Assert.Equal(
+            expectedRemaining,
+            movements.Sum(movement =>
+                movement.Credit - movement.Debit));
+        var invoiceMovement = Assert.Single(
+            movements,
+            movement => movement.InvoiceId.HasValue);
+        Assert.Equal(result.Value.Total, invoiceMovement.Credit);
     }
 
     [Fact]
-    public async Task Update_PartialCreditToFullyPaidRemovesPartnerMovement()
+    public async Task Update_PartialCreditToFullyPaidIsRejected()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -2488,15 +2625,17 @@ public sealed class InvoiceServiceTests
                 [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
                 paidAmount: 20m));
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal(0m, result.Value.RemainingAmount);
+        Assert.True(result.IsFailure);
         Assert.Equal(
-            0,
+            "Invoices.CreditInvoiceCannotBeFullyPaid",
+            result.Error.Code);
+        Assert.Equal(
+            2,
             await database.Context.BusinessPartnerMovements.CountAsync());
     }
 
     [Fact]
-    public async Task Update_FullyPaidCreditToPartialCreatesPartnerMovement()
+    public async Task Update_PartialPaymentPreservesVoucherIdentityAndZeroRemovesIt()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -2504,7 +2643,57 @@ public sealed class InvoiceServiceTests
             CreateRequest(
                 InvoiceType.SalesReturn,
                 PaymentTerm.Credit,
-                paidAmount: 20m))).Value;
+                paidAmount: 5m))).Value;
+        var originalVoucher = await database.Context.CashVouchers
+            .AsNoTracking()
+            .SingleAsync();
+
+        var increased = await service.UpdateAsync(
+            created.Id,
+            CreateUpdateRequest(
+                created,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
+                paidAmount: 8m));
+
+        Assert.True(increased.IsSuccess);
+        database.Context.ChangeTracker.Clear();
+        var updatedVoucher = await database.Context.CashVouchers
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal(originalVoucher.Id, updatedVoucher.Id);
+        Assert.Equal(originalVoucher.CreatedOn, updatedVoucher.CreatedOn);
+        Assert.Equal(8m, updatedVoucher.Amount);
+        Assert.Equal(updatedVoucher.Id, increased.Value.PaymentVoucherId);
+
+        var removed = await service.UpdateAsync(
+            created.Id,
+            CreateUpdateRequest(
+                increased.Value,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
+                paidAmount: 0m));
+
+        Assert.True(removed.IsSuccess);
+        Assert.Equal(PaymentStatus.Unpaid, removed.Value.PaymentStatus);
+        Assert.Null(removed.Value.PaymentVoucherId);
+        Assert.Empty(await database.Context.CashVouchers.ToListAsync());
+        Assert.True(
+            await database.Context.CashVouchers
+                .IgnoreQueryFilters()
+                .Where(voucher => voucher.Id == originalVoucher.Id)
+                .Select(voucher => voucher.IsDeleted)
+                .SingleAsync());
+    }
+
+    [Fact]
+    public async Task Update_UnpaidCreditToPartialCreatesPaymentVoucher()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var created = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                paidAmount: 0m))).Value;
 
         var result = await service.UpdateAsync(
             created.Id,
@@ -2515,9 +2704,14 @@ public sealed class InvoiceServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(12m, result.Value.RemainingAmount);
-        var movement =
-            await database.Context.BusinessPartnerMovements.SingleAsync();
-        Assert.Equal(12m, movement.Credit);
+        var movements = await database.Context.BusinessPartnerMovements
+            .ToListAsync();
+        Assert.Equal(2, movements.Count);
+        Assert.Equal(
+            12m,
+            movements.Sum(movement =>
+                movement.Credit - movement.Debit));
+        Assert.Single(await database.Context.CashVouchers.ToListAsync());
     }
 
     [Fact]
@@ -2587,12 +2781,13 @@ public sealed class InvoiceServiceTests
         Assert.Equal(17m, result.Value.PaidAmount);
         Assert.Equal(0m, result.Value.RemainingAmount);
         Assert.Equal(
-            0,
+            2,
             await database.Context.BusinessPartnerMovements.CountAsync());
+        Assert.Single(await database.Context.CashVouchers.ToListAsync());
     }
 
     [Fact]
-    public async Task Update_ChangedCashTotalAllowsOutstandingBalance()
+    public async Task Update_ChangedCashTotalRequiresFullPayment()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -2610,19 +2805,16 @@ public sealed class InvoiceServiceTests
                 changedLines,
                 paidAmount: 20m));
 
-        Assert.True(partial.IsSuccess);
-        Assert.Equal(30m, partial.Value.Total);
-        Assert.Equal(20m, partial.Value.PaidAmount);
-        Assert.Equal(10m, partial.Value.RemainingAmount);
-        var movement =
-            await database.Context.BusinessPartnerMovements.SingleAsync();
-        Assert.Equal(10m, movement.Credit);
+        Assert.True(partial.IsFailure);
+        Assert.Equal(
+            "Invoices.CashInvoiceMustBeFullyPaid",
+            partial.Error.Code);
 
         database.Context.ChangeTracker.Clear();
         var valid = await service.UpdateAsync(
             created.Id,
             CreateUpdateRequest(
-                partial.Value,
+                created,
                 changedLines,
                 paidAmount: 30m));
 
@@ -2631,7 +2823,7 @@ public sealed class InvoiceServiceTests
         Assert.Equal(30m, valid.Value.PaidAmount);
         Assert.Equal(0m, valid.Value.RemainingAmount);
         Assert.Equal(
-            0,
+            2,
             await database.Context.BusinessPartnerMovements.CountAsync());
     }
 
@@ -2696,9 +2888,13 @@ public sealed class InvoiceServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(14m, result.Value.RemainingAmount);
-        var movement =
-            await database.Context.BusinessPartnerMovements.SingleAsync();
-        Assert.Equal(14m, movement.Credit);
+        var movements = await database.Context.BusinessPartnerMovements
+            .ToListAsync();
+        Assert.Equal(2, movements.Count);
+        Assert.Equal(
+            14m,
+            movements.Sum(movement =>
+                movement.Credit - movement.Debit));
     }
 
     [Fact]
@@ -3761,7 +3957,15 @@ public sealed class InvoiceServiceTests
             requestedPaidAmount,
             null,
             requestedLines,
-            containerLines ?? []);
+            containerLines ?? [],
+            PartnerInvoiceNo: null,
+            CashboxId: requestedPaidAmount > 0m ? 1 : null,
+            CashMovementTypeId: requestedPaidAmount > 0m
+                ? invoiceType is
+                    InvoiceType.Sales or InvoiceType.PurchaseReturn
+                    ? 1
+                    : 2
+                : null);
     }
 
     private static async Task SeedInvoiceFilterDataAsync(
@@ -3843,10 +4047,16 @@ public sealed class InvoiceServiceTests
         var requestedPaymentTerm = paymentTerm ?? invoice.PaymentTerm;
         var requestedDiscountAmount =
             discountAmount ?? invoice.DiscountAmount;
+        var requestedTotal = CalculateRequestTotal(
+            lines,
+            requestedDiscountAmount);
         var requestedPaidAmount = paidAmount ??
             (requestedPaymentTerm == PaymentTerm.Cash
-                ? CalculateRequestTotal(lines, requestedDiscountAmount)
-                : invoice.PaidAmount);
+                ? requestedTotal
+                : invoice.PaymentTerm == PaymentTerm.Credit &&
+                  invoice.PaidAmount < requestedTotal
+                    ? invoice.PaidAmount
+                    : 0m);
 
         return new InvoiceUpdateRequest(
             requestedInvoiceType,
@@ -3868,7 +4078,15 @@ public sealed class InvoiceServiceTests
             invoice.Notes,
             lines,
             containerLines ?? [],
-            invoice.RowVersion);
+            invoice.RowVersion,
+            PartnerInvoiceNo: invoice.PartnerInvoiceNo,
+            CashboxId: requestedPaidAmount > 0m ? 1 : null,
+            CashMovementTypeId: requestedPaidAmount > 0m
+                ? requestedInvoiceType is
+                    InvoiceType.Sales or InvoiceType.PurchaseReturn
+                    ? 1
+                    : 2
+                : null);
     }
 
     private static decimal CalculateRequestTotal(
@@ -4168,7 +4386,9 @@ public sealed class InvoiceServiceTests
                     CompanyId INTEGER NOT NULL,
                     InvoiceNumber TEXT NOT NULL,
                     ExportInvoiceCode TEXT NULL,
+                    PartnerInvoiceNo TEXT NULL,
                     InvoiceType INTEGER NOT NULL,
+                    ContentType INTEGER NOT NULL DEFAULT 1,
                     PaymentTerm INTEGER NOT NULL DEFAULT 1,
                     InvoiceDate TEXT NOT NULL,
                     DueDate TEXT NULL,
@@ -4403,12 +4623,85 @@ public sealed class InvoiceServiceTests
                     IsDeleted INTEGER NOT NULL
                 );
 
+                CREATE TABLE Cashboxes (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    Code TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    Currency INTEGER NOT NULL,
+                    OpeningBalance NUMERIC NOT NULL,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    Notes TEXT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE CashMovementTypes (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    Name TEXT NOT NULL,
+                    Direction INTEGER NOT NULL,
+                    PartnerEffect INTEGER NOT NULL,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    Notes TEXT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
                 CREATE TABLE CashVouchers (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    InvoiceId INTEGER NULL,
+                    VoucherNumber TEXT NOT NULL,
+                    VoucherDate TEXT NOT NULL,
+                    Direction INTEGER NOT NULL,
+                    CashboxId INTEGER NOT NULL,
+                    CashMovementTypeId INTEGER NOT NULL,
+                    PartyType INTEGER NOT NULL,
+                    BusinessPartnerId INTEGER NULL,
+                    DriverId INTEGER NULL,
                     DriverTripId INTEGER NULL,
+                    ExternalPartyName TEXT NULL,
+                    Amount NUMERIC NOT NULL,
+                    Currency INTEGER NOT NULL,
+                    ReferenceNumber TEXT NULL,
+                    Description TEXT NULL,
+                    Notes TEXT NULL,
+                    LastModifiedAt TEXT NOT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
+
+                CREATE UNIQUE INDEX UX_CashVouchers_Invoice
+                ON CashVouchers (CompanyId, InvoiceId)
+                WHERE InvoiceId IS NOT NULL AND IsDeleted = 0;
 
                 CREATE TRIGGER AdvanceInvoiceRowVersion
                 AFTER UPDATE ON Invoices
@@ -4422,6 +4715,14 @@ public sealed class InvoiceServiceTests
                 AFTER UPDATE ON DriverTrips
                 BEGIN
                     UPDATE DriverTrips
+                    SET RowVersion = randomblob(8)
+                    WHERE Id = NEW.Id;
+                END;
+
+                CREATE TRIGGER AdvanceCashVoucherRowVersion
+                AFTER UPDATE ON CashVouchers
+                BEGIN
+                    UPDATE CashVouchers
                     SET RowVersion = randomblob(8)
                     WHERE Id = NEW.Id;
                 END;
@@ -4479,6 +4780,22 @@ public sealed class InvoiceServiceTests
                     (2, 1, 'DRV-2', 'Driver 2', NULL, NULL, 'LIC-2', NULL, 1, 0),
                     (3, 1, 'DRV-3', 'Inactive Driver', NULL, NULL, 'LIC-3', NULL, 0, 0),
                     (4, 2, 'DRV-4', 'Other Company Driver', NULL, NULL, 'LIC-4', NULL, 1, 0);
+
+                INSERT INTO Cashboxes (
+                    Id, CompanyId, Code, Name, Currency, OpeningBalance,
+                    IsActive, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES
+                    (1, 1, 'MAIN', 'Main Cashbox', 1, 10000, 1,
+                     'test', '2026-01-01', 'test', 0);
+
+                INSERT INTO CashMovementTypes (
+                    Id, CompanyId, Name, Direction, PartnerEffect, IsActive,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES
+                    (1, 1, 'Customer Collection', 1, 2, 1,
+                     'test', '2026-01-01', 'test', 0),
+                    (2, 1, 'Supplier Payment', 2, 1, 1,
+                     'test', '2026-01-01', 'test', 0);
 
                 INSERT INTO StockOpeningBalances (
                     Id, CompanyId, StoreId, DocumentDate, IsDeleted)

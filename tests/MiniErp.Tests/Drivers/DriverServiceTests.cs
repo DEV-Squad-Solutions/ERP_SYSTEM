@@ -476,6 +476,7 @@ public sealed class DriverServiceTests
                 CREATE TABLE Invoices (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    ContentType INTEGER NOT NULL DEFAULT 1,
                     DriverId INTEGER NULL,
                     ActualDriverId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL

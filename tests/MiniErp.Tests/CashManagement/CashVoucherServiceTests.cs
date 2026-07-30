@@ -354,6 +354,49 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
+    public async Task InvoiceGeneratedVoucherIsVisibleButCannotBeChangedDirectly()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO CashVouchers (
+                Id, CompanyId, InvoiceId, VoucherNumber, VoucherDate,
+                Direction, CashboxId, CashMovementTypeId, PartyType,
+                BusinessPartnerId, Amount, Currency, LastModifiedAt,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                100, 1, 1, 'INV-PAY-1', '2026-07-25',
+                1, 1, 1, 2,
+                1, 25, 1, '2026-07-25',
+                'test', '2026-07-25', 'test', 0);
+            """);
+        var service = database.CreateVoucherService(companyId: 1);
+
+        var generated = await service.GetByIdAsync(100);
+        var update = await service.UpdateAsync(
+            100,
+            ToUpdateRequest(generated.Value, amount: 30m));
+        var delete = await service.DeleteAsync(100);
+
+        Assert.True(generated.IsSuccess);
+        Assert.Equal(1, generated.Value.InvoiceId);
+        Assert.Equal("INV-1", generated.Value.InvoiceNumber);
+        Assert.Equal(
+            "CashVouchers.InvoiceGeneratedReadOnly",
+            update.Error.Code);
+        Assert.Equal(
+            "CashVouchers.InvoiceGeneratedReadOnly",
+            delete.Error.Code);
+        Assert.Equal(
+            25m,
+            await database.Context.CashVouchers
+                .Where(voucher => voucher.Id == 100)
+                .Select(voucher => voucher.Amount)
+                .SingleAsync());
+    }
+
+    [Fact]
     public async Task DuplicateVoucherNumbersAreAllowed()
     {
         await using var database =

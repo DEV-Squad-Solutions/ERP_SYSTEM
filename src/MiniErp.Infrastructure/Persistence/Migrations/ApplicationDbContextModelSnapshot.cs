@@ -610,6 +610,9 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<int?>("InvoiceId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -653,6 +656,10 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "InvoiceId")
+                        .IsUnique()
+                        .HasFilter("[InvoiceId] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.HasIndex("CompanyId", "VoucherNumber")
                         .HasFilter("[IsDeleted] = 0");
@@ -1271,6 +1278,67 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.ToTable("StoreContainers", (string)null);
                 });
 
+            modelBuilder.Entity("MiniErp.Domain.Entities.Inventory.InventoryCostAllocation", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2(7)");
+
+                    b.Property<int>("InboundMovementId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("OutboundMovementId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<int>("StoreId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("TotalCost")
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<decimal>("UnitCost")
+                        .HasPrecision(24, 8)
+                        .HasColumnType("decimal(24,8)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "InboundMovementId");
+
+                    b.HasIndex("CompanyId", "ItemId");
+
+                    b.HasIndex("CompanyId", "OutboundMovementId", "InboundMovementId")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "StoreId", "ItemId", "InboundMovementId");
+
+                    b.HasIndex("CompanyId", "StoreId", "ItemId", "OutboundMovementId");
+
+                    b.ToTable("InventoryCostAllocations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_InventoryCostAllocations_Cost_NonNegative", "[UnitCost] >= 0 AND [TotalCost] >= 0");
+
+                            t.HasCheckConstraint("CK_InventoryCostAllocations_DifferentMovements", "[OutboundMovementId] <> [InboundMovementId]");
+
+                            t.HasCheckConstraint("CK_InventoryCostAllocations_Quantity_Positive", "[Quantity] > 0");
+                        });
+                });
+
             modelBuilder.Entity("MiniErp.Domain.Entities.Inventory.InventoryCount", b =>
                 {
                     b.Property<int>("Id")
@@ -1452,7 +1520,14 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<decimal>("AverageCostAfter")
+                        .HasPrecision(24, 8)
+                        .HasColumnType("decimal(24,8)");
+
                     b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CostStatus")
                         .HasColumnType("int");
 
                     b.Property<string>("CreatedById")
@@ -1483,6 +1558,10 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<decimal>("InventoryValueAfter")
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -1497,6 +1576,14 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("MovementType")
                         .HasColumnType("int");
+
+                    b.Property<decimal>("PendingCostQuantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<decimal>("QuantityAfter")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<decimal>("QuantityIn")
                         .HasPrecision(18, 6)
@@ -1517,6 +1604,14 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Property<int>("StoreId")
                         .HasColumnType("int");
 
+                    b.Property<decimal>("TotalCost")
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<decimal?>("UnitCost")
+                        .HasPrecision(24, 8)
+                        .HasColumnType("decimal(24,8)");
+
                     b.Property<string>("UpdatedById")
                         .HasMaxLength(450)
                         .HasColumnType("nvarchar(450)");
@@ -1530,8 +1625,6 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasAlternateKey("CompanyId", "Id");
-
                     b.HasIndex("CompanyId", "ItemId");
 
                     b.HasIndex("CompanyId", "ItemUnitId");
@@ -1540,13 +1633,102 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
 
-                    b.HasIndex("CompanyId", "StoreId", "ItemId", "MovementDate", "Id");
+                    b.HasIndex("CompanyId", "StoreId", "ItemId", "MovementDate", "CreatedOn", "Id")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "StoreId", "ItemId", "CostStatus", "MovementDate", "CreatedOn", "Id")
+                        .HasFilter("[IsDeleted] = 0 AND [CostStatus] IN (2, 3)");
 
                     b.ToTable("ItemMovements", null, t =>
                         {
+                            t.HasCheckConstraint("CK_ItemMovements_Costs_NonNegative", "[PendingCostQuantity] >= 0 AND [TotalCost] >= 0 AND [AverageCostAfter] >= 0 AND [InventoryValueAfter] >= 0");
+
                             t.HasCheckConstraint("CK_ItemMovements_ExactlyOneDirection", "([QuantityIn] > 0 AND [QuantityOut] = 0) OR ([QuantityIn] = 0 AND [QuantityOut] > 0)");
 
+                            t.HasCheckConstraint("CK_ItemMovements_NonPositiveState", "[QuantityAfter] > 0 OR ([AverageCostAfter] = 0 AND [InventoryValueAfter] = 0)");
+
+                            t.HasCheckConstraint("CK_ItemMovements_PendingWithinOutbound", "[PendingCostQuantity] <= [QuantityOut]");
+
                             t.HasCheckConstraint("CK_ItemMovements_Quantity_NonNegative", "[QuantityIn] >= 0 AND [QuantityOut] >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Inventory.ItemStoreBalance", b =>
+                {
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("StoreId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("AverageCost")
+                        .HasPrecision(24, 8)
+                        .HasColumnType("decimal(24,8)");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("InventoryValue")
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("CompanyId", "StoreId", "ItemId");
+
+                    b.HasIndex("CompanyId", "ItemId");
+
+                    b.ToTable("ItemStoreBalances", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ItemStoreBalances_Costs_NonNegative", "[AverageCost] >= 0 AND [InventoryValue] >= 0");
+
+                            t.HasCheckConstraint("CK_ItemStoreBalances_NonPositiveState", "[Quantity] > 0 OR ([AverageCost] = 0 AND [InventoryValue] = 0)");
                         });
                 });
 
@@ -1699,6 +1881,10 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("StockAdjustmentId")
                         .HasColumnType("int");
+
+                    b.Property<decimal?>("UnitCost")
+                        .HasPrecision(24, 8)
+                        .HasColumnType("decimal(24,8)");
 
                     b.Property<string>("UpdatedById")
                         .HasMaxLength(450)
@@ -2026,6 +2212,11 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Property<int?>("ContainerStoreId")
                         .HasColumnType("int");
 
+                    b.Property<int>("ContentType")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
                     b.Property<int?>("CountryId")
                         .HasColumnType("int");
 
@@ -2102,6 +2293,10 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)")
                         .HasDefaultValue(0m);
+
+                    b.Property<string>("PartnerInvoiceNo")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<int>("PaymentTerm")
                         .ValueGeneratedOnAdd()
@@ -2301,6 +2496,13 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 6)
                         .HasColumnType("decimal(18,6)");
 
+                    b.Property<decimal?>("ReturnUnitCost")
+                        .HasPrecision(24, 8)
+                        .HasColumnType("decimal(24,8)");
+
+                    b.Property<int?>("SourceInvoiceLineId")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("Total")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
@@ -2322,11 +2524,11 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasAlternateKey("CompanyId", "Id");
-
                     b.HasIndex("CompanyId", "ItemId");
 
                     b.HasIndex("CompanyId", "ItemUnitId");
+
+                    b.HasIndex("CompanyId", "SourceInvoiceLineId");
 
                     b.HasIndex("CompanyId", "InvoiceId", "ItemId")
                         .IsUnique()
@@ -2936,6 +3138,12 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("CompanyId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("MiniErp.Domain.Entities.Invoicing.Invoice", "Invoice")
+                        .WithMany("PaymentVouchers")
+                        .HasForeignKey("CompanyId", "InvoiceId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("BusinessPartner");
 
                     b.Navigation("CashMovementType");
@@ -2947,6 +3155,8 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Navigation("Driver");
 
                     b.Navigation("DriverTrip");
+
+                    b.Navigation("Invoice");
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.CashManagement.Cashbox", b =>
@@ -3089,6 +3299,53 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Navigation("Store");
                 });
 
+            modelBuilder.Entity("MiniErp.Domain.Entities.Inventory.InventoryCostAllocation", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Inventory.ItemMovement", "InboundMovement")
+                        .WithMany("InboundCostAllocations")
+                        .HasForeignKey("CompanyId", "InboundMovementId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Catalog.Item", "Item")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "ItemId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Inventory.ItemMovement", "OutboundMovement")
+                        .WithMany("OutboundCostAllocations")
+                        .HasForeignKey("CompanyId", "OutboundMovementId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Inventory.Store", "Store")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "StoreId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("InboundMovement");
+
+                    b.Navigation("Item");
+
+                    b.Navigation("OutboundMovement");
+
+                    b.Navigation("Store");
+                });
+
             modelBuilder.Entity("MiniErp.Domain.Entities.Inventory.InventoryCount", b =>
                 {
                     b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
@@ -3180,6 +3437,35 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Navigation("Item");
 
                     b.Navigation("ItemUnit");
+
+                    b.Navigation("Store");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Inventory.ItemStoreBalance", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Catalog.Item", "Item")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "ItemId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Inventory.Store", "Store")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "StoreId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Item");
 
                     b.Navigation("Store");
                 });
@@ -3444,6 +3730,12 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Invoicing.InvoiceLine", "SourceInvoiceLine")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "SourceInvoiceLineId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Company");
 
                     b.Navigation("Invoice");
@@ -3451,6 +3743,8 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Navigation("Item");
 
                     b.Navigation("ItemUnit");
+
+                    b.Navigation("SourceInvoiceLine");
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.Logistics.Driver", b =>
@@ -3579,6 +3873,13 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Navigation("Lines");
                 });
 
+            modelBuilder.Entity("MiniErp.Domain.Entities.Inventory.ItemMovement", b =>
+                {
+                    b.Navigation("InboundCostAllocations");
+
+                    b.Navigation("OutboundCostAllocations");
+                });
+
             modelBuilder.Entity("MiniErp.Domain.Entities.Inventory.StockAdjustment", b =>
                 {
                     b.Navigation("Lines");
@@ -3599,6 +3900,8 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Navigation("ContainerLines");
 
                     b.Navigation("Lines");
+
+                    b.Navigation("PaymentVouchers");
                 });
 
             modelBuilder.Entity("MiniErp.Infrastructure.Identity.ApplicationUser", b =>

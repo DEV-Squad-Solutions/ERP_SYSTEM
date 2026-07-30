@@ -1,6 +1,7 @@
 using MiniErp.Domain.Common.Entities;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Logistics;
 using MiniErp.Domain.Enums;
 
@@ -13,6 +14,10 @@ public sealed class CashVoucher : AuditableEntity
     public int CompanyId { get; set; }
 
     public Company Company { get; set; } = null!;
+
+    public int? InvoiceId { get; set; }
+
+    public Invoice? Invoice { get; set; }
 
     public string VoucherNumber { get; set; } = string.Empty;
 

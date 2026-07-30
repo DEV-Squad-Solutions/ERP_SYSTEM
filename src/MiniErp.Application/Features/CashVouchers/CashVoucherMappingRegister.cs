@@ -59,7 +59,12 @@ public sealed class CashVoucherMappingRegister : IRegister
                 response => response.DriverTripInvoiceNumber,
                 voucher => voucher.DriverTrip == null
                     ? null
-                    : voucher.DriverTrip.InvoiceNumber);
+                    : voucher.DriverTrip.InvoiceNumber)
+            .Map(
+                response => response.InvoiceNumber,
+                voucher => voucher.Invoice == null
+                    ? null
+                    : voucher.Invoice.InvoiceNumber);
     }
 
     private static string? Normalize(string? value) =>

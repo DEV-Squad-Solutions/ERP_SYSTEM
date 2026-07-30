@@ -494,6 +494,7 @@ public sealed class StoreServiceTests
                 CREATE TABLE Invoices (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    ContentType INTEGER NOT NULL DEFAULT 1,
                     StoreId INTEGER NOT NULL,
                     ContainerStoreId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL

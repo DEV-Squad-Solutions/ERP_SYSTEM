@@ -47,6 +47,8 @@ public sealed class CashVoucherConfiguration
         builder.Property(voucher => voucher.CompanyId)
             .IsRequired();
 
+        builder.Property(voucher => voucher.InvoiceId);
+
         builder.HasAlternateKey(voucher => new
         {
             voucher.CompanyId,
@@ -63,6 +65,14 @@ public sealed class CashVoucherConfiguration
             voucher.VoucherNumber
         })
             .HasFilter("[IsDeleted] = 0");
+
+        builder.HasIndex(voucher => new
+        {
+            voucher.CompanyId,
+            voucher.InvoiceId
+        })
+            .IsUnique()
+            .HasFilter("[InvoiceId] IS NOT NULL AND [IsDeleted] = 0");
 
         builder.Property(voucher => voucher.VoucherDate)
             .HasColumnType("date")
@@ -147,6 +157,21 @@ public sealed class CashVoucherConfiguration
         builder.HasOne(voucher => voucher.Company)
             .WithMany()
             .HasForeignKey(voucher => voucher.CompanyId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(voucher => voucher.Invoice)
+            .WithMany(invoice => invoice.PaymentVouchers)
+            .HasForeignKey(voucher => new
+            {
+                voucher.CompanyId,
+                voucher.InvoiceId
+            })
+            .HasPrincipalKey(invoice => new
+            {
+                invoice.CompanyId,
+                invoice.Id
+            })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(voucher => voucher.Cashbox)

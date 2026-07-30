@@ -32,7 +32,7 @@ public sealed class InvoicePaymentTermTests
     }
 
     [Fact]
-    public void CashInvoice_CanHaveZeroPaidAmount()
+    public void UnpaidPositiveInvoice_HasUnpaidStatus()
     {
         var invoice = CreateInvoice(PaymentTerm.Cash, 0m);
 
@@ -46,7 +46,7 @@ public sealed class InvoicePaymentTermTests
     {
         var invoice = CreateInvoice(PaymentTerm.Credit, 10m);
 
-        Assert.Equal(PaymentStatus.Unpaid, invoice.GetPaymentStatus());
+        Assert.Equal(PaymentStatus.PartiallyPaid, invoice.GetPaymentStatus());
         Assert.Equal(10m, invoice.PaidAmount);
         Assert.Equal(15m, invoice.RemainingAmount);
     }
@@ -55,7 +55,7 @@ public sealed class InvoicePaymentTermTests
     [InlineData(PaymentTerm.Cash, 25, PaymentStatus.Paid, 0)]
     [InlineData(PaymentTerm.Cash, 0, PaymentStatus.Unpaid, 25)]
     [InlineData(PaymentTerm.Credit, 0, PaymentStatus.Unpaid, 25)]
-    [InlineData(PaymentTerm.Credit, 10, PaymentStatus.Unpaid, 15)]
+    [InlineData(PaymentTerm.Credit, 10, PaymentStatus.PartiallyPaid, 15)]
     [InlineData(PaymentTerm.Credit, 25, PaymentStatus.Paid, 0)]
     public void Mapping_ExposesPaymentSummary(
         PaymentTerm paymentTerm,
@@ -84,7 +84,7 @@ public sealed class InvoicePaymentTermTests
     }
 
     [Theory]
-    [InlineData(PaymentTerm.Cash, 0)]
+    [InlineData(PaymentTerm.Cash, 25)]
     [InlineData(PaymentTerm.Credit, 0)]
     public void Validator_AcceptsBothPaymentTerms(
         PaymentTerm paymentTerm,
@@ -110,7 +110,9 @@ public sealed class InvoicePaymentTermTests
             paidAmount,
             null,
             [new InvoiceLineRequest(1, 1, 1m, 25m, null)],
-            []);
+            [],
+            CashboxId: paidAmount > 0m ? 1 : null,
+            CashMovementTypeId: paidAmount > 0m ? 1 : null);
 
         var result = new InvoiceRequestValidator().Validate(request);
 

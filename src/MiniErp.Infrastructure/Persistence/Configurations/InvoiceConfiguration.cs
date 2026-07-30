@@ -38,8 +38,17 @@ public sealed class InvoiceConfiguration : AuditableEntityConfiguration<Invoice>
         builder.Property(invoice => invoice.ExportInvoiceCode)
             .HasMaxLength(100);
 
+        builder.Property(invoice => invoice.PartnerInvoiceNo)
+            .HasMaxLength(100);
+
         builder.Property(invoice => invoice.InvoiceType)
             .HasConversion<int>()
+            .IsRequired();
+
+        builder.Property(invoice => invoice.ContentType)
+            .HasConversion<int>()
+            .HasDefaultValue(Domain.Enums.InvoiceContentType.Items)
+            .HasSentinel(Domain.Enums.InvoiceContentType.Items)
             .IsRequired();
 
         builder.Property(invoice => invoice.PaymentTerm)
@@ -91,6 +100,7 @@ public sealed class InvoiceConfiguration : AuditableEntityConfiguration<Invoice>
 
         builder.Ignore(invoice => invoice.Subtotal);
         builder.Ignore(invoice => invoice.RemainingAmount);
+        builder.Ignore(invoice => invoice.PaymentStatus);
 
         builder.Property(invoice => invoice.Notes)
             .HasMaxLength(1_000);
@@ -226,5 +236,6 @@ public sealed class InvoiceConfiguration : AuditableEntityConfiguration<Invoice>
                 invoice.Id
             })
             .OnDelete(DeleteBehavior.Restrict);
+
     }
 }

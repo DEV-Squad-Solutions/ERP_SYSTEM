@@ -54,6 +54,7 @@ public static class ArabicValidationConfiguration
             ["ForPartner"] = "مخصص للعميل أو المورد",
             ["PartyType"] = "نوع الطرف",
             ["PaymentTerm"] = "شرط السداد",
+            ["PartnerInvoiceNo"] = "رقم الفاتورة لدى الشريك",
             ["DiscountAmount"] = "قيمة الخصم",
             ["PaidAmount"] = "المبلغ المدفوع",
             ["Password"] = "كلمة المرور",

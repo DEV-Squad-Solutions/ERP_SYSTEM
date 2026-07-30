@@ -53,6 +53,7 @@ public sealed record InvoiceListResponse(
     string InvoiceNumber,
     string? ExportInvoiceCode,
     InvoiceType InvoiceType,
+    InvoiceContentType ContentType,
     PaymentTerm PaymentTerm,
     DateOnly InvoiceDate,
     DateOnly? DueDate,
@@ -81,7 +82,20 @@ public sealed record InvoiceListResponse(
     string? Notes,
     int LineCount,
     int ContainerLineCount,
-    byte[] RowVersion);
+    byte[] RowVersion)
+{
+    public string? PartnerInvoiceNo { get; init; }
+
+    public int? PaymentVoucherId { get; init; }
+
+    public int? CashboxId { get; init; }
+
+    public string? CashboxName { get; init; }
+
+    public int? CashMovementTypeId { get; init; }
+
+    public string? CashMovementTypeName { get; init; }
+}
 
 public sealed record InvoiceSummaryResponse(
     decimal Subtotal,
@@ -116,6 +130,7 @@ public sealed record InvoiceResponse(
     string InvoiceNumber,
     string? ExportInvoiceCode,
     InvoiceType InvoiceType,
+    InvoiceContentType ContentType,
     PaymentTerm PaymentTerm,
     DateOnly InvoiceDate,
     DateOnly? DueDate,
@@ -144,4 +159,17 @@ public sealed record InvoiceResponse(
     string? Notes,
     byte[] RowVersion,
     IReadOnlyList<InvoiceLineResponse> Lines,
-    IReadOnlyList<InvoiceContainerLineResponse> ContainerLines);
+    IReadOnlyList<InvoiceContainerLineResponse> ContainerLines)
+{
+    public string? PartnerInvoiceNo { get; init; }
+
+    public int? PaymentVoucherId { get; init; }
+
+    public int? CashboxId { get; init; }
+
+    public string? CashboxName { get; init; }
+
+    public int? CashMovementTypeId { get; init; }
+
+    public string? CashMovementTypeName { get; init; }
+}

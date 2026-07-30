@@ -25,4 +25,9 @@ public sealed record CashVoucherResponse(
     string? ReferenceNumber,
     string? Description,
     string? Notes,
-    byte[] RowVersion);
+    byte[] RowVersion)
+{
+    public int? InvoiceId { get; init; }
+
+    public string? InvoiceNumber { get; init; }
+}

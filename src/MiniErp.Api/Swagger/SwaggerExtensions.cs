@@ -51,6 +51,7 @@ public static class SwaggerExtensions
             options.OperationFilter<StockOpeningBalancesSwaggerDocumentation>();
             options.OperationFilter<StockAdjustmentsSwaggerDocumentation>();
             options.OperationFilter<InventoryCountsSwaggerDocumentation>();
+            options.OperationFilter<InventoryCostReportsSwaggerDocumentation>();
             options.OperationFilter<StatementsSwaggerDocumentation>();
             options.OperationFilter<PartnerOpeningBalancesSwaggerDocumentation>();
             options.OperationFilter<InvoicesSwaggerDocumentation>();

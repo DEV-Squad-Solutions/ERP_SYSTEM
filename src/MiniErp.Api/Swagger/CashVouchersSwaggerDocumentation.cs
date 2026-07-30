@@ -20,14 +20,14 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
             nameof(CashVouchersController.GetAll) => (
                 "Get paginated cash vouchers",
                 SwaggerOperationDescription.Create(
-                    "Returns active Receipt and Payment vouchers for the selected company.",
+                    "Returns active manual and invoice-generated Receipt and Payment vouchers for the selected company. InvoiceId and InvoiceNumber identify generated payment vouchers.",
                     "Optional search, voucherNumber, direction, cashboxId, cashMovementTypeId, partyType, businessPartnerId, driverId, driverTripId, fromDate, toDate, pageNumber, and pageSize filters.",
                     "Search covers voucher, cashbox, movement type, party, trip invoice, reference, and description display values.",
                     "Deleted and other-company vouchers are excluded.")),
             nameof(CashVouchersController.GetById) => (
                 "Get a cash voucher",
                 SwaggerOperationDescription.Create(
-                    "Returns one voucher with cashbox, type, party, derived currency, and concurrency token.",
+                    "Returns one voucher with cashbox, type, party, optional source invoice, derived currency, and concurrency token.",
                     "A positive route id.",
                     "CompanyId, currency, and partner Debit/Credit are server-controlled. The frontend does not send or display an accounting-side selector.",
                     "Missing or other-company vouchers return 404.")),
@@ -41,17 +41,17 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
             nameof(CashVouchersController.Update) => (
                 "Update a cash voucher",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Replaces voucher values and all derived effects atomically.",
+                    "Admin only. Replaces a manual voucher and all derived effects atomically.",
                     "Editable fields plus the original base64 rowVersion.",
                     "Apply the same conditional UI fields and movement-type filtering as Create. The old effects are removed and the new effects are applied exactly once.",
-                    "A stale token returns CashVouchers.Concurrency.")),
+                    "A stale token returns CashVouchers.Concurrency. An invoice-generated voucher returns CashVouchers.InvoiceGeneratedReadOnly and must be changed through its invoice.")),
             nameof(CashVouchersController.Delete) => (
                 "Delete a cash voucher",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Soft-deletes the voucher and its partner movement atomically.",
+                    "Admin only. Soft-deletes a manual voucher and its partner movement atomically.",
                     "A positive route id.",
                     "Deleting a receipt is rejected when it would leave its cashbox negative.",
-                    "Missing records return 404; concurrency and balance conflicts return 409.")),
+                    "Missing records return 404; concurrency and balance conflicts return 409. Invoice-generated vouchers are read-only and return CashVouchers.InvoiceGeneratedReadOnly.")),
             _ => default
         };
 

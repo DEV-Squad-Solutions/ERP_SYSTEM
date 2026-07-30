@@ -283,6 +283,7 @@ public sealed class BusinessPartnerIntegrityServiceTests
                 CREATE TABLE Invoices (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    ContentType INTEGER NOT NULL DEFAULT 1,
                     BusinessPartnerId INTEGER NOT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
