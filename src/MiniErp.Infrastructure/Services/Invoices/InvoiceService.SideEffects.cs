@@ -14,8 +14,7 @@ public sealed partial class InvoiceService
 {
     private async Task SaveSideEffectsAsync(
         Invoice invoice,
-        int? cashboxId,
-        int? cashMovementTypeId,
+        PaymentPreparation? paymentPreparation,
         CancellationToken cancellationToken)
     {
         await ReconcileItemMovementsAsync(invoice, cancellationToken);
@@ -52,25 +51,25 @@ public sealed partial class InvoiceService
                 invoice.InvoiceType,
                 invoice.Total);
 
-            dbContext.BusinessPartnerMovements.Add(
-                new BusinessPartnerMovement
-                {
-                    CompanyId = companyId,
-                    BusinessPartnerId = invoice.BusinessPartnerId,
-                    InvoiceId = invoice.Id,
-                    MovementType = partnerMovementType,
-                    MovementDate = invoice.InvoiceDate,
-                    Currency = invoice.Currency,
-                    Debit = debit,
-                    Credit = credit,
-                    Description = $"Invoice {invoice.InvoiceNumber}"
-                });
+            var partnerMovement = new BusinessPartnerMovement
+            {
+                CompanyId = companyId,
+                BusinessPartnerId = invoice.BusinessPartnerId,
+                InvoiceId = invoice.Id,
+                MovementType = partnerMovementType,
+                MovementDate = invoice.InvoiceDate,
+                Currency = invoice.Currency,
+                Debit = debit,
+                Credit = credit,
+                Description = $"Invoice {invoice.InvoiceNumber}"
+            };
+            partnerMovement.ApplyExchangeRate(invoice.ExchangeRate);
+            dbContext.BusinessPartnerMovements.Add(partnerMovement);
         }
 
         await SynchronizePaymentVoucherAsync(
             invoice,
-            cashboxId,
-            cashMovementTypeId,
+            paymentPreparation,
             cancellationToken);
 
         if (invoice.DriverId.HasValue)
@@ -128,6 +127,13 @@ public sealed partial class InvoiceService
         var paymentVoucherIds = paymentVouchers
             .Select(voucher => voucher.Id)
             .ToArray();
+        var invoicePayments = paymentVoucherIds.Length == 0
+            ? []
+            : await dbContext.InvoicePayments
+                .Where(payment =>
+                    payment.CompanyId == companyId &&
+                    paymentVoucherIds.Contains(payment.CashVoucherId))
+                .ToListAsync(cancellationToken);
         var paymentPartnerMovements = paymentVoucherIds.Length == 0
             ? []
             : await dbContext.BusinessPartnerMovements
@@ -141,14 +147,14 @@ public sealed partial class InvoiceService
         dbContext.ContainerMovements.RemoveRange(containerMovements);
         dbContext.BusinessPartnerMovements.RemoveRange(partnerMovements);
         dbContext.BusinessPartnerMovements.RemoveRange(paymentPartnerMovements);
+        dbContext.InvoicePayments.RemoveRange(invoicePayments);
         dbContext.CashVouchers.RemoveRange(paymentVouchers);
         dbContext.DriverTrips.RemoveRange(driverTrips);
     }
 
     private async Task SynchronizePaymentVoucherAsync(
         Invoice invoice,
-        int? cashboxId,
-        int? cashMovementTypeId,
+        PaymentPreparation? preparation,
         CancellationToken cancellationToken)
     {
         var voucher = await dbContext.CashVouchers
@@ -161,6 +167,16 @@ public sealed partial class InvoiceService
         {
             if (voucher is not null)
             {
+                var removedPayment = await dbContext.InvoicePayments
+                    .FirstOrDefaultAsync(payment =>
+                        payment.CompanyId == companyId &&
+                        payment.CashVoucherId == voucher.Id,
+                        cancellationToken);
+                if (removedPayment is not null)
+                {
+                    dbContext.InvoicePayments.Remove(removedPayment);
+                }
+
                 var partnerMovement = await dbContext
                     .BusinessPartnerMovements
                     .FirstOrDefaultAsync(movement =>
@@ -178,7 +194,7 @@ public sealed partial class InvoiceService
             return;
         }
 
-        if (!cashboxId.HasValue || !cashMovementTypeId.HasValue)
+        if (preparation is null)
         {
             return;
         }
@@ -194,15 +210,18 @@ public sealed partial class InvoiceService
                 VoucherNumber = $"INV-PAY-{invoice.Id}",
                 VoucherDate = invoice.InvoiceDate,
                 Direction = direction,
-                CashboxId = cashboxId.Value,
-                CashMovementTypeId = cashMovementTypeId.Value,
+                CashboxId = preparation.CashboxId,
+                CashMovementTypeId = preparation.CashMovementTypeId,
                 PartyType = CashPartyType.Partner,
                 BusinessPartnerId = invoice.BusinessPartnerId,
-                Amount = invoice.PaidAmount,
-                Currency = invoice.Currency,
+                Amount = preparation.CashboxAmount,
+                Currency = preparation.CashboxCurrency,
                 ReferenceNumber = invoice.InvoiceNumber,
                 Description = $"دفعة الفاتورة {invoice.InvoiceNumber}"
             };
+            voucher.ApplyExchangeRate(
+                preparation.ExchangeRateId,
+                preparation.ExchangeRate);
             voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
             dbContext.CashVouchers.Add(voucher);
         }
@@ -210,15 +229,19 @@ public sealed partial class InvoiceService
         {
             voucher.VoucherDate = invoice.InvoiceDate;
             voucher.Direction = direction;
-            voucher.CashboxId = cashboxId.Value;
-            voucher.CashMovementTypeId = cashMovementTypeId.Value;
+            voucher.CashboxId = preparation.CashboxId;
+            voucher.CashMovementTypeId =
+                preparation.CashMovementTypeId;
             voucher.PartyType = CashPartyType.Partner;
             voucher.BusinessPartnerId = invoice.BusinessPartnerId;
             voucher.DriverId = null;
             voucher.DriverTripId = null;
             voucher.ExternalPartyName = null;
-            voucher.Amount = invoice.PaidAmount;
-            voucher.Currency = invoice.Currency;
+            voucher.Amount = preparation.CashboxAmount;
+            voucher.Currency = preparation.CashboxCurrency;
+            voucher.ApplyExchangeRate(
+                preparation.ExchangeRateId,
+                preparation.ExchangeRate);
             voucher.ReferenceNumber = invoice.InvoiceNumber;
             voucher.Description = $"دفعة الفاتورة {invoice.InvoiceNumber}";
             voucher.Notes = null;
@@ -242,21 +265,22 @@ public sealed partial class InvoiceService
             : 0m;
         if (paymentMovement is null)
         {
-            dbContext.BusinessPartnerMovements.Add(
-                new BusinessPartnerMovement
-                {
-                    CompanyId = companyId,
-                    BusinessPartnerId = invoice.BusinessPartnerId,
-                    CashVoucher = voucher,
-                    MovementType = direction == CashDirection.Receipt
+            paymentMovement = new BusinessPartnerMovement
+            {
+                CompanyId = companyId,
+                BusinessPartnerId = invoice.BusinessPartnerId,
+                CashVoucher = voucher,
+                MovementType = direction == CashDirection.Receipt
                         ? BusinessPartnerMovementType.CashReceipt
                         : BusinessPartnerMovementType.CashPayment,
-                    MovementDate = invoice.InvoiceDate,
-                    Currency = invoice.Currency,
-                    Debit = debit,
-                    Credit = credit,
-                    Description = $"دفعة الفاتورة {invoice.InvoiceNumber}"
-                });
+                MovementDate = invoice.InvoiceDate,
+                Currency = invoice.Currency,
+                Debit = debit,
+                Credit = credit,
+                Description = $"دفعة الفاتورة {invoice.InvoiceNumber}"
+            };
+            paymentMovement.ApplyExchangeRate(invoice.ExchangeRate);
+            dbContext.BusinessPartnerMovements.Add(paymentMovement);
         }
         else
         {
@@ -269,9 +293,35 @@ public sealed partial class InvoiceService
             paymentMovement.Currency = invoice.Currency;
             paymentMovement.Debit = debit;
             paymentMovement.Credit = credit;
+            paymentMovement.ApplyExchangeRate(invoice.ExchangeRate);
             paymentMovement.Description =
                 $"دفعة الفاتورة {invoice.InvoiceNumber}";
         }
+
+        var invoicePayment = await dbContext.InvoicePayments
+            .FirstOrDefaultAsync(
+                payment =>
+                    payment.CompanyId == companyId &&
+                    payment.CashVoucherId == voucher.Id,
+                cancellationToken);
+        if (invoicePayment is null)
+        {
+            invoicePayment = new InvoicePayment
+            {
+                CompanyId = companyId,
+                Invoice = invoice,
+                CashVoucher = voucher
+            };
+            dbContext.InvoicePayments.Add(invoicePayment);
+        }
+
+        invoicePayment.Apply(
+            invoice.Currency,
+            invoice.PaidAmount,
+            preparation.CashboxCurrency,
+            preparation.CashboxAmount,
+            invoice.ExchangeRate,
+            preparation.ExchangeRate);
     }
 
     private async Task ReconcileItemMovementsAsync(
@@ -388,4 +438,12 @@ public sealed partial class InvoiceService
                     tripIds.Contains(voucher.DriverTripId.Value),
                 cancellationToken);
     }
+
+    private sealed record PaymentPreparation(
+        int CashboxId,
+        int CashMovementTypeId,
+        CurrencyCode CashboxCurrency,
+        int? ExchangeRateId,
+        decimal ExchangeRate,
+        decimal CashboxAmount);
 }

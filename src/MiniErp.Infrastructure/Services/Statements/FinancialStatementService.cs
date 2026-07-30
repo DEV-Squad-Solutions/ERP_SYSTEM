@@ -37,7 +37,11 @@ public sealed class FinancialStatementService(
                 entity.Id,
                 entity.Name,
                 entity.Currency,
-                entity.OpeningBalance
+                entity.OpeningBalance,
+                entity.BaseOpeningBalance,
+                BaseCurrency = entity.Company.Settings == null
+                    ? CurrencyCode.EGP
+                    : entity.Company.Settings.BaseCurrency
             })
             .FirstOrDefaultAsync(cancellationToken);
         if (cashbox is null)
@@ -47,6 +51,7 @@ public sealed class FinancialStatementService(
         }
 
         var openingBalance = cashbox.OpeningBalance;
+        var baseOpeningBalance = cashbox.BaseOpeningBalance;
         if (filters.FromDate.HasValue)
         {
             openingBalance += await dbContext.CashVouchers
@@ -61,6 +66,20 @@ public sealed class FinancialStatementService(
                             CashDirection.Receipt
                             ? voucher.Amount
                             : -voucher.Amount),
+                    cancellationToken) ?? 0m;
+
+            baseOpeningBalance += await dbContext.CashVouchers
+                .AsNoTracking()
+                .Where(voucher =>
+                    voucher.CompanyId == companyId &&
+                    voucher.CashboxId == cashbox.Id &&
+                    voucher.VoucherDate < filters.FromDate.Value)
+                .SumAsync(
+                    voucher =>
+                        (decimal?)(voucher.Direction ==
+                            CashDirection.Receipt
+                            ? voucher.BaseAmount
+                            : -voucher.BaseAmount),
                     cancellationToken) ?? 0m;
         }
 
@@ -127,12 +146,22 @@ public sealed class FinancialStatementService(
                 Payments = vouchers.Sum(voucher =>
                     voucher.Direction == CashDirection.Payment
                         ? voucher.Amount
+                        : 0m),
+                BaseReceipts = vouchers.Sum(voucher =>
+                    voucher.Direction == CashDirection.Receipt
+                        ? voucher.BaseAmount
+                        : 0m),
+                BasePayments = vouchers.Sum(voucher =>
+                    voucher.Direction == CashDirection.Payment
+                        ? voucher.BaseAmount
                         : 0m)
             })
             .SingleOrDefaultAsync(cancellationToken);
 
         var totalReceipts = totals?.Receipts ?? 0m;
         var totalPayments = totals?.Payments ?? 0m;
+        var totalBaseReceipts = totals?.BaseReceipts ?? 0m;
+        var totalBasePayments = totals?.BasePayments ?? 0m;
         var ordered = query
             .OrderBy(voucher => voucher.VoucherDate)
             .ThenBy(voucher => voucher.CreatedOn)
@@ -150,6 +179,18 @@ public sealed class FinancialStatementService(
                             CashDirection.Receipt
                             ? voucher.Amount
                             : -voucher.Amount),
+                    cancellationToken) ?? 0m;
+
+        var precedingBaseEffect = offset == 0
+            ? 0m
+            : await ordered
+                .Take(offset)
+                .SumAsync(
+                    voucher =>
+                        (decimal?)(voucher.Direction ==
+                            CashDirection.Receipt
+                            ? voucher.BaseAmount
+                            : -voucher.BaseAmount),
                     cancellationToken) ?? 0m;
 
         var pageRows = offset >= totalCount
@@ -178,14 +219,26 @@ public sealed class FinancialStatementService(
                         voucher.Direction == CashDirection.Payment
                             ? voucher.Amount
                             : 0m,
+                    BaseReceiptAmount =
+                        voucher.Direction == CashDirection.Receipt
+                            ? voucher.BaseAmount
+                            : 0m,
+                    BasePaymentAmount =
+                        voucher.Direction == CashDirection.Payment
+                            ? voucher.BaseAmount
+                            : 0m,
                     ReferenceNumber = voucher.ReferenceNumber
                 })
                 .ToListAsync(cancellationToken);
 
         var runningBalance = openingBalance + precedingEffect;
+        var runningBaseBalance =
+            baseOpeningBalance + precedingBaseEffect;
         var items = pageRows.Select(row =>
         {
             runningBalance += row.ReceiptAmount - row.PaymentAmount;
+            runningBaseBalance +=
+                row.BaseReceiptAmount - row.BasePaymentAmount;
             return new CashboxStatementItemResponse(
                 row.CashVoucherId,
                 row.Date,
@@ -196,7 +249,12 @@ public sealed class FinancialStatementService(
                 row.ReceiptAmount,
                 row.PaymentAmount,
                 runningBalance,
-                row.ReferenceNumber);
+                row.ReferenceNumber)
+            {
+                BaseReceiptAmount = row.BaseReceiptAmount,
+                BasePaymentAmount = row.BasePaymentAmount,
+                BaseBalance = runningBaseBalance
+            };
         }).ToList();
 
         return Result<CashboxStatementResponse>.Success(
@@ -213,7 +271,19 @@ public sealed class FinancialStatementService(
                     openingBalance,
                     totalReceipts,
                     totalPayments,
-                    openingBalance + totalReceipts - totalPayments)));
+                    openingBalance + totalReceipts - totalPayments)
+                {
+                    BaseOpeningBalance = baseOpeningBalance,
+                    BaseTotalReceipts = totalBaseReceipts,
+                    BaseTotalPayments = totalBasePayments,
+                    BaseClosingBalance =
+                        baseOpeningBalance +
+                        totalBaseReceipts -
+                        totalBasePayments
+                })
+            {
+                BaseCurrency = cashbox.BaseCurrency
+            });
     }
 
     public async Task<Result<PartnerStatementResponse>>
@@ -237,7 +307,10 @@ public sealed class FinancialStatementService(
             {
                 entity.Id,
                 entity.Name,
-                entity.Currency
+                entity.Currency,
+                BaseCurrency = entity.Company.Settings == null
+                    ? CurrencyCode.EGP
+                    : entity.Company.Settings.BaseCurrency
             })
             .FirstOrDefaultAsync(cancellationToken);
         if (partner is null)
@@ -252,6 +325,14 @@ public sealed class FinancialStatementService(
                 .Where(row => row.Date < filters.FromDate.Value)
                 .SumAsync(
                     row => (decimal?)(row.Debit - row.Credit),
+                    cancellationToken) ?? 0m
+            : 0m;
+        var baseOpeningBalance = filters.FromDate.HasValue
+            ? await allRows
+                .Where(row => row.Date < filters.FromDate.Value)
+                .SumAsync(
+                    row => (decimal?)
+                        (row.BaseDebit - row.BaseCredit),
                     cancellationToken) ?? 0m
             : 0m;
 
@@ -287,11 +368,15 @@ public sealed class FinancialStatementService(
             .Select(rows => new
             {
                 Debit = rows.Sum(row => row.Debit),
-                Credit = rows.Sum(row => row.Credit)
+                Credit = rows.Sum(row => row.Credit),
+                BaseDebit = rows.Sum(row => row.BaseDebit),
+                BaseCredit = rows.Sum(row => row.BaseCredit)
             })
             .SingleOrDefaultAsync(cancellationToken);
         var totalDebit = totals?.Debit ?? 0m;
         var totalCredit = totals?.Credit ?? 0m;
+        var totalBaseDebit = totals?.BaseDebit ?? 0m;
+        var totalBaseCredit = totals?.BaseCredit ?? 0m;
 
         var ordered = query
             .OrderBy(row => row.Date)
@@ -306,6 +391,15 @@ public sealed class FinancialStatementService(
                 .SumAsync(
                     row => (decimal?)(row.Debit - row.Credit),
                     cancellationToken) ?? 0m;
+
+        var precedingBaseEffect = offset == 0
+            ? 0m
+            : await ordered
+                .Take(offset)
+                .SumAsync(
+                    row => (decimal?)
+                        (row.BaseDebit - row.BaseCredit),
+                    cancellationToken) ?? 0m;
         var pageRows = offset >= totalCount
             ? []
             : await ordered
@@ -314,9 +408,12 @@ public sealed class FinancialStatementService(
                 .ToListAsync(cancellationToken);
 
         var runningBalance = openingBalance + precedingEffect;
+        var runningBaseBalance =
+            baseOpeningBalance + precedingBaseEffect;
         var items = pageRows.Select(row =>
         {
             runningBalance += row.Debit - row.Credit;
+            runningBaseBalance += row.BaseDebit - row.BaseCredit;
             return new PartnerStatementItemResponse(
                 row.Date,
                 row.DocumentNumber,
@@ -326,11 +423,18 @@ public sealed class FinancialStatementService(
                 row.Credit,
                 Math.Abs(runningBalance),
                 PartnerBalanceDescription(runningBalance),
-                row.ReferenceNumber);
+                row.ReferenceNumber)
+            {
+                BaseDebitAmount = row.BaseDebit,
+                BaseCreditAmount = row.BaseCredit,
+                BaseBalanceAmount = Math.Abs(runningBaseBalance)
+            };
         }).ToList();
 
         var closingBalance =
             openingBalance + totalDebit - totalCredit;
+        var baseClosingBalance =
+            baseOpeningBalance + totalBaseDebit - totalBaseCredit;
         return Result<PartnerStatementResponse>.Success(
             new PartnerStatementResponse(
                 partner.Id,
@@ -345,7 +449,16 @@ public sealed class FinancialStatementService(
                     Math.Abs(openingBalance),
                     PartnerBalanceDescription(openingBalance),
                     Math.Abs(closingBalance),
-                    PartnerBalanceDescription(closingBalance))));
+                    PartnerBalanceDescription(closingBalance))
+                {
+                    BaseOpeningBalanceAmount =
+                        Math.Abs(baseOpeningBalance),
+                    BaseClosingBalanceAmount =
+                        Math.Abs(baseClosingBalance)
+                })
+            {
+                BaseCurrency = partner.BaseCurrency
+            });
     }
 
     public async Task<Result<DriverStatementResponse>>
@@ -546,6 +659,8 @@ public sealed class FinancialStatementService(
                 Description = movement.Description,
                 Debit = movement.Debit,
                 Credit = movement.Credit,
+                BaseDebit = movement.BaseDebit,
+                BaseCredit = movement.BaseCredit,
                 ReferenceNumber = movement.CashVoucherId.HasValue
                     ? movement.CashVoucher!.ReferenceNumber
                     : null,
@@ -575,6 +690,14 @@ public sealed class FinancialStatementService(
                 Credit = balance.BalanceType ==
                     PartnerBalanceType.Payable
                     ? balance.Amount
+                    : 0m,
+                BaseDebit = balance.BalanceType ==
+                    PartnerBalanceType.Receivable
+                    ? balance.BaseAmount
+                    : 0m,
+                BaseCredit = balance.BalanceType ==
+                    PartnerBalanceType.Payable
+                    ? balance.BaseAmount
                     : 0m,
                 ReferenceNumber = null,
                 CashMovementTypeId = null
@@ -726,6 +849,8 @@ public sealed class FinancialStatementService(
         public string? PartyName { get; init; }
         public decimal ReceiptAmount { get; init; }
         public decimal PaymentAmount { get; init; }
+        public decimal BaseReceiptAmount { get; init; }
+        public decimal BasePaymentAmount { get; init; }
         public string? ReferenceNumber { get; init; }
     }
 
@@ -740,6 +865,10 @@ public sealed class FinancialStatementService(
         public string? Description { get; init; }
         public decimal Debit { get; init; }
         public decimal Credit { get; init; }
+
+        public decimal BaseDebit { get; init; }
+
+        public decimal BaseCredit { get; init; }
         public string? ReferenceNumber { get; init; }
         public int? CashMovementTypeId { get; init; }
     }

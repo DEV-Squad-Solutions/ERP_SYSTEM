@@ -4,6 +4,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Cashboxes;
+using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Infrastructure.Persistence;
 
@@ -12,7 +13,9 @@ namespace MiniErp.Infrastructure.Services.Cashboxes;
 public sealed class CashboxService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    IExchangeRateResolver exchangeRateResolver,
+    TimeProvider timeProvider)
     : ICashboxService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -100,6 +103,24 @@ public sealed class CashboxService(
         var cashbox = request.Adapt<Cashbox>();
         cashbox.CompanyId = companyId;
 
+        var openingDate = request.OpeningBalanceDate ??
+            DateOnly.FromDateTime(
+                timeProvider.GetUtcNow().UtcDateTime);
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            cashbox.Currency,
+            openingDate,
+            request.OpeningExchangeRate,
+            cancellationToken);
+        if (exchangeRateResult.IsFailure)
+        {
+            return Result<CashboxResponse>.Failure(
+                exchangeRateResult.Error);
+        }
+        cashbox.ApplyOpeningExchangeRate(
+            openingDate,
+            exchangeRateResult.Value.ExchangeRateId,
+            exchangeRateResult.Value.Rate);
+
         var duplicateError = await FindDuplicateAsync(
             cashbox,
             excludedId: null,
@@ -167,10 +188,27 @@ public sealed class CashboxService(
                 OpeningOrCurrencyChangeNotAllowed());
         }
 
+        var openingDate = request.OpeningBalanceDate ??
+            cashbox.OpeningBalanceDate;
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            request.Currency,
+            openingDate,
+            request.OpeningExchangeRate,
+            cancellationToken);
+        if (exchangeRateResult.IsFailure)
+        {
+            return Result<CashboxResponse>.Failure(
+                exchangeRateResult.Error);
+        }
+
         var entry = dbContext.Entry(cashbox);
         entry.Property(entity => entity.RowVersion).OriginalValue =
             request.RowVersion;
         request.Adapt(cashbox);
+        cashbox.ApplyOpeningExchangeRate(
+            openingDate,
+            exchangeRateResult.Value.ExchangeRateId,
+            exchangeRateResult.Value.Rate);
 
         try
         {

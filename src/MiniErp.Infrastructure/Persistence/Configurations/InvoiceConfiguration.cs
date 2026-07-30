@@ -68,6 +68,15 @@ public sealed class InvoiceConfiguration : AuditableEntityConfiguration<Invoice>
             .HasConversion<int>()
             .IsRequired();
 
+        builder.Property(invoice => invoice.ExchangeRateId);
+
+        builder.Property(invoice => invoice.ExchangeRate)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.RatePrecision,
+                Domain.Entities.Companies.ExchangeRateRules.RateScale)
+            .HasDefaultValue(1m)
+            .IsRequired();
+
         builder.Property(invoice => invoice.UsesExternalDriver)
             .HasDefaultValue(false)
             .IsRequired();
@@ -85,6 +94,34 @@ public sealed class InvoiceConfiguration : AuditableEntityConfiguration<Invoice>
             .HasDefaultValue(0m)
             .IsRequired();
 
+        builder.Property(invoice => invoice.WBWeight)
+            .HasPrecision(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
+        builder.Property(invoice => invoice.WBScaleDifference)
+            .HasPrecision(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
+        builder.Property(invoice => invoice.WBDiscount)
+            .HasPrecision(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
+        builder.Property(invoice => invoice.WBTotal)
+            .HasPrecision(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
         builder.Property(invoice => invoice.PaidAmount)
             .HasPrecision(
                 InvoiceAmountRules.MoneyPrecision,
@@ -96,6 +133,34 @@ public sealed class InvoiceConfiguration : AuditableEntityConfiguration<Invoice>
             .HasPrecision(
                 InvoiceAmountRules.MoneyPrecision,
                 InvoiceAmountRules.MoneyScale)
+            .IsRequired();
+
+        builder.Property(invoice => invoice.BaseSubtotal)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountPrecision,
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
+        builder.Property(invoice => invoice.BaseDiscountAmount)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountPrecision,
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
+        builder.Property(invoice => invoice.BaseTotal)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountPrecision,
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
+        builder.Property(invoice => invoice.BasePaidAmountAtInvoiceRate)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountPrecision,
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountScale)
+            .HasDefaultValue(0m)
             .IsRequired();
 
         builder.Ignore(invoice => invoice.Subtotal);
@@ -236,6 +301,27 @@ public sealed class InvoiceConfiguration : AuditableEntityConfiguration<Invoice>
                 invoice.Id
             })
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(invoice => invoice.ExchangeRateRecord)
+            .WithMany()
+            .HasForeignKey(invoice => new
+            {
+                invoice.CompanyId,
+                invoice.ExchangeRateId
+            })
+            .HasPrincipalKey(rate => new
+            {
+                rate.CompanyId,
+                rate.Id
+            })
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(invoice => new
+        {
+            invoice.CompanyId,
+            invoice.ExchangeRateId
+        });
 
     }
 }

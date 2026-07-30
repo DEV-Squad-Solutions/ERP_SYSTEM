@@ -63,9 +63,9 @@ public sealed class InventoryCostReportService(
         {
             return Result<InventoryCostReportResponse>.Failure(
                 Error.NotFound(
-                    "InventoryCostReports.StoreNotFound",
-                    "مخزن تقرير متوسط التكلفة غير موجود أو لا ينتمي إلى الشركة الحالية.",
-                    nameof(filters.StoreId)));
+                "InventoryCostReports.StoreNotFound",
+                "مخزن تقرير متوسط التكلفة غير موجود أو لا ينتمي إلى الشركة الحالية.",
+                nameof(filters.StoreId)));
         }
 
         if (store.IsContainerStore)
@@ -98,6 +98,12 @@ public sealed class InventoryCostReportService(
                     "الصنف غير موجود أو لا ينتمي إلى الشركة الحالية.",
                     nameof(filters.ItemId)));
         }
+
+        var baseCurrency = await dbContext.CompanySettings
+            .AsNoTracking()
+            .Where(settings => settings.CompanyId == companyId)
+            .Select(settings => settings.BaseCurrency)
+            .SingleOrDefaultAsync(cancellationToken);
 
         var timeline = await dbContext.ItemMovements
             .AsNoTracking()
@@ -316,6 +322,7 @@ public sealed class InventoryCostReportService(
                 item.Code,
                 item.Name,
                 item.ItemUnitName,
+                baseCurrency,
                 filters.FromDate,
                 filters.ToDate,
                 items,

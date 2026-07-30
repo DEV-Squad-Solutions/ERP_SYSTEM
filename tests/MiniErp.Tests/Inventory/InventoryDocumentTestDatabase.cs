@@ -133,6 +133,7 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
             CREATE TABLE CompanySettings (
                 CompanyId INTEGER NOT NULL PRIMARY KEY,
                 StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
+                BaseCurrency INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
             );
 
@@ -469,6 +470,9 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
                  1, 1, 'test', '2026-01-01', 'test', 0),
                 (3, 2, NULL, 'OTHER', 'Other Store', NULL,
                  0, 1, 'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO CompanySettings (CompanyId, StockBalanceCheckMode, BaseCurrency)
+            VALUES (1, 1, 0), (2, 1, 0);
 
             INSERT INTO ItemUnits (
                 Id, CompanyId, Name, IsActive, CreatedById, CreatedOn,

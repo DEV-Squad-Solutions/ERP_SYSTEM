@@ -114,6 +114,7 @@ public sealed class CompanyService(
         dbContext.Companies.Add(company);
         company.Settings = new CompanySettings
         {
+            BaseCurrency = request.BaseCurrency ?? CurrencyCode.EGP,
             StockBalanceCheckMode = request.StockBalanceCheckMode ??
                 StockBalanceCheckMode.DateCheck
         };
@@ -169,14 +170,33 @@ public sealed class CompanyService(
             settings = new CompanySettings
             {
                 CompanyId = id,
+                BaseCurrency = request.BaseCurrency ?? CurrencyCode.EGP,
                 StockBalanceCheckMode = request.StockBalanceCheckMode ??
                     StockBalanceCheckMode.DateCheck
             };
             dbContext.CompanySettings.Add(settings);
         }
-        else if (request.StockBalanceCheckMode.HasValue)
+        else
         {
-            settings.StockBalanceCheckMode = request.StockBalanceCheckMode.Value;
+            if (request.StockBalanceCheckMode.HasValue)
+            {
+                settings.StockBalanceCheckMode =
+                    request.StockBalanceCheckMode.Value;
+            }
+
+            if (request.BaseCurrency.HasValue &&
+                request.BaseCurrency.Value != settings.BaseCurrency)
+            {
+                if (await HasFinancialOrInventoryHistoryAsync(
+                        id,
+                        cancellationToken))
+                {
+                    return Result<CompanyResponse>.Failure(
+                        BaseCurrencyLocked());
+                }
+
+                settings.BaseCurrency = request.BaseCurrency.Value;
+            }
         }
 
         company.Settings = settings;
@@ -289,6 +309,40 @@ public sealed class CompanyService(
                 nameof(CompanyRequest.TaxNumber))
             : null;
     }
+
+    private async Task<bool> HasFinancialOrInventoryHistoryAsync(
+        int targetCompanyId,
+        CancellationToken cancellationToken) =>
+        await dbContext.Invoices
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                invoice => invoice.CompanyId == targetCompanyId,
+                cancellationToken) ||
+        await dbContext.CashVouchers
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                voucher => voucher.CompanyId == targetCompanyId,
+                cancellationToken) ||
+        await dbContext.BusinessPartnerMovements
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                movement => movement.CompanyId == targetCompanyId,
+                cancellationToken) ||
+        await dbContext.ItemMovements
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                movement => movement.CompanyId == targetCompanyId,
+                cancellationToken) ||
+        await dbContext.PartnerOpeningBalances
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                balance => balance.CompanyId == targetCompanyId,
+                cancellationToken);
+
+    private static Error BaseCurrencyLocked() =>
+        Error.Conflict(
+            "Companies.BaseCurrencyLocked",
+            "لا يمكن تغيير عملة الشركة الأساسية بعد وجود حركات مالية أو مخزنية.");
 
     private static Error InvalidId() =>
         Error.Validation("Companies.InvalidId", "يجب أن يكون رقم الشركة أكبر من صفر.");

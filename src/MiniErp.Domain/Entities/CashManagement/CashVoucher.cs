@@ -53,6 +53,14 @@ public sealed class CashVoucher : AuditableEntity
 
     public CurrencyCode Currency { get; set; } = CurrencyCode.EGP;
 
+    public int? ExchangeRateId { get; private set; }
+
+    public ExchangeRate? ExchangeRateRecord { get; private set; }
+
+    public decimal ExchangeRate { get; private set; } = 1m;
+
+    public decimal BaseAmount { get; private set; }
+
     public string? ReferenceNumber { get; set; }
 
     public string? Description { get; set; }
@@ -63,8 +71,28 @@ public sealed class CashVoucher : AuditableEntity
 
     public byte[] RowVersion { get; private set; } = [];
 
+    public InvoicePayment? InvoicePayment { get; set; }
+
     public void Touch(DateTime utcNow)
     {
         LastModifiedAt = utcNow;
+    }
+
+    public void ApplyExchangeRate(
+        int? exchangeRateId,
+        decimal exchangeRate)
+    {
+        if (!ExchangeRateRules.IsValidRate(exchangeRate))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(exchangeRate),
+                "Exchange rate must be greater than zero.");
+        }
+
+        ExchangeRateId = exchangeRateId;
+        ExchangeRate = ExchangeRateRules.RoundRate(exchangeRate);
+        BaseAmount = ExchangeRateRules.ConvertToBase(
+            Amount,
+            ExchangeRate);
     }
 }

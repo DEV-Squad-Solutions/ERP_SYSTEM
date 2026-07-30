@@ -55,6 +55,9 @@ public static class InvoiceAmountRules
     public static bool IsValidMoney(decimal value) =>
         HasPrecision(value, MoneyMaximumExclusive, MoneyScale);
 
+    public static bool IsValidQuantity(decimal value) =>
+        HasPrecision(value, QuantityMaximumExclusive, QuantityScale);
+
     private static bool HasPrecision(
         decimal value,
         decimal maximumExclusive,

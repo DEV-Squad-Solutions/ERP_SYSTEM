@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
+using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
@@ -15,6 +16,7 @@ public sealed partial class InvoiceService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
+    IExchangeRateResolver exchangeRateResolver,
     IInventoryStockService inventoryStockService,
     IInventoryCostingService inventoryCostingService,
     TimeProvider timeProvider)
@@ -130,9 +132,25 @@ public sealed partial class InvoiceService(
         invoice.CompanyId = companyId;
         invoice.Currency = preparation.Value.Currency;
 
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            invoice.Currency,
+            invoice.InvoiceDate,
+            request.ExchangeRate,
+            cancellationToken);
+        if (exchangeRateResult.IsFailure)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<InvoiceResponse>.Failure(
+                exchangeRateResult.Error);
+        }
+
         AddLines(invoice, request, preparation.Value);
         AddContainerLines(invoice, request);
         invoice.CalculateTotal();
+        invoice.ApplyExchangeRate(
+            exchangeRateResult.Value.ExchangeRateId,
+            exchangeRateResult.Value.Rate);
         var amountError = ValidateAmounts(invoice);
         if (amountError is not null)
         {
@@ -141,17 +159,19 @@ public sealed partial class InvoiceService(
             return Result<InvoiceResponse>.Failure(amountError);
         }
 
-        var paymentError = await ValidatePaymentAsync(
+        var paymentPreparation = await PreparePaymentAsync(
             invoice,
             request.CashboxId,
             request.CashMovementTypeId,
+            request.CashboxExchangeRate,
             currentInvoiceId: null,
             cancellationToken);
-        if (paymentError is not null)
+        if (paymentPreparation.IsFailure)
         {
             await transaction.RollbackAsync(cancellationToken);
             dbContext.ChangeTracker.Clear();
-            return Result<InvoiceResponse>.Failure(paymentError);
+            return Result<InvoiceResponse>.Failure(
+                paymentPreparation.Error);
         }
 
         invoice.Touch(timeProvider.GetUtcNow().UtcDateTime);
@@ -161,8 +181,7 @@ public sealed partial class InvoiceService(
 
         await SaveSideEffectsAsync(
             invoice,
-            request.CashboxId,
-            request.CashMovementTypeId,
+            paymentPreparation.Value,
             cancellationToken);
 
         var costingError = await inventoryCostingService.RecalculateAsync(
@@ -261,9 +280,25 @@ public sealed partial class InvoiceService(
         NormalizeDriverValues(invoice);
         invoice.Currency = preparation.Value.Currency;
 
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            invoice.Currency,
+            invoice.InvoiceDate,
+            request.ExchangeRate,
+            cancellationToken);
+        if (exchangeRateResult.IsFailure)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<InvoiceResponse>.Failure(
+                exchangeRateResult.Error);
+        }
+
         ReplaceLines(invoice, request, preparation.Value);
         ReplaceContainerLines(invoice, request);
         invoice.CalculateTotal();
+        invoice.ApplyExchangeRate(
+            exchangeRateResult.Value.ExchangeRateId,
+            exchangeRateResult.Value.Rate);
         var amountError = ValidateAmounts(invoice);
         if (amountError is not null)
         {
@@ -272,17 +307,19 @@ public sealed partial class InvoiceService(
             return Result<InvoiceResponse>.Failure(amountError);
         }
 
-        var paymentError = await ValidatePaymentAsync(
+        var paymentPreparation = await PreparePaymentAsync(
             invoice,
             request.CashboxId,
             request.CashMovementTypeId,
+            request.CashboxExchangeRate,
             currentInvoiceId: id,
             cancellationToken);
-        if (paymentError is not null)
+        if (paymentPreparation.IsFailure)
         {
             await transaction.RollbackAsync(cancellationToken);
             dbContext.ChangeTracker.Clear();
-            return Result<InvoiceResponse>.Failure(paymentError);
+            return Result<InvoiceResponse>.Failure(
+                paymentPreparation.Error);
         }
 
         invoice.Touch(timeProvider.GetUtcNow().UtcDateTime);
@@ -300,8 +337,7 @@ public sealed partial class InvoiceService(
 
             await SaveSideEffectsAsync(
                 invoice,
-                request.CashboxId,
-                request.CashMovementTypeId,
+                paymentPreparation.Value,
                 cancellationToken);
 
             var costingError = await inventoryCostingService.RecalculateAsync(

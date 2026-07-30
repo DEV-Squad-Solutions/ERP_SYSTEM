@@ -9,7 +9,8 @@ public sealed record PartnerOpeningBalanceRequest(
     CurrencyCode Currency,
     PartnerBalanceType BalanceType,
     decimal Amount,
-    string? Notes)
+    string? Notes,
+    decimal? ExchangeRate = null)
 {
     public const int DocumentNumberMaximumLength = 50;
 
@@ -24,4 +25,5 @@ public sealed record PartnerOpeningBalanceUpdateRequest(
     PartnerBalanceType BalanceType,
     decimal Amount,
     string? Notes,
-    byte[]? RowVersion);
+    byte[]? RowVersion,
+    decimal? ExchangeRate = null);

@@ -22,6 +22,9 @@ public sealed record CashVoucherResponse(
     string? ExternalPartyName,
     decimal Amount,
     CurrencyCode Currency,
+    CurrencyCode BaseCurrency,
+    decimal ExchangeRate,
+    decimal BaseAmount,
     string? ReferenceNumber,
     string? Description,
     string? Notes,
@@ -30,4 +33,12 @@ public sealed record CashVoucherResponse(
     public int? InvoiceId { get; init; }
 
     public string? InvoiceNumber { get; init; }
+
+    public decimal? AppliedInvoiceAmount { get; init; }
+
+    public CurrencyCode? AppliedInvoiceCurrency { get; init; }
+
+    public decimal? AppliedBaseAmount { get; init; }
+
+    public decimal? RealizedExchangeDifference { get; init; }
 }

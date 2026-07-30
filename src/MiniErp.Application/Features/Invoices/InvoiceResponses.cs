@@ -16,6 +16,8 @@ public sealed record InvoiceLineResponse(
     decimal Quantity,
     decimal Price,
     decimal Total,
+    decimal BaseUnitPrice,
+    decimal BaseTotal,
     string? Notes)
 {
     public int? SourceInvoiceLineId { get; init; }
@@ -66,6 +68,8 @@ public sealed record InvoiceListResponse(
     int? CountryId,
     string? CountryName,
     CurrencyCode Currency,
+    CurrencyCode BaseCurrency,
+    decimal ExchangeRate,
     int? DriverId,
     string? DriverName,
     int? ActualDriverId,
@@ -73,9 +77,17 @@ public sealed record InvoiceListResponse(
     bool UsesExternalDriver,
     string? ExternalDriverName,
     string? VehicleNumber,
+    decimal WBWeight,
+    decimal WBScaleDifference,
+    decimal WBDiscount,
+    decimal WBTotal,
     decimal Subtotal,
     decimal DiscountAmount,
     decimal Total,
+    decimal BaseSubtotal,
+    decimal BaseDiscountAmount,
+    decimal BaseTotal,
+    decimal BasePaidAmountAtInvoiceRate,
     PaymentStatus PaymentStatus,
     decimal PaidAmount,
     decimal RemainingAmount,
@@ -95,6 +107,16 @@ public sealed record InvoiceListResponse(
     public int? CashMovementTypeId { get; init; }
 
     public string? CashMovementTypeName { get; init; }
+
+    public CurrencyCode? CashboxCurrency { get; init; }
+
+    public decimal? CashboxAmount { get; init; }
+
+    public decimal? CashboxExchangeRate { get; init; }
+
+    public decimal? CashboxBaseAmount { get; init; }
+
+    public decimal? RealizedExchangeDifference { get; init; }
 }
 
 public sealed record InvoiceSummaryResponse(
@@ -143,6 +165,8 @@ public sealed record InvoiceResponse(
     int? CountryId,
     string? CountryName,
     CurrencyCode Currency,
+    CurrencyCode BaseCurrency,
+    decimal ExchangeRate,
     int? DriverId,
     string? DriverName,
     int? ActualDriverId,
@@ -150,9 +174,17 @@ public sealed record InvoiceResponse(
     bool UsesExternalDriver,
     string? ExternalDriverName,
     string? VehicleNumber,
+    decimal WBWeight,
+    decimal WBScaleDifference,
+    decimal WBDiscount,
+    decimal WBTotal,
     decimal Subtotal,
     decimal DiscountAmount,
     decimal Total,
+    decimal BaseSubtotal,
+    decimal BaseDiscountAmount,
+    decimal BaseTotal,
+    decimal BasePaidAmountAtInvoiceRate,
     PaymentStatus PaymentStatus,
     decimal PaidAmount,
     decimal RemainingAmount,
@@ -172,4 +204,14 @@ public sealed record InvoiceResponse(
     public int? CashMovementTypeId { get; init; }
 
     public string? CashMovementTypeName { get; init; }
+
+    public CurrencyCode? CashboxCurrency { get; init; }
+
+    public decimal? CashboxAmount { get; init; }
+
+    public decimal? CashboxExchangeRate { get; init; }
+
+    public decimal? CashboxBaseAmount { get; init; }
+
+    public decimal? RealizedExchangeDifference { get; init; }
 }

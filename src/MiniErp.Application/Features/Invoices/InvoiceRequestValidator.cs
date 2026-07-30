@@ -1,4 +1,5 @@
 using FluentValidation;
+using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
@@ -85,6 +86,18 @@ public sealed class InvoiceRequestValidator
     public InvoiceRequestValidator()
     {
         InvoiceValidationRules.AddCreateRules(this);
+
+        RuleFor(request => request.ExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف الفاتورة أكبر من صفر.");
+
+        RuleFor(request => request.CashboxExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف صندوق النقدية أكبر من صفر.");
     }
 }
 
@@ -94,6 +107,18 @@ public sealed class InvoiceUpdateRequestValidator
     public InvoiceUpdateRequestValidator()
     {
         InvoiceValidationRules.AddUpdateRules(this);
+
+        RuleFor(request => request.ExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف الفاتورة أكبر من صفر.");
+
+        RuleFor(request => request.CashboxExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف صندوق النقدية أكبر من صفر.");
 
         RuleFor(request => request.RowVersion)
             .NotNull()
@@ -194,6 +219,7 @@ internal static class InvoiceValidationRules
                 InvoiceAmountRules.MoneyScale,
                 ignoreTrailingZeros: true);
 
+        AddWeighbridgeRules(validator);
         AddAmountRules(validator);
 
         validator.RuleFor(request => request.Lines)
@@ -324,6 +350,7 @@ internal static class InvoiceValidationRules
                 InvoiceAmountRules.MoneyScale,
                 ignoreTrailingZeros: true);
 
+        AddWeighbridgeRules(validator);
         AddAmountRules(validator);
 
         validator.RuleFor(request => request.Lines)
@@ -426,6 +453,90 @@ internal static class InvoiceValidationRules
                 paidAmount < total)
             .WithMessage("الفاتورة الآجلة لا تقبل السداد الكامل؛ استخدم الفاتورة النقدية.")
             .WithErrorCode("Invoices.CreditInvoiceCannotBeFullyPaid");
+    }
+
+    private static void AddWeighbridgeRules(
+        AbstractValidator<InvoiceRequest> validator)
+    {
+        validator.RuleFor(request => request.WBWeight)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .WithMessage(
+                "يجب ألا يكون وزن الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBWeight");
+
+        validator.RuleFor(request => request.WBScaleDifference)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .WithMessage(
+                "يجب ألا يكون فرق الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBScaleDifference");
+
+        validator.RuleFor(request => request.WBDiscount)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .WithMessage(
+                "يجب ألا يكون خصم الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBDiscount");
+
+        validator.RuleFor(request => request)
+            .Must(request =>
+                request.WBScaleDifference + request.WBDiscount <=
+                request.WBWeight)
+            .WithMessage(
+                "يجب ألا يتجاوز مجموع فرق الميزان وخصم الميزان وزن الميزان.")
+            .WithErrorCode("Invoices.InvalidWBTotal");
+    }
+
+    private static void AddWeighbridgeRules(
+        AbstractValidator<InvoiceUpdateRequest> validator)
+    {
+        validator.RuleFor(request => request.WBWeight)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .WithMessage(
+                "يجب ألا يكون وزن الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBWeight");
+
+        validator.RuleFor(request => request.WBScaleDifference)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .WithMessage(
+                "يجب ألا يكون فرق الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBScaleDifference");
+
+        validator.RuleFor(request => request.WBDiscount)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .WithMessage(
+                "يجب ألا يكون خصم الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBDiscount");
+
+        validator.RuleFor(request => request)
+            .Must(request =>
+                request.WBScaleDifference + request.WBDiscount <=
+                request.WBWeight)
+            .WithMessage(
+                "يجب ألا يتجاوز مجموع فرق الميزان وخصم الميزان وزن الميزان.")
+            .WithErrorCode("Invoices.InvalidWBTotal");
     }
 
     private static void AddAmountRules(

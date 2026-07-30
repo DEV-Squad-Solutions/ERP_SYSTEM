@@ -330,6 +330,7 @@ public sealed class CompanyServiceTests
 
                 CREATE TABLE CompanySettings (
                     CompanyId INTEGER NOT NULL PRIMARY KEY,
+                    BaseCurrency INTEGER NOT NULL DEFAULT 1,
                     StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
                     FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
                 );

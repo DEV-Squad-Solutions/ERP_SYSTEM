@@ -34,5 +34,11 @@ public sealed class CompanyRequestValidator : AbstractValidator<CompanyRequest>
         RuleFor(request => request.StockBalanceCheckMode)
             .Must(mode => !mode.HasValue || Enum.IsDefined(mode.Value))
             .WithMessage("Stock balance check mode is invalid.");
+
+        RuleFor(request => request.BaseCurrency)
+            .Must(currency =>
+                !currency.HasValue ||
+                Enum.IsDefined(currency.Value))
+            .WithMessage("عملة الشركة الأساسية غير صالحة.");
     }
 }

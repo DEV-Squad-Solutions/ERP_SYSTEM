@@ -254,7 +254,7 @@ public sealed class InventoryCostingService(
                         movement,
                         cancellationToken);
                     return line is not null
-                        ? InboundCostResult.Success(line.Price)
+                        ? InboundCostResult.Success(line.BaseUnitPrice)
                         : movement.UnitCost.HasValue
                             ? InboundCostResult.Success(movement.UnitCost.Value)
                             : InboundCostResult.Failure(

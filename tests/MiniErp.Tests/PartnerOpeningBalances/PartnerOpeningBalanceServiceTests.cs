@@ -476,7 +476,8 @@ public sealed class PartnerOpeningBalanceServiceTests
             new(
                 Context,
                 new PaginationService(),
-                new TestCurrentCompanyContext(companyId));
+                new TestCurrentCompanyContext(companyId),
+                new MiniErp.Tests.TestExchangeRateResolver());
 
         public async ValueTask DisposeAsync()
         {
@@ -509,6 +510,7 @@ public sealed class PartnerOpeningBalanceServiceTests
 
                 CREATE TABLE CompanySettings (
                     CompanyId INTEGER NOT NULL PRIMARY KEY,
+                    BaseCurrency INTEGER NOT NULL DEFAULT 1,
                     StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
                     FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
                 );
@@ -544,8 +546,11 @@ public sealed class PartnerOpeningBalanceServiceTests
                     DocumentNumber TEXT NOT NULL,
                     DocumentDate TEXT NOT NULL,
                     Currency INTEGER NOT NULL,
+                    ExchangeRateId INTEGER NULL,
+                    ExchangeRate NUMERIC NOT NULL DEFAULT 1,
                     BalanceType INTEGER NOT NULL,
                     Amount NUMERIC NOT NULL CHECK (Amount > 0),
+                    BaseAmount NUMERIC NOT NULL DEFAULT 0,
                     Notes TEXT NULL,
                     RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
                     CreatedById TEXT NOT NULL,

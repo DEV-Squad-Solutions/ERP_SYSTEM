@@ -24,6 +24,15 @@ public sealed class InvoiceMappingRegister : IRegister
         config.ForType<InvoiceRequest, Invoice>()
             .Ignore(invoice => invoice.Lines)
             .Ignore(invoice => invoice.ContainerLines)
+            .Ignore(invoice => invoice.Payments)
+            .Ignore(invoice => invoice.ExchangeRateRecord)
+            .Ignore(invoice => invoice.ExchangeRateId)
+            .Ignore(invoice => invoice.ExchangeRate)
+            .Ignore(invoice => invoice.BaseSubtotal)
+            .Ignore(invoice => invoice.BaseDiscountAmount)
+            .Ignore(invoice => invoice.BaseTotal)
+            .Ignore(invoice => invoice.BasePaidAmountAtInvoiceRate)
+            .Ignore(invoice => invoice.WBTotal)
             .Map(
                 invoice => invoice.InvoiceNumber,
                 request => request.InvoiceNumber.Trim())
@@ -33,6 +42,15 @@ public sealed class InvoiceMappingRegister : IRegister
             .Map(
                 invoice => invoice.PartnerInvoiceNo,
                 request => Normalize(request.PartnerInvoiceNo))
+            .Map(
+                invoice => invoice.WBWeight,
+                request => request.WBWeight)
+            .Map(
+                invoice => invoice.WBScaleDifference,
+                request => request.WBScaleDifference)
+            .Map(
+                invoice => invoice.WBDiscount,
+                request => request.WBDiscount)
             .Map(
                 invoice => invoice.ExternalDriverName,
                 request => Normalize(request.ExternalDriverName))
@@ -47,12 +65,30 @@ public sealed class InvoiceMappingRegister : IRegister
             .Ignore(invoice => invoice.RowVersion)
             .Ignore(invoice => invoice.Lines)
             .Ignore(invoice => invoice.ContainerLines)
+            .Ignore(invoice => invoice.Payments)
+            .Ignore(invoice => invoice.ExchangeRateRecord)
+            .Ignore(invoice => invoice.ExchangeRateId)
+            .Ignore(invoice => invoice.ExchangeRate)
+            .Ignore(invoice => invoice.BaseSubtotal)
+            .Ignore(invoice => invoice.BaseDiscountAmount)
+            .Ignore(invoice => invoice.BaseTotal)
+            .Ignore(invoice => invoice.BasePaidAmountAtInvoiceRate)
+            .Ignore(invoice => invoice.WBTotal)
             .Map(
                 invoice => invoice.ExportInvoiceCode,
                 request => Normalize(request.ExportInvoiceCode))
             .Map(
                 invoice => invoice.PartnerInvoiceNo,
                 request => Normalize(request.PartnerInvoiceNo))
+            .Map(
+                invoice => invoice.WBWeight,
+                request => request.WBWeight)
+            .Map(
+                invoice => invoice.WBScaleDifference,
+                request => request.WBScaleDifference)
+            .Map(
+                invoice => invoice.WBDiscount,
+                request => request.WBDiscount)
             .Map(
                 invoice => invoice.ExternalDriverName,
                 request => Normalize(request.ExternalDriverName))
@@ -102,6 +138,12 @@ public sealed class InvoiceMappingRegister : IRegister
                     ? null
                     : invoice.ActualDriver.Name)
             .Map(
+                response => response.BaseCurrency,
+                invoice => invoice.Company == null ||
+                    invoice.Company.Settings == null
+                    ? CurrencyCode.EGP
+                    : invoice.Company.Settings.BaseCurrency)
+            .Map(
                 response => response.PaymentStatus,
                 invoice => invoice.PaidAmount <= 0m && invoice.Total > 0m
                     ? PaymentStatus.Unpaid
@@ -137,6 +179,40 @@ public sealed class InvoiceMappingRegister : IRegister
                 invoice => invoice.PaymentVouchers
                     .OrderBy(voucher => voucher.Id)
                     .Select(voucher => voucher.CashMovementType.Name)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashboxCurrency,
+                invoice => invoice.Payments
+                    .OrderBy(payment => payment.Id)
+                    .Select(payment =>
+                        (CurrencyCode?)payment.CashboxCurrency)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashboxAmount,
+                invoice => invoice.Payments
+                    .OrderBy(payment => payment.Id)
+                    .Select(payment => (decimal?)payment.CashboxAmount)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashboxExchangeRate,
+                invoice => invoice.Payments
+                    .OrderBy(payment => payment.Id)
+                    .Select(payment =>
+                        (decimal?)payment.CashboxToBaseRate)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashboxBaseAmount,
+                invoice => invoice.Payments
+                    .OrderBy(payment => payment.Id)
+                    .Select(payment =>
+                        (decimal?)payment.CashboxBaseAmount)
+                    .FirstOrDefault())
+            .Map(
+                response => response.RealizedExchangeDifference,
+                invoice => invoice.Payments
+                    .OrderBy(payment => payment.Id)
+                    .Select(payment =>
+                        (decimal?)payment.RealizedExchangeDifference)
                     .FirstOrDefault())
             .Map(
                 response => response.Subtotal,
@@ -178,6 +254,12 @@ public sealed class InvoiceMappingRegister : IRegister
                     ? null
                     : invoice.ActualDriver.Name)
             .Map(
+                response => response.BaseCurrency,
+                invoice => invoice.Company == null ||
+                    invoice.Company.Settings == null
+                    ? CurrencyCode.EGP
+                    : invoice.Company.Settings.BaseCurrency)
+            .Map(
                 response => response.PaymentStatus,
                 invoice => invoice.PaidAmount <= 0m && invoice.Total > 0m
                     ? PaymentStatus.Unpaid
@@ -213,6 +295,40 @@ public sealed class InvoiceMappingRegister : IRegister
                 invoice => invoice.PaymentVouchers
                     .OrderBy(voucher => voucher.Id)
                     .Select(voucher => voucher.CashMovementType.Name)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashboxCurrency,
+                invoice => invoice.Payments
+                    .OrderBy(payment => payment.Id)
+                    .Select(payment =>
+                        (CurrencyCode?)payment.CashboxCurrency)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashboxAmount,
+                invoice => invoice.Payments
+                    .OrderBy(payment => payment.Id)
+                    .Select(payment => (decimal?)payment.CashboxAmount)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashboxExchangeRate,
+                invoice => invoice.Payments
+                    .OrderBy(payment => payment.Id)
+                    .Select(payment =>
+                        (decimal?)payment.CashboxToBaseRate)
+                    .FirstOrDefault())
+            .Map(
+                response => response.CashboxBaseAmount,
+                invoice => invoice.Payments
+                    .OrderBy(payment => payment.Id)
+                    .Select(payment =>
+                        (decimal?)payment.CashboxBaseAmount)
+                    .FirstOrDefault())
+            .Map(
+                response => response.RealizedExchangeDifference,
+                invoice => invoice.Payments
+                    .OrderBy(payment => payment.Id)
+                    .Select(payment =>
+                        (decimal?)payment.RealizedExchangeDifference)
                     .FirstOrDefault())
             .Map(
                 response => response.Subtotal,

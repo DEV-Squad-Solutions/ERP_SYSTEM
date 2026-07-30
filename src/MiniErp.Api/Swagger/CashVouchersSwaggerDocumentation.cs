@@ -27,7 +27,7 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
             nameof(CashVouchersController.GetById) => (
                 "Get a cash voucher",
                 SwaggerOperationDescription.Create(
-                    "Returns one voucher with cashbox, type, party, optional source invoice, derived currency, and concurrency token.",
+                    "Returns one voucher with cashbox, type, party, optional source invoice, transaction/base amounts, resolved exchange-rate snapshot, and concurrency token.",
                     "A positive route id.",
                     "CompanyId, currency, and partner Debit/Credit are server-controlled. The frontend does not send or display an accounting-side selector.",
                     "Missing or other-company vouchers return 404.")),
@@ -35,13 +35,13 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
                 "Create a cash voucher",
                 SwaggerOperationDescription.Create(
                     "Admin only. Saves the voucher and its cash/partner effects atomically.",
-                    "Voucher number/date, Receipt or Payment, active cashbox, matching active movement type, party fields, positive amount, and optional reference/description/notes.",
+                    "Voucher number/date, Receipt or Payment, active cashbox, matching active movement type, party fields, positive amount, optional positive `exchangeRate`, and optional reference/description/notes. A null rate resolves the latest rate on or before the voucher date.",
                     "Voucher number is required but may be duplicated. Choose direction and partyType, then load /CashMovementTypes/select using direction and forPartner=(partyType == Partner).",
                     "The server posts partner Receipt as Credit and partner Payment as Debit. DriverTripId is optional, non-partner vouchers create no partner movement, and Payment cannot make the cashbox negative.")),
             nameof(CashVouchersController.Update) => (
                 "Update a cash voucher",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Replaces a manual voucher and all derived effects atomically.",
+                    "Admin only. Replaces a manual voucher and all derived effects, including its base-currency snapshot, atomically.",
                     "Editable fields plus the original base64 rowVersion.",
                     "Apply the same conditional UI fields and movement-type filtering as Create. The old effects are removed and the new effects are applied exactly once.",
                     "A stale token returns CashVouchers.Concurrency. An invoice-generated voucher returns CashVouchers.InvoiceGeneratedReadOnly and must be changed through its invoice.")),

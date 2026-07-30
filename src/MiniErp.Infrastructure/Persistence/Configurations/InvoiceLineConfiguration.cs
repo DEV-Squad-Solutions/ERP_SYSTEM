@@ -90,6 +90,20 @@ public sealed class InvoiceLineConfiguration
                 InvoiceAmountRules.MoneyScale)
             .IsRequired();
 
+        builder.Property(line => line.BaseUnitPrice)
+            .HasPrecision(
+                InventoryCostRules.UnitCostPrecision,
+                InventoryCostRules.UnitCostScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
+        builder.Property(line => line.BaseTotal)
+            .HasPrecision(
+                InventoryCostRules.ValuePrecision,
+                InventoryCostRules.ValueScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
         builder.Property(line => line.Notes)
             .HasMaxLength(1_000);
 

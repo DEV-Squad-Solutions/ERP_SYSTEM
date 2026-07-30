@@ -4,6 +4,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.CashVouchers;
+using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Logistics;
@@ -16,6 +17,7 @@ public sealed class CashVoucherService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
+    IExchangeRateResolver exchangeRateResolver,
     TimeProvider timeProvider)
     : ICashVoucherService, IScopedService
 {
@@ -138,6 +140,9 @@ public sealed class CashVoucherService(
         var voucher = request.Adapt<CashVoucher>();
         voucher.CompanyId = companyId;
         voucher.Currency = preparation.Value.Cashbox.Currency;
+        voucher.ApplyExchangeRate(
+            preparation.Value.ExchangeRate.ExchangeRateId,
+            preparation.Value.ExchangeRate.Rate);
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
 
         dbContext.CashVouchers.Add(voucher);
@@ -213,6 +218,9 @@ public sealed class CashVoucherService(
 
         request.Adapt(voucher);
         voucher.Currency = preparation.Value.Cashbox.Currency;
+        voucher.ApplyExchangeRate(
+            preparation.Value.ExchangeRate.ExchangeRateId,
+            preparation.Value.ExchangeRate.Rate);
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
         entry.Property(entity => entity.LastModifiedAt).IsModified = true;
 
@@ -321,6 +329,17 @@ public sealed class CashVoucherService(
              currentVoucher.CashboxId != cashbox.Id))
         {
             return Result<VoucherPreparation>.Failure(CashboxInactive());
+        }
+
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            cashbox.Currency,
+            request.VoucherDate,
+            request.ExchangeRate,
+            cancellationToken);
+        if (exchangeRateResult.IsFailure)
+        {
+            return Result<VoucherPreparation>.Failure(
+                exchangeRateResult.Error);
         }
 
         var movementType = await dbContext.CashMovementTypes
@@ -434,7 +453,8 @@ public sealed class CashVoucherService(
             new VoucherPreparation(
                 cashbox,
                 partner,
-                driver));
+                driver,
+                exchangeRateResult.Value));
     }
 
     private async Task<Result<VoucherPreparation>> PrepareAsync(
@@ -456,7 +476,8 @@ public sealed class CashVoucherService(
             request.Amount,
             request.ReferenceNumber,
             request.Description,
-            request.Notes);
+            request.Notes,
+            request.ExchangeRate);
 
         return await PrepareAsync(
             createShape,
@@ -531,7 +552,7 @@ public sealed class CashVoucherService(
             ? voucher.Amount
             : 0m;
 
-        return new BusinessPartnerMovement
+        var movement = new BusinessPartnerMovement
         {
             CompanyId = companyId,
             BusinessPartnerId = voucher.BusinessPartnerId!.Value,
@@ -547,6 +568,8 @@ public sealed class CashVoucherService(
             Description = voucher.Description ??
                 $"Cash voucher {voucher.VoucherNumber}"
         };
+        movement.ApplyExchangeRate(voucher.ExchangeRate);
+        return movement;
     }
 
     private async Task SynchronizePartnerMovementAsync(
@@ -591,6 +614,7 @@ public sealed class CashVoucherService(
         existing.Credit = voucher.Direction == CashDirection.Receipt
             ? voucher.Amount
             : 0m;
+        existing.ApplyExchangeRate(voucher.ExchangeRate);
         existing.Description = voucher.Description ??
             $"Cash voucher {voucher.VoucherNumber}";
     }
@@ -605,7 +629,8 @@ public sealed class CashVoucherService(
     private sealed record VoucherPreparation(
         Cashbox Cashbox,
         BusinessPartner? BusinessPartner,
-        Driver? Driver);
+        Driver? Driver,
+        ResolvedExchangeRate ExchangeRate);
 
     private static Error InvalidId() =>
         Error.Validation(

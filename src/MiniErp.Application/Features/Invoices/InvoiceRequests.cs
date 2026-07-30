@@ -40,7 +40,12 @@ public sealed record InvoiceRequest(
     string? PartnerInvoiceNo = null,
     int? CashboxId = null,
     int? CashMovementTypeId = null,
-    InvoiceContentType ContentType = InvoiceContentType.Items)
+    InvoiceContentType ContentType = InvoiceContentType.Items,
+    decimal? ExchangeRate = null,
+    decimal? CashboxExchangeRate = null,
+    decimal WBWeight = 0m,
+    decimal WBScaleDifference = 0m,
+    decimal WBDiscount = 0m)
 {
     public const int InvoiceNumberMaximumLength = 100;
 
@@ -83,4 +88,9 @@ public sealed record InvoiceUpdateRequest(
     string? PartnerInvoiceNo = null,
     int? CashboxId = null,
     int? CashMovementTypeId = null,
-    InvoiceContentType ContentType = InvoiceContentType.Items);
+    InvoiceContentType ContentType = InvoiceContentType.Items,
+    decimal? ExchangeRate = null,
+    decimal? CashboxExchangeRate = null,
+    decimal WBWeight = 0m,
+    decimal WBScaleDifference = 0m,
+    decimal WBDiscount = 0m);

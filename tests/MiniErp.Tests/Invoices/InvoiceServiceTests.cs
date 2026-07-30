@@ -2318,6 +2318,52 @@ public sealed class InvoiceServiceTests
         Assert.Equal(expectedRemaining, invoice.RemainingAmount);
     }
 
+    [Fact]
+    public async Task Add_CalculatesAndPersistsWeighbridgeTotal()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit) with
+        {
+            WBWeight = 125.750000m,
+            WBScaleDifference = 2.250000m,
+            WBDiscount = 1.500000m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(125.750000m, result.Value.WBWeight);
+        Assert.Equal(2.250000m, result.Value.WBScaleDifference);
+        Assert.Equal(1.500000m, result.Value.WBDiscount);
+        Assert.Equal(122.000000m, result.Value.WBTotal);
+
+        database.Context.ChangeTracker.Clear();
+        var persisted = await database.Context.Invoices.SingleAsync();
+        Assert.Equal(122.000000m, persisted.WBTotal);
+    }
+
+    [Fact]
+    public async Task Add_RejectsWeighbridgeDeductionsAboveWeight()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit) with
+        {
+            WBWeight = 10m,
+            WBScaleDifference = 8m,
+            WBDiscount = 3m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.InvalidWBTotal", result.Error.Code);
+        Assert.Empty(database.Context.Invoices);
+    }
+
     [Theory]
     [InlineData(-1, 0, PaymentTerm.Credit, "Invoices.InvalidDiscountAmount")]
     [InlineData(21, 0, PaymentTerm.Credit, "Invoices.InvalidDiscountAmount")]
@@ -4236,6 +4282,7 @@ public sealed class InvoiceServiceTests
                 Context,
                 new PaginationService(),
                 companyContext,
+                new MiniErp.Tests.TestExchangeRateResolver(),
                 new InventoryStockService(Context, companyContext),
                 new InventoryCostingService(
                     Context,
@@ -4267,6 +4314,7 @@ public sealed class InvoiceServiceTests
 
                 CREATE TABLE CompanySettings (
                     CompanyId INTEGER NOT NULL PRIMARY KEY,
+                    BaseCurrency INTEGER NOT NULL DEFAULT 1,
                     StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
                     FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
                 );
@@ -4397,6 +4445,8 @@ public sealed class InvoiceServiceTests
                     ContainerStoreId INTEGER NULL,
                     CountryId INTEGER NULL,
                     Currency INTEGER NOT NULL,
+                    ExchangeRateId INTEGER NULL,
+                    ExchangeRate NUMERIC NOT NULL DEFAULT 1,
                     DriverId INTEGER NULL,
                     ActualDriverId INTEGER NULL,
                     UsesExternalDriver INTEGER NOT NULL DEFAULT 0,
@@ -4404,7 +4454,15 @@ public sealed class InvoiceServiceTests
                     VehicleNumber TEXT NULL,
                     Total NUMERIC NOT NULL,
                     DiscountAmount NUMERIC NOT NULL DEFAULT 0,
+                    WBWeight NUMERIC NOT NULL DEFAULT 0,
+                    WBScaleDifference NUMERIC NOT NULL DEFAULT 0,
+                    WBDiscount NUMERIC NOT NULL DEFAULT 0,
+                    WBTotal NUMERIC NOT NULL DEFAULT 0,
                     PaidAmount NUMERIC NOT NULL DEFAULT 0,
+                    BaseSubtotal NUMERIC NOT NULL DEFAULT 0,
+                    BaseDiscountAmount NUMERIC NOT NULL DEFAULT 0,
+                    BaseTotal NUMERIC NOT NULL DEFAULT 0,
+                    BasePaidAmountAtInvoiceRate NUMERIC NOT NULL DEFAULT 0,
                     Notes TEXT NULL,
                     LastModifiedAt TEXT NOT NULL,
                     RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
@@ -4433,6 +4491,8 @@ public sealed class InvoiceServiceTests
                     Quantity NUMERIC NOT NULL,
                     Price NUMERIC NOT NULL,
                     Total NUMERIC NOT NULL,
+                    BaseUnitPrice NUMERIC NOT NULL DEFAULT 0,
+                    BaseTotal NUMERIC NOT NULL DEFAULT 0,
                     Notes TEXT NULL,
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
@@ -4584,6 +4644,9 @@ public sealed class InvoiceServiceTests
                     Currency INTEGER NOT NULL,
                     Debit NUMERIC NOT NULL,
                     Credit NUMERIC NOT NULL,
+                    ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                    BaseDebit NUMERIC NOT NULL DEFAULT 0,
+                    BaseCredit NUMERIC NOT NULL DEFAULT 0,
                     Description TEXT NULL,
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
@@ -4630,6 +4693,10 @@ public sealed class InvoiceServiceTests
                     Name TEXT NOT NULL,
                     Currency INTEGER NOT NULL,
                     OpeningBalance NUMERIC NOT NULL,
+                    OpeningBalanceDate TEXT NOT NULL DEFAULT '2026-01-01',
+                    OpeningExchangeRateId INTEGER NULL,
+                    OpeningExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                    BaseOpeningBalance NUMERIC NOT NULL DEFAULT 0,
                     IsActive INTEGER NOT NULL DEFAULT 1,
                     Notes TEXT NULL,
                     RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
@@ -4682,6 +4749,9 @@ public sealed class InvoiceServiceTests
                     ExternalPartyName TEXT NULL,
                     Amount NUMERIC NOT NULL,
                     Currency INTEGER NOT NULL,
+                    ExchangeRateId INTEGER NULL,
+                    ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                    BaseAmount NUMERIC NOT NULL DEFAULT 0,
                     ReferenceNumber TEXT NULL,
                     Description TEXT NULL,
                     Notes TEXT NULL,
@@ -4702,6 +4772,32 @@ public sealed class InvoiceServiceTests
                 CREATE UNIQUE INDEX UX_CashVouchers_Invoice
                 ON CashVouchers (CompanyId, InvoiceId)
                 WHERE InvoiceId IS NOT NULL AND IsDeleted = 0;
+
+                CREATE TABLE InvoicePayments (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    InvoiceId INTEGER NOT NULL,
+                    CashVoucherId INTEGER NOT NULL,
+                    InvoiceCurrency INTEGER NOT NULL,
+                    AppliedAmount NUMERIC NOT NULL,
+                    CashboxCurrency INTEGER NOT NULL,
+                    CashboxAmount NUMERIC NOT NULL,
+                    InvoiceToBaseRate NUMERIC NOT NULL,
+                    CashboxToBaseRate NUMERIC NOT NULL,
+                    AppliedBaseAmount NUMERIC NOT NULL,
+                    CashboxBaseAmount NUMERIC NOT NULL,
+                    RealizedExchangeDifference NUMERIC NOT NULL,
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
 
                 CREATE TRIGGER AdvanceInvoiceRowVersion
                 AFTER UPDATE ON Invoices

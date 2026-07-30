@@ -12,6 +12,11 @@ public sealed class CompanySettingsConfiguration
         builder.ToTable("CompanySettings");
         builder.HasKey(settings => settings.CompanyId);
 
+        builder.Property(settings => settings.BaseCurrency)
+            .HasConversion<int>()
+            .HasDefaultValue(Domain.Enums.CurrencyCode.EGP)
+            .IsRequired();
+
         builder.Property(settings => settings.StockBalanceCheckMode)
             .HasConversion<int>()
             .IsRequired();

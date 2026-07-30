@@ -8,4 +8,5 @@ public sealed record CompanyRequest(
     string CommercialRegister,
     string TaxNumber,
     string ManagerName,
-    StockBalanceCheckMode? StockBalanceCheckMode = null);
+    StockBalanceCheckMode? StockBalanceCheckMode = null,
+    CurrencyCode? BaseCurrency = null);

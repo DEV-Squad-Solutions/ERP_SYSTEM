@@ -52,6 +52,12 @@ public sealed class Invoice : AuditableEntity
 
     public CurrencyCode Currency { get; set; } = CurrencyCode.EGP;
 
+    public int? ExchangeRateId { get; private set; }
+
+    public ExchangeRate? ExchangeRateRecord { get; private set; }
+
+    public decimal ExchangeRate { get; private set; } = 1m;
+
     public int? DriverId { get; set; }
     public Driver? Driver { get; set; }
 
@@ -64,9 +70,25 @@ public sealed class Invoice : AuditableEntity
 
     public decimal DiscountAmount { get; set; }
 
+    public decimal WBWeight { get; set; }
+
+    public decimal WBScaleDifference { get; set; }
+
+    public decimal WBDiscount { get; set; }
+
+    public decimal WBTotal { get; private set; }
+
     public decimal PaidAmount { get; set; }
 
     public decimal Total { get; private set; }
+
+    public decimal BaseSubtotal { get; private set; }
+
+    public decimal BaseDiscountAmount { get; private set; }
+
+    public decimal BaseTotal { get; private set; }
+
+    public decimal BasePaidAmountAtInvoiceRate { get; private set; }
 
     public decimal Subtotal =>
         Lines.Sum(line => line.Total);
@@ -93,6 +115,8 @@ public sealed class Invoice : AuditableEntity
 
     public ICollection<CashVoucher> PaymentVouchers { get; set; } = [];
 
+    public ICollection<InvoicePayment> Payments { get; set; } = [];
+
     public void CalculateTotal()
     {
         foreach (var line in Lines)
@@ -104,6 +128,11 @@ public sealed class Invoice : AuditableEntity
             Subtotal - DiscountAmount,
             InvoiceAmountRules.MoneyScale,
             MidpointRounding.AwayFromZero);
+
+        WBTotal = decimal.Round(
+            WBWeight - WBScaleDifference - WBDiscount,
+            InvoiceAmountRules.QuantityScale,
+            MidpointRounding.AwayFromZero);
     }
 
     public void Touch(DateTime utcNow)
@@ -112,4 +141,37 @@ public sealed class Invoice : AuditableEntity
     }
 
     public PaymentStatus GetPaymentStatus() => PaymentStatus;
+
+    public void ApplyExchangeRate(
+        int? exchangeRateId,
+        decimal exchangeRate)
+    {
+        if (!ExchangeRateRules.IsValidRate(exchangeRate))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(exchangeRate),
+                "Exchange rate must be greater than zero.");
+        }
+
+        ExchangeRateId = exchangeRateId;
+        ExchangeRate = ExchangeRateRules.RoundRate(exchangeRate);
+
+        foreach (var line in Lines)
+        {
+            line.ApplyExchangeRate(ExchangeRate);
+        }
+
+        BaseSubtotal = ExchangeRateRules.ConvertToBase(
+            Subtotal,
+            ExchangeRate);
+        BaseDiscountAmount = ExchangeRateRules.ConvertToBase(
+            DiscountAmount,
+            ExchangeRate);
+        BaseTotal = ExchangeRateRules.ConvertToBase(
+            Total,
+            ExchangeRate);
+        BasePaidAmountAtInvoiceRate = ExchangeRateRules.ConvertToBase(
+            PaidAmount,
+            ExchangeRate);
+    }
 }

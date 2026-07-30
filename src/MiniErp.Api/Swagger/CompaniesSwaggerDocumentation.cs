@@ -20,7 +20,7 @@ public sealed class CompaniesSwaggerDocumentation : IOperationFilter
             nameof(CompaniesController.GetAll) => (
                 "Get all companies",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Returns a deterministic page of non-deleted companies ordered by name and ID, including each company's stock-balance check mode. Supplied filters are combined with AND.",
+                    "Admin only. Returns a deterministic page of non-deleted companies ordered by name and ID, including each company's stock-balance check mode and base currency. Supplied filters are combined with AND.",
                     "An Admin bearer token. Optional query fields are `pageNumber`, `pageSize`, `search`, `name`, `address`, `commercialRegister`, `taxNumber`, and `managerName`.",
                     "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100.",
                     "Invalid pagination returns 400. A page beyond the available data returns an empty item list with valid pagination metadata.")),
@@ -34,7 +34,7 @@ public sealed class CompaniesSwaggerDocumentation : IOperationFilter
             nameof(CompaniesController.GetById) => (
                 "Get a company",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Returns one non-deleted company by its integer ID, including its stock-balance check mode.",
+                    "Admin only. Returns one non-deleted company by its integer ID, including its stock-balance check mode and base currency.",
                     "An Admin bearer token and route `id`.",
                     "`id` must be greater than zero.",
                     "Zero or negative IDs return 400. Missing or soft-deleted companies return 404.")),
@@ -42,14 +42,14 @@ public sealed class CompaniesSwaggerDocumentation : IOperationFilter
                 "Create a company",
                 SwaggerOperationDescription.Create(
                     "Admin only. Creates a company and grants the authenticated admin access to it atomically.",
-                    "`name`, `address`, `commercialRegister`, `taxNumber`, and `managerName`. Optional `stockBalanceCheckMode` is `None`, `DateCheck`, `FinalCheck`, or `Both`; omitted values default to `DateCheck`.",
+                    "`name`, `address`, `commercialRegister`, `taxNumber`, and `managerName`. Optional `stockBalanceCheckMode` is `None`, `DateCheck`, `FinalCheck`, or `Both`; optional `baseCurrency` defaults to `EGP`.",
                     "Required strings are trimmed and cannot be empty. Maximum lengths: name and managerName 200; address 500; commercialRegister and taxNumber 50.",
                     "Duplicate commercial-register or tax-number values return 409. The entire create-and-assign operation rolls back on failure. The admin must log in again before selecting the new company.")),
             nameof(CompaniesController.Update) => (
                 "Update a company",
                 SwaggerOperationDescription.Create(
                     "Admin only. Updates a company while preserving its ID and creation audit information.",
-                    "An Admin bearer token, positive route `id`, and all company request fields. `stockBalanceCheckMode` may be changed independently with the same four values.",
+                    "An Admin bearer token, positive route `id`, and all company request fields. `stockBalanceCheckMode` may be changed independently; `baseCurrency` is locked after financial or inventory history exists.",
                     "The same requiredness and maximum lengths as create apply. Duplicate checks exclude the current company.",
                     "Invalid IDs return 400; missing or deleted companies return 404; commercial-register or tax-number conflicts return 409.")),
             nameof(CompaniesController.Delete) => (

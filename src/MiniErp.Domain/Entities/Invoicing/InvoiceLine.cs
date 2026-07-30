@@ -40,6 +40,10 @@ public sealed class InvoiceLine : AuditableEntity
 
     public decimal Total { get; private set; }
 
+    public decimal BaseUnitPrice { get; private set; }
+
+    public decimal BaseTotal { get; private set; }
+
     public string? Notes { get; set; }
 
     public void CalculateAmounts()
@@ -57,5 +61,15 @@ public sealed class InvoiceLine : AuditableEntity
 
         Quantity = quantity;
         Total = total;
+    }
+
+    public void ApplyExchangeRate(decimal exchangeRate)
+    {
+        BaseUnitPrice = ExchangeRateRules.ConvertToBase(
+            Price,
+            exchangeRate);
+        BaseTotal = ExchangeRateRules.ConvertToBase(
+            Total,
+            exchangeRate);
     }
 }

@@ -36,5 +36,29 @@ public sealed class BusinessPartnerMovement : AuditableEntity
 
     public decimal Credit { get; set; }
 
+    public decimal ExchangeRate { get; private set; } = 1m;
+
+    public decimal BaseDebit { get; private set; }
+
+    public decimal BaseCredit { get; private set; }
+
     public string? Description { get; set; }
+
+    public void ApplyExchangeRate(decimal exchangeRate)
+    {
+        if (!ExchangeRateRules.IsValidRate(exchangeRate))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(exchangeRate),
+                "Exchange rate must be greater than zero.");
+        }
+
+        ExchangeRate = ExchangeRateRules.RoundRate(exchangeRate);
+        BaseDebit = ExchangeRateRules.ConvertToBase(
+            Debit,
+            ExchangeRate);
+        BaseCredit = ExchangeRateRules.ConvertToBase(
+            Credit,
+            ExchangeRate);
+    }
 }

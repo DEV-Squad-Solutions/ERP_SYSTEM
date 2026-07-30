@@ -16,7 +16,8 @@ public sealed record CashVoucherRequest(
     decimal Amount,
     string? ReferenceNumber,
     string? Description,
-    string? Notes)
+    string? Notes,
+    decimal? ExchangeRate = null)
 {
     public const int VoucherNumberMaximumLength = 100;
 
@@ -44,4 +45,5 @@ public sealed record CashVoucherUpdateRequest(
     string? ReferenceNumber,
     string? Description,
     string? Notes,
-    byte[]? RowVersion);
+    byte[]? RowVersion,
+    decimal? ExchangeRate = null);

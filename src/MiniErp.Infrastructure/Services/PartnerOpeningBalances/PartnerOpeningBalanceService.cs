@@ -4,6 +4,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.PartnerOpeningBalances;
+using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -13,7 +14,8 @@ namespace MiniErp.Infrastructure.Services.PartnerOpeningBalances;
 public sealed class PartnerOpeningBalanceService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    IExchangeRateResolver exchangeRateResolver)
     : IPartnerOpeningBalanceService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -89,6 +91,17 @@ public sealed class PartnerOpeningBalanceService(
             return Result<PartnerOpeningBalanceResponse>.Failure(partnerError);
         }
 
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            normalized.Currency,
+            normalized.DocumentDate,
+            request.ExchangeRate,
+            cancellationToken);
+        if (exchangeRateResult.IsFailure)
+        {
+            return Result<PartnerOpeningBalanceResponse>.Failure(
+                exchangeRateResult.Error);
+        }
+
         var documentNumberExists = await dbContext.PartnerOpeningBalances.AnyAsync(
             balance =>
                 balance.CompanyId == companyId &&
@@ -101,6 +114,9 @@ public sealed class PartnerOpeningBalanceService(
         }
 
         normalized.CompanyId = companyId;
+        normalized.ApplyExchangeRate(
+            exchangeRateResult.Value.ExchangeRateId,
+            exchangeRateResult.Value.Rate);
         dbContext.PartnerOpeningBalances.Add(normalized);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -157,6 +173,17 @@ public sealed class PartnerOpeningBalanceService(
             return Result<PartnerOpeningBalanceResponse>.Failure(partnerError);
         }
 
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            normalized.Currency,
+            normalized.DocumentDate,
+            request.ExchangeRate,
+            cancellationToken);
+        if (exchangeRateResult.IsFailure)
+        {
+            return Result<PartnerOpeningBalanceResponse>.Failure(
+                exchangeRateResult.Error);
+        }
+
         var documentNumberExists = await dbContext.PartnerOpeningBalances.AnyAsync(
             balance =>
                 balance.CompanyId == companyId &&
@@ -176,6 +203,9 @@ public sealed class PartnerOpeningBalanceService(
         openingBalance.BalanceType = normalized.BalanceType;
         openingBalance.Amount = normalized.Amount;
         openingBalance.Notes = normalized.Notes;
+        openingBalance.ApplyExchangeRate(
+            exchangeRateResult.Value.ExchangeRateId,
+            exchangeRateResult.Value.Rate);
 
         var entry = dbContext.Entry(openingBalance);
         entry.State = EntityState.Modified;

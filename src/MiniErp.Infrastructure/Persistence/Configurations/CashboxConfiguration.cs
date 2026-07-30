@@ -58,6 +58,26 @@ public sealed class CashboxConfiguration
             .HasPrecision(18, 2)
             .IsRequired();
 
+        builder.Property(cashbox => cashbox.OpeningBalanceDate)
+            .HasColumnType("date")
+            .IsRequired();
+
+        builder.Property(cashbox => cashbox.OpeningExchangeRateId);
+
+        builder.Property(cashbox => cashbox.OpeningExchangeRate)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.RatePrecision,
+                Domain.Entities.Companies.ExchangeRateRules.RateScale)
+            .HasDefaultValue(1m)
+            .IsRequired();
+
+        builder.Property(cashbox => cashbox.BaseOpeningBalance)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountPrecision,
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
         builder.Property(cashbox => cashbox.IsActive)
             .HasDefaultValue(true)
             .IsRequired();
@@ -80,6 +100,21 @@ public sealed class CashboxConfiguration
         builder.HasOne(cashbox => cashbox.Company)
             .WithMany()
             .HasForeignKey(cashbox => cashbox.CompanyId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(cashbox => cashbox.OpeningExchangeRateRecord)
+            .WithMany()
+            .HasForeignKey(cashbox => new
+            {
+                cashbox.CompanyId,
+                cashbox.OpeningExchangeRateId
+            })
+            .HasPrincipalKey(rate => new
+            {
+                rate.CompanyId,
+                rate.Id
+            })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

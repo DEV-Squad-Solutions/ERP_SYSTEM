@@ -1,4 +1,5 @@
 using FluentValidation;
+using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.CashVouchers;
@@ -9,6 +10,12 @@ public sealed class CashVoucherRequestValidator
     public CashVoucherRequestValidator()
     {
         CashVoucherValidationRules.AddRules(this);
+
+        RuleFor(request => request.ExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف سند النقدية أكبر من صفر.");
     }
 }
 
@@ -18,6 +25,12 @@ public sealed class CashVoucherUpdateRequestValidator
     public CashVoucherUpdateRequestValidator()
     {
         CashVoucherValidationRules.AddRules(this);
+
+        RuleFor(request => request.ExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف سند النقدية أكبر من صفر.");
 
         RuleFor(request => request.RowVersion)
             .NotNull()

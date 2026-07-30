@@ -71,7 +71,6 @@ public sealed class CashVoucherConfiguration
             voucher.CompanyId,
             voucher.InvoiceId
         })
-            .IsUnique()
             .HasFilter("[InvoiceId] IS NOT NULL AND [IsDeleted] = 0");
 
         builder.Property(voucher => voucher.VoucherDate)
@@ -95,6 +94,22 @@ public sealed class CashVoucherConfiguration
 
         builder.Property(voucher => voucher.Currency)
             .HasConversion<int>()
+            .IsRequired();
+
+        builder.Property(voucher => voucher.ExchangeRateId);
+
+        builder.Property(voucher => voucher.ExchangeRate)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.RatePrecision,
+                Domain.Entities.Companies.ExchangeRateRules.RateScale)
+            .HasDefaultValue(1m)
+            .IsRequired();
+
+        builder.Property(voucher => voucher.BaseAmount)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountPrecision,
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountScale)
+            .HasDefaultValue(0m)
             .IsRequired();
 
         builder.Property(voucher => voucher.ReferenceNumber)
@@ -158,6 +173,27 @@ public sealed class CashVoucherConfiguration
             .WithMany()
             .HasForeignKey(voucher => voucher.CompanyId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(voucher => voucher.ExchangeRateRecord)
+            .WithMany()
+            .HasForeignKey(voucher => new
+            {
+                voucher.CompanyId,
+                voucher.ExchangeRateId
+            })
+            .HasPrincipalKey(rate => new
+            {
+                rate.CompanyId,
+                rate.Id
+            })
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(voucher => new
+        {
+            voucher.CompanyId,
+            voucher.ExchangeRateId
+        });
 
         builder.HasOne(voucher => voucher.Invoice)
             .WithMany(invoice => invoice.PaymentVouchers)

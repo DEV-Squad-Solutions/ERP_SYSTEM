@@ -44,6 +44,7 @@ public static class SwaggerExtensions
             options.OperationFilter<CountriesSwaggerDocumentation>();
             options.OperationFilter<DriversSwaggerDocumentation>();
             options.OperationFilter<DriverTripsSwaggerDocumentation>();
+            options.OperationFilter<ExchangeRatesSwaggerDocumentation>();
             options.OperationFilter<ItemsSwaggerDocumentation>();
             options.OperationFilter<ItemUnitsSwaggerDocumentation>();
             options.OperationFilter<StoresSwaggerDocumentation>();

@@ -10,4 +10,5 @@ public sealed record CompanyResponse(
     string TaxNumber,
     string ManagerName,
     DateTime CreatedAt,
-    StockBalanceCheckMode StockBalanceCheckMode);
+    StockBalanceCheckMode StockBalanceCheckMode,
+    CurrencyCode BaseCurrency);

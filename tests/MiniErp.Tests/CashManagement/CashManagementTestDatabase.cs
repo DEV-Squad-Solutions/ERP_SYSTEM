@@ -63,7 +63,9 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
         new(
             context ?? Context,
             new PaginationService(),
-            new TestCurrentCompanyContext(companyId));
+            new TestCurrentCompanyContext(companyId),
+            new MiniErp.Tests.TestExchangeRateResolver(),
+            TimeProvider.System);
 
     public CashMovementTypeService CreateMovementTypeService(
         int companyId,
@@ -80,6 +82,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             context ?? Context,
             new PaginationService(),
             new TestCurrentCompanyContext(companyId),
+            new MiniErp.Tests.TestExchangeRateResolver(),
             TimeProvider.System);
 
     public DriverTripService CreateDriverTripService(
@@ -129,6 +132,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
 
             CREATE TABLE CompanySettings (
                 CompanyId INTEGER NOT NULL PRIMARY KEY,
+                BaseCurrency INTEGER NOT NULL DEFAULT 1,
                 StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
                 FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
             );
@@ -195,8 +199,11 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 DocumentNumber TEXT NOT NULL,
                 DocumentDate TEXT NOT NULL,
                 Currency INTEGER NOT NULL,
+                ExchangeRateId INTEGER NULL,
+                ExchangeRate NUMERIC NOT NULL DEFAULT 1,
                 BalanceType INTEGER NOT NULL,
                 Amount NUMERIC NOT NULL,
+                BaseAmount NUMERIC NOT NULL DEFAULT 0,
                 Notes TEXT NULL,
                 RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
                 CreatedById TEXT NOT NULL,
@@ -218,6 +225,10 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Name TEXT NOT NULL COLLATE NOCASE,
                 Currency INTEGER NOT NULL,
                 OpeningBalance NUMERIC NOT NULL,
+                OpeningBalanceDate TEXT NOT NULL DEFAULT '2026-01-01',
+                OpeningExchangeRateId INTEGER NULL,
+                OpeningExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                BaseOpeningBalance NUMERIC NOT NULL DEFAULT 0,
                 IsActive INTEGER NOT NULL DEFAULT 1,
                 Notes TEXT NULL,
                 RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
@@ -305,6 +316,9 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 ExternalPartyName TEXT NULL,
                 Amount NUMERIC NOT NULL,
                 Currency INTEGER NOT NULL,
+                ExchangeRateId INTEGER NULL,
+                ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                BaseAmount NUMERIC NOT NULL DEFAULT 0,
                 ReferenceNumber TEXT NULL,
                 Description TEXT NULL,
                 Notes TEXT NULL,
@@ -326,6 +340,32 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             ON CashVouchers (CompanyId, VoucherNumber)
             WHERE IsDeleted = 0;
 
+            CREATE TABLE InvoicePayments (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                InvoiceId INTEGER NOT NULL,
+                CashVoucherId INTEGER NOT NULL,
+                InvoiceCurrency INTEGER NOT NULL,
+                AppliedAmount NUMERIC NOT NULL,
+                CashboxCurrency INTEGER NOT NULL,
+                CashboxAmount NUMERIC NOT NULL,
+                InvoiceToBaseRate NUMERIC NOT NULL,
+                CashboxToBaseRate NUMERIC NOT NULL,
+                AppliedBaseAmount NUMERIC NOT NULL,
+                CashboxBaseAmount NUMERIC NOT NULL,
+                RealizedExchangeDifference NUMERIC NOT NULL,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
             CREATE TABLE BusinessPartnerMovements (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,
@@ -337,6 +377,9 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Currency INTEGER NOT NULL,
                 Debit NUMERIC NOT NULL,
                 Credit NUMERIC NOT NULL,
+                ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                BaseDebit NUMERIC NOT NULL DEFAULT 0,
+                BaseCredit NUMERIC NOT NULL DEFAULT 0,
                 Description TEXT NULL,
                 CreatedById TEXT NOT NULL,
                 CreatedOn TEXT NOT NULL,

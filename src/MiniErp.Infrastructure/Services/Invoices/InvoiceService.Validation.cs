@@ -3,6 +3,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.CashManagement;
+using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
@@ -649,6 +650,18 @@ public sealed partial class InvoiceService
 
     private static Error? ValidateAmounts(Invoice invoice)
     {
+        if (!InvoiceAmountRules.IsValidQuantity(invoice.WBWeight) ||
+            !InvoiceAmountRules.IsValidQuantity(
+                invoice.WBScaleDifference) ||
+            !InvoiceAmountRules.IsValidQuantity(invoice.WBDiscount) ||
+            !InvoiceAmountRules.IsValidQuantity(invoice.WBTotal))
+        {
+            return Error.Validation(
+                "Invoices.InvalidWBTotal",
+                "يجب أن تكون قيم الميزان غير سالبة وألا يتجاوز مجموع فرق الميزان وخصم الميزان وزن الميزان.",
+                nameof(InvoiceRequest.WBWeight));
+        }
+
         if (invoice.DiscountAmount < 0m ||
             !InvoiceAmountRules.IsValidMoney(invoice.DiscountAmount) ||
             invoice.DiscountAmount > invoice.Subtotal)
@@ -681,10 +694,11 @@ public sealed partial class InvoiceService
         return null;
     }
 
-    private async Task<Error?> ValidatePaymentAsync(
+    private async Task<Result<PaymentPreparation?>> PreparePaymentAsync(
         Invoice invoice,
         int? cashboxId,
         int? cashMovementTypeId,
+        decimal? requestedCashboxExchangeRate,
         int? currentInvoiceId,
         CancellationToken cancellationToken)
     {
@@ -699,39 +713,47 @@ public sealed partial class InvoiceService
         if (invoice.PaymentTerm == PaymentTerm.Cash &&
             invoice.PaidAmount != invoice.Total)
         {
-            return CashInvoiceMustBeFullyPaid();
+            return Result<PaymentPreparation?>.Failure(
+                CashInvoiceMustBeFullyPaid());
         }
 
         if (invoice.PaymentTerm == PaymentTerm.Credit &&
             invoice.Total > 0m &&
             invoice.PaidAmount >= invoice.Total)
         {
-            return CreditInvoiceCannotBeFullyPaid();
+            return Result<PaymentPreparation?>.Failure(
+                CreditInvoiceCannotBeFullyPaid());
         }
 
         if (invoice.PaidAmount <= 0m)
         {
             if (cashboxId.HasValue || cashMovementTypeId.HasValue)
             {
-                return PaymentReferencesNotAllowed();
+                return Result<PaymentPreparation?>.Failure(
+                    PaymentReferencesNotAllowed());
             }
 
-            return await ValidateFinalCashboxBalanceAsync(
+            var balanceError = await ValidateFinalCashboxBalanceAsync(
                 currentVoucher,
                 proposedCashboxId: null,
                 proposedDirection: null,
                 proposedAmount: null,
                 cancellationToken);
+            return balanceError is null
+                ? Result<PaymentPreparation?>.Success(null)
+                : Result<PaymentPreparation?>.Failure(balanceError);
         }
 
         if (!cashboxId.HasValue)
         {
-            return CashboxRequiredForPayment();
+            return Result<PaymentPreparation?>.Failure(
+                CashboxRequiredForPayment());
         }
 
         if (!cashMovementTypeId.HasValue)
         {
-            return CashMovementTypeRequiredForPayment();
+            return Result<PaymentPreparation?>.Failure(
+                CashMovementTypeRequiredForPayment());
         }
 
         var cashbox = await dbContext.Cashboxes
@@ -742,19 +764,16 @@ public sealed partial class InvoiceService
                 cancellationToken);
         if (cashbox is null)
         {
-            return CashboxNotFound(cashboxId.Value);
+            return Result<PaymentPreparation?>.Failure(
+                CashboxNotFound(cashboxId.Value));
         }
 
         if (!cashbox.IsActive &&
             (currentVoucher is null ||
              currentVoucher.CashboxId != cashbox.Id))
         {
-            return CashboxInactive();
-        }
-
-        if (cashbox.Currency != invoice.Currency)
-        {
-            return PaymentCurrencyMismatch();
+            return Result<PaymentPreparation?>.Failure(
+                CashboxInactive());
         }
 
         var movementType = await dbContext.CashMovementTypes
@@ -765,36 +784,77 @@ public sealed partial class InvoiceService
                 cancellationToken);
         if (movementType is null)
         {
-            return CashMovementTypeNotFound(cashMovementTypeId.Value);
+            return Result<PaymentPreparation?>.Failure(
+                CashMovementTypeNotFound(cashMovementTypeId.Value));
         }
 
         if (!movementType.IsActive &&
             (currentVoucher is null ||
              currentVoucher.CashMovementTypeId != movementType.Id))
         {
-            return CashMovementTypeInactive();
+            return Result<PaymentPreparation?>.Failure(
+                CashMovementTypeInactive());
         }
 
         var expectedDirection = InvoiceMovementRules.GetPaymentDirection(
             invoice.InvoiceType);
         if (movementType.Direction != expectedDirection)
         {
-            return CashMovementTypeDirectionMismatch();
+            return Result<PaymentPreparation?>.Failure(
+                CashMovementTypeDirectionMismatch());
         }
 
         var expectedEffect = InvoiceMovementRules.GetPaymentPartnerEffect(
             invoice.InvoiceType);
         if (movementType.PartnerEffect != expectedEffect)
         {
-            return CashMovementTypePartnerEffectMismatch();
+            return Result<PaymentPreparation?>.Failure(
+                CashMovementTypePartnerEffectMismatch());
         }
 
-        return await ValidateFinalCashboxBalanceAsync(
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            cashbox.Currency,
+            invoice.InvoiceDate,
+            requestedCashboxExchangeRate,
+            cancellationToken);
+        if (exchangeRateResult.IsFailure)
+        {
+            return Result<PaymentPreparation?>.Failure(
+                exchangeRateResult.Error);
+        }
+
+        var cashboxAmount = ExchangeRateRules.ConvertFromBase(
+            invoice.BasePaidAmountAtInvoiceRate,
+            exchangeRateResult.Value.Rate);
+        if (cashboxAmount <= 0m)
+        {
+            return Result<PaymentPreparation?>.Failure(
+                Error.Validation(
+                    "Invoices.CashboxAmountTooSmall",
+                    "قيمة الدفعة بعد التحويل أقل من أصغر قيمة يمكن تسجيلها في صندوق النقدية.",
+                    nameof(InvoiceRequest.PaidAmount)));
+        }
+
+        var finalBalanceError = await ValidateFinalCashboxBalanceAsync(
             currentVoucher,
             cashbox.Id,
             expectedDirection,
-            invoice.PaidAmount,
+            cashboxAmount,
             cancellationToken);
+        if (finalBalanceError is not null)
+        {
+            return Result<PaymentPreparation?>.Failure(
+                finalBalanceError);
+        }
+
+        return Result<PaymentPreparation?>.Success(
+            new PaymentPreparation(
+                cashbox.Id,
+                movementType.Id,
+                cashbox.Currency,
+                exchangeRateResult.Value.ExchangeRateId,
+                exchangeRateResult.Value.Rate,
+                cashboxAmount));
     }
 
     private async Task<Error?> ValidateFinalCashboxBalanceAsync(

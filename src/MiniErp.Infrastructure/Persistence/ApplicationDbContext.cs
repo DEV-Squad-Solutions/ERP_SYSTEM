@@ -22,6 +22,8 @@ public sealed class ApplicationDbContext(
 
     public DbSet<CompanySettings> CompanySettings => Set<CompanySettings>();
 
+    public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
+
     public DbSet<BusinessPartner> BusinessPartners => Set<BusinessPartner>();
 
     public DbSet<Cashbox> Cashboxes => Set<Cashbox>();
@@ -72,6 +74,8 @@ public sealed class ApplicationDbContext(
 
     public DbSet<InvoiceContainerLine> InvoiceContainerLines =>
         Set<InvoiceContainerLine>();
+
+    public DbSet<InvoicePayment> InvoicePayments => Set<InvoicePayment>();
 
     public DbSet<ItemMovement> ItemMovements => Set<ItemMovement>();
 

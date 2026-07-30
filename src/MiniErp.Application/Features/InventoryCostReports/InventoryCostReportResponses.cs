@@ -58,6 +58,7 @@ public sealed record InventoryCostReportResponse(
     string ItemCode,
     string ItemName,
     string ItemUnitName,
+    CurrencyCode BaseCurrency,
     DateOnly? FromDate,
     DateOnly? ToDate,
     IReadOnlyList<InventoryCostReportItemResponse> Items,

@@ -8,6 +8,7 @@ public sealed class CompanyMappingRegister : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.ForType<CompanyRequest, Company>()
+            .Ignore(company => company.Settings)
             .Map(company => company.Name, request => request.Name.Trim())
             .Map(company => company.Address, request => request.Address.Trim())
             .Map(
@@ -22,6 +23,11 @@ public sealed class CompanyMappingRegister : IRegister
                 response => response.StockBalanceCheckMode,
                 company => company.Settings == null
                     ? MiniErp.Domain.Enums.StockBalanceCheckMode.DateCheck
-                    : company.Settings.StockBalanceCheckMode);
+                    : company.Settings.StockBalanceCheckMode)
+            .Map(
+                response => response.BaseCurrency,
+                company => company.Settings == null
+                    ? MiniErp.Domain.Enums.CurrencyCode.EGP
+                    : company.Settings.BaseCurrency);
     }
 }

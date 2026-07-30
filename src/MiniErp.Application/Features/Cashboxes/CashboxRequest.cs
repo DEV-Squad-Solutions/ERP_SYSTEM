@@ -8,7 +8,9 @@ public sealed record CashboxRequest(
     CurrencyCode Currency,
     decimal OpeningBalance,
     bool IsActive,
-    string? Notes)
+    string? Notes,
+    DateOnly? OpeningBalanceDate = null,
+    decimal? OpeningExchangeRate = null)
 {
     public const int CodeMaximumLength = 50;
 
@@ -24,4 +26,6 @@ public sealed record CashboxUpdateRequest(
     decimal OpeningBalance,
     bool IsActive,
     string? Notes,
-    byte[]? RowVersion);
+    byte[]? RowVersion,
+    DateOnly? OpeningBalanceDate = null,
+    decimal? OpeningExchangeRate = null);

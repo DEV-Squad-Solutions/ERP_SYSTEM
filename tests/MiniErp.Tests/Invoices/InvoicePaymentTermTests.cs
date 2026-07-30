@@ -133,6 +133,23 @@ public sealed class InvoicePaymentTermTests
     }
 
     [Fact]
+    public void RequestContracts_DoNotExposeServerCalculatedWBTotal()
+    {
+        Assert.DoesNotContain(
+            typeof(InvoiceRequest).GetProperties(),
+            property => property.Name == "WBTotal");
+        Assert.DoesNotContain(
+            typeof(InvoiceUpdateRequest).GetProperties(),
+            property => property.Name == "WBTotal");
+        Assert.Contains(
+            typeof(InvoiceResponse).GetProperties(),
+            property => property.Name == "WBTotal");
+        Assert.Contains(
+            typeof(InvoiceListResponse).GetProperties(),
+            property => property.Name == "WBTotal");
+    }
+
+    [Fact]
     public void Validator_RejectsUnsupportedPaymentTerm()
     {
         var request = new InvoiceRequest(

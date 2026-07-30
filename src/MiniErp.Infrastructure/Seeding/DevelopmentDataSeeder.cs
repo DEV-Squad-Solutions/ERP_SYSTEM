@@ -166,6 +166,11 @@ public static class DevelopmentDataSeeder
             companies,
             cancellationToken);
 
+        await SeedExchangeRatesAsync(
+            dbContext,
+            companies,
+            cancellationToken);
+
         await SeedIdentityAsync(
             dbContext,
             userManager,
@@ -850,10 +855,35 @@ public static class DevelopmentDataSeeder
                     existingBalance.Notes = notes;
                 }
 
+                if (existingBalance.Amount != 0m &&
+                    existingBalance.BaseAmount == 0m)
+                {
+                    if (partner.Currency == CurrencyCode.EGP)
+                    {
+                        existingBalance.ApplyExchangeRate(null, 1m);
+                    }
+                    else
+                    {
+                        var existingRate = await dbContext.ExchangeRates
+                            .Where(candidate =>
+                                candidate.CompanyId == company.Id &&
+                                candidate.Currency == partner.Currency &&
+                                candidate.RateDate <=
+                                    existingBalance.DocumentDate)
+                            .OrderByDescending(candidate =>
+                                candidate.RateDate)
+                            .ThenByDescending(candidate => candidate.Id)
+                            .FirstAsync(cancellationToken);
+                        existingBalance.ApplyExchangeRate(
+                            existingRate.Id,
+                            existingRate.Rate);
+                    }
+                }
+
                 continue;
             }
 
-            dbContext.PartnerOpeningBalances.Add(new PartnerOpeningBalance
+            var openingBalance = new PartnerOpeningBalance
             {
                 CompanyId = company.Id,
                 BusinessPartnerId = partner.Id,
@@ -863,7 +893,25 @@ public static class DevelopmentDataSeeder
                 BalanceType = seed.BalanceType,
                 Amount = seed.Amount,
                 Notes = notes
-            });
+            };
+            if (partner.Currency == CurrencyCode.EGP)
+            {
+                openingBalance.ApplyExchangeRate(null, 1m);
+            }
+            else
+            {
+                var rate = await dbContext.ExchangeRates
+                    .Where(candidate =>
+                        candidate.CompanyId == company.Id &&
+                        candidate.Currency == partner.Currency &&
+                        candidate.RateDate <= openingBalance.DocumentDate)
+                    .OrderByDescending(candidate => candidate.RateDate)
+                    .ThenByDescending(candidate => candidate.Id)
+                    .FirstAsync(cancellationToken);
+                openingBalance.ApplyExchangeRate(rate.Id, rate.Rate);
+            }
+
+            dbContext.PartnerOpeningBalances.Add(openingBalance);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -1184,6 +1232,25 @@ public static class DevelopmentDataSeeder
                 invoice.PaidAmount = invoice.Total;
             }
 
+            if (invoice.Currency == CurrencyCode.EGP)
+            {
+                invoice.ApplyExchangeRate(null, 1m);
+            }
+            else
+            {
+                var invoiceRate = await dbContext.ExchangeRates
+                    .Where(candidate =>
+                        candidate.CompanyId == company.Id &&
+                        candidate.Currency == invoice.Currency &&
+                        candidate.RateDate <= invoice.InvoiceDate)
+                    .OrderByDescending(candidate => candidate.RateDate)
+                    .ThenByDescending(candidate => candidate.Id)
+                    .FirstAsync(cancellationToken);
+                invoice.ApplyExchangeRate(
+                    invoiceRate.Id,
+                    invoiceRate.Rate);
+            }
+
             invoice.Touch(DateTime.UtcNow);
             dbContext.Invoices.Add(invoice);
         }
@@ -1200,6 +1267,29 @@ public static class DevelopmentDataSeeder
 
         foreach (var invoice in seededInvoices)
         {
+            if (invoice.Total != 0m && invoice.BaseTotal == 0m)
+            {
+                if (invoice.Currency == CurrencyCode.EGP)
+                {
+                    invoice.ApplyExchangeRate(null, 1m);
+                }
+                else
+                {
+                    var invoiceRate = await dbContext.ExchangeRates
+                        .Where(candidate =>
+                            candidate.CompanyId == company.Id &&
+                            candidate.Currency == invoice.Currency &&
+                            candidate.RateDate <= invoice.InvoiceDate)
+                        .OrderByDescending(candidate =>
+                            candidate.RateDate)
+                        .ThenByDescending(candidate => candidate.Id)
+                        .FirstAsync(cancellationToken);
+                    invoice.ApplyExchangeRate(
+                        invoiceRate.Id,
+                        invoiceRate.Rate);
+                }
+            }
+
             var hasItemMovements = await dbContext.ItemMovements.AnyAsync(
                 movement =>
                     movement.CompanyId == company.Id &&
@@ -1258,19 +1348,20 @@ public static class DevelopmentDataSeeder
                     InvoiceMovementRules.GetPartnerAmounts(
                         invoice.InvoiceType,
                         invoice.RemainingAmount);
-                dbContext.BusinessPartnerMovements.Add(
-                    new BusinessPartnerMovement
-                    {
-                        CompanyId = company.Id,
-                        BusinessPartnerId = invoice.BusinessPartnerId,
-                        InvoiceId = invoice.Id,
-                        MovementType = movementType,
-                        MovementDate = invoice.InvoiceDate,
-                        Currency = invoice.Currency,
-                        Debit = debit,
-                        Credit = credit,
-                        Description = $"فاتورة {invoice.InvoiceNumber}"
-                    });
+                var newPartnerMovement = new BusinessPartnerMovement
+                {
+                    CompanyId = company.Id,
+                    BusinessPartnerId = invoice.BusinessPartnerId,
+                    InvoiceId = invoice.Id,
+                    MovementType = movementType,
+                    MovementDate = invoice.InvoiceDate,
+                    Currency = invoice.Currency,
+                    Debit = debit,
+                    Credit = credit,
+                    Description = $"فاتورة {invoice.InvoiceNumber}"
+                };
+                newPartnerMovement.ApplyExchangeRate(invoice.ExchangeRate);
+                dbContext.BusinessPartnerMovements.Add(newPartnerMovement);
             }
         }
 
@@ -1301,7 +1392,21 @@ public static class DevelopmentDataSeeder
                 IsActive = true,
                 Notes = "Development seed cashbox"
             };
+            cashbox.ApplyOpeningExchangeRate(
+                new DateOnly(2026, 1, 1),
+                null,
+                1m);
             dbContext.Cashboxes.Add(cashbox);
+        }
+        else if (cashbox.OpeningBalance != 0m &&
+                 cashbox.BaseOpeningBalance == 0m)
+        {
+            cashbox.ApplyOpeningExchangeRate(
+                cashbox.OpeningBalanceDate == default
+                    ? new DateOnly(2026, 1, 1)
+                    : cashbox.OpeningBalanceDate,
+                null,
+                1m);
         }
 
         var movementTypeSeeds = new[]
@@ -1418,12 +1523,18 @@ public static class DevelopmentDataSeeder
                 Notes = "سند نقدية تجريبي"
             };
             voucher.Touch(DateTime.UtcNow);
+            voucher.ApplyExchangeRate(null, 1m);
             dbContext.CashVouchers.Add(voucher);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
         if (voucher is not null)
         {
+            if (voucher.Amount != 0m && voucher.BaseAmount == 0m)
+            {
+                voucher.ApplyExchangeRate(null, 1m);
+            }
+
             if (voucher.Description == "Seed customer collection")
             {
                 voucher.Description = "تحصيل تجريبي من العميل";
@@ -1452,6 +1563,15 @@ public static class DevelopmentDataSeeder
                 cancellationToken);
         if (existingMovement is not null)
         {
+            if ((existingMovement.Debit != 0m ||
+                 existingMovement.Credit != 0m) &&
+                existingMovement.BaseDebit == 0m &&
+                existingMovement.BaseCredit == 0m)
+            {
+                existingMovement.ApplyExchangeRate(
+                    voucher.ExchangeRate);
+            }
+
             if (existingMovement.Description == "Seed customer collection")
             {
                 existingMovement.Description =
@@ -1462,19 +1582,20 @@ public static class DevelopmentDataSeeder
             return;
         }
 
-        dbContext.BusinessPartnerMovements.Add(
-            new BusinessPartnerMovement
-            {
-                CompanyId = company.Id,
-                BusinessPartnerId = voucher.BusinessPartnerId.Value,
-                CashVoucherId = voucher.Id,
-                MovementType = BusinessPartnerMovementType.CashReceipt,
-                MovementDate = voucher.VoucherDate,
-                Currency = voucher.Currency,
-                Debit = 0m,
-                Credit = voucher.Amount,
-                Description = voucher.Description
-            });
+        var partnerMovement = new BusinessPartnerMovement
+        {
+            CompanyId = company.Id,
+            BusinessPartnerId = voucher.BusinessPartnerId.Value,
+            CashVoucherId = voucher.Id,
+            MovementType = BusinessPartnerMovementType.CashReceipt,
+            MovementDate = voucher.VoucherDate,
+            Currency = voucher.Currency,
+            Debit = 0m,
+            Credit = voucher.Amount,
+            Description = voucher.Description
+        };
+        partnerMovement.ApplyExchangeRate(voucher.ExchangeRate);
+        dbContext.BusinessPartnerMovements.Add(partnerMovement);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -1583,8 +1704,59 @@ public static class DevelopmentDataSeeder
             dbContext.CompanySettings.Add(new CompanySettings
             {
                 CompanyId = companyId,
+                BaseCurrency = CurrencyCode.EGP,
                 StockBalanceCheckMode = StockBalanceCheckMode.DateCheck
             });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedExchangeRatesAsync(
+        ApplicationDbContext dbContext,
+        IReadOnlyCollection<Company> companies,
+        CancellationToken cancellationToken)
+    {
+        var seeds = new (CurrencyCode Currency, decimal Rate)[]
+        {
+            (CurrencyCode.USD, 50m),
+            (CurrencyCode.EUR, 55m),
+            (CurrencyCode.GBP, 64m),
+            (CurrencyCode.SAR, 13.333333333333m),
+            (CurrencyCode.AED, 13.617m),
+            (CurrencyCode.KWD, 162m)
+        };
+        var rateDate = new DateOnly(2026, 1, 1);
+
+        foreach (var company in companies)
+        {
+            foreach (var seed in seeds)
+            {
+                var exists = await dbContext.ExchangeRates
+                    .IgnoreQueryFilters()
+                    .AnyAsync(
+                        rate =>
+                            rate.CompanyId == company.Id &&
+                            rate.Currency == seed.Currency &&
+                            rate.RateDate == rateDate,
+                        cancellationToken);
+                if (exists)
+                {
+                    continue;
+                }
+
+                var rate = new ExchangeRate
+                {
+                    CompanyId = company.Id,
+                    Currency = seed.Currency,
+                    RateDate = rateDate,
+                    Rate = seed.Rate,
+                    Source = ExchangeRateSource.Manual,
+                    Notes = "Development seed exchange rate"
+                };
+                rate.Touch(DateTime.UtcNow);
+                dbContext.ExchangeRates.Add(rate);
+            }
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
