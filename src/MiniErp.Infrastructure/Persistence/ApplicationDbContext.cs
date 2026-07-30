@@ -42,6 +42,8 @@ public sealed class ApplicationDbContext(
 
     public DbSet<ItemUnit> ItemUnits => Set<ItemUnit>();
 
+    public DbSet<ItemsCategory> ItemsCategories => Set<ItemsCategory>();
+
     public DbSet<Store> Stores => Set<Store>();
 
     public DbSet<Country> Countries => Set<Country>();

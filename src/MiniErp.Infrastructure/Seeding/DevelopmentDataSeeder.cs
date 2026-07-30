@@ -68,6 +68,13 @@ public static class DevelopmentDataSeeder
         "Meter"
     ];
 
+    private static readonly string[] DefaultItemsCategoryNames =
+    [
+        "General Items",
+        "Local Items",
+        "Export Items"
+    ];
+
     private static readonly SeedStore[] DefaultStores =
     [
         new("MAIN", "Main Store"),
@@ -220,6 +227,11 @@ public static class DevelopmentDataSeeder
                 dbContext,
                 company.Id,
                 itemCount,
+                cancellationToken);
+
+            await SeedItemsCategoriesAsync(
+                dbContext,
+                company.Id,
                 cancellationToken);
 
             await SeedStockOpeningBalancesAsync(
@@ -1026,6 +1038,38 @@ public static class DevelopmentDataSeeder
             cancellationToken);
     }
 
+    private static async Task SeedItemsCategoriesAsync(
+        ApplicationDbContext dbContext,
+        int companyId,
+        CancellationToken cancellationToken)
+    {
+        var existingNames = (await dbContext.ItemsCategories
+            .IgnoreQueryFilters()
+            .Where(category => category.CompanyId == companyId)
+            .Select(category => category.Name)
+            .ToListAsync(cancellationToken))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in DefaultItemsCategoryNames)
+        {
+            if (existingNames.Contains(name))
+            {
+                continue;
+            }
+
+            dbContext.ItemsCategories.Add(
+                new ItemsCategory
+                {
+                    CompanyId = companyId,
+                    Name = name,
+                    IsActive = true,
+                    Notes = $"Development seed category for Company {companyId}"
+                });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     private static async Task EnsureOpeningBalanceMovementsAsync(
         ApplicationDbContext dbContext,
         StockOpeningBalance balance,
@@ -1170,6 +1214,13 @@ public static class DevelopmentDataSeeder
                 candidate.ItemUnitId
             })
             .FirstOrDefaultAsync(cancellationToken);
+        var itemsCategoryId = await dbContext.ItemsCategories
+            .Where(category =>
+                category.CompanyId == company.Id &&
+                category.Name == DefaultItemsCategoryNames[0] &&
+                category.IsActive)
+            .Select(category => (int?)category.Id)
+            .FirstOrDefaultAsync(cancellationToken);
 
         if (partner is null || store is null || item is null)
         {
@@ -1208,6 +1259,7 @@ public static class DevelopmentDataSeeder
                 DueDate = seed.DueDate,
                 BusinessPartnerId = partner.Id,
                 StoreId = store.Id,
+                ItemsCategoryId = itemsCategoryId,
                 Currency = partner.Currency,
                 Notes = $"Seed {seed.PaymentTerm} invoice for Company {company.Id}",
                 CreatedById = SeedActor,
@@ -1267,6 +1319,12 @@ public static class DevelopmentDataSeeder
 
         foreach (var invoice in seededInvoices)
         {
+            if (!invoice.ItemsCategoryId.HasValue)
+            {
+                invoice.ItemsCategoryId = itemsCategoryId;
+                invoice.Touch(DateTime.UtcNow);
+            }
+
             if (invoice.Total != 0m && invoice.BaseTotal == 0m)
             {
                 if (invoice.Currency == CurrencyCode.EGP)

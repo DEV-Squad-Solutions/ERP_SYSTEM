@@ -238,6 +238,27 @@ public sealed class InvoiceConfiguration : AuditableEntityConfiguration<Invoice>
             .HasForeignKey(invoice => invoice.CountryId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasOne(invoice => invoice.ItemsCategory)
+            .WithMany(category => category.Invoices)
+            .HasForeignKey(invoice => new
+            {
+                invoice.CompanyId,
+                invoice.ItemsCategoryId
+            })
+            .HasPrincipalKey(category => new
+            {
+                category.CompanyId,
+                category.Id
+            })
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(invoice => new
+        {
+            invoice.CompanyId,
+            invoice.ItemsCategoryId
+        });
+
         builder.HasOne(invoice => invoice.Driver)
             .WithMany()
             .HasForeignKey(invoice => new

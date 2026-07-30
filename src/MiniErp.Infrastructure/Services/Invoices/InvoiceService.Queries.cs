@@ -32,6 +32,8 @@ public sealed partial class InvoiceService
                  (invoice.Country.Code.Contains(search) ||
                   invoice.Country.Name.Contains(search) ||
                   invoice.Country.ArabicName.Contains(search))) ||
+                (invoice.ItemsCategory != null &&
+                 invoice.ItemsCategory.Name.Contains(search)) ||
                 (invoice.Driver != null &&
                  (invoice.Driver.Code.Contains(search) ||
                   invoice.Driver.Name.Contains(search))) ||

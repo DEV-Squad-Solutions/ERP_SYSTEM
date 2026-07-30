@@ -166,6 +166,10 @@ internal static class InvoiceValidationRules
             .GreaterThan(0)
             .When(request => request.CountryId.HasValue);
 
+        validator.RuleFor(request => request.ItemsCategoryId)
+            .GreaterThan(0)
+            .When(request => request.ItemsCategoryId.HasValue);
+
         validator.RuleFor(request => request.ContainerStoreId)
             .GreaterThan(0)
             .When(request => request.ContainerStoreId.HasValue);
@@ -296,6 +300,10 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.CountryId)
             .GreaterThan(0)
             .When(request => request.CountryId.HasValue);
+
+        validator.RuleFor(request => request.ItemsCategoryId)
+            .GreaterThan(0)
+            .When(request => request.ItemsCategoryId.HasValue);
 
         validator.RuleFor(request => request.ContainerStoreId)
             .GreaterThan(0)

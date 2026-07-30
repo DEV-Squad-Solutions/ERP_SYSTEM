@@ -2466,6 +2466,93 @@ public sealed class InvoiceServiceTests
                 .SingleAsync());
     }
 
+    [Fact]
+    public async Task Add_PersistsCompanyItemCategoryInAllContracts()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit) with
+        {
+            ItemsCategoryId = 1
+        };
+
+        var created = await service.AddAsync(request);
+        var details = await service.GetByIdAsync(created.Value.Id);
+        var list = await service.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest());
+
+        Assert.True(created.IsSuccess);
+        Assert.Equal(1, created.Value.ItemsCategoryId);
+        Assert.Equal("General Items", created.Value.ItemsCategoryName);
+        Assert.Equal(1, details.Value.ItemsCategoryId);
+        Assert.Equal("General Items", details.Value.ItemsCategoryName);
+        Assert.Equal(
+            "General Items",
+            Assert.Single(list.Value.Items).ItemsCategoryName);
+    }
+
+    [Theory]
+    [InlineData(2, "Invoices.ItemsCategoryInactive")]
+    [InlineData(3, "Invoices.ItemsCategoryNotFound")]
+    public async Task Add_RejectsInactiveOrOtherCompanyItemCategory(
+        int categoryId,
+        string expectedCode)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit) with
+            {
+                ItemsCategoryId = categoryId
+            });
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(expectedCode, result.Error.Code);
+        Assert.Empty(await database.Context.Invoices.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Update_CanRetainCategoryDeactivatedAfterInvoiceCreation()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var created = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit) with
+            {
+                ItemsCategoryId = 1
+            });
+        Assert.True(created.IsSuccess);
+
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE ItemsCategories SET IsActive = 0 WHERE Id = 1;");
+        database.Context.ChangeTracker.Clear();
+        var current = await service.GetByIdAsync(created.Value.Id);
+        var lines = current.Value.Lines
+            .Select(line => new InvoiceLineRequest(
+                line.ItemId,
+                line.Count,
+                line.Weight,
+                line.Price,
+                line.Notes,
+                line.SourceInvoiceLineId,
+                line.ReturnUnitCost))
+            .ToArray();
+
+        var updated = await service.UpdateAsync(
+            current.Value.Id,
+            CreateUpdateRequest(current.Value, lines));
+
+        Assert.True(updated.IsSuccess);
+        Assert.Equal(1, updated.Value.ItemsCategoryId);
+        Assert.Equal("General Items", updated.Value.ItemsCategoryName);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(7)]
@@ -4132,7 +4219,8 @@ public sealed class InvoiceServiceTests
                     InvoiceType.Sales or InvoiceType.PurchaseReturn
                     ? 1
                     : 2
-                : null);
+                : null,
+            ItemsCategoryId: invoice.ItemsCategoryId);
     }
 
     private static decimal CalculateRequestTotal(
@@ -4379,6 +4467,25 @@ public sealed class InvoiceServiceTests
                     IsDeleted INTEGER NOT NULL
                 );
 
+                CREATE TABLE ItemsCategories (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    Name TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL,
+                    Notes TEXT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
                 CREATE TABLE Drivers (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
@@ -4444,6 +4551,7 @@ public sealed class InvoiceServiceTests
                     StoreId INTEGER NOT NULL,
                     ContainerStoreId INTEGER NULL,
                     CountryId INTEGER NULL,
+                    ItemsCategoryId INTEGER NULL,
                     Currency INTEGER NOT NULL,
                     ExchangeRateId INTEGER NULL,
                     ExchangeRate NUMERIC NOT NULL DEFAULT 1,
@@ -4859,6 +4967,17 @@ public sealed class InvoiceServiceTests
                 VALUES
                     (1, 1, 1, 'ITEM-1', 'Item 1', NULL, 1, 0),
                     (2, 1, 1, 'ITEM-2', 'Item 2', NULL, 1, 0);
+
+                INSERT INTO ItemsCategories (
+                    Id, CompanyId, Name, IsActive, Notes, RowVersion,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES
+                    (1, 1, 'General Items', 1, NULL, randomblob(8),
+                     'test', '2026-01-01', 'test', 0),
+                    (2, 1, 'Inactive Items', 0, NULL, randomblob(8),
+                     'test', '2026-01-01', 'test', 0),
+                    (3, 2, 'Other Company Items', 1, NULL, randomblob(8),
+                     'test', '2026-01-01', 'test', 0);
 
                 INSERT INTO Containers (
                     Id, CompanyId, Code, Name, Description, IsActive, IsDeleted)

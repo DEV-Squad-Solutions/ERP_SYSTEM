@@ -1,6 +1,7 @@
 using MiniErp.Domain.Common.Entities;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.CashManagement;
+using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Logistics;
@@ -49,6 +50,10 @@ public sealed class Invoice : AuditableEntity
     public int? CountryId { get; set; }
 
     public Country? Country { get; set; }
+
+    public int? ItemsCategoryId { get; set; }
+
+    public ItemsCategory? ItemsCategory { get; set; }
 
     public CurrencyCode Currency { get; set; } = CurrencyCode.EGP;
 

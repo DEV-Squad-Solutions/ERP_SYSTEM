@@ -429,6 +429,51 @@ public sealed partial class InvoiceService
             }
         }
 
+        if (invoice.ItemsCategoryId is int itemsCategoryId)
+        {
+            var category = await dbContext.ItemsCategories
+                .AsNoTracking()
+                .Where(candidate =>
+                    candidate.CompanyId == companyId &&
+                    candidate.Id == itemsCategoryId)
+                .Select(candidate => new
+                {
+                    candidate.IsActive
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (category is null)
+            {
+                return Failure(
+                    Error.NotFound(
+                        "Invoices.ItemsCategoryNotFound",
+                        "لم يتم العثور على تصنيف الأصناف المحدد.",
+                        nameof(InvoiceRequest.ItemsCategoryId)));
+            }
+
+            if (!category.IsActive)
+            {
+                var isExistingSelection =
+                    currentInvoiceId.HasValue &&
+                    await dbContext.Invoices
+                        .AsNoTracking()
+                        .AnyAsync(
+                            candidate =>
+                                candidate.CompanyId == companyId &&
+                                candidate.Id == currentInvoiceId.Value &&
+                                candidate.ItemsCategoryId ==
+                                itemsCategoryId,
+                            cancellationToken);
+                if (!isExistingSelection)
+                {
+                    return Failure(
+                        Error.Conflict(
+                            "Invoices.ItemsCategoryInactive",
+                            "لا يمكن استخدام تصنيف أصناف غير نشط.",
+                            nameof(InvoiceRequest.ItemsCategoryId)));
+                }
+            }
+        }
+
         NormalizeDriverValues(invoice);
 
         if (invoice.ActualDriverId.HasValue &&

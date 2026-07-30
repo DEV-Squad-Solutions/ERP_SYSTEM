@@ -98,6 +98,10 @@ public sealed record InvoiceListResponse(
 {
     public string? PartnerInvoiceNo { get; init; }
 
+    public int? ItemsCategoryId { get; init; }
+
+    public string? ItemsCategoryName { get; init; }
+
     public int? PaymentVoucherId { get; init; }
 
     public int? CashboxId { get; init; }
@@ -194,6 +198,10 @@ public sealed record InvoiceResponse(
     IReadOnlyList<InvoiceContainerLineResponse> ContainerLines)
 {
     public string? PartnerInvoiceNo { get; init; }
+
+    public int? ItemsCategoryId { get; init; }
+
+    public string? ItemsCategoryName { get; init; }
 
     public int? PaymentVoucherId { get; init; }
 

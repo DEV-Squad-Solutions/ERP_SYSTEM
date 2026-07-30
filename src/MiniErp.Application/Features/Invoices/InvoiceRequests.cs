@@ -19,11 +19,21 @@ public sealed record InvoiceContainerLineRequest(
 public sealed record InvoiceRequest(
     string InvoiceNumber,
     InvoiceType InvoiceType,
+    int? ItemsCategoryId,
+    InvoiceContentType ContentType,
     PaymentTerm PaymentTerm,
     DateOnly InvoiceDate,
     DateOnly? DueDate,
-    int BusinessPartnerId,
     int StoreId,
+    int BusinessPartnerId,
+    string? PartnerInvoiceNo,
+    int? CashboxId,
+    int? CashMovementTypeId,
+    decimal? ExchangeRate,
+    decimal? CashboxExchangeRate,
+    decimal WBWeight,
+    decimal WBScaleDifference,
+    decimal WBDiscount,
     int? ContainerStoreId,
     int? CountryId,
     int? DriverId,
@@ -36,16 +46,8 @@ public sealed record InvoiceRequest(
     decimal PaidAmount,
     string? Notes,
     IReadOnlyList<InvoiceLineRequest> Lines,
-    IReadOnlyList<InvoiceContainerLineRequest> ContainerLines,
-    string? PartnerInvoiceNo = null,
-    int? CashboxId = null,
-    int? CashMovementTypeId = null,
-    InvoiceContentType ContentType = InvoiceContentType.Items,
-    decimal? ExchangeRate = null,
-    decimal? CashboxExchangeRate = null,
-    decimal WBWeight = 0m,
-    decimal WBScaleDifference = 0m,
-    decimal WBDiscount = 0m)
+    IReadOnlyList<InvoiceContainerLineRequest> ContainerLines
+    )
 {
     public const int InvoiceNumberMaximumLength = 100;
 
@@ -93,4 +95,5 @@ public sealed record InvoiceUpdateRequest(
     decimal? CashboxExchangeRate = null,
     decimal WBWeight = 0m,
     decimal WBScaleDifference = 0m,
-    decimal WBDiscount = 0m);
+    decimal WBDiscount = 0m,
+    int? ItemsCategoryId = null);

@@ -43,6 +43,9 @@ public sealed class InvoiceMappingRegister : IRegister
                 invoice => invoice.PartnerInvoiceNo,
                 request => Normalize(request.PartnerInvoiceNo))
             .Map(
+                invoice => invoice.ItemsCategoryId,
+                request => request.ItemsCategoryId)
+            .Map(
                 invoice => invoice.WBWeight,
                 request => request.WBWeight)
             .Map(
@@ -80,6 +83,9 @@ public sealed class InvoiceMappingRegister : IRegister
             .Map(
                 invoice => invoice.PartnerInvoiceNo,
                 request => Normalize(request.PartnerInvoiceNo))
+            .Map(
+                invoice => invoice.ItemsCategoryId,
+                request => request.ItemsCategoryId)
             .Map(
                 invoice => invoice.WBWeight,
                 request => request.WBWeight)
@@ -129,6 +135,14 @@ public sealed class InvoiceMappingRegister : IRegister
             .Map(
                 response => response.CountryName,
                 invoice => invoice.Country == null ? null : invoice.Country.Name)
+            .Map(
+                response => response.ItemsCategoryId,
+                invoice => invoice.ItemsCategoryId)
+            .Map(
+                response => response.ItemsCategoryName,
+                invoice => invoice.ItemsCategory == null
+                    ? null
+                    : invoice.ItemsCategory.Name)
             .Map(
                 response => response.DriverName,
                 invoice => invoice.Driver == null ? null : invoice.Driver.Name)
@@ -245,6 +259,14 @@ public sealed class InvoiceMappingRegister : IRegister
             .Map(
                 response => response.CountryName,
                 invoice => invoice.Country == null ? null : invoice.Country.Name)
+            .Map(
+                response => response.ItemsCategoryId,
+                invoice => invoice.ItemsCategoryId)
+            .Map(
+                response => response.ItemsCategoryName,
+                invoice => invoice.ItemsCategory == null
+                    ? null
+                    : invoice.ItemsCategory.Name)
             .Map(
                 response => response.DriverName,
                 invoice => invoice.Driver == null ? null : invoice.Driver.Name)
