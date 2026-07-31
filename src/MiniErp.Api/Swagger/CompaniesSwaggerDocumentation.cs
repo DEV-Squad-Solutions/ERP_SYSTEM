@@ -20,7 +20,7 @@ public sealed class CompaniesSwaggerDocumentation : IOperationFilter
             nameof(CompaniesController.GetAll) => (
                 "Get all companies",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Returns a deterministic page of non-deleted companies ordered by name and ID, including each company's stock-balance check mode and base currency. Supplied filters are combined with AND.",
+                    "Admin only. Returns a deterministic page of non-deleted companies ordered by name and ID, including each company's stock-balance check mode, base currency, and row-version token. Supplied filters are combined with AND.",
                     "An Admin bearer token. Optional query fields are `pageNumber`, `pageSize`, `search`, `name`, `address`, `commercialRegister`, `taxNumber`, and `managerName`.",
                     "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100.",
                     "Invalid pagination returns 400. A page beyond the available data returns an empty item list with valid pagination metadata.")),
@@ -34,7 +34,7 @@ public sealed class CompaniesSwaggerDocumentation : IOperationFilter
             nameof(CompaniesController.GetById) => (
                 "Get a company",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Returns one non-deleted company by its integer ID, including its stock-balance check mode and base currency.",
+                    "Admin only. Returns one non-deleted company by its integer ID, including its stock-balance check mode, base currency, and row-version token.",
                     "An Admin bearer token and route `id`.",
                     "`id` must be greater than zero.",
                     "Zero or negative IDs return 400. Missing or soft-deleted companies return 404.")),
@@ -49,9 +49,9 @@ public sealed class CompaniesSwaggerDocumentation : IOperationFilter
                 "Update a company",
                 SwaggerOperationDescription.Create(
                     "Admin only. Updates a company while preserving its ID and creation audit information.",
-                    "An Admin bearer token, positive route `id`, and all company request fields. `stockBalanceCheckMode` may be changed independently; `baseCurrency` is locked after financial or inventory history exists.",
-                    "The same requiredness and maximum lengths as create apply. Duplicate checks exclude the current company.",
-                    "Invalid IDs return 400; missing or deleted companies return 404; commercial-register or tax-number conflicts return 409.")),
+                    "An Admin bearer token, positive route `id`, all company request fields, and the exact returned `rowVersion`. `stockBalanceCheckMode` may be changed independently; `baseCurrency` is locked after financial or inventory history exists.",
+                    "The same requiredness and maximum lengths as create apply. `rowVersion` must decode to 8 bytes. Duplicate checks exclude the current company.",
+                    "Invalid IDs or missing row versions return 400; missing or deleted companies return 404; stale row versions, locked base currency, commercial-register conflicts, or tax-number conflicts return 409.")),
             nameof(CompaniesController.Delete) => (
                 "Delete a company",
                 SwaggerOperationDescription.Create(

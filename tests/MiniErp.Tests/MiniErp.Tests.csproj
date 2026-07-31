@@ -22,6 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../src/MiniErp.Api/MiniErp.Api.csproj" />
     <ProjectReference Include="../../src/MiniErp.Application/MiniErp.Application.csproj" />
     <ProjectReference Include="../../src/MiniErp.Infrastructure/MiniErp.Infrastructure.csproj" />
   </ItemGroup>

@@ -58,6 +58,42 @@ public sealed class ExchangeRatesController(
         return this.ToActionResult(result);
     }
 
+    /// <summary>
+    /// Fetches CBE/Frankfurter rates for the selected date and currencies without saving them.
+    /// </summary>
+    [Authorize(Roles = "Admin")]
+    [HttpPost("import/preview")]
+    [ProducesResponseType<ExchangeRateImportPreviewResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status502BadGateway)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status504GatewayTimeout)]
+    public async Task<IActionResult> PreviewImport(
+        ExchangeRateImportRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await exchangeRateService.PreviewImportAsync(
+            request,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("import")]
+    [ProducesResponseType<ExchangeRateImportResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status502BadGateway)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status504GatewayTimeout)]
+    public async Task<IActionResult> Import(
+        ExchangeRateImportRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await exchangeRateService.ImportAsync(
+            request,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<ExchangeRateResponse>(

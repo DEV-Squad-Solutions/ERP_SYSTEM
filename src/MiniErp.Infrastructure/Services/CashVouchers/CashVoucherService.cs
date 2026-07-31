@@ -1,3 +1,4 @@
+using System.Data;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -124,8 +125,8 @@ public sealed class CashVoucherService(
         CashVoucherRequest request,
         CancellationToken cancellationToken = default)
     {
-        await using var transaction =
-            await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
         var preparation = await PrepareAsync(
             request,
@@ -178,8 +179,8 @@ public sealed class CashVoucherService(
                 RowVersionRequired());
         }
 
-        await using var transaction =
-            await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
         var voucher = await dbContext.CashVouchers.FirstOrDefaultAsync(
             entity =>
@@ -256,8 +257,8 @@ public sealed class CashVoucherService(
             return Result.Failure(InvalidId());
         }
 
-        await using var transaction =
-            await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
         var voucher = await dbContext.CashVouchers.FirstOrDefaultAsync(
             entity =>

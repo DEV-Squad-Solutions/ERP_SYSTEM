@@ -24,6 +24,14 @@ public interface IExchangeRateService
         ExchangeRateRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<Result<ExchangeRateImportResponse>> ImportAsync(
+        ExchangeRateImportRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ExchangeRateImportPreviewResponse>> PreviewImportAsync(
+        ExchangeRateImportRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<Result<ExchangeRateResponse>> UpdateAsync(
         int id,
         ExchangeRateUpdateRequest request,

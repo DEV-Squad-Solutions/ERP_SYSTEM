@@ -1,3 +1,4 @@
+using System.Data;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -100,6 +101,11 @@ public sealed class CashboxService(
         CashboxRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
         var cashbox = request.Adapt<Cashbox>();
         cashbox.CompanyId = companyId;
 
@@ -136,6 +142,7 @@ public sealed class CashboxService(
         var response = await ProjectResponseQuery(cashbox.Id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Result<CashboxResponse>.Success(response);
     }
 
@@ -153,6 +160,11 @@ public sealed class CashboxService(
         {
             return Result<CashboxResponse>.Failure(RowVersionRequired());
         }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var cashbox = await dbContext.Cashboxes.FirstOrDefaultAsync(
             entity =>
@@ -223,6 +235,7 @@ public sealed class CashboxService(
         var response = await ProjectResponseQuery(id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Result<CashboxResponse>.Success(response);
     }
 

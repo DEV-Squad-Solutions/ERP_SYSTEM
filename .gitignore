@@ -7,3 +7,10 @@ client/dist/
 client/.env.local
 client/*.tsbuildinfo
 /client/
+
+# Graphify local runtime state (the graph, report, and HTML remain versioned)
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/manifest.json
+graphify-out/cost.json
+graphify-out/cache/

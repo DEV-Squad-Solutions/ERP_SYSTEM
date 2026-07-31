@@ -10,7 +10,10 @@ public sealed record ExchangeRateResponse(
     DateOnly RateDate,
     decimal Rate,
     ExchangeRateSource Source,
+    string? Provider,
     string? Notes,
+    DateTime CreatedOn,
+    DateTime? UpdatedOn,
     byte[] RowVersion);
 
 public sealed record ExchangeRateResolutionResponse(

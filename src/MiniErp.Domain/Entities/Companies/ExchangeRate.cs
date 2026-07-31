@@ -17,8 +17,9 @@ public sealed class ExchangeRate : AuditableEntity
 
     public decimal Rate { get; set; }
 
-    public ExchangeRateSource Source { get; set; } =
-        ExchangeRateSource.Manual;
+    public ExchangeRateSource Source { get; set; } = ExchangeRateSource.Manual;
+
+    public string? Provider { get; set; }
 
     public string? Notes { get; set; }
 

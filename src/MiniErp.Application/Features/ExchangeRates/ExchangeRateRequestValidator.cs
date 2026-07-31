@@ -1,5 +1,6 @@
 using FluentValidation;
 using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.ExchangeRates;
 
@@ -19,7 +20,8 @@ public sealed class ExchangeRateRequestValidator
             .WithMessage("يجب أن يكون سعر الصرف أكبر من صفر وألا يتجاوز 12 منزلة عشرية.");
 
         RuleFor(request => request.Source)
-            .IsInEnum();
+            .Equal(ExchangeRateSource.Manual)
+            .WithMessage("Normal exchange-rate creation only accepts Manual source.");
 
         RuleFor(request => request.Notes)
             .MaximumLength(500);
@@ -42,7 +44,8 @@ public sealed class ExchangeRateUpdateRequestValidator
             .WithMessage("يجب أن يكون سعر الصرف أكبر من صفر وألا يتجاوز 12 منزلة عشرية.");
 
         RuleFor(request => request.Source)
-            .IsInEnum();
+            .Equal(ExchangeRateSource.Manual)
+            .WithMessage("Normal exchange-rate updates only accept Manual source.");
 
         RuleFor(request => request.Notes)
             .MaximumLength(500);
@@ -70,5 +73,9 @@ public sealed class ExchangeRateFilterRequestValidator
             .When(request =>
                 request.DateFrom.HasValue &&
                 request.DateTo.HasValue);
+
+        RuleFor(request => request.Search)
+            .Must(value => value is null || value.Trim().Length <= 500)
+            .WithMessage("Search must not exceed 500 characters.");
     }
 }

@@ -52,6 +52,9 @@ public sealed class ExchangeRateConfiguration
             .HasConversion<int>()
             .IsRequired();
 
+        builder.Property(rate => rate.Provider)
+            .HasMaxLength(100);
+
         builder.Property(rate => rate.Notes)
             .HasMaxLength(500);
 

@@ -19,7 +19,10 @@ public sealed class ExchangeRateMappingRegister : IRegister
             .Map(response => response.RateDate, rate => rate.RateDate)
             .Map(response => response.Rate, rate => rate.Rate)
             .Map(response => response.Source, rate => rate.Source)
+            .Map(response => response.Provider, rate => rate.Provider)
             .Map(response => response.Notes, rate => rate.Notes)
+            .Map(response => response.CreatedOn, rate => rate.CreatedOn)
+            .Map(response => response.UpdatedOn, rate => rate.UpdatedOn)
             .Map(response => response.RowVersion, rate => rate.RowVersion);
     }
 }

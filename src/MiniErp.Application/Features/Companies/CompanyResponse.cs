@@ -11,4 +11,5 @@ public sealed record CompanyResponse(
     string ManagerName,
     DateTime CreatedAt,
     StockBalanceCheckMode StockBalanceCheckMode,
-    CurrencyCode BaseCurrency);
+    CurrencyCode BaseCurrency,
+    byte[] RowVersion);

@@ -45,5 +45,9 @@ public sealed class CompanyConfiguration : AuditableEntityConfiguration<Company>
         builder.Property(company => company.ManagerName)
             .HasMaxLength(200)
             .IsRequired();
+
+        builder.Property(company => company.RowVersion)
+            .IsRowVersion()
+            .IsRequired();
     }
 }

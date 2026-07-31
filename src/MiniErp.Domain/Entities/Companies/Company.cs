@@ -16,5 +16,7 @@ public sealed class Company : AuditableEntity
 
     public string ManagerName { get; set; } = string.Empty;
 
+    public byte[] RowVersion { get; private set; } = [];
+
     public CompanySettings? Settings { get; set; }
 }

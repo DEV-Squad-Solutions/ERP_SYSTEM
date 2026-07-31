@@ -20,6 +20,8 @@ public static class ApiErrorResponseFactory
             ErrorType.Forbidden => StatusCodes.Status403Forbidden,
             ErrorType.NotFound => StatusCodes.Status404NotFound,
             ErrorType.Conflict => StatusCodes.Status409Conflict,
+            ErrorType.BadGateway => StatusCodes.Status502BadGateway,
+            ErrorType.GatewayTimeout => StatusCodes.Status504GatewayTimeout,
             _ => StatusCodes.Status500InternalServerError
         };
 
@@ -30,6 +32,8 @@ public static class ApiErrorResponseFactory
             ErrorType.Forbidden => "غير مسموح بتنفيذ هذا الإجراء.",
             ErrorType.NotFound => "العنصر المطلوب غير موجود.",
             ErrorType.Conflict => "يوجد تعارض في البيانات.",
+            ErrorType.BadGateway => "مزود الخدمة الخارجي غير متاح.",
+            ErrorType.GatewayTimeout => "انتهت مهلة مزود الخدمة الخارجي.",
             _ => "حدث خطأ أثناء معالجة الطلب."
         };
 
@@ -230,6 +234,10 @@ public static class ApiErrorResponseFactory
                 "https://tools.ietf.org/html/rfc9110#section-15.5.10",
             StatusCodes.Status415UnsupportedMediaType =>
                 "https://tools.ietf.org/html/rfc9110#section-15.5.16",
+            StatusCodes.Status502BadGateway =>
+                "https://tools.ietf.org/html/rfc9110#section-15.6.3",
+            StatusCodes.Status504GatewayTimeout =>
+                "https://tools.ietf.org/html/rfc9110#section-15.6.5",
             StatusCodes.Status500InternalServerError =>
                 "https://tools.ietf.org/html/rfc9110#section-15.6.1",
             _ => "about:blank"

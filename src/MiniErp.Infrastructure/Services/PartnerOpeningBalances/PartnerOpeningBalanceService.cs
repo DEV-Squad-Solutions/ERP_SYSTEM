@@ -1,3 +1,4 @@
+using System.Data;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -80,6 +81,11 @@ public sealed class PartnerOpeningBalanceService(
         PartnerOpeningBalanceRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
         var normalized = request.Adapt<PartnerOpeningBalance>();
 
         var partnerError = await ValidateBusinessPartnerAsync(
@@ -124,6 +130,8 @@ public sealed class PartnerOpeningBalanceService(
             .AsNoTracking()
             .FirstAsync(cancellationToken);
 
+        await transaction.CommitAsync(cancellationToken);
+
         return Result<PartnerOpeningBalanceResponse>.Success(response);
     }
 
@@ -143,8 +151,13 @@ public sealed class PartnerOpeningBalanceService(
                 Error.Validation(
                     "PartnerOpeningBalances.RowVersionRequired",
                     "يجب إرسال إصدار السجل الحالي للتعديل.",
-                    nameof(PartnerOpeningBalanceUpdateRequest.RowVersion)));
+                nameof(PartnerOpeningBalanceUpdateRequest.RowVersion)));
         }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var normalized = request.Adapt<PartnerOpeningBalance>();
 
@@ -225,6 +238,8 @@ public sealed class PartnerOpeningBalanceService(
         var response = await ProjectResponseQuery(id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
 
         return Result<PartnerOpeningBalanceResponse>.Success(response);
     }

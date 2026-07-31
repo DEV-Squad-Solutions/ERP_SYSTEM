@@ -80,7 +80,7 @@ public sealed class CompaniesController(ICompanyService companyService)
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Update(
         int id,
-        CompanyRequest request,
+        CompanyUpdateRequest request,
         CancellationToken cancellationToken)
     {
         var result = await companyService.UpdateAsync(
