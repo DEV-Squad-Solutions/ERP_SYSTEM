@@ -6,9 +6,11 @@ using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Containers;
+using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Logistics;
+using MiniErp.Domain.Entities.Payroll;
 using MiniErp.Domain.Entities.ReferenceData;
 using MiniErp.Infrastructure.Identity;
 
@@ -72,6 +74,11 @@ public sealed class ApplicationDbContext(
     public DbSet<UserCompany> UserCompanies => Set<UserCompany>();
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<PayrollPeriod> PayrollPeriods => Set<PayrollPeriod>();
+    public DbSet<PayrollEntry> PayrollPeriodLines => Set<PayrollEntry>();
+    public DbSet<Employee> Employees => Set<Employee>();
+    public DbSet<EmployeeAttendance> EmployeeAttendances => Set<EmployeeAttendance>();
+    public DbSet<EmployeeTransaction> PayrollDeductions => Set<EmployeeTransaction>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

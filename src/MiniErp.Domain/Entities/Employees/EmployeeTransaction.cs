@@ -1,4 +1,5 @@
 ﻿using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 using System;
 using System.Collections.Generic;
@@ -9,6 +10,9 @@ namespace MiniErp.Domain.Entities.Employees
     public sealed class EmployeeTransaction : AuditableEntity
     {
         public int Id { get; set; }
+
+        public int CompanyId { get; set; }
+        public Company Company { get; set; } = null!;
 
         public int EmployeeId { get; set; }
         public Employee Employee { get; set; } = default!;

@@ -16,6 +16,7 @@ namespace MiniErp.Domain.Entities.Employees
 
         public string Code { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
+        public string? JobTitle { get; set; }
         public string? PhoneNumber { get; set; }
         public string? Email { get; set; }
         public string? Address { get; set; }
