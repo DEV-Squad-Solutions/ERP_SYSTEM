@@ -15,14 +15,24 @@ public sealed class InvoiceLineRequestValidator
             .GreaterThan(0);
 
         RuleFor(line => line.Count)
-            .GreaterThan(0);
+            .GreaterThan(0)
+            .When(line => line.Count.HasValue);
 
         RuleFor(line => line.Weight)
             .GreaterThan(0)
             .PrecisionScale(
                 InvoiceAmountRules.QuantityPrecision,
                 InvoiceAmountRules.QuantityScale,
-                ignoreTrailingZeros: true);
+                ignoreTrailingZeros: true)
+            .When(line => line.Weight.HasValue);
+
+        RuleFor(line => line.Quantity)
+            .GreaterThan(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .When(line => line.Quantity.HasValue);
 
         RuleFor(line => line.Price)
             .GreaterThanOrEqualTo(0)
@@ -44,10 +54,8 @@ public sealed class InvoiceLineRequestValidator
                 ignoreTrailingZeros: true);
 
         RuleFor(line => line)
-            .Must(line => InvoiceAmountRules.TryCalculate(
-                line.Count,
-                line.Weight,
-                line.Price,
+            .Must(line => InvoiceLineRequestValidator.TryCalculateLine(
+                line,
                 out _,
                 out _))
             .WithMessage(
@@ -55,6 +63,55 @@ public sealed class InvoiceLineRequestValidator
 
         RuleFor(line => line.Notes)
             .MaximumLength(InvoiceRequest.NotesMaximumLength);
+    }
+
+    internal static bool TryCalculateLine(
+        InvoiceLineRequest line,
+        out decimal quantity,
+        out decimal total)
+    {
+        var count = line.Count.GetValueOrDefault();
+        var weight = line.Weight.GetValueOrDefault();
+
+        if (count <= 0 && weight <= 0m && line.Quantity.HasValue)
+        {
+            quantity = line.Quantity.Value;
+            if (!InvoiceAmountRules.IsValidQuantity(quantity) ||
+                line.Price < 0m)
+            {
+                total = 0m;
+                return false;
+            }
+
+            try
+            {
+                total = decimal.Round(
+                    quantity * line.Price,
+                    InvoiceAmountRules.MoneyScale,
+                    MidpointRounding.AwayFromZero);
+            }
+            catch (OverflowException)
+            {
+                total = 0m;
+                return false;
+            }
+
+            return InvoiceAmountRules.IsValidMoney(total);
+        }
+
+        if (!line.Count.HasValue || !line.Weight.HasValue)
+        {
+            quantity = 0m;
+            total = 0m;
+            return false;
+        }
+
+        return InvoiceAmountRules.TryCalculate(
+            line.Count.Value,
+            line.Weight.Value,
+            line.Price,
+            out quantity,
+            out total);
     }
 }
 
@@ -691,10 +748,8 @@ internal static class InvoiceValidationRules
             foreach (var line in lines)
             {
                 if (line is null ||
-                    !InvoiceAmountRules.TryCalculate(
-                        line.Count,
-                        line.Weight,
-                        line.Price,
+                    !InvoiceLineRequestValidator.TryCalculateLine(
+                        line,
                         out _,
                         out var lineTotal))
                 {

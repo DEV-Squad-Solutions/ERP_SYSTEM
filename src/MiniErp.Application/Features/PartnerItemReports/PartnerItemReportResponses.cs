@@ -19,8 +19,8 @@ public sealed record PartnerItemReportSummaryResponse(
     decimal TotalPurchaseWeight);
 
 public sealed record PartnerItemReportResponse(
-    int BusinessPartnerId,
-    string BusinessPartnerName,
+    int? BusinessPartnerId,
+    string? BusinessPartnerName,
     int? ItemId,
     string? ItemName,
     DateOnly? FromDate,

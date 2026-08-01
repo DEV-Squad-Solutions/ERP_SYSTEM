@@ -19,7 +19,7 @@ public sealed class PartnerItemReportService(
         PartnerItemReportFilterRequest filters,
         CancellationToken cancellationToken = default)
     {
-        if (filters.BusinessPartnerId <= 0)
+        if (filters.BusinessPartnerId is <= 0)
         {
             return Result<PartnerItemReportResponse>.Failure(
                 BusinessPartnerRequired());
@@ -28,6 +28,11 @@ public sealed class PartnerItemReportService(
         if (filters.ItemId.HasValue && filters.ItemId.Value <= 0)
         {
             return Result<PartnerItemReportResponse>.Failure(ItemInvalid());
+        }
+
+        if (filters.CountryId.HasValue && filters.CountryId.Value <= 0)
+        {
+            return Result<PartnerItemReportResponse>.Failure(CountryInvalid());
         }
 
         var search = filters.Search?.Trim();
@@ -50,18 +55,24 @@ public sealed class PartnerItemReportService(
                 InvalidDateRange());
         }
 
-        var partner = await dbContext.BusinessPartners
-            .AsNoTracking()
-            .Where(entity =>
-                entity.CompanyId == companyId &&
-                entity.Id == filters.BusinessPartnerId &&
-                !entity.IsDeleted)
-            .Select(entity => new { entity.Id, entity.Name })
-            .SingleOrDefaultAsync(cancellationToken);
-        if (partner is null)
+        string? partnerName = null;
+        if (filters.BusinessPartnerId is int businessPartnerId)
         {
-            return Result<PartnerItemReportResponse>.Failure(
-                BusinessPartnerNotFound());
+            var partner = await dbContext.BusinessPartners
+                .AsNoTracking()
+                .Where(entity =>
+                    entity.CompanyId == companyId &&
+                    entity.Id == businessPartnerId &&
+                    !entity.IsDeleted)
+                .Select(entity => new { entity.Id, entity.Name })
+                .SingleOrDefaultAsync(cancellationToken);
+            if (partner is null)
+            {
+                return Result<PartnerItemReportResponse>.Failure(
+                    BusinessPartnerNotFound());
+            }
+
+            partnerName = partner.Name;
         }
 
         var item = filters.ItemId.HasValue
@@ -84,7 +95,10 @@ public sealed class PartnerItemReportService(
             .Where(line =>
                 line.CompanyId == companyId &&
                 line.Invoice.CompanyId == companyId &&
-                line.Invoice.BusinessPartnerId == partner.Id &&
+                (!filters.BusinessPartnerId.HasValue ||
+                 line.Invoice.BusinessPartnerId == filters.BusinessPartnerId.Value) &&
+                (!filters.CountryId.HasValue ||
+                 line.Invoice.CountryId == filters.CountryId.Value) &&
                 !line.IsDeleted &&
                 !line.Invoice.IsDeleted &&
                 (line.Invoice.InvoiceType == InvoiceType.Sales ||
@@ -164,8 +178,8 @@ public sealed class PartnerItemReportService(
 
         return Result<PartnerItemReportResponse>.Success(
             new PartnerItemReportResponse(
-                partner.Id,
-                partner.Name,
+                filters.BusinessPartnerId,
+                partnerName,
                 item?.Id,
                 item?.Name,
                 filters.FromDate,

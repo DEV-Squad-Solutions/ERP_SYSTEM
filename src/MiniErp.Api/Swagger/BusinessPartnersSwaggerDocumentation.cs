@@ -48,9 +48,9 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
             nameof(BusinessPartnersController.GetItemReport) => (
                 "Get item movements for a business partner",
                 SwaggerOperationDescription.Create(
-                    "Returns sales and purchase invoice movements for the selected business partner and one item. The report is company-scoped and read-only.",
-                    "A bearer token containing one `company_id` and required query `businessPartnerId`. Optional query fields are `itemId`, `search`, `movementType`, `fromDate`, and `toDate`.",
-                    "`businessPartnerId` must be positive. When `itemId` is omitted, all items are included; when supplied, it must be positive. `movementType` accepts `Sales` or `Purchase`; and the start date cannot be after the end date. Search matches invoice number, partner invoice number, or notes.",
+                    "Returns sales and purchase invoice movements with optional business-partner and item filters. The report is company-scoped and read-only.",
+                    "A bearer token containing one `company_id`. Optional query fields are `businessPartnerId`, `itemId`, `countryId`, `search`, `movementType`, `fromDate`, and `toDate`.",
+                    "When `businessPartnerId` is supplied, it must be positive and company-owned; when omitted, all business partners are included. When `itemId` is omitted, all items are included; when supplied, it must be positive. `movementType` accepts `Sales` or `Purchase`; and the start date cannot be after the end date. Search matches invoice number, partner invoice number, or notes.",
                     "Returns `quantity` from the invoice-line count, `weight` as count multiplied by unit weight, and line `unitPrice` and `totalAmount`. Sales and purchase returns are not included.")),
             nameof(BusinessPartnersController.Create) => (
                 "Create a business partner",

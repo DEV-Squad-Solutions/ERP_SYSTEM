@@ -16,6 +16,12 @@ public static class PartnerItemReportErrors
             "الصنف المحدد غير صالح.",
             nameof(PartnerItemReportFilterRequest.ItemId));
 
+    public static Error CountryInvalid() =>
+        Error.Validation(
+            "PartnerItemReports.CountryInvalid",
+            "الدولة المحددة غير صالحة.",
+            nameof(PartnerItemReportFilterRequest.CountryId));
+
     public static Error InvalidDateRange() =>
         Error.Validation(
             "PartnerItemReports.InvalidDateRange",

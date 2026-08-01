@@ -15,6 +15,12 @@ public sealed partial class InvoiceService
         foreach (var requestLine in request.Lines)
         {
             var line = requestLine.Adapt<InvoiceLine>();
+            TryGetEffectiveLineValues(
+                requestLine,
+                out var count,
+                out var weight);
+            line.Count = count;
+            line.Weight = weight;
             line.CompanyId = companyId;
             line.ItemUnitId = preparation.ItemUnitIds[requestLine.ItemId];
             ApplyReturnCostInput(
@@ -52,8 +58,12 @@ public sealed partial class InvoiceService
                 continue;
             }
 
-            existingLine.Count = incoming.Count;
-            existingLine.Weight = incoming.Weight;
+            TryGetEffectiveLineValues(
+                incoming,
+                out var count,
+                out var weight);
+            existingLine.Count = count;
+            existingLine.Weight = weight;
             existingLine.Price = incoming.Price;
             ApplyReturnCostInput(
                 invoice.InvoiceType,
@@ -74,6 +84,12 @@ public sealed partial class InvoiceService
                      !existingItemIds.Contains(line.ItemId)))
         {
             var line = incoming.Adapt<InvoiceLine>();
+            TryGetEffectiveLineValues(
+                incoming,
+                out var count,
+                out var weight);
+            line.Count = count;
+            line.Weight = weight;
             line.CompanyId = companyId;
             line.ItemUnitId = preparation.ItemUnitIds[incoming.ItemId];
             ApplyReturnCostInput(

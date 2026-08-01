@@ -4,12 +4,13 @@ namespace MiniErp.Application.Features.Invoices;
 
 public sealed record InvoiceLineRequest(
     int ItemId,
-    int Count,
-    decimal Weight,
+    int? Count,
+    decimal? Weight,
     decimal Price,
     string? Notes,
     int? SourceInvoiceLineId = null,
-    decimal? ReturnUnitCost = null);
+    decimal? ReturnUnitCost = null,
+    decimal? Quantity = null);
 
 public sealed record InvoiceContainerLineRequest(
     int ContainerId,
