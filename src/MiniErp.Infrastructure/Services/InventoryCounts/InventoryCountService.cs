@@ -1,4 +1,5 @@
 using System.Data;
+using static MiniErp.Application.Features.InventoryCounts.InventoryCountErrors;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -551,25 +552,16 @@ public sealed class InventoryCountService(
 
         if (store is null)
         {
-            return Error.NotFound(
-                "InventoryCounts.StoreNotFound",
-                $"لم يتم العثور على المخزن رقم {storeId}.",
-                nameof(InventoryCountRequest.StoreId));
+            return StoreNotFound(storeId);
         }
 
         if (!store.IsActive)
         {
-            return Error.Conflict(
-                "InventoryCounts.StoreInactive",
-                "لا يمكن جرد مخزن غير نشط.",
-                nameof(InventoryCountRequest.StoreId));
+            return StoreInactive();
         }
 
         return store.IsContainerStore
-            ? Error.Conflict(
-                "InventoryCounts.ContainerStoreNotAllowed",
-                "يجب اختيار مخزن منتجات وليس مخزن عبوات.",
-                nameof(InventoryCountRequest.StoreId))
+            ? ContainerStoreNotAllowed()
             : null;
     }
 
@@ -708,9 +700,7 @@ public sealed class InventoryCountService(
         if (filters.StoreId is <= 0 ||
             filters.ToDate < filters.FromDate)
         {
-            return Error.Validation(
-                "InventoryCounts.FiltersInvalid",
-                "مرشحات مستندات الجرد غير صحيحة.");
+            return FiltersInvalid();
         }
 
         return null;
@@ -720,85 +710,4 @@ public sealed class InventoryCountService(
         int Id,
         int ItemUnitId);
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "InventoryCounts.InvalidId",
-            "يجب أن يكون رقم مستند الجرد أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "InventoryCounts.NotFound",
-            $"لم يتم العثور على مستند الجرد رقم {id}.");
-
-    private static Error RowVersionRequired() =>
-        Error.Validation(
-            "InventoryCounts.RowVersionRequired",
-            "يجب إرسال إصدار السجل الحالي المكون من 8 بايت للتعديل.",
-            nameof(InventoryCountUpdateRequest.RowVersion));
-
-    private static Error ReconcileRowVersionRequired() =>
-        Error.Validation(
-            "InventoryCounts.RowVersionRequired",
-            "يجب إرسال إصدار السجل الحالي المكون من 8 بايت للتسوية.",
-            nameof(InventoryCountReconcileRequest.RowVersion));
-
-    private static Error Concurrency() =>
-        Error.Conflict(
-            "InventoryCounts.Concurrency",
-            "تم تعديل مستند الجرد بواسطة مستخدم آخر. أعد تحميله ثم حاول مرة أخرى.");
-
-    private static Error DocumentNumberExists(string number) =>
-        Error.Conflict(
-            "InventoryCounts.DocumentNumberExists",
-            $"رقم مستند الجرد '{number}' مستخدم بالفعل.",
-            nameof(InventoryCountRequest.DocumentNumber));
-
-    private static Error NoEligibleItems() =>
-        Error.Conflict(
-            "InventoryCounts.NoEligibleItems",
-            "لا توجد أصناف نشطة بوحدات قياس نشطة لإنشاء مستند الجرد.");
-
-    private static Error LinesDoNotMatchSnapshot() =>
-        Error.Validation(
-            "InventoryCounts.LinesDoNotMatchSnapshot",
-            "يجب إرسال مجموعة أصناف لقطة الجرد كاملة دون إضافة أو حذف أو تكرار.",
-            nameof(InventoryCountUpdateRequest.Lines));
-
-    private static Error ReconciledImmutable() =>
-        Error.Conflict(
-            "InventoryCounts.ReconciledImmutable",
-            "مستند الجرد الذي تمت تسويته غير قابل للتعديل أو الحذف.");
-
-    private static Error AlreadyReconciled() =>
-        Error.Conflict(
-            "InventoryCounts.AlreadyReconciled",
-            "تمت تسوية مستند الجرد بالفعل.");
-
-    private static Error PhysicalQuantitiesRequired(IEnumerable<int> itemIds) =>
-        Error.Validation(
-            "InventoryCounts.PhysicalQuantitiesRequired",
-            $"يجب إدخال الكمية الفعلية لكل الأصناف. الأصناف الناقصة: {string.Join(", ", itemIds)}.",
-            nameof(InventoryCountUpdateRequest.Lines));
-
-    private static Error SnapshotStale() =>
-        Error.Conflict(
-            "InventoryCounts.SnapshotStale",
-            "تغير رصيد المخزون بعد أخذ لقطة الجرد. أنشئ مستند جرد جديدًا ثم أعد العد.");
-
-    private static Error IncreaseCostsInvalid() =>
-        Error.Validation(
-            "InventoryCounts.IncreaseCostsInvalid",
-            "تكاليف زيادات تسوية الجرد غير صالحة أو تحتوي على أصناف مكررة.",
-            nameof(InventoryCountReconcileRequest.IncreaseCosts));
-
-    private static Error IncreaseCostsRequired(IEnumerable<int> itemIds) =>
-        Error.Validation(
-            "InventoryCounts.IncreaseCostsRequired",
-            $"يجب إدخال تكلفة الوحدة لكل صنف له زيادة في تسوية الجرد: {string.Join(", ", itemIds)}.",
-            nameof(InventoryCountReconcileRequest.IncreaseCosts));
-
-    private static Error GeneratedDocumentNumberConflict() =>
-        Error.Conflict(
-            "InventoryCounts.GeneratedDocumentNumberConflict",
-            "تعذر إنشاء أرقام مستندات التسوية الخاصة بالجرد لأنها مستخدمة بالفعل.");
 }

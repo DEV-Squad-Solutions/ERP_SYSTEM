@@ -1,4 +1,5 @@
 using Mapster;
+using static MiniErp.Application.Features.Containers.ContainerErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
@@ -196,24 +197,4 @@ public sealed class ContainerService(
                 cancellationToken)
             : Task.FromResult(false);
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "Containers.InvalidId",
-            "يجب أن يكون رقم العبوة أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "Containers.NotFound",
-            $"لم يتم العثور على العبوة رقم {id}.");
-
-    private static Error CodeExists(string code) =>
-        Error.Conflict(
-            "Containers.CodeExists",
-            $"كود العبوة '{code}' مستخدم بالفعل في عبوة نشطة.",
-            nameof(ContainerRequest.Code));
-
-    private static Error HasStoreAssignments() =>
-        Error.Conflict(
-            "Containers.HasStoreAssignments",
-            "لا يمكن حذف العبوة لارتباطها بمخزن عبوات حالي أو تاريخي.");
 }

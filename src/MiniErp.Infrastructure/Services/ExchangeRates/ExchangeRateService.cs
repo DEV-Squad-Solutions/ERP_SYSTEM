@@ -1,4 +1,5 @@
 using System.Data;
+using static MiniErp.Application.Features.ExchangeRates.ExchangeRateErrors;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -151,7 +152,8 @@ public sealed class ExchangeRateService(
     {
         if (exchangeRateProvider is null)
         {
-            return Result<ExchangeRateImportPreviewResponse>.Failure(ProviderUnavailable());
+            return Result<ExchangeRateImportPreviewResponse>.Failure(
+                ExternalExchangeRateErrors.ProviderUnavailable());
         }
 
         var baseCurrency = await GetRequiredBaseCurrencyAsync(cancellationToken);
@@ -219,7 +221,8 @@ public sealed class ExchangeRateService(
     {
         if (exchangeRateProvider is null)
         {
-            return Result<ExchangeRateImportResponse>.Failure(ProviderUnavailable());
+            return Result<ExchangeRateImportResponse>.Failure(
+                ExternalExchangeRateErrors.ProviderUnavailable());
         }
 
         var baseCurrency = await GetRequiredBaseCurrencyAsync(cancellationToken);
@@ -755,76 +758,4 @@ public sealed class ExchangeRateService(
                 StringComparison.OrdinalIgnoreCase);
     }
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "ExchangeRates.InvalidId",
-            "يجب أن يكون رقم سعر الصرف أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "ExchangeRates.NotFound",
-            $"لم يتم العثور على سعر الصرف رقم {id}.");
-
-    private static Error InvalidCurrency() =>
-        Error.Validation(
-            "ExchangeRates.InvalidCurrency",
-            "العملة المحددة غير صالحة.",
-            nameof(ExchangeRateRequest.Currency));
-
-    private static Error InvalidRate() =>
-        Error.Validation(
-            "ExchangeRates.InvalidRate",
-            "يجب أن يكون سعر الصرف أكبر من صفر وألا يتجاوز 12 منزلة عشرية.",
-            nameof(ExchangeRateRequest.Rate));
-
-    private static Error BaseCurrencyRateNotAllowed() =>
-        Error.Validation(
-            "ExchangeRates.BaseCurrencyRateNotAllowed",
-            "لا يتم إنشاء سعر صرف لعملة الشركة الأساسية؛ سعرها يساوي واحدًا دائمًا.",
-            nameof(ExchangeRateRequest.Currency));
-
-    private static Error BaseCurrencyRateMustBeOne() =>
-        Error.Validation(
-            "ExchangeRates.BaseCurrencyRateMustBeOne",
-            "يجب أن يساوي سعر صرف عملة الشركة الأساسية واحدًا.",
-            "exchangeRate");
-
-    private static Error Missing(
-        CurrencyCode currency,
-        DateOnly date) =>
-        Error.Validation(
-            "ExchangeRates.Missing",
-            $"لا يوجد سعر صرف للعملة {currency} بتاريخ {date:yyyy-MM-dd} أو قبله.",
-            "exchangeRate");
-
-    private static Error Duplicate() =>
-        Error.Conflict(
-            "ExchangeRates.Duplicate",
-            "يوجد سعر صرف نشط لهذه العملة في التاريخ نفسه.",
-            nameof(ExchangeRateRequest.RateDate));
-
-    private static Error Referenced() =>
-        Error.Conflict(
-            "ExchangeRates.Referenced",
-            "لا يمكن تعديل أو حذف سعر صرف مستخدم في مستند مالي. أضف سعرًا بتاريخ جديد بدلًا من ذلك.");
-
-    private static Error RowVersionRequired() =>
-        Error.Validation(
-            "ExchangeRates.RowVersionRequired",
-            "يجب إرسال إصدار سعر الصرف الحالي.",
-            nameof(ExchangeRateUpdateRequest.RowVersion));
-
-    private static Error Concurrency() =>
-        Error.Conflict(
-            "ExchangeRates.Concurrency",
-            "تم تعديل سعر الصرف بواسطة مستخدم آخر. أعد تحميل البيانات ثم حاول مرة أخرى.");
-    private static Error ProviderUnavailable() =>
-        Error.BadGateway(
-            "ExchangeRates.ProviderUnavailable",
-            "The external exchange-rate provider is currently unavailable.");
-
-    private static Error CompanySettingsNotFound() =>
-        Error.NotFound(
-            "ExchangeRates.CompanySettingsNotFound",
-            "Company exchange-rate settings were not found.");
 }

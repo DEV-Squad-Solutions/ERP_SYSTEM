@@ -1,4 +1,5 @@
 using Mapster;
+using static MiniErp.Application.Features.Countries.CountryErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
@@ -185,24 +186,4 @@ public sealed class CountryService(
                 cancellationToken)
             : Task.FromResult(false);
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "Countries.InvalidId",
-            "يجب أن يكون رقم الدولة أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "Countries.NotFound",
-            $"لم يتم العثور على الدولة رقم {id}.");
-
-    private static Error CodeExists(string code) =>
-        Error.Conflict(
-            "Countries.CodeExists",
-            $"كود الدولة '{code}' مستخدم بالفعل في دولة نشطة.",
-            nameof(CountryRequest.Code));
-
-    private static Error HasInvoices() =>
-        Error.Conflict(
-            "Countries.HasInvoices",
-            "لا يمكن حذف الدولة لارتباطها بفواتير حالية أو تاريخية.");
 }

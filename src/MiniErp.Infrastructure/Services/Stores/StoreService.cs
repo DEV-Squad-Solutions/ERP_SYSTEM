@@ -1,4 +1,5 @@
 using Mapster;
+using static MiniErp.Application.Features.Stores.StoreErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
@@ -325,18 +326,6 @@ public sealed class StoreService(
                     movement.ContainerStoreId == storeId,
                 cancellationToken);
 
-    private static Error InvalidId() =>
-        Error.Validation("Stores.InvalidId", "يجب أن يكون رقم المخزن أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound("Stores.NotFound", $"لم يتم العثور على المخزن رقم {id}.");
-
-    private static Error CodeExists(string code) =>
-        Error.Conflict(
-            "Stores.CodeExists",
-            $"كود المخزن '{code}' مستخدم بالفعل.",
-            nameof(StoreRequest.Code));
-
     private async Task<Error?> ValidateBusinessPartnerAsync(
         Store store,
         int? excludedStoreId,
@@ -346,16 +335,12 @@ public sealed class StoreService(
         {
             return store.BusinessPartnerId is null
                 ? null
-                : Error.Validation(
-                    "Stores.ProductStoreBusinessPartner",
-                    "يجب عدم تحديد عميل أو مورد لمخزن المنتجات.");
+                : ProductStoreBusinessPartner();
         }
 
         if (store.BusinessPartnerId is null or <= 0)
         {
-            return Error.Validation(
-                "Stores.InvalidBusinessPartnerId",
-                "يجب تحديد عميل أو مورد صحيح للمخزن المخصص للعبوات.");
+            return InvalidBusinessPartnerId();
         }
 
         var businessPartner = await dbContext.BusinessPartners
@@ -368,16 +353,12 @@ public sealed class StoreService(
 
         if (businessPartner is null)
         {
-            return Error.NotFound(
-                "Stores.BusinessPartnerNotFound",
-                $"لم يتم العثور على العميل أو المورد رقم {store.BusinessPartnerId.Value}.");
+            return BusinessPartnerNotFound(store.BusinessPartnerId.Value);
         }
 
         if (!businessPartner.IsActive)
         {
-            return Error.Conflict(
-                "Stores.BusinessPartnerInactive",
-                "يجب ربط مخزن العبوات بعميل أو مورد نشط.");
+            return BusinessPartnerInactive();
         }
 
         if (!store.IsActive)
@@ -402,24 +383,4 @@ public sealed class StoreService(
             : null;
     }
 
-    private static Error ActiveContainerStoreExists(int businessPartnerId) =>
-        Error.Conflict(
-            "Stores.ActiveContainerStoreExists",
-            $"يوجد بالفعل مخزن عبوات نشط مخصص للعميل أو المورد رقم {businessPartnerId}.",
-            nameof(StoreRequest.BusinessPartnerId));
-
-    private static Error HasContainerAssignments() =>
-        Error.Conflict(
-            "Stores.HasContainerAssignments",
-            "لا يمكن حذف مخزن العبوات أو تغيير نوعه أو العميل أو المورد المرتبط به لوجود ربط عبوات حالي أو تاريخي.");
-
-    private static Error HasDependencies() =>
-        Error.Conflict(
-            "Stores.HasDependencies",
-            "لا يمكن حذف المخزن لارتباطه بمستندات أو حركات حالية أو تاريخية.");
-
-    private static Error HistoricalIdentityChangeNotAllowed() =>
-        Error.Conflict(
-            "Stores.HistoricalIdentityChangeNotAllowed",
-            "لا يمكن تغيير نوع المخزن أو العميل أو المورد المرتبط به لوجود مستندات أو حركات حالية أو تاريخية.");
 }

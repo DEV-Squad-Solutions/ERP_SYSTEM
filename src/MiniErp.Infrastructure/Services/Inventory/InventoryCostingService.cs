@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using static MiniErp.Application.Features.Inventory.InventoryErrors;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
+using MiniErp.Application.Features.StockAdjustments;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
@@ -293,11 +295,7 @@ public sealed class InventoryCostingService(
                             sourceLine.StoreId != movement.StoreId ||
                             sourceLine.InvoiceType != InvoiceType.Sales)
                         {
-                            return InboundCostResult.Failure(
-                                Error.Validation(
-                                    "Inventory.InvalidSalesReturnSource",
-                                    "مرجع حركة البيع الأصلية غير صالح لاحتساب تكلفة مرتجع البيع.",
-                                    "sourceInvoiceLineId"));
+                            return InboundCostResult.Failure(InvalidSalesReturnSource());
                         }
 
                         var sourceMovement = timeline.SingleOrDefault(candidate =>
@@ -313,11 +311,7 @@ public sealed class InventoryCostingService(
                                 InventoryCostStatus.PartiallyCosted ||
                             !sourceMovement.UnitCost.HasValue)
                         {
-                            return InboundCostResult.Failure(
-                                Error.Conflict(
-                                    "Inventory.SalesReturnSourceCostPending",
-                                    "لا يمكن احتساب تكلفة مرتجع البيع لأن حركة البيع الأصلية لم تكتمل تكلفتها بعد.",
-                                    "sourceInvoiceLineId"));
+                            return InboundCostResult.Failure(SalesReturnSourceCostPending());
                         }
 
                         return InboundCostResult.Success(
@@ -331,11 +325,7 @@ public sealed class InventoryCostingService(
 
                     return line.ReturnUnitCost.HasValue
                         ? InboundCostResult.Success(line.ReturnUnitCost.Value)
-                        : InboundCostResult.Failure(
-                            Error.Validation(
-                                "Inventory.ReturnUnitCostRequired",
-                                "يجب إدخال تكلفة وحدة مرتجع البيع عند عدم توفر متوسط تكلفة موجب.",
-                                "returnUnitCost"));
+                        : InboundCostResult.Failure(ReturnUnitCostRequired());
                 }
 
             case ItemMovementType.AdjustmentIncrease:
@@ -353,11 +343,7 @@ public sealed class InventoryCostingService(
                         ? InboundCostResult.Success(unitCost.Value)
                         : movement.UnitCost.HasValue
                             ? InboundCostResult.Success(movement.UnitCost.Value)
-                        : InboundCostResult.Failure(
-                            Error.Validation(
-                                "StockAdjustments.UnitCostRequired",
-                                "يجب إدخال تكلفة الوحدة عند زيادة المخزون.",
-                                CostFieldName));
+                        : InboundCostResult.Failure(StockAdjustmentErrors.UnitCostRequired());
                 }
 
             case ItemMovementType.OpeningBalance:
@@ -381,18 +367,10 @@ public sealed class InventoryCostingService(
             case ItemMovementType.TransferIn:
                 return movement.UnitCost.HasValue
                     ? InboundCostResult.Success(movement.UnitCost.Value)
-                    : InboundCostResult.Failure(
-                        Error.Validation(
-                            "Inventory.TransferUnitCostRequired",
-                            "لا يمكن احتساب تكلفة التحويل الوارد بدون تكلفة مصدر.",
-                            CostFieldName));
+                    : InboundCostResult.Failure(TransferUnitCostRequired());
 
             default:
-                return InboundCostResult.Failure(
-                    Error.Validation(
-                        "Inventory.InvalidInboundMovementType",
-                        "نوع حركة المخزون الواردة غير صالح لاحتساب التكلفة.",
-                        "movementType"));
+                return InboundCostResult.Failure(InvalidInboundMovementType());
         }
     }
 
@@ -559,12 +537,6 @@ public sealed class InventoryCostingService(
                     coveredCost));
         }
     }
-
-    private static Error MissingSourceError(ItemMovement movement) =>
-        Error.Validation(
-            "Inventory.MovementCostSourceMissing",
-            $"تعذر العثور على مصدر تكلفة حركة المخزون رقم {movement.Id}.",
-            CostFieldName);
 
     private static bool ComesBefore(
         ItemMovement candidate,

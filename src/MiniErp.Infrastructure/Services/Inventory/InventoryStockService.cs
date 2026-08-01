@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
+using MiniErp.Application.Features.Inventory;
 using MiniErp.Domain.Enums;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Infrastructure.Persistence;
@@ -304,23 +305,25 @@ public sealed class InventoryStockService(
                 if (stockEvent.IsProposed &&
                     stockEvent.QuantityOut > 0m)
                 {
-                    return Error.Conflict(
-                        "Inventory.InsufficientStock",
-                        $"الكمية المتاحة للصنف {itemName} (رقم {itemId}) في المخزن " +
-                        $"{storeId} بتاريخ {stockEvent.Date:yyyy-MM-dd} هي " +
-                        $"{availableBeforeMovement}، ولا يمكن صرف " +
-                        $"{stockEvent.QuantityOut}.",
+                    return InventoryErrors.InsufficientStockAtDate(
+                        itemName,
+                        itemId,
+                        storeId,
+                        stockEvent.Date,
+                        availableBeforeMovement,
+                        stockEvent.QuantityOut,
                         proposal.ErrorFieldName);
                 }
 
-                return Error.Conflict(
-                    "Inventory.HistoricalStockConflict",
-                    $"{proposal.OperationDescription} بتاريخ " +
-                    $"{proposal.MovementDate:yyyy-MM-dd} سيؤدي إلى " +
-                    $"عجز في رصيد الصنف {itemName} (رقم {itemId}) في المخزن {storeId} " +
-                    $"بتاريخ {stockEvent.Date:yyyy-MM-dd}. الرصيد قبل " +
-                    $"حركة الصرف هو {availableBeforeMovement}، وكمية " +
-                    $"الحركة هي {stockEvent.QuantityOut}.",
+                return InventoryErrors.HistoricalStockConflict(
+                    proposal.OperationDescription,
+                    proposal.MovementDate,
+                    itemName,
+                    itemId,
+                    storeId,
+                    stockEvent.Date,
+                    availableBeforeMovement,
+                    stockEvent.QuantityOut,
                     proposal.ErrorFieldName);
             }
         }
@@ -408,18 +411,18 @@ public sealed class InventoryStockService(
                 if (!proposal.IsInbound && requestedQuantity > 0m &&
                     storeId == proposal.StoreId)
                 {
-                    return Error.Conflict(
-                        "Inventory.InsufficientStock",
-                        $"ظ„ط§ ظٹظˆط¬ط¯ ط±طµظٹط¯ ظƒط§ظپظچ ظ„ظ„طµظ†ظپ {itemName} (ط±ظ‚ظ… {itemId}) " +
-                        $"ظپظٹ ط§ظ„ظ…ط®ط²ظ† {storeId} ظ„طھظ†ظپظٹط° ط§ظ„ط­ط±ظƒط©. " +
-                        $"ط§ظ„ط±طµظٹط¯ ط§ظ„ظ†ظ‡ط§ط¦ظٹ ط§ظ„ظ…طھظˆظ‚ط¹ {finalBalance}.",
+                    return InventoryErrors.InsufficientFinalStock(
+                        itemName,
+                        itemId,
+                        storeId,
+                        finalBalance,
                         proposal.ErrorFieldName);
                 }
 
-                return Error.Conflict(
-                    "Inventory.HistoricalStockConflict",
-                    $"ط§ظ„طھط¹ط¯ظٹظ„ ط³ظٹط¤ط¯ظٹ ط¥ظ„ظ‰ ط±طµظٹط¯ ظ†ظ‡ط§ط¦ظٹ ط³ط§ظ„ط¨ ظ„ظ„طµظ†ظپ {itemName} " +
-                    $"(ط±ظ‚ظ… {itemId}) ظپظٹ ط§ظ„ظ…ط®ط²ظ† {storeId}.",
+                return InventoryErrors.HistoricalFinalStockConflict(
+                    itemName,
+                    itemId,
+                    storeId,
                     proposal.ErrorFieldName);
             }
         }

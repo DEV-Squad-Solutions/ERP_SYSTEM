@@ -1,4 +1,5 @@
 using System.Data;
+using static MiniErp.Application.Features.Companies.CompanyErrors;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -265,10 +266,7 @@ public sealed class CompanyService(
             cancellationToken);
         if (dependency is not null)
         {
-            return Result.Failure(
-                Error.Conflict(
-                    "Companies.HasDependencies",
-                    $"The company cannot be deleted because related {dependency} records exist, including active or historical data."));
+            return Result.Failure(HasDependencies(dependency));
         }
 
         dbContext.Companies.Remove(company);
@@ -301,10 +299,7 @@ public sealed class CompanyService(
 
         if (commercialRegisterExists)
         {
-            return Error.Conflict(
-                "Companies.CommercialRegisterExists",
-                $"السجل التجاري '{commercialRegister}' مستخدم بالفعل.",
-                nameof(CompanyRequest.CommercialRegister));
+            return CommercialRegisterExists(commercialRegister);
         }
 
         var taxNumberExists = await dbContext.Companies.AnyAsync(
@@ -314,10 +309,7 @@ public sealed class CompanyService(
             cancellationToken);
 
         return taxNumberExists
-            ? Error.Conflict(
-                "Companies.TaxNumberExists",
-                $"الرقم الضريبي '{taxNumber}' مستخدم بالفعل.",
-                nameof(CompanyRequest.TaxNumber))
+            ? TaxNumberExists(taxNumber)
             : null;
     }
 
@@ -452,29 +444,4 @@ public sealed class CompanyService(
         return null;
     }
 
-    private static Error BaseCurrencyLocked() =>
-        Error.Conflict(
-            "Companies.BaseCurrencyLocked",
-            "لا يمكن تغيير عملة الشركة الأساسية بعد وجود حركات مالية أو مخزنية.");
-
-    private static Error RowVersionRequired() =>
-        Error.Validation(
-            "Companies.RowVersionRequired",
-            "The current company rowVersion is required.",
-            nameof(CompanyUpdateRequest.RowVersion));
-
-    private static Error Concurrency() =>
-        Error.Conflict(
-            "Companies.Concurrency",
-            "The company was changed by another user. Reload it and try again.");
-
-    private static Error InvalidId() =>
-        Error.Validation(
-            "Companies.InvalidId",
-            "يجب أن يكون رقم الشركة أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "Companies.NotFound",
-            $"لم يتم العثور على الشركة رقم {id}.");
 }

@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using static MiniErp.Application.Features.Invoices.InvoiceErrors;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
+using MiniErp.Application.Features.Inventory;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Companies;
@@ -17,10 +19,7 @@ public sealed partial class InvoiceService
         if (filters.InvoiceNumber?.Trim().Length >
             InvoiceRequest.InvoiceNumberMaximumLength)
         {
-            return Error.Validation(
-                "Invoices.InvoiceNumberFilterInvalid",
-                "رقم الفاتورة في البحث يجب ألا يتجاوز 100 حرف.",
-                nameof(InvoiceFilterRequest.InvoiceNumber));
+            return InvoiceNumberFilterInvalid();
         }
 
         if (filters.InvoiceType.HasValue &&
@@ -28,10 +27,7 @@ public sealed partial class InvoiceService
                 typeof(InvoiceType),
                 filters.InvoiceType.Value))
         {
-            return Error.Validation(
-                "Invoices.InvoiceTypeInvalid",
-                "نوع الفاتورة غير مدعوم.",
-                nameof(InvoiceFilterRequest.InvoiceType));
+            return InvoiceTypeInvalid(nameof(InvoiceFilterRequest.InvoiceType));
         }
 
         if (filters.PaymentTerm.HasValue &&
@@ -39,10 +35,7 @@ public sealed partial class InvoiceService
                 typeof(PaymentTerm),
                 filters.PaymentTerm.Value))
         {
-            return Error.Validation(
-                "Invoices.PaymentTermInvalid",
-                "شرط السداد غير مدعوم.",
-                nameof(InvoiceFilterRequest.PaymentTerm));
+            return PaymentTermInvalid(nameof(InvoiceFilterRequest.PaymentTerm));
         }
 
         if (filters.PriceStatus.HasValue &&
@@ -50,54 +43,36 @@ public sealed partial class InvoiceService
                 typeof(InvoicePriceStatus),
                 filters.PriceStatus.Value))
         {
-            return InvalidFilter(
-                nameof(InvoiceFilterRequest.PriceStatus),
-                "حالة تسعير الأصناف غير مدعومة.");
+            return InvalidFilter(InvoiceFilterErrorKind.PriceStatus);
         }
 
         if (filters.BusinessPartnerId is <= 0)
         {
-            return InvalidFilter(
-                nameof(InvoiceFilterRequest.BusinessPartnerId),
-                "رقم الطرف يجب أن يكون أكبر من صفر.");
+            return InvalidFilter(InvoiceFilterErrorKind.BusinessPartnerId);
         }
 
         if (filters.CountryId is <= 0)
         {
-            return InvalidFilter(
-                nameof(InvoiceFilterRequest.CountryId),
-                "رقم الدولة يجب أن يكون أكبر من صفر.");
+            return InvalidFilter(InvoiceFilterErrorKind.CountryId);
         }
 
         if (filters.StoreId is <= 0)
         {
-            return InvalidFilter(
-                nameof(InvoiceFilterRequest.StoreId),
-                "رقم المخزن يجب أن يكون أكبر من صفر.");
+            return InvalidFilter(InvoiceFilterErrorKind.StoreId);
         }
 
         if (filters.DriverId is <= 0)
         {
-            return InvalidFilter(
-                nameof(InvoiceFilterRequest.DriverId),
-                "رقم السائق يجب أن يكون أكبر من صفر.");
+            return InvalidFilter(InvoiceFilterErrorKind.DriverId);
         }
 
         if (filters.FromDate > filters.ToDate)
         {
-            return InvalidFilter(
-                nameof(InvoiceFilterRequest.ToDate),
-                "تاريخ النهاية يجب ألا يسبق تاريخ البداية.");
+            return InvalidFilter(InvoiceFilterErrorKind.DateRange);
         }
 
         return null;
     }
-
-    private static Error InvalidFilter(string target, string description) =>
-        Error.Validation(
-            "Invoices.InvalidFilter",
-            description,
-            target);
 
     private async Task<Result<PreparedInvoice>> PrepareAsync(
         Invoice invoice,
@@ -117,20 +92,14 @@ public sealed partial class InvoiceService
                 InvoiceRequest.InvoiceNumberMaximumLength)
             {
                 return Failure(
-                    Error.Validation(
-                        "Invoices.InvoiceNumberInvalid",
-                        "رقم الفاتورة مطلوب ويجب ألا يتجاوز 100 حرف.",
-                        nameof(InvoiceRequest.InvoiceNumber)));
+                    InvoiceNumberInvalid());
             }
         }
 
         if (!Enum.IsDefined(typeof(InvoiceType), invoice.InvoiceType))
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.InvoiceTypeInvalid",
-                    "نوع الفاتورة غير مدعوم.",
-                    nameof(InvoiceRequest.InvoiceType)));
+                InvoiceTypeInvalid(nameof(InvoiceRequest.InvoiceType)));
         }
 
         if (!Enum.IsDefined(
@@ -138,40 +107,28 @@ public sealed partial class InvoiceService
                 invoice.ContentType))
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.ContentTypeInvalid",
-                    "محتوى الفاتورة غير مدعوم.",
-                    nameof(InvoiceRequest.ContentType)));
+                ContentTypeInvalid());
         }
 
         if (invoice.ContentType == InvoiceContentType.Containers &&
             lines.Count > 0)
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.ItemLinesNotAllowedForContainerInvoice",
-                    "لا يجوز إضافة سطور أصناف إلى فاتورة محتواها عبوات.",
-                    nameof(InvoiceRequest.Lines)));
+                ItemLinesNotAllowedForContainerInvoice());
         }
 
         if (invoice.ContentType == InvoiceContentType.Containers &&
             containerLines.Count == 0)
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.ContainerLinesRequired",
-                    "يجب إضافة سطر عبوة واحد على الأقل لفاتورة العبوات.",
-                    nameof(InvoiceRequest.ContainerLines)));
+                ContainerLinesRequired());
         }
 
         if (invoice.ContentType == InvoiceContentType.Items &&
             lines.Count == 0)
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.ItemLinesRequired",
-                    "يجب إضافة سطر صنف واحد على الأقل لفاتورة الأصناف.",
-                    nameof(InvoiceRequest.Lines)));
+                ItemLinesRequired());
         }
 
         if (invoice.InvoiceType != InvoiceType.SalesReturn &&
@@ -180,19 +137,13 @@ public sealed partial class InvoiceService
                 line.ReturnUnitCost.HasValue))
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.ReturnCostFieldsNotAllowed",
-                    "حقول تكلفة المرتجع مسموحة فقط في فاتورة مرتجع البيع.",
-                    nameof(InvoiceLineRequest.ReturnUnitCost)));
+                ReturnCostFieldsNotAllowed());
         }
 
         if (lines.Any(line => line.ReturnUnitCost < 0m))
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.ReturnUnitCostInvalid",
-                    "يجب ألا تقل تكلفة وحدة المرتجع عن صفر.",
-                    nameof(InvoiceLineRequest.ReturnUnitCost)));
+                ReturnUnitCostInvalid());
         }
 
         if (invoice.InvoiceType == InvoiceType.SalesReturn)
@@ -233,10 +184,7 @@ public sealed partial class InvoiceService
                 if (invalidLinkedLines.Length > 0)
                 {
                     return Failure(
-                        Error.Validation(
-                            "Invoices.InvalidSalesReturnSource",
-                            "يجب أن يشير مرتجع البيع إلى سطر بيع أصلي لنفس الشركة والمخزن والصنف.",
-                            nameof(InvoiceLineRequest.SourceInvoiceLineId)));
+                        InvalidSalesReturnSource());
                 }
             }
         }
@@ -244,19 +192,13 @@ public sealed partial class InvoiceService
         if (!Enum.IsDefined(typeof(PaymentTerm), invoice.PaymentTerm))
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.PaymentTermInvalid",
-                    "طريقة الدفع غير مدعومة.",
-                    nameof(InvoiceRequest.PaymentTerm)));
+                PaymentTermInvalid(nameof(InvoiceRequest.PaymentTerm)));
         }
 
         if (lines.GroupBy(line => line.ItemId).Any(group => group.Count() > 1))
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.DuplicateItemIds",
-                    "لا يجوز تكرار الصنف في سطور الفاتورة.",
-                    nameof(InvoiceRequest.Lines)));
+                DuplicateItemIds());
         }
 
         if (containerLines
@@ -264,10 +206,7 @@ public sealed partial class InvoiceService
             .Any(group => group.Count() > 1))
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.DuplicateContainerIds",
-                    "لا يجوز تكرار العبوة في سطور الفاتورة.",
-                    nameof(InvoiceRequest.ContainerLines)));
+                DuplicateContainerIds());
         }
 
         foreach (var line in lines)
@@ -280,10 +219,7 @@ public sealed partial class InvoiceService
                     out _))
             {
                 return Failure(
-                    Error.Validation(
-                        "Invoices.InvalidCalculatedAmounts",
-                        "نتيجة الكمية أو الإجمالي تتجاوز الدقة الرقمية المسموحة.",
-                        nameof(InvoiceRequest.Lines)));
+                    InvalidCalculatedAmounts(InvoiceCalculationErrorKind.LineQuantityOrTotal));
             }
         }
 
@@ -302,19 +238,13 @@ public sealed partial class InvoiceService
         if (partner is null)
         {
             return Failure(
-                Error.NotFound(
-                    "Invoices.BusinessPartnerNotFound",
-                    "لم يتم العثور على العميل أو المورد المحدد.",
-                    nameof(InvoiceRequest.BusinessPartnerId)));
+                BusinessPartnerNotFound(invoice.BusinessPartnerId));
         }
 
         if (!partner.IsActive)
         {
             return Failure(
-                Error.Conflict(
-                    "Invoices.BusinessPartnerInactive",
-                    "لا يمكن استخدام عميل أو مورد غير نشط.",
-                    nameof(InvoiceRequest.BusinessPartnerId)));
+                BusinessPartnerInactive());
         }
 
         var store = await dbContext.Stores
@@ -331,39 +261,27 @@ public sealed partial class InvoiceService
         if (store is null)
         {
             return Failure(
-                Error.NotFound(
-                    "Invoices.StoreNotFound",
-                    "لم يتم العثور على مخزن المنتجات المحدد.",
-                    nameof(InvoiceRequest.StoreId)));
+                StoreNotFound(invoice.StoreId));
         }
 
         if (!store.IsActive)
         {
             return Failure(
-                Error.Conflict(
-                    "Invoices.StoreInactive",
-                    "لا يمكن استخدام مخزن منتجات غير نشط.",
-                    nameof(InvoiceRequest.StoreId)));
+                StoreInactive());
         }
 
         if (invoice.ContentType == InvoiceContentType.Items &&
             store.IsContainerStore)
         {
             return Failure(
-                Error.Conflict(
-                    "Invoices.ContainerStoreNotAllowed",
-                    "يجب اختيار مخزن منتجات وليس مخزن عبوات.",
-                    nameof(InvoiceRequest.StoreId)));
+                ContainerStoreNotAllowed());
         }
 
         if (invoice.ContentType == InvoiceContentType.Containers &&
             !store.IsContainerStore)
         {
             return Failure(
-                Error.Conflict(
-                    "Invoices.ContainerStoreRequired",
-                    "يجب اختيار مخزن عبوات في فاتورة محتواها عبوات.",
-                    nameof(InvoiceRequest.StoreId)));
+                ContainerStoreRequired(InvoiceContainerStoreRequirement.ContainerInvoice));
         }
 
         if (invoice.ContentType == InvoiceContentType.Containers &&
@@ -384,29 +302,20 @@ public sealed partial class InvoiceService
             if (containerStore is null)
             {
                 return Failure(
-                    Error.NotFound(
-                        "Invoices.ContainerStoreNotFound",
-                        "لم يتم العثور على مخزن العبوات المحدد.",
-                        nameof(InvoiceRequest.ContainerStoreId)));
+                    ContainerStoreNotFound(containerStoreId));
             }
 
             if (!containerStore.IsActive)
             {
                 return Failure(
-                    Error.Conflict(
-                        "Invoices.ContainerStoreInactive",
-                        "لا يمكن استخدام مخزن عبوات غير نشط.",
-                        nameof(InvoiceRequest.ContainerStoreId)));
+                    ContainerStoreInactive());
             }
 
             if (!containerStore.IsContainerStore ||
                 containerStore.BusinessPartnerId != partner.Id)
             {
                 return Failure(
-                    Error.Conflict(
-                        "Invoices.ContainerStorePartnerMismatch",
-                        "مخزن العبوات يجب أن يكون مخزن العبوات النشط للعميل أو المورد المحدد.",
-                        nameof(InvoiceRequest.ContainerStoreId)));
+                    ContainerStorePartnerMismatch());
             }
         }
 
@@ -422,10 +331,7 @@ public sealed partial class InvoiceService
             if (!countryExists)
             {
                 return Failure(
-                    Error.NotFound(
-                        "Invoices.CountryNotFound",
-                        "لم يتم العثور على الدولة المحددة أو أنها غير نشطة.",
-                        nameof(InvoiceRequest.CountryId)));
+                    CountryNotFound(countryId));
             }
         }
 
@@ -444,10 +350,7 @@ public sealed partial class InvoiceService
             if (category is null)
             {
                 return Failure(
-                    Error.NotFound(
-                        "Invoices.ItemsCategoryNotFound",
-                        "لم يتم العثور على تصنيف الأصناف المحدد.",
-                        nameof(InvoiceRequest.ItemsCategoryId)));
+                    ItemsCategoryNotFound(itemsCategoryId));
             }
 
             if (!category.IsActive)
@@ -466,10 +369,7 @@ public sealed partial class InvoiceService
                 if (!isExistingSelection)
                 {
                     return Failure(
-                        Error.Conflict(
-                            "Invoices.ItemsCategoryInactive",
-                            "لا يمكن استخدام تصنيف أصناف غير نشط.",
-                            nameof(InvoiceRequest.ItemsCategoryId)));
+                        ItemsCategoryInactive());
                 }
             }
         }
@@ -480,20 +380,14 @@ public sealed partial class InvoiceService
             !invoice.DriverId.HasValue)
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.MainDriverRequired",
-                    "يجب تحديد السائق الرئيسي قبل تحديد السائق الفعلي.",
-                    nameof(InvoiceRequest.DriverId)));
+                MainDriverRequired());
         }
 
         if (invoice.UsesExternalDriver &&
             invoice.ActualDriverId.HasValue)
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.ExternalDriverWithActualDriver",
-                    "لا يجوز اختيار سائق فعلي داخلي مع السائق الخارجي.",
-                    nameof(InvoiceRequest.ActualDriverId)));
+                ExternalDriverWithActualDriver());
         }
 
         if (invoice.UsesExternalDriver)
@@ -501,10 +395,7 @@ public sealed partial class InvoiceService
             if (string.IsNullOrWhiteSpace(invoice.ExternalDriverName))
             {
                 return Failure(
-                    Error.Validation(
-                        "Invoices.ExternalDriverNameRequired",
-                        "اسم السائق الخارجي مطلوب.",
-                        nameof(InvoiceRequest.ExternalDriverName)));
+                    ExternalDriverNameRequired());
             }
         }
 
@@ -523,19 +414,13 @@ public sealed partial class InvoiceService
             if (driver is null)
             {
                 return Failure(
-                    Error.NotFound(
-                        "Invoices.DriverNotFound",
-                        "لم يتم العثور على السائق الرئيسي المحدد.",
-                        nameof(InvoiceRequest.DriverId)));
+                    DriverNotFound(driverId));
             }
 
             if (!driver.IsActive)
             {
                 return Failure(
-                    Error.Conflict(
-                        "Invoices.DriverInactive",
-                        "لا يمكن استخدام سائق رئيسي غير نشط.",
-                        nameof(InvoiceRequest.DriverId)));
+                    DriverInactive());
             }
         }
 
@@ -554,19 +439,13 @@ public sealed partial class InvoiceService
             if (actualDriver is null)
             {
                 return Failure(
-                    Error.NotFound(
-                        "Invoices.ActualDriverNotFound",
-                        "لم يتم العثور على السائق الفعلي المحدد.",
-                        nameof(InvoiceRequest.ActualDriverId)));
+                    ActualDriverNotFound(actualDriverId));
             }
 
             if (!actualDriver.IsActive)
             {
                 return Failure(
-                    Error.Conflict(
-                        "Invoices.ActualDriverInactive",
-                        "لا يمكن استخدام سائق فعلي غير نشط.",
-                        nameof(InvoiceRequest.ActualDriverId)));
+                    ActualDriverInactive());
             }
         }
 
@@ -594,10 +473,7 @@ public sealed partial class InvoiceService
         if (missingItemIds.Length > 0)
         {
             return Failure(
-                Error.NotFound(
-                    "Invoices.ItemNotFound",
-                    $"لم يتم العثور على الأصناف: {string.Join(", ", missingItemIds)}.",
-                    nameof(InvoiceLineRequest.ItemId)));
+                ItemNotFound(missingItemIds));
         }
 
         var inactiveItemIds = items
@@ -607,10 +483,7 @@ public sealed partial class InvoiceService
         if (inactiveItemIds.Length > 0)
         {
             return Failure(
-                Error.Conflict(
-                    "Invoices.ItemInactive",
-                    $"لا يمكن استخدام الأصناف غير النشطة: {string.Join(", ", inactiveItemIds)}.",
-                    nameof(InvoiceLineRequest.ItemId)));
+                ItemInactive(inactiveItemIds));
         }
 
         var inactiveUnitItemIds = items
@@ -620,10 +493,7 @@ public sealed partial class InvoiceService
         if (inactiveUnitItemIds.Length > 0)
         {
             return Failure(
-                Error.Conflict(
-                    "Invoices.ItemUnitInactive",
-                    $"وحدات الأصناف غير النشطة: {string.Join(", ", inactiveUnitItemIds)}.",
-                    nameof(InvoiceLineRequest.ItemId)));
+                ItemUnitInactive(inactiveUnitItemIds));
         }
 
         if (containerLines.Count > 0)
@@ -632,19 +502,13 @@ public sealed partial class InvoiceService
                 InvoiceType.SalesReturn))
             {
                 return Failure(
-                    Error.Conflict(
-                        "Invoices.ContainerLinesNotAllowed",
-                        "لا يسمح بسطر العبوة إلا في فواتير البيع ومرتجع البيع.",
-                        nameof(InvoiceRequest.ContainerLines)));
+                    ContainerLinesNotAllowed());
             }
 
             if (containerStore is null)
             {
                 return Failure(
-                    Error.Validation(
-                        "Invoices.ContainerStoreRequired",
-                        "مخزن العبوات مطلوب عند إضافة سطور العبوات.",
-                        nameof(InvoiceRequest.ContainerStoreId)));
+                    ContainerStoreRequired(InvoiceContainerStoreRequirement.ContainerLines));
             }
 
             var containerIds = containerLines
@@ -667,10 +531,7 @@ public sealed partial class InvoiceService
             if (missingContainerIds.Length > 0)
             {
                 return Failure(
-                    Error.NotFound(
-                        "Invoices.ContainerNotAssigned",
-                        $"العبوات غير النشطة أو غير المرتبطة بمخزن العميل: {string.Join(", ", missingContainerIds)}.",
-                        nameof(InvoiceContainerLineRequest.ContainerId)));
+                    ContainerNotAssigned(missingContainerIds));
             }
         }
 
@@ -701,39 +562,27 @@ public sealed partial class InvoiceService
             !InvoiceAmountRules.IsValidQuantity(invoice.WBDiscount) ||
             !InvoiceAmountRules.IsValidQuantity(invoice.WBTotal))
         {
-            return Error.Validation(
-                "Invoices.InvalidWBTotal",
-                "يجب أن تكون قيم الميزان غير سالبة وألا يتجاوز مجموع فرق الميزان وخصم الميزان وزن الميزان.",
-                nameof(InvoiceRequest.WBWeight));
+            return InvalidWBTotal();
         }
 
         if (invoice.DiscountAmount < 0m ||
             !InvoiceAmountRules.IsValidMoney(invoice.DiscountAmount) ||
             invoice.DiscountAmount > invoice.Subtotal)
         {
-            return Error.Validation(
-                "Invoices.InvalidDiscountAmount",
-                "قيمة الخصم يجب ألا تكون سالبة ولا يمكن أن تتجاوز إجمالي سطور الفاتورة.",
-                nameof(InvoiceRequest.DiscountAmount));
+            return InvalidDiscountAmount();
         }
 
         if (!InvoiceAmountRules.IsValidMoney(invoice.Subtotal) ||
             !InvoiceAmountRules.IsValidMoney(invoice.Total))
         {
-            return Error.Validation(
-                "Invoices.InvalidCalculatedAmounts",
-                "نتيجة المبالغ تتجاوز الدقة الرقمية المسموحة.",
-                nameof(InvoiceRequest.Lines));
+            return InvalidCalculatedAmounts(InvoiceCalculationErrorKind.Totals);
         }
 
         if (invoice.PaidAmount < 0m ||
             !InvoiceAmountRules.IsValidMoney(invoice.PaidAmount) ||
             invoice.PaidAmount > invoice.Total)
         {
-            return Error.Validation(
-                "Invoices.InvalidPaidAmount",
-                "المبلغ المدفوع يجب ألا يكون سالبًا ولا يمكن أن يتجاوز صافي الفاتورة.",
-                nameof(InvoiceRequest.PaidAmount));
+            return InvalidPaidAmount();
         }
 
         return null;
@@ -874,10 +723,7 @@ public sealed partial class InvoiceService
         if (cashboxAmount <= 0m)
         {
             return Result<PaymentPreparation?>.Failure(
-                Error.Validation(
-                    "Invoices.CashboxAmountTooSmall",
-                    "قيمة الدفعة بعد التحويل أقل من أصغر قيمة يمكن تسجيلها في صندوق النقدية.",
-                    nameof(InvoiceRequest.PaidAmount)));
+                CashboxAmountTooSmall());
         }
 
         var finalBalanceError = await ValidateFinalCashboxBalanceAsync(
@@ -989,9 +835,7 @@ public sealed partial class InvoiceService
             !string.IsNullOrWhiteSpace(currentInvoiceNumber);
         if (hasCurrentInvoiceId != hasCurrentInvoiceNumber)
         {
-            return Error.Validation(
-                "Invoices.InvalidCurrentInvoiceReference",
-                "يجب توفير رقم تعريف الفاتورة ورقمها معًا عند التعديل.");
+            return InvalidCurrentInvoiceReference();
         }
 
         var stockLines = new List<InventoryStockLine>(lines.Count);
@@ -1004,10 +848,7 @@ public sealed partial class InvoiceService
                     out var quantity,
                     out _))
             {
-                return Error.Validation(
-                    "Invoices.InvalidCalculatedAmounts",
-                    "نتيجة الكمية تتجاوز الدقة الرقمية المسموحة.",
-                    nameof(InvoiceRequest.Lines));
+                return InvalidCalculatedAmounts(InvoiceCalculationErrorKind.Quantity);
             }
 
             stockLines.Add(new InventoryStockLine(line.ItemId, quantity));
@@ -1048,9 +889,7 @@ public sealed partial class InvoiceService
             !string.IsNullOrWhiteSpace(currentInvoiceNumber);
         if (hasCurrentInvoiceId != hasCurrentInvoiceNumber)
         {
-            return Error.Validation(
-                "Invoices.InvalidCurrentInvoiceReference",
-                "يجب توفير رقم تعريف الفاتورة ورقمها معًا عند التعديل.");
+            return InvalidCurrentInvoiceReference();
         }
 
         var isUpdate = hasCurrentInvoiceId;
@@ -1068,10 +907,7 @@ public sealed partial class InvoiceService
                     out var quantity,
                     out _))
             {
-                return Error.Validation(
-                    "Invoices.InvalidCalculatedAmounts",
-                    "نتيجة الكمية تتجاوز الدقة الرقمية المسموحة.",
-                    nameof(InvoiceRequest.Lines));
+                return InvalidCalculatedAmounts(InvoiceCalculationErrorKind.Quantity);
             }
 
             requestedByItem[line.ItemId] =
@@ -1296,27 +1132,12 @@ public sealed partial class InvoiceService
                 if (stockEvent.IsCurrentInvoice &&
                     stockEvent.QuantityOut > 0m)
                 {
-                    return Error.Conflict(
-                        "Inventory.InsufficientStock",
-                        $"الكمية المتاحة للصنف {itemName} (رقم {itemId}) في المخزن " +
-                        $"{storeId} بتاريخ " +
-                        $"{stockEvent.Date:yyyy-MM-dd} هي " +
-                        $"{availableBeforeMovement}، ولا يمكن صرف " +
-                        $"{stockEvent.QuantityOut}.",
-                        nameof(InvoiceRequest.Lines));
+                    return InventoryErrors.InsufficientStockAtDate(itemName, itemId, storeId, stockEvent.Date, availableBeforeMovement, stockEvent.QuantityOut, nameof(InvoiceRequest.Lines));
                 }
 
                 // Removing, moving, reducing, or re-dating the old invoice
                 // causes a later stored movement to make the balance negative.
-                return Error.Conflict(
-                    "Inventory.HistoricalStockConflict",
-                    $"{operationDescription} بتاريخ " +
-                    $"{invoice.InvoiceDate:yyyy-MM-dd} سيؤدي إلى " +
-                    $"عجز في رصيد الصنف {itemName} (رقم {itemId}) في المخزن {storeId} " +
-                    $"بتاريخ {stockEvent.Date:yyyy-MM-dd}. الرصيد قبل " +
-                    $"حركة الصرف هو {availableBeforeMovement}، وكمية " +
-                    $"الحركة هي {stockEvent.QuantityOut}.",
-                    nameof(InvoiceRequest.Lines));
+                return InventoryErrors.HistoricalStockConflict(operationDescription, invoice.InvoiceDate, itemName, itemId, storeId, stockEvent.Date, availableBeforeMovement, stockEvent.QuantityOut, nameof(InvoiceRequest.Lines));
             }
         }
 

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using static MiniErp.Application.Features.Statements.StatementErrors;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
@@ -771,9 +772,7 @@ public sealed class FinancialStatementService(
     private static Error? ValidatePagination(PaginationRequest pagination) =>
         pagination.PageNumber <= 0 ||
         pagination.PageSize is <= 0 or > PaginationRequest.MaxPageSize
-            ? Error.Validation(
-                "Pagination.Invalid",
-                $"يجب أن يكون رقم الصفحة أكبر من صفر وحجم الصفحة بين 1 و{PaginationRequest.MaxPageSize}.")
+            ? PaginationErrors.Invalid()
             : null;
 
     private static int GetOffset(
@@ -823,21 +822,6 @@ public sealed class FinancialStatementService(
             < 0m => "مبلغ مطلوب دفعه للسائق",
             _ => "لا يوجد مبلغ مستحق"
         };
-
-    private static Error CashboxNotFound(int id) =>
-        Error.NotFound(
-            "Statements.CashboxNotFound",
-            $"لم يتم العثور على صندوق النقدية رقم {id}.");
-
-    private static Error PartnerNotFound(int id) =>
-        Error.NotFound(
-            "Statements.PartnerNotFound",
-            $"لم يتم العثور على العميل أو المورد رقم {id}.");
-
-    private static Error DriverNotFound(int id) =>
-        Error.NotFound(
-            "Statements.DriverNotFound",
-            $"لم يتم العثور على السائق رقم {id}.");
 
     private sealed class CashboxStatementRaw
     {

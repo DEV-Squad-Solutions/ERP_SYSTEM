@@ -1,4 +1,5 @@
 using System.Data;
+using static MiniErp.Application.Features.PartnerOpeningBalances.PartnerOpeningBalanceErrors;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -147,11 +148,7 @@ public sealed class PartnerOpeningBalanceService(
 
         if (request.RowVersion is not { Length: > 0 })
         {
-            return Result<PartnerOpeningBalanceResponse>.Failure(
-                Error.Validation(
-                    "PartnerOpeningBalances.RowVersionRequired",
-                    "يجب إرسال إصدار السجل الحالي للتعديل.",
-                nameof(PartnerOpeningBalanceUpdateRequest.RowVersion)));
+            return Result<PartnerOpeningBalanceResponse>.Failure(RowVersionRequired());
         }
 
         await using var transaction = await dbContext.Database
@@ -305,46 +302,17 @@ public sealed class PartnerOpeningBalanceService(
 
         if (partner is null)
         {
-            return Error.NotFound(
-                "PartnerOpeningBalances.BusinessPartnerNotFound",
-                $"لم يتم العثور على العميل أو المورد رقم {businessPartnerId}.",
-                nameof(PartnerOpeningBalanceRequest.BusinessPartnerId));
+            return BusinessPartnerNotFound(businessPartnerId);
         }
 
         if (!partner.IsActive)
         {
-            return Error.Conflict(
-                "PartnerOpeningBalances.BusinessPartnerInactive",
-                "لا يمكن استخدام عميل أو مورد غير نشط.",
-                nameof(PartnerOpeningBalanceRequest.BusinessPartnerId));
+            return BusinessPartnerInactive();
         }
 
         return partner.Currency == currency
             ? null
-            : Error.Conflict(
-                "PartnerOpeningBalances.CurrencyMismatch",
-                "يجب أن تطابق عملة رصيد الشريك عملة العميل أو المورد.",
-                nameof(PartnerOpeningBalanceRequest.Currency));
+            : CurrencyMismatch();
     }
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "PartnerOpeningBalances.InvalidId",
-            "يجب أن يكون رقم رصيد الشريك أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "PartnerOpeningBalances.NotFound",
-            $"لم يتم العثور على رصيد الشريك رقم {id}.");
-
-    private static Error DocumentNumberExists(string number) =>
-        Error.Conflict(
-            "PartnerOpeningBalances.DocumentNumberExists",
-            $"رقم المستند '{number}' مستخدم بالفعل.",
-            nameof(PartnerOpeningBalanceRequest.DocumentNumber));
-
-    private static Error Concurrency() =>
-        Error.Conflict(
-            "PartnerOpeningBalances.Concurrency",
-            "تم تعديل رصيد الشريك بواسطة عملية أخرى. أعد تحميل المستند ثم حاول مرة أخرى.");
 }

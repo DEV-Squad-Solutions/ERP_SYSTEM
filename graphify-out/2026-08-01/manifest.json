@@ -65,8 +65,8 @@
     "semantic_hash": ""
   },
   "src/MiniErp.Api/Controllers/ExchangeRatesController.cs": {
-    "mtime": 1785529376.8677678,
-    "ast_hash": "d9281f10637db522a96480d6aa1800e0",
+    "mtime": 1785532620.8939745,
+    "ast_hash": "06002bd6576dbad6f37eb77be8d83114",
     "semantic_hash": ""
   },
   "src/MiniErp.Api/Controllers/InventoryCostReportsController.cs": {
@@ -250,8 +250,8 @@
     "semantic_hash": ""
   },
   "src/MiniErp.Api/Swagger/ExchangeRatesSwaggerDocumentation.cs": {
-    "mtime": 1785523131.030895,
-    "ast_hash": "19d8c2ab7b188883ef03a9a07fde8f4c",
+    "mtime": 1785534965.9652207,
+    "ast_hash": "95b0667d3d600bca6cd5d9d2c356644b",
     "semantic_hash": ""
   },
   "src/MiniErp.Api/Swagger/InventoryCostReportsSwaggerDocumentation.cs": {
@@ -860,8 +860,8 @@
     "semantic_hash": ""
   },
   "src/MiniErp.Application/Features/ExchangeRates/IExchangeRateService.cs": {
-    "mtime": 1785528045.8723588,
-    "ast_hash": "a9da35051691b629e05640c09818c665",
+    "mtime": 1785532620.8919814,
+    "ast_hash": "e3bf2b30a2e242199cb6935972491428",
     "semantic_hash": ""
   },
   "src/MiniErp.Application/Features/InventoryCostReports/IInventoryCostReportService.cs": {
@@ -2095,8 +2095,8 @@
     "semantic_hash": ""
   },
   "src/MiniErp.Infrastructure/Services/ExchangeRates/ExchangeRateService.cs": {
-    "mtime": 1785530801.9991615,
-    "ast_hash": "d1f4ea7edb1f1f7d64f3836806bd8c16",
+    "mtime": 1785532620.892983,
+    "ast_hash": "57d2b17afb2e5f3d90749aab58006951",
     "semantic_hash": ""
   },
   "src/MiniErp.Infrastructure/Services/InventoryCounts/InventoryCountService.cs": {
@@ -2210,8 +2210,8 @@
     "semantic_hash": ""
   },
   "tests/MiniErp.Tests/Authorization/CompanyAndExchangeRateAuthorizationTests.cs": {
-    "mtime": 1785531052.813565,
-    "ast_hash": "d620b40d57c22e91199dec0c9a8f4550",
+    "mtime": 1785532620.8939745,
+    "ast_hash": "16c45b8dfd335d54138ef528a34f9d5d",
     "semantic_hash": ""
   },
   "tests/MiniErp.Tests/BusinessPartners/BusinessPartnerContainerStoreServiceTests.cs": {
@@ -2435,8 +2435,8 @@
     "semantic_hash": ""
   },
   "src/MiniErp.Infrastructure/Services/ExchangeRates/FrankfurterExchangeRateProvider.cs": {
-    "mtime": 1785529525.6792202,
-    "ast_hash": "72152bb7ead4484ec5e9c6c07f79854a",
+    "mtime": 1785533431.5505626,
+    "ast_hash": "fa6b5213aaad97541e7652d7ba8ebdfd",
     "semantic_hash": ""
   },
   "src/MiniErp.Infrastructure/Services/ExchangeRates/FrankfurterOptions.cs": {
@@ -2445,8 +2445,13 @@
     "semantic_hash": ""
   },
   "tests/MiniErp.Tests/ExchangeRates/FrankfurterExchangeRateProviderTests.cs": {
-    "mtime": 1785530978.3704243,
-    "ast_hash": "f087d39db85610bb58260efe52fe6ad4",
+    "mtime": 1785532698.5545442,
+    "ast_hash": "d43c2b96fb252efbc2f6ac5dd8714282",
+    "semantic_hash": ""
+  },
+  "src/MiniErp.Application/Features/ExchangeRates/ExchangeRateImportPreviewResponse.cs": {
+    "mtime": 1785532564.6048315,
+    "ast_hash": "e690bc7046f66389c18205f122b0e687",
     "semantic_hash": ""
   }
 }

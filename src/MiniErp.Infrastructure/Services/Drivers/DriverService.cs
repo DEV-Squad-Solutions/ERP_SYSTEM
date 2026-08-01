@@ -1,4 +1,5 @@
 using Mapster;
+using static MiniErp.Application.Features.Drivers.DriverErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
@@ -248,10 +249,7 @@ public sealed class DriverService(
                 driver.Name,
                 StringComparison.OrdinalIgnoreCase)))
         {
-            return Error.Conflict(
-                "Drivers.NameExists",
-                $"اسم السائق '{driver.Name}' موجود بالفعل.",
-                nameof(DriverRequest.Name));
+            return NameExists(driver.Name);
         }
 
         if (duplicates.Any(entity => string.Equals(
@@ -259,10 +257,7 @@ public sealed class DriverService(
                 driver.Code,
                 StringComparison.OrdinalIgnoreCase)))
         {
-            return Error.Conflict(
-                "Drivers.CodeExists",
-                $"كود السائق '{driver.Code}' مستخدم بالفعل.",
-                nameof(DriverRequest.Code));
+            return CodeExists(driver.Code);
         }
 
         if (duplicates.Any(entity => string.Equals(
@@ -270,10 +265,7 @@ public sealed class DriverService(
                 driver.LicenseNumber,
                 StringComparison.OrdinalIgnoreCase)))
         {
-            return Error.Conflict(
-                "Drivers.LicenseNumberExists",
-                $"رقم رخصة السائق '{driver.LicenseNumber}' مستخدم بالفعل.",
-                nameof(DriverRequest.LicenseNumber));
+            return LicenseNumberExists(driver.LicenseNumber);
         }
 
         return driver.NationalId is not null &&
@@ -281,25 +273,8 @@ public sealed class DriverService(
                    entity.NationalId,
                    driver.NationalId,
                    StringComparison.OrdinalIgnoreCase))
-            ? Error.Conflict(
-                "Drivers.NationalIdExists",
-                "يوجد سائق آخر يحمل الرقم القومي نفسه.",
-                nameof(DriverRequest.NationalId))
+            ? NationalIdExists()
             : null;
     }
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "Drivers.InvalidId",
-            "يجب أن يكون رقم السائق أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "Drivers.NotFound",
-            $"لم يتم العثور على السائق رقم {id}.");
-
-    private static Error HasDependencies() =>
-        Error.Conflict(
-            "Drivers.HasDependencies",
-            "لا يمكن حذف السائق لارتباطه بفواتير أو رحلات أو سندات نقدية حالية أو تاريخية.");
 }

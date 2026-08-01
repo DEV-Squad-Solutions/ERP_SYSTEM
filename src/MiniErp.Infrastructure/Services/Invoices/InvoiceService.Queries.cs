@@ -1,4 +1,5 @@
 using Mapster;
+using static MiniErp.Application.Features.Invoices.InvoiceErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
@@ -165,38 +166,22 @@ public sealed partial class InvoiceService
     {
         if (storeId <= 0)
         {
-            return Result<InvoiceItemBalanceResponse>.Failure(
-                Error.Validation(
-                    "Invoices.ItemBalanceStoreInvalid",
-                    "يجب أن يكون رقم المخزن أكبر من صفر.",
-                    nameof(InvoiceItemBalanceResponse.StoreId)));
+            return Result<InvoiceItemBalanceResponse>.Failure(ItemBalanceStoreInvalid());
         }
 
         if (itemId <= 0)
         {
-            return Result<InvoiceItemBalanceResponse>.Failure(
-                Error.Validation(
-                    "Invoices.ItemBalanceItemInvalid",
-                    "يجب أن يكون رقم الصنف أكبر من صفر.",
-                    nameof(InvoiceItemBalanceResponse.ItemId)));
+            return Result<InvoiceItemBalanceResponse>.Failure(ItemBalanceItemInvalid());
         }
 
         if (asOfDate == DateOnly.MinValue)
         {
-            return Result<InvoiceItemBalanceResponse>.Failure(
-                Error.Validation(
-                    "Invoices.ItemBalanceDateRequired",
-                    "يجب تحديد تاريخ الفاتورة لحساب الرصيد.",
-                    nameof(InvoiceItemBalanceResponse.AsOfDate)));
+            return Result<InvoiceItemBalanceResponse>.Failure(ItemBalanceDateRequired());
         }
 
         if (invoiceId is <= 0)
         {
-            return Result<InvoiceItemBalanceResponse>.Failure(
-                Error.Validation(
-                    "Invoices.ItemBalanceInvoiceInvalid",
-                    "يجب أن يكون رقم الفاتورة المستبعدة أكبر من صفر.",
-                    "InvoiceId"));
+            return Result<InvoiceItemBalanceResponse>.Failure(ItemBalanceInvoiceInvalid());
         }
 
         var store = await dbContext.Stores
@@ -213,29 +198,17 @@ public sealed partial class InvoiceService
             .FirstOrDefaultAsync(cancellationToken);
         if (store is null)
         {
-            return Result<InvoiceItemBalanceResponse>.Failure(
-                Error.NotFound(
-                    "Invoices.StoreNotFound",
-                    "لم يتم العثور على المخزن المحدد.",
-                    nameof(InvoiceItemBalanceResponse.StoreId)));
+            return Result<InvoiceItemBalanceResponse>.Failure(StoreNotFound(storeId));
         }
 
         if (!store.IsActive)
         {
-            return Result<InvoiceItemBalanceResponse>.Failure(
-                Error.Conflict(
-                    "Invoices.StoreInactive",
-                    "لا يمكن حساب رصيد مخزن غير نشط.",
-                    nameof(InvoiceItemBalanceResponse.StoreId)));
+            return Result<InvoiceItemBalanceResponse>.Failure(StoreInactive());
         }
 
         if (store.IsContainerStore)
         {
-            return Result<InvoiceItemBalanceResponse>.Failure(
-                Error.Conflict(
-                    "Invoices.ContainerStoreNotAllowed",
-                    "رصيد الأصناف متاح لمخازن المنتجات فقط.",
-                    nameof(InvoiceItemBalanceResponse.StoreId)));
+            return Result<InvoiceItemBalanceResponse>.Failure(ContainerStoreNotAllowed());
         }
 
         var item = await dbContext.Items
@@ -254,29 +227,17 @@ public sealed partial class InvoiceService
             .FirstOrDefaultAsync(cancellationToken);
         if (item is null)
         {
-            return Result<InvoiceItemBalanceResponse>.Failure(
-                Error.NotFound(
-                    "Invoices.ItemNotFound",
-                    "لم يتم العثور على الصنف المحدد.",
-                    nameof(InvoiceItemBalanceResponse.ItemId)));
+            return Result<InvoiceItemBalanceResponse>.Failure(ItemNotFound([itemId]));
         }
 
         if (!item.IsActive)
         {
-            return Result<InvoiceItemBalanceResponse>.Failure(
-                Error.Conflict(
-                    "Invoices.ItemInactive",
-                    "لا يمكن حساب رصيد صنف غير نشط.",
-                    nameof(InvoiceItemBalanceResponse.ItemId)));
+            return Result<InvoiceItemBalanceResponse>.Failure(ItemInactive([itemId]));
         }
 
         if (!item.ItemUnitIsActive)
         {
-            return Result<InvoiceItemBalanceResponse>.Failure(
-                Error.Conflict(
-                    "Invoices.ItemUnitInactive",
-                    "لا يمكن حساب رصيد صنف وحدته غير نشطة.",
-                    nameof(InvoiceItemBalanceResponse.ItemId)));
+            return Result<InvoiceItemBalanceResponse>.Failure(ItemUnitInactive([itemId]));
         }
 
         string? excludedInvoiceNumber = null;

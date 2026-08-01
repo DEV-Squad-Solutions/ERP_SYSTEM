@@ -1,4 +1,5 @@
 using System.Data;
+using static MiniErp.Application.Features.Invoices.InvoiceErrors;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -216,11 +217,7 @@ public sealed partial class InvoiceService(
 
         if (request.RowVersion is not { Length: 8 })
         {
-            return Result<InvoiceResponse>.Failure(
-                Error.Validation(
-                    "Invoices.RowVersionRequired",
-                    "يجب إرسال إصدار السجل الحالي المكون من 8 بايت.",
-                    nameof(InvoiceUpdateRequest.RowVersion)));
+            return Result<InvoiceResponse>.Failure(RowVersionRequired());
         }
 
         var requestedValues = request.Adapt<Invoice>();

@@ -1,9 +1,11 @@
 using Mapster;
+using static MiniErp.Application.Features.Items.ItemErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Items;
+using MiniErp.Application.Features.ItemUnits;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Infrastructure.Persistence;
 
@@ -104,11 +106,7 @@ public sealed class ItemService(
 
         if (codeExists)
         {
-            return Result<ItemResponse>.Failure(
-                Error.Conflict(
-                    "Items.CodeExists",
-                    $"كود الصنف '{item.Code}' مستخدم بالفعل.",
-                    nameof(ItemRequest.Code)));
+            return Result<ItemResponse>.Failure(CodeExists(item.Code));
         }
 
         var itemUnitResult = await GetActiveItemUnitAsync(
@@ -156,11 +154,7 @@ public sealed class ItemService(
 
         if (codeExists)
         {
-            return Result<ItemResponse>.Failure(
-                Error.Conflict(
-                    "Items.CodeExists",
-                    $"كود الصنف '{normalizedItem.Code}' مستخدم بالفعل.",
-                    nameof(ItemRequest.Code)));
+            return Result<ItemResponse>.Failure(CodeExists(normalizedItem.Code));
         }
 
         var itemUnitResult = await GetActiveItemUnitAsync(
@@ -244,17 +238,6 @@ public sealed class ItemService(
         return Result.Success();
     }
 
-    private static Error InvalidId() =>
-        Error.Validation("Items.InvalidId", "يجب أن يكون رقم الصنف أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound("Items.NotFound", $"لم يتم العثور على الصنف رقم {id}.");
-
-    private static Error InUse() =>
-        Error.Conflict(
-            "Items.InUse",
-            "لا يمكن حذف الصنف لارتباطه بمستندات أو حركات حالية أو تاريخية.");
-
     private async Task<Result<ItemUnit>> GetActiveItemUnitAsync(
         int itemUnitId,
         int companyId,
@@ -268,17 +251,11 @@ public sealed class ItemService(
 
         if (itemUnit is null)
         {
-            return Result<ItemUnit>.Failure(
-                Error.NotFound(
-                    "ItemUnits.NotFound",
-                    $"لم يتم العثور على وحدة الصنف رقم {itemUnitId}."));
+            return Result<ItemUnit>.Failure(ItemUnitErrors.NotFound(itemUnitId));
         }
 
         return !itemUnit.IsActive
-            ? Result<ItemUnit>.Failure(
-                Error.Conflict(
-                    "ItemUnits.Inactive",
-                    $"وحدة الصنف رقم {itemUnitId} غير نشطة."))
+            ? Result<ItemUnit>.Failure(ItemUnitErrors.Inactive(itemUnitId))
             : Result<ItemUnit>.Success(itemUnit);
     }
 }

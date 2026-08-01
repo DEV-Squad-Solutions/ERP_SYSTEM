@@ -1,4 +1,5 @@
 using Mapster;
+using static MiniErp.Application.Features.BusinessPartners.BusinessPartnerErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
@@ -597,10 +598,7 @@ public sealed class BusinessPartnerService(
                 partner.Name,
                 StringComparison.OrdinalIgnoreCase)))
         {
-            return Error.Conflict(
-                "BusinessPartners.NameExists",
-                $"اسم العميل أو المورد '{partner.Name}' موجود بالفعل.",
-                nameof(BusinessPartnerRequest.Name));
+            return NameExists(partner.Name);
         }
 
         if (duplicates.Any(entity => string.Equals(
@@ -608,10 +606,7 @@ public sealed class BusinessPartnerService(
                 partner.Code,
                 StringComparison.OrdinalIgnoreCase)))
         {
-            return Error.Conflict(
-                "BusinessPartners.CodeExists",
-                $"كود العميل أو المورد '{partner.Code}' مستخدم بالفعل.",
-                nameof(BusinessPartnerRequest.Code));
+            return CodeExists(partner.Code);
         }
 
         return partner.TaxNumber is not null &&
@@ -619,10 +614,7 @@ public sealed class BusinessPartnerService(
                    entity.TaxNumber,
                    partner.TaxNumber,
                    StringComparison.OrdinalIgnoreCase))
-            ? Error.Conflict(
-                "BusinessPartners.TaxNumberExists",
-                "يوجد عميل أو مورد آخر يحمل الرقم الضريبي نفسه.",
-                nameof(BusinessPartnerRequest.TaxNumber))
+            ? TaxNumberExists()
             : null;
     }
 
@@ -672,34 +664,4 @@ public sealed class BusinessPartnerService(
                     trip.BusinessPartnerId == businessPartnerId,
                 cancellationToken);
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "BusinessPartners.InvalidId",
-            "يجب أن يكون رقم العميل أو المورد أكبر من صفر.");
-
-    private static Error ContainerStoreNotFound(int id) =>
-        Error.NotFound(
-            "BusinessPartners.ContainerStoreNotFound",
-            $"لم يتم العثور على مخزن عبوات نشط مرتبط بالعميل أو المورد رقم {id}.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "BusinessPartners.NotFound",
-            $"لم يتم العثور على العميل أو المورد رقم {id}.");
-
-    private static Error HasContainerStores() =>
-        Error.Conflict(
-            "BusinessPartners.HasContainerStores",
-            "لا يمكن حذف العميل أو المورد لارتباطه بمخزن عبوات حالي أو تاريخي.");
-
-    private static Error HasFinancialRecords() =>
-        Error.Conflict(
-            "BusinessPartners.HasFinancialRecords",
-            "لا يمكن حذف العميل أو المورد لارتباطه بسجلات مالية حالية أو تاريخية.");
-
-    private static Error CurrencyChangeNotAllowed() =>
-        Error.Conflict(
-            "BusinessPartners.CurrencyChangeNotAllowed",
-            "لا يمكن تغيير عملة العميل أو المورد بعد إنشاء سجلات مالية مرتبطة به.",
-            nameof(BusinessPartnerRequest.Currency));
 }

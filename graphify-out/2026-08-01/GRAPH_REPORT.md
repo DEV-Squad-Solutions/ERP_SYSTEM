@@ -1,12 +1,12 @@
 # Graph Report - MiniErp  (2026-08-01)
 
 ## Corpus Check
-- 490 files · ~141,681 words
+- 491 files · ~141,984 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 4028 nodes · 11102 edges · 208 communities (160 shown, 48 thin omitted)
-- Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 87 edges (avg confidence: 0.8)
+- 4036 nodes · 11134 edges · 202 communities (146 shown, 56 thin omitted)
+- Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 88 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
@@ -20,7 +20,7 @@
 - PartnerOpeningBalanceServiceTests
 - StockAdjustmentService
 - .CreateAsync
-- ApplicationRoles.cs
+- MiniErp.Infrastructure.Identity
 - BusinessPartnerService
 - AuthenticationService
 - IRegister
@@ -32,7 +32,7 @@
 - InventoryCostingService
 - ApplicationUser
 - Task
-- InvoiceType
+- .Create
 - CountryService
 - ApiErrorResponseFactory
 - DriverService
@@ -48,10 +48,10 @@
 - StoreContainerService
 - Task
 - InventoryStockService
-- CashVoucherService
+- .NotFound
 - Task
-- SelectResponse
-- AuditableEntityConfiguration
+- .Success
+- MiniErp.Infrastructure.Persistence.Configurations
 - UserService
 - MiniErp.Application.Features.Users
 - Error
@@ -61,24 +61,24 @@
 - Task
 - CompanyService
 - ExchangeRatesController
-- Driver
+- CashVoucher
 - MiniErp.Api
-- ItemUnitService
+- Result
 - StockOpeningBalanceServiceTests
 - AccessTokenCompanyTestDatabase
 - .CreateAsync
 - ArabicIdentityErrorDescriber
 - Task
 - Task
-- ItemMovement
+- MiniErp.Application.Features.DriverTrips
 - .GetAllAsync
 - StoreService
-- Result
+- InventoryCountResponse
 - CategoryTestDatabase
 - ApplicationDbContext
 - FinancialStatementService
 - InventoryCostAllocation
-- Task
+- ExchangeRate
 - .PrepareAsync
 - AuditableEntityInterceptor
 - .Create
@@ -86,9 +86,9 @@
 - UsersController
 - ICurrentCompanyContext
 - .CreateAsync
-- StoresController
-- InvoiceService
 - ProducesResponseType&lt;ProblemDetails&gt;
+- .Login
+- .GetAll
 - .Create
 - .Create
 - .Create
@@ -96,47 +96,47 @@
 - ExchangeRateService
 - .GetRateAsync
 - .Create
-- .ProcessInbound
+- CashVoucherUpdateRequest
 - ContainerService
 - InvoiceMappingRegister
 - .GetCashboxStatement
 - .Upsert
 - .Create
 - EnumRequestOperationDocumentationFilter
-- PagedResponse
+- PaginationRequest
 - StockOpeningBalance
 - InvoicePaymentTermTests
+- SwaggerExtensions
+- .Create
 - MiniErp.Api.Swagger
-- .Create
-- IOperationFilter
-- InventoryCostReportService
+- InventoryCostStatus
 - ProducesResponseType&lt;IReadOnlyList&lt;SelectResponse&gt;&gt;
-- .LoadMovementCostsAsync
-- .Create
+- IScopedService
+- ContainerTestDatabase
 - .UpdateCosts
-- InventoryCountRequest
+- CurrentCompanyContext
 - DriverTripService
 - StatementResponses.cs
-- .IsValidRate
 - .Apply
-- StockOpeningBalanceRequest
+- .Apply
+- .Apply
 - JwtOptions
-- .GetRateAsync
+- CashboxMappingRegister
 - InventoryCount
 - UserRequestValidatorTests
 - .GetAsync
 - ArabicValidationConfiguration
-- ExchangeRateServiceTests
-- .SendAsync
-- .GetAllAsync
+- CashMovementTypeMappingRegister
+- FrankfurterExchangeRateProviderTests
+- CashVoucherMappingRegister
+- InitialIdentity
 - Migration
-- AddTablesItemAndItemUnit
 - .GetCostEntryAsync
 - .ApplyPendingMigrationsAsync
-- .GetSnapshotsAsync
+- InventoryCountMappingRegister
 - MappingConfiguration
-- CashManagementValidatorTests
-- AllowAnonymousOperationFilter
+- ItemsCategoryMappingRegister
+- IOperationFilter
 - .Apply
 - .Apply
 - .Apply
@@ -146,14 +146,14 @@
 - .Apply
 - .Apply
 - .Apply
-- InventoryCostReportsSwaggerDocumentation.cs
+- StockAdjustmentMappingRegister
 - .Apply
 - .Apply
 - .Apply
 - InvoiceResponse
 - .Apply
 - StatementsSwaggerDocumentation.cs
-- .AddMovementAsync
+- StockOpeningBalanceMappingRegister
 - .Apply
 - StockOpeningBalanceRequestValidatorTests
 - .Apply
@@ -193,39 +193,35 @@
 - addwbforinvoice
 - additemCategory
 - InventoryDocumentValidatorTests
-- MiniErp.Api.Errors
-- MiniErp.Application.Features.PartnerOpeningBalances
+- BusinessPartnerMappingRegister
+- PartnerOpeningBalanceMappingRegister
 - DriverTripBulkCostUpdateRequest
 - Invoice
-- CashboxStatementFilterRequest
+- ContainerMappingRegister
 - CompanyAndExchangeRateAuthorizationTests
-- StockOpeningBalanceLine
-- IAsyncDisposable
-- MiniErp.Application.Features.Companies
+- StockOpeningBalanceAmountRules
+- CountryMappingRegister
+- CompanyMappingRegister
 - DriverStatementRaw
-- StoreContainerUpsertRequest
+- DriverMappingRegister
 - AbstractValidator
 - Q: Cross-project MiniErp feature flow impact analysis
 - AddCompanyRowVersion
-- PaginationRequest
-- .SeedInvoiceFilterDataAsync
-- InvoiceLineRequest
+- DriverTripCostMappingRegister
+- ItemUnitMappingRegister
+- StoreMappingRegister
 - AddExchangeRateProvider
-- StoreContainerFilterRequest
-- CustomClaimTypes.cs
 - InventoryQuantityRules.cs
 - MiniErp.Application
-- .DisposeAsync
-- .Apply
 - .Apply
 - MappingConfigurationTests
 - StockAdjustmentsSwaggerDocumentation.cs
 
 ## God Nodes (most connected - your core abstractions)
-1. `Result` - 293 edges
+1. `Result` - 295 edges
 2. `InvoiceServiceTests` - 137 edges
 3. `ApplicationDbContext` - 120 edges
-4. `MiniErp.Domain.Enums` - 116 edges
+4. `MiniErp.Domain.Enums` - 117 edges
 5. `MiniErp.Application.Common.Models` - 89 edges
 6. `PaginationRequest` - 87 edges
 7. `MiniErp.Application.Common.Results` - 72 edges
@@ -253,39 +249,43 @@
 - **Company-Scoped Authentication Flow** — readme_jwt_authentication, readme_company_selection_token, readme_company_scoped_access_token, readme_rotating_refresh_tokens [EXTRACTED 1.00]
 - **Application Outcome Handling** — readme_result_pattern, readme_fluentvalidation, readme_global_exception_handling [EXTRACTED 1.00]
 
-## Communities (208 total, 48 thin omitted)
+## Communities (202 total, 56 thin omitted)
 
 ### Community 0 - "InvoiceServiceTests"
-Cohesion: 0.09
-Nodes (5): Fact, SqliteConnection, Task, InvoiceServiceTests, InvoiceTestDatabase
+Cohesion: 0.05
+Nodes (23): Credit, Debit, InvoiceTestDatabase, InvoicePriceStatus, InvoiceLineRequest, InvoiceMovementRules, BusinessPartnerMovementType, InvoiceType (+15 more)
 
 ### Community 1 - "StockOpeningBalanceService"
-Cohesion: 0.18
-Nodes (12): StockOpeningBalanceResponse, CancellationToken, DateOnly, IEnumerable, int, IQueryable, IReadOnlyCollection, List (+4 more)
+Cohesion: 0.06
+Nodes (43): OpeningMovementCost, ProducesResponseType&lt;PagedResponse&lt;StockOpeningBalanceListResponse&gt;&gt;, ProducesResponseType&lt;StockOpeningBalanceResponse&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost (+35 more)
 
 ### Community 2 - "PartnerOpeningBalanceServiceTests"
 Cohesion: 0.05
 Nodes (40): PartnerOpeningBalanceTestDatabase, ProducesResponseType&lt;PagedResponse&lt;PartnerOpeningBalanceResponse&gt;&gt;, ProducesResponseType&lt;PartnerOpeningBalanceResponse&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost (+32 more)
 
 ### Community 3 - "StockAdjustmentService"
-Cohesion: 0.06
-Nodes (39): MovementCostSnapshot, CancellationToken, Task, IStockAdjustmentService, StockAdjustmentFilterRequest, int, StockAdjustmentLineRequest, StockAdjustmentRequest (+31 more)
+Cohesion: 0.07
+Nodes (36): MovementCostSnapshot, CancellationToken, Task, IStockAdjustmentService, StockAdjustmentFilterRequest, int, StockAdjustmentLineRequest, StockAdjustmentRequest (+28 more)
 
 ### Community 4 - ".CreateAsync"
-Cohesion: 0.10
-Nodes (19): CashDirection, PartnerAccountEffect, Fact, InlineData, Task, Theory, CashMasterServiceTests, Fact (+11 more)
+Cohesion: 0.07
+Nodes (27): int, CashVoucherRequest, CashVoucherRequestValidator, CashDirection, CashPartyType, PartnerAccountEffect, Fact, InlineData (+19 more)
+
+### Community 5 - "MiniErp.Infrastructure.Identity"
+Cohesion: 0.12
+Nodes (9): MiniErp.Tests.Authentication, MiniErp.Infrastructure.Services.Users, MiniErp.Infrastructure.Services.Companies, MiniErp.Infrastructure.Identity, MiniErp.Application.Common.Authentication, string, ApplicationRoles, string (+1 more)
 
 ### Community 6 - "BusinessPartnerService"
 Cohesion: 0.07
-Nodes (33): ProducesResponseType&lt;BusinessPartnerContainerStoreResponse&gt;, ProducesResponseType&lt;BusinessPartnerResponse&gt;, ProducesResponseType&lt;PagedResponse&lt;BusinessPartnerResponse&gt;&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost (+25 more)
+Nodes (30): BusinessPartnerIntegrityTestDatabase, BusinessPartnerContainerStoreResponse, BusinessPartnerFilterRequest, BusinessPartnerFilterRequestValidator, BusinessPartnerRequest, BusinessPartnerRequestValidator, IReadOnlyList, BusinessPartnerResponse (+22 more)
 
 ### Community 7 - "AuthenticationService"
-Cohesion: 0.06
-Nodes (33): AllowAnonymous, Claim, CompanySelectionTokenData, MiniErp.Application.Features.Authentication, ProducesResponseType&lt;LoginResponse&gt;, ProducesResponseType&lt;TokenResponse&gt;, CancellationToken, HttpPost (+25 more)
+Cohesion: 0.07
+Nodes (24): Claim, CompanySelectionTokenData, MiniErp.Application.Features.Authentication, CompanyAccessResponse, CancellationToken, Task, IAuthenticationService, LoginRequest (+16 more)
 
 ### Community 8 - "IRegister"
-Cohesion: 0.03
-Nodes (29): IRegister, TypeAdapterConfig, CashboxMappingRegister, TypeAdapterConfig, CashMovementTypeMappingRegister, TypeAdapterConfig, CashVoucherMappingRegister, TypeAdapterConfig (+21 more)
+Cohesion: 0.14
+Nodes (9): IRegister, TypeAdapterConfig, ExchangeRateMappingRegister, TypeAdapterConfig, ItemMappingRegister, TypeAdapterConfig, StoreContainerMappingRegister, TypeAdapterConfig (+1 more)
 
 ### Community 9 - ".CreateAsync"
 Cohesion: 0.11
@@ -300,16 +300,16 @@ Cohesion: 0.07
 Nodes (32): ProducesResponseType&lt;IReadOnlyList&lt;ItemsCategorySelectResponse&gt;&gt;, ProducesResponseType&lt;ItemsCategoryResponse&gt;, ProducesResponseType&lt;PagedResponse&lt;ItemsCategoryResponse&gt;&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost (+24 more)
 
 ### Community 12 - "CashboxService"
-Cohesion: 0.07
+Cohesion: 0.08
 Nodes (32): ProducesResponseType&lt;CashboxResponse&gt;, ProducesResponseType&lt;IReadOnlyList&lt;CashboxSelectResponse&gt;&gt;, ProducesResponseType&lt;PagedResponse&lt;CashboxResponse&gt;&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost (+24 more)
 
 ### Community 13 - "MiniErp.Domain.Entities.Companies"
-Cohesion: 0.06
-Nodes (13): MiniErp.Infrastructure.Seeding, MiniErp.Domain.Entities.BusinessPartners, MiniErp.Domain.Entities.Catalog, MiniErp.Domain.Entities.Companies, MiniErp.Domain.Entities.Logistics, MiniErp.Domain.Common.Entities, MiniErp.Domain.Entities.Containers, MiniErp.Domain.Entities.CashManagement (+5 more)
+Cohesion: 0.12
+Nodes (12): MiniErp.Infrastructure.Seeding, MiniErp.Domain.Entities.BusinessPartners, MiniErp.Domain.Entities.Catalog, MiniErp.Domain.Entities.Companies, MiniErp.Domain.Entities.Logistics, MiniErp.Domain.Common.Entities, MiniErp.Domain.Entities.Containers, MiniErp.Domain.Entities.CashManagement (+4 more)
 
 ### Community 14 - "InventoryCostingService"
-Cohesion: 0.23
-Nodes (11): InboundCostResult, InventoryCostingKey, CancellationToken, DateOnly, int, IReadOnlyCollection, IReadOnlyDictionary, string (+3 more)
+Cohesion: 0.09
+Nodes (24): InboundCostResult, PendingOutbound, Queue, CancellationToken, DateOnly, IReadOnlyCollection, IReadOnlyDictionary, Task (+16 more)
 
 ### Community 15 - "ApplicationUser"
 Cohesion: 0.09
@@ -319,61 +319,61 @@ Nodes (25): IdentityUser, Guid, ICollection, ApplicationUser, AsyncServiceScope,
 Cohesion: 0.10
 Nodes (10): InventoryDeletionDatabase, Fact, MemberData, SqliteConnection, Task, Theory, TheoryData, ValueTask (+2 more)
 
-### Community 17 - "InvoiceType"
-Cohesion: 0.09
-Nodes (13): Credit, Debit, InvoicePriceStatus, InvoiceMovementRules, BusinessPartnerMovementType, InvoiceType, ItemMovementType, PaymentTerm (+5 more)
+### Community 17 - ".Create"
+Cohesion: 0.25
+Nodes (12): ProducesResponseType&lt;ContainerResponse&gt;, ProducesResponseType&lt;PagedResponse&lt;ContainerResponse&gt;&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost, HttpPut (+4 more)
 
 ### Community 18 - "CountryService"
 Cohesion: 0.13
 Nodes (13): CountryFilterRequest, CountryFilterRequestValidator, CountryRequest, CountryRequestValidator, CountryResponse, CancellationToken, IReadOnlyList, Task (+5 more)
 
 ### Community 19 - "ApiErrorResponseFactory"
-Cohesion: 0.07
-Nodes (30): ActionExecutingContext, Exception, IDictionary, IExceptionHandler, IFluentValidationAutoValidationResultFactory, IValidationContext, KeyValuePair, ModelStateDictionary (+22 more)
+Cohesion: 0.06
+Nodes (33): ActionExecutingContext, MiniErp.Api.Errors, MiniErp.Api.Exceptions, MiniErp.Api.Validation, Exception, IDictionary, IExceptionHandler, IFluentValidationAutoValidationResultFactory (+25 more)
 
 ### Community 20 - "DriverService"
-Cohesion: 0.15
-Nodes (12): DriverFilterRequest, DriverRequest, DriverResponse, CancellationToken, IReadOnlyList, Task, IDriverService, CancellationToken (+4 more)
+Cohesion: 0.08
+Nodes (26): ProducesResponseType&lt;DriverResponse&gt;, ProducesResponseType&lt;PagedResponse&lt;DriverResponse&gt;&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost, HttpPut (+18 more)
 
 ### Community 21 - "MiniErp.Domain.Enums"
-Cohesion: 0.08
-Nodes (17): MiniErp.Infrastructure.Services.ExchangeRates, MiniErp.Infrastructure.Services.InventoryCounts, MiniErp.Infrastructure.Services.StockAdjustments, MiniErp.Infrastructure.Services.CashMovementTypes, MiniErp.Infrastructure.Services.PartnerOpeningBalances, MiniErp.Tests.ExchangeRates, MiniErp.Tests, MiniErp.Application.Features.ExchangeRates (+9 more)
+Cohesion: 0.05
+Nodes (18): MiniErp.Infrastructure.Services.ExchangeRates, MiniErp.Infrastructure.Services.CashMovementTypes, MiniErp.Infrastructure.Services.PartnerOpeningBalances, MiniErp.Tests.ExchangeRates, MiniErp.Tests, MiniErp.Application.Features.ExchangeRates, MiniErp.Application.Features.PartnerOpeningBalances, MiniErp.Application.Features.CashVouchers (+10 more)
 
 ### Community 22 - "Company"
 Cohesion: 0.10
 Nodes (29): IServiceProvider, SeedBusinessPartner, SeedCompany, SeedContainer, SeedCountry, SeedDriver, SeedStore, SeedUser (+21 more)
 
 ### Community 23 - "MiniErp.Application.Common.Abstractions"
-Cohesion: 0.07
-Nodes (33): MiniErp.Infrastructure.Services.Containers, MiniErp.Tests.Inventory, MiniErp.Infrastructure.Services.BusinessPartners, MiniErp.Tests.Companies, MiniErp.Infrastructure, MiniErp.Tests.Authentication, MiniErp.Infrastructure.Services.Stores, MiniErp.Tests.BusinessPartners (+25 more)
+Cohesion: 0.08
+Nodes (28): MiniErp.Infrastructure.Services.Containers, MiniErp.Tests.Inventory, MiniErp.Infrastructure.Services.ItemsCategories, MiniErp.Infrastructure.Services.BusinessPartners, MiniErp.Tests.Companies, MiniErp.Infrastructure, MiniErp.Infrastructure.Services.Stores, MiniErp.Tests.BusinessPartners (+20 more)
 
 ### Community 24 - "MiniErp.Application.Common.Models"
 Cohesion: 0.05
-Nodes (19): MiniErp.Infrastructure.Services.ItemsCategories, MiniErp.Application.Features.Cashboxes, MiniErp.Application.Features.ItemUnits, MiniErp.Api.Extensions, MiniErp.Application.Features.InventoryCostReports, MiniErp.Application.Common.Models, MiniErp.Application.Features.InventoryCounts, MiniErp.Application.Features.Items (+11 more)
+Nodes (18): MiniErp.Infrastructure.Services.InventoryCounts, MiniErp.Infrastructure.Services.StockAdjustments, MiniErp.Application.Features.ItemUnits, MiniErp.Api.Extensions, MiniErp.Application.Features.InventoryCostReports, MiniErp.Application.Common.Models, MiniErp.Application.Features.InventoryCounts, MiniErp.Application.Features.Companies (+10 more)
 
 ### Community 25 - "AuditableEntity"
 Cohesion: 0.09
-Nodes (24): DateTime, AuditableEntity, ICollection, CashMovementType, ICollection, Container, DateOnly, ContainerMovement (+16 more)
+Nodes (20): DateTime, AuditableEntity, ICollection, Container, DateOnly, ContainerMovement, StoreContainer, ICollection (+12 more)
 
 ### Community 26 - "InventoryCountService"
-Cohesion: 0.12
-Nodes (12): InventoryCountFilterRequest, InventoryCountLineResponse, InventoryCountListResponse, InventoryCountResponse, CancellationToken, IEnumerable, int, IQueryable (+4 more)
+Cohesion: 0.14
+Nodes (9): InventoryCountFilterRequest, CancellationToken, IEnumerable, int, IQueryable, IReadOnlyCollection, Task, InventoryCountService (+1 more)
 
 ### Community 27 - "InvoiceRequest"
 Cohesion: 0.22
-Nodes (10): int, InvoiceContainerLineRequest, InvoiceRequest, InvoiceUpdateRequest, IReadOnlyList, InvoiceContainerLineRequestValidator, InvoiceLineRequestValidator, InvoiceRequestValidator (+2 more)
+Nodes (7): int, InvoiceRequest, InvoiceUpdateRequest, IReadOnlyList, InvoiceValidationRules, PreparedInvoice, InvoiceService
 
 ### Community 28 - ".UpdateAsync"
 Cohesion: 0.20
 Nodes (12): CancellationToken, int, Task, InvoiceService, CancellationToken, IEnumerable, IReadOnlyCollection, List (+4 more)
 
 ### Community 29 - "MiniErp.Application.Features.Stores"
-Cohesion: 0.07
-Nodes (13): MiniErp.Application.Features.Stores, MiniErp.Infrastructure.Services.StoreContainers, MiniErp.Application.Features.BusinessPartners, MiniErp.Application.Features.Containers, MiniErp.Application.Features.StoreContainers, TypeAdapterConfig, BusinessPartnerMappingRegister, TypeAdapterConfig (+5 more)
+Cohesion: 0.11
+Nodes (5): MiniErp.Application.Features.Stores, MiniErp.Infrastructure.Services.StoreContainers, MiniErp.Application.Features.BusinessPartners, MiniErp.Application.Features.Containers, MiniErp.Application.Features.StoreContainers
 
 ### Community 30 - "StoreContainerService"
-Cohesion: 0.26
-Nodes (5): CancellationToken, int, IReadOnlyList, Task, StoreContainerService
+Cohesion: 0.11
+Nodes (16): CancellationToken, IReadOnlyList, Task, IStoreContainerService, StoreContainerFilterRequest, StoreContainerFilterRequestValidator, StoreContainerResponse, int (+8 more)
 
 ### Community 31 - "Task"
 Cohesion: 0.13
@@ -383,21 +383,21 @@ Nodes (13): DriverTestDatabase, DateOnly, DateTimeOffset, Fact, InlineData, Sqli
 Cohesion: 0.11
 Nodes (22): CancellationToken, DateOnly, DateTime, IReadOnlyCollection, IReadOnlyDictionary, Task, IInventoryStockService, InventoryMovementReference (+14 more)
 
-### Community 33 - "CashVoucherService"
-Cohesion: 0.15
-Nodes (11): int, CashVoucherRequest, CashVoucherUpdateRequest, CashVoucherResponse, CancellationToken, int, IQueryable, Task (+3 more)
+### Community 33 - ".NotFound"
+Cohesion: 0.14
+Nodes (8): CashVoucherResponse, CancellationToken, int, IQueryable, Task, CashVoucherService, VoucherPreparation, VoucherPreparation
 
 ### Community 34 - "Task"
-Cohesion: 0.12
-Nodes (11): CompanyTestDatabase, Fact, Guid, InlineData, SqliteConnection, Task, Theory, ValueTask (+3 more)
+Cohesion: 0.06
+Nodes (31): CompanyTestDatabase, DbConnection, DbTransaction, DbTransactionInterceptor, ExchangeRateRow, ExchangeRateTestDatabase, IAsyncDisposable, IsolationCaptureInterceptor (+23 more)
 
-### Community 35 - "SelectResponse"
+### Community 35 - ".Success"
 Cohesion: 0.12
-Nodes (15): SelectResponse, CancellationToken, IReadOnlyList, Task, IItemService, ItemFilterRequest, ItemFilterRequestValidator, ItemRequest (+7 more)
+Nodes (14): CancellationToken, IReadOnlyList, Task, IItemService, ItemFilterRequest, ItemFilterRequestValidator, ItemRequest, ItemRequestValidator (+6 more)
 
-### Community 36 - "AuditableEntityConfiguration"
-Cohesion: 0.09
-Nodes (25): Item, ICollection, ItemUnit, InventoryCountLine, ItemStoreBalance, StockAdjustmentLine, InvoiceLine, EntityTypeBuilder (+17 more)
+### Community 36 - "MiniErp.Infrastructure.Persistence.Configurations"
+Cohesion: 0.07
+Nodes (31): MiniErp.Infrastructure.Persistence.Configurations, Item, ICollection, ItemUnit, InventoryCountLine, DateOnly, ICollection, ItemMovement (+23 more)
 
 ### Community 37 - "UserService"
 Cohesion: 0.20
@@ -405,19 +405,19 @@ Nodes (12): UserCompanyResponse, UserResponse, CancellationToken, Guid, HashSet,
 
 ### Community 38 - "MiniErp.Application.Features.Users"
 Cohesion: 0.10
-Nodes (16): MiniErp.Application.Features.Users, MiniErp.Tests.Users, CancellationToken, Guid, IReadOnlyList, Task, IUserService, UserCompaniesRequest (+8 more)
+Nodes (15): MiniErp.Application.Features.Users, CancellationToken, Guid, IReadOnlyList, Task, IUserService, UserCompaniesRequest, UserCompaniesRequestValidator (+7 more)
 
 ### Community 39 - "Error"
-Cohesion: 0.11
-Nodes (6): Error, CancellationToken, Task, InvoiceService, PreparedInvoice, PaymentPreparation
+Cohesion: 0.14
+Nodes (4): Error, InvoiceService, PreparedInvoice, PaymentPreparation
 
 ### Community 40 - "MiniErp.Api.csproj"
 Cohesion: 0.08
 Nodes (26): Asp.Versioning.Mvc (10.0.0), Asp.Versioning.Mvc.ApiExplorer (10.0.0), Bogus (35.6.5), FluentValidation (12.1.1), FluentValidation.DependencyInjectionExtensions (12.1.1), Mapster (10.0.11), Microsoft.AspNetCore.Authentication.JwtBearer (10.0.9), Microsoft.AspNetCore.Identity.EntityFrameworkCore (10.0.10) (+18 more)
 
 ### Community 41 - "CurrencyCode"
-Cohesion: 0.07
-Nodes (28): BusinessPartner, DateOnly, BusinessPartnerMovement, DateOnly, PartnerOpeningBalance, DateOnly, ICollection, Cashbox (+20 more)
+Cohesion: 0.10
+Nodes (15): BusinessPartner, DateOnly, BusinessPartnerMovement, DateOnly, PartnerOpeningBalance, InvoicePayment, CurrencyCode, EntityTypeBuilder (+7 more)
 
 ### Community 42 - ".TryParse"
 Cohesion: 0.09
@@ -428,24 +428,24 @@ Cohesion: 0.16
 Nodes (9): IsActive, IsDeleted, StoreContainerTestDatabase, Fact, SqliteConnection, Task, ValueTask, StoreContainerServiceTests (+1 more)
 
 ### Community 44 - "CompanyService"
-Cohesion: 0.13
-Nodes (15): CompanyFilterRequest, CompanyFilterRequestValidator, CompanyRequest, CompanyUpdateRequest, CompanyRequestValidator, CompanyUpdateRequestValidator, CompanyResponse, CancellationToken (+7 more)
+Cohesion: 0.14
+Nodes (13): CompanyFilterRequest, CompanyFilterRequestValidator, CompanyRequest, CompanyUpdateRequest, CompanyResponse, CancellationToken, IReadOnlyList, Task (+5 more)
 
 ### Community 45 - "ExchangeRatesController"
-Cohesion: 0.07
-Nodes (35): ProducesResponseType&lt;ExchangeRateImportResponse&gt;, ProducesResponseType&lt;ExchangeRateResolutionResponse&gt;, ProducesResponseType&lt;ExchangeRateResponse&gt;, ProducesResponseType&lt;PagedResponse&lt;ExchangeRateResponse&gt;&gt;, Authorize, CancellationToken, DateOnly, HttpDelete (+27 more)
+Cohesion: 0.20
+Nodes (16): ProducesResponseType&lt;ExchangeRateImportPreviewResponse&gt;, ProducesResponseType&lt;ExchangeRateImportResponse&gt;, ProducesResponseType&lt;ExchangeRateResolutionResponse&gt;, ProducesResponseType&lt;ExchangeRateResponse&gt;, ProducesResponseType&lt;PagedResponse&lt;ExchangeRateResponse&gt;&gt;, Authorize, CancellationToken, DateOnly (+8 more)
 
-### Community 46 - "Driver"
-Cohesion: 0.24
-Nodes (8): DateOnly, Driver, DateOnly, DriverTrip, EntityTypeBuilder, DriverConfiguration, EntityTypeBuilder, DriverTripConfiguration
+### Community 46 - "CashVoucher"
+Cohesion: 0.10
+Nodes (17): ICollection, CashMovementType, DateOnly, DateTime, CashVoucher, DateOnly, Driver, DateOnly (+9 more)
 
 ### Community 47 - "MiniErp.Api"
 Cohesion: 0.10
 Nodes (29): ASP.NET Core Identity, Bogus, Clean Architecture, Company-Scoped Access Token, Company-Scoped Tenancy, Company Selection Token, Database Migrations, Entity Framework Core (+21 more)
 
-### Community 48 - "ItemUnitService"
-Cohesion: 0.13
-Nodes (14): CancellationToken, IReadOnlyList, Task, IItemUnitService, ItemUnitFilterRequest, ItemUnitFilterRequestValidator, ItemUnitRequest, ItemUnitRequestValidator (+6 more)
+### Community 48 - "Result"
+Cohesion: 0.12
+Nodes (16): Result, Result, CancellationToken, IReadOnlyList, Task, IItemUnitService, ItemUnitFilterRequest, ItemUnitFilterRequestValidator (+8 more)
 
 ### Community 49 - "StockOpeningBalanceServiceTests"
 Cohesion: 0.21
@@ -464,28 +464,28 @@ Cohesion: 0.20
 Nodes (3): IdentityError, IdentityErrorDescriber, ArabicIdentityErrorDescriber
 
 ### Community 53 - "Task"
-Cohesion: 0.20
-Nodes (7): ContainerTestDatabase, Fact, SqliteConnection, Task, ValueTask, ContainerServiceTests, ContainerTestDatabase
+Cohesion: 0.33
+Nodes (4): ContainerTestDatabase, Fact, Task, ContainerServiceTests
 
 ### Community 54 - "Task"
-Cohesion: 0.18
+Cohesion: 0.17
 Nodes (9): CountryTestDatabase, Fact, InlineData, SqliteConnection, Task, Theory, ValueTask, CountryServiceTests (+1 more)
 
-### Community 55 - "ItemMovement"
-Cohesion: 0.33
-Nodes (5): DateOnly, ICollection, ItemMovement, EntityTypeBuilder, ItemMovementConfiguration
+### Community 55 - "MiniErp.Application.Features.DriverTrips"
+Cohesion: 0.12
+Nodes (4): MiniErp.Application.Features.Cashboxes, MiniErp.Infrastructure.Services.DriverTrips, MiniErp.Application.Features.DriverTrips, MiniErp.Infrastructure.Services.Cashboxes
 
 ### Community 56 - ".GetAllAsync"
-Cohesion: 0.14
-Nodes (15): InvoiceFilterRequest, InvoiceContainerLineResponse, InvoiceItemBalanceResponse, InvoiceListResponse, InvoicePagedResponse, InvoiceSummaryResponse, CancellationToken, DateOnly (+7 more)
+Cohesion: 0.12
+Nodes (16): InvoiceFilterRequest, InvoiceFilterRequestValidator, InvoiceContainerLineResponse, InvoiceItemBalanceResponse, InvoiceListResponse, InvoicePagedResponse, InvoiceSummaryResponse, CancellationToken (+8 more)
 
 ### Community 57 - "StoreService"
 Cohesion: 0.12
-Nodes (14): CancellationToken, IReadOnlyList, Task, IStoreService, StoreFilterRequest, StoreFilterRequestValidator, StoreRequest, StoreRequestValidator (+6 more)
+Nodes (14): SelectResponse, CancellationToken, IReadOnlyList, Task, IStoreService, StoreFilterRequest, StoreFilterRequestValidator, StoreRequest (+6 more)
 
-### Community 58 - "Result"
-Cohesion: 0.20
-Nodes (8): Result, Result, CancellationToken, Task, ICashVoucherService, CancellationToken, Task, IInventoryCountService
+### Community 58 - "InventoryCountResponse"
+Cohesion: 0.33
+Nodes (6): CancellationToken, Task, IInventoryCountService, InventoryCountLineResponse, InventoryCountListResponse, InventoryCountResponse
 
 ### Community 59 - "CategoryTestDatabase"
 Cohesion: 0.19
@@ -503,16 +503,16 @@ Nodes (7): DriverStatementRaw, PartnerStatementRaw, CancellationToken, int, IQue
 Cohesion: 0.10
 Nodes (16): IEntityTypeConfiguration, CompanySettings, InventoryCostAllocation, DateTimeOffset, Guid, RefreshToken, Guid, UserCompany (+8 more)
 
-### Community 63 - "Task"
-Cohesion: 0.19
-Nodes (9): BusinessPartnerIntegrityTestDatabase, Fact, InlineData, SqliteConnection, Task, Theory, ValueTask, BusinessPartnerIntegrityServiceTests (+1 more)
+### Community 63 - "ExchangeRate"
+Cohesion: 0.15
+Nodes (10): DateOnly, ICollection, Cashbox, DateOnly, ExchangeRate, ExchangeRateSource, EntityTypeBuilder, CashboxConfiguration (+2 more)
 
 ### Community 64 - ".PrepareAsync"
 Cohesion: 0.20
 Nodes (8): decimal, int, InvoiceAmountRules, CancellationToken, IReadOnlyList, PreparedInvoice, Task, InvoiceService
 
 ### Community 65 - "AuditableEntityInterceptor"
-Cohesion: 0.16
+Cohesion: 0.18
 Nodes (10): DbContext, DbContextEventData, EntityEntry, InterceptionResult, SaveChangesInterceptor, CancellationToken, DateTime, string (+2 more)
 
 ### Community 66 - ".Create"
@@ -532,20 +532,24 @@ Cohesion: 0.13
 Nodes (14): ICurrentCompanyContext, SeedCompanyContext, TestCurrentCompanyContext, TestCurrentCompanyContext, TestCurrentCompanyContext, TestCurrentCompanyContext, TestCurrentCompanyContext, TestCurrentCompanyContext (+6 more)
 
 ### Community 70 - ".CreateAsync"
-Cohesion: 0.32
-Nodes (4): BusinessPartnerContainerStoreTestDatabase, Fact, Task, BusinessPartnerContainerStoreServiceTests
+Cohesion: 0.21
+Nodes (7): BusinessPartnerContainerStoreTestDatabase, Fact, SqliteConnection, Task, ValueTask, BusinessPartnerContainerStoreServiceTests, BusinessPartnerContainerStoreTestDatabase
 
-### Community 71 - "StoresController"
-Cohesion: 0.25
-Nodes (12): ProducesResponseType&lt;PagedResponse&lt;StoreResponse&gt;&gt;, ProducesResponseType&lt;StoreResponse&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost, HttpPut (+4 more)
+### Community 71 - "ProducesResponseType&lt;ProblemDetails&gt;"
+Cohesion: 0.26
+Nodes (13): ProducesResponseType&lt;PagedResponse&lt;StoreResponse&gt;&gt;, ProducesResponseType&lt;ProblemDetails&gt;, ProducesResponseType&lt;StoreResponse&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost (+5 more)
 
-### Community 73 - "ProducesResponseType&lt;ProblemDetails&gt;"
-Cohesion: 0.27
-Nodes (12): ProducesResponseType&lt;CompanyResponse&gt;, ProducesResponseType&lt;PagedResponse&lt;CompanyResponse&gt;&gt;, ProducesResponseType&lt;ProblemDetails&gt;, CancellationToken, HttpDelete, HttpGet, HttpPost, HttpPut (+4 more)
+### Community 72 - ".Login"
+Cohesion: 0.36
+Nodes (9): AllowAnonymous, ProducesResponseType&lt;LoginResponse&gt;, ProducesResponseType&lt;TokenResponse&gt;, CancellationToken, HttpPost, IActionResult, ProducesResponseType, Task (+1 more)
+
+### Community 73 - ".GetAll"
+Cohesion: 0.26
+Nodes (11): ProducesResponseType&lt;CompanyResponse&gt;, ProducesResponseType&lt;PagedResponse&lt;CompanyResponse&gt;&gt;, CancellationToken, HttpDelete, HttpGet, HttpPost, HttpPut, IActionResult (+3 more)
 
 ### Community 74 - ".Create"
-Cohesion: 0.26
-Nodes (12): ProducesResponseType&lt;InventoryCountResponse&gt;, ProducesResponseType&lt;PagedResponse&lt;InventoryCountListResponse&gt;&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost, HttpPut (+4 more)
+Cohesion: 0.13
+Nodes (22): ProducesResponseType&lt;InventoryCountResponse&gt;, ProducesResponseType&lt;PagedResponse&lt;InventoryCountListResponse&gt;&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost, HttpPut (+14 more)
 
 ### Community 75 - ".Create"
 Cohesion: 0.25
@@ -560,28 +564,28 @@ Cohesion: 0.12
 Nodes (17): ASPNETCORE_ENVIRONMENT, applicationUrl, commandName, dotnetRunMessages, environmentVariables, launchBrowser, launchUrl, applicationUrl (+9 more)
 
 ### Community 78 - "ExchangeRateService"
-Cohesion: 0.16
-Nodes (9): ExchangeRateResponse, DateTime, CancellationToken, DateOnly, DbUpdateException, int, IOrderedQueryable, Task (+1 more)
+Cohesion: 0.05
+Nodes (35): ExchangeRateFilterRequest, ExchangeRateImportPreviewResponse, ExchangeRateImportRequest, ExchangeRateImportItemResponse, ExchangeRateImportItemStatus, ExchangeRateImportResponse, ExchangeRateRequest, ExchangeRateUpdateRequest (+27 more)
 
 ### Community 79 - ".GetRateAsync"
-Cohesion: 0.18
-Nodes (8): HttpStatusCode, CancellationToken, DateOnly, Task, FrankfurterExchangeRateProvider, FrankfurterRateResponse, string, FrankfurterOptions
+Cohesion: 0.13
+Nodes (13): HttpStatusCode, CancellationToken, DateOnly, Task, ExternalExchangeRate, IExchangeRateProvider, CancellationToken, DateOnly (+5 more)
 
 ### Community 80 - ".Create"
 Cohesion: 0.24
 Nodes (12): ProducesResponseType&lt;PagedResponse&lt;StockAdjustmentListResponse&gt;&gt;, ProducesResponseType&lt;StockAdjustmentResponse&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost, HttpPut (+4 more)
 
-### Community 81 - ".ProcessInbound"
-Cohesion: 0.24
-Nodes (6): PendingOutbound, Queue, DateTime, int, InventoryCostRules, PendingOutbound
+### Community 81 - "CashVoucherUpdateRequest"
+Cohesion: 0.29
+Nodes (6): CashVoucherFilterRequest, CashVoucherFilterRequestValidator, CashVoucherUpdateRequest, CancellationToken, Task, ICashVoucherService
 
 ### Community 82 - "ContainerService"
-Cohesion: 0.08
-Nodes (26): ProducesResponseType&lt;ContainerResponse&gt;, ProducesResponseType&lt;PagedResponse&lt;ContainerResponse&gt;&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost, HttpPut (+18 more)
+Cohesion: 0.12
+Nodes (14): ContainerFilterRequest, ContainerFilterRequestValidator, ContainerRequest, ContainerRequestValidator, ContainerResponse, CancellationToken, IReadOnlyList, Task (+6 more)
 
 ### Community 84 - ".GetCashboxStatement"
-Cohesion: 0.33
-Nodes (8): ProducesResponseType&lt;CashboxStatementResponse&gt;, ProducesResponseType&lt;DriverStatementResponse&gt;, ProducesResponseType&lt;PartnerStatementResponse&gt;, CancellationToken, HttpGet, IActionResult, Task, StatementsController
+Cohesion: 0.17
+Nodes (14): ProducesResponseType&lt;CashboxStatementResponse&gt;, ProducesResponseType&lt;DriverStatementResponse&gt;, ProducesResponseType&lt;PartnerStatementResponse&gt;, CancellationToken, HttpGet, IActionResult, Task, StatementsController (+6 more)
 
 ### Community 85 - ".Upsert"
 Cohesion: 0.25
@@ -595,113 +599,101 @@ Nodes (12): ProducesResponseType&lt;CountryResponse&gt;, ProducesResponseType&lt
 Cohesion: 0.20
 Nodes (9): EnumProperty, HashSet, int, IReadOnlyList, OpenApiOperation, OperationFilterContext, Type, EnumProperty (+1 more)
 
-### Community 88 - "PagedResponse"
-Cohesion: 0.12
-Nodes (14): Guid, ICurrentUserService, CancellationToken, IOrderedQueryable, Task, IPaginationService, IScopedService, PagedResponse (+6 more)
+### Community 88 - "PaginationRequest"
+Cohesion: 0.18
+Nodes (11): CancellationToken, IOrderedQueryable, Task, IPaginationService, PagedResponse, int, PaginationRequest, CancellationToken (+3 more)
 
 ### Community 89 - "StockOpeningBalance"
-Cohesion: 0.27
-Nodes (7): DateOnly, ICollection, StockOpeningBalance, EntityTypeBuilder, StockOpeningBalanceConfiguration, IReadOnlyDictionary, ItemSnapshot
+Cohesion: 0.18
+Nodes (8): DateOnly, ICollection, StockOpeningBalance, StockOpeningBalanceLine, EntityTypeBuilder, StockOpeningBalanceConfiguration, EntityTypeBuilder, StockOpeningBalanceLineConfiguration
 
 ### Community 90 - "InvoicePaymentTermTests"
 Cohesion: 0.27
 Nodes (4): Fact, InlineData, Theory, InvoicePaymentTermTests
 
-### Community 91 - "MiniErp.Api.Swagger"
-Cohesion: 0.15
-Nodes (8): MiniErp.Api.Swagger, OpenApiOperation, OperationFilterContext, InventoryCountsSwaggerDocumentation, IConfiguration, IServiceCollection, WebApplication, SwaggerExtensions
+### Community 91 - "SwaggerExtensions"
+Cohesion: 0.29
+Nodes (4): IConfiguration, IServiceCollection, WebApplication, SwaggerExtensions
 
 ### Community 92 - ".Create"
 Cohesion: 0.15
-Nodes (7): OpenApiOperation, OperationFilterContext, CashMovementTypesSwaggerDocumentation, OpenApiOperation, OperationFilterContext, StoresSwaggerDocumentation, SwaggerOperationDescription
+Nodes (7): OpenApiOperation, OperationFilterContext, StoreContainersSwaggerDocumentation, OpenApiOperation, OperationFilterContext, StoresSwaggerDocumentation, SwaggerOperationDescription
 
-### Community 93 - "IOperationFilter"
+### Community 93 - "MiniErp.Api.Swagger"
 Cohesion: 0.17
-Nodes (8): IOperationFilter, OpenApiOperation, OperationFilterContext, DriversSwaggerDocumentation, OpenApiOperation, OperationFilterContext, string, UnifiedErrorResponseSwaggerFilter
+Nodes (8): MiniErp.Api.Swagger, OpenApiOperation, OperationFilterContext, InventoryCostReportsSwaggerDocumentation, OpenApiOperation, OperationFilterContext, string, UnifiedErrorResponseSwaggerFilter
 
-### Community 94 - "InventoryCostReportService"
-Cohesion: 0.17
-Nodes (9): MovementProjection, InvoiceLineResponse, InventoryCostStatus, DateOnly, DateTime, int, AllocationProjection, InventoryCostReportService (+1 more)
+### Community 94 - "InventoryCostStatus"
+Cohesion: 0.33
+Nodes (5): InvoiceLineResponse, InventoryCostStatus, DateOnly, DateTime, MovementProjection
 
 ### Community 95 - "ProducesResponseType&lt;IReadOnlyList&lt;SelectResponse&gt;&gt;"
-Cohesion: 0.23
-Nodes (13): ProducesResponseType&lt;DriverResponse&gt;, ProducesResponseType&lt;IReadOnlyList&lt;SelectResponse&gt;&gt;, ProducesResponseType&lt;PagedResponse&lt;DriverResponse&gt;&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost (+5 more)
+Cohesion: 0.21
+Nodes (14): ProducesResponseType&lt;BusinessPartnerContainerStoreResponse&gt;, ProducesResponseType&lt;BusinessPartnerResponse&gt;, ProducesResponseType&lt;IReadOnlyList&lt;SelectResponse&gt;&gt;, ProducesResponseType&lt;PagedResponse&lt;BusinessPartnerResponse&gt;&gt;, Authorize, CancellationToken, HttpDelete, HttpGet (+6 more)
 
-### Community 96 - ".LoadMovementCostsAsync"
-Cohesion: 0.15
-Nodes (9): OpeningMovementCost, StockOpeningBalanceFilterRequest, StockOpeningBalanceFilterRequestValidator, StockOpeningBalanceLineResponse, StockOpeningBalanceListResponse, Dictionary, IReadOnlyList, ItemId (+1 more)
+### Community 96 - "IScopedService"
+Cohesion: 0.25
+Nodes (5): Guid, ICurrentUserService, IScopedService, Guid, CurrentUserService
 
-### Community 97 - ".Create"
-Cohesion: 0.24
-Nodes (12): ProducesResponseType&lt;PagedResponse&lt;StockOpeningBalanceListResponse&gt;&gt;, ProducesResponseType&lt;StockOpeningBalanceResponse&gt;, Authorize, CancellationToken, HttpDelete, HttpGet, HttpPost, HttpPut (+4 more)
+### Community 97 - "ContainerTestDatabase"
+Cohesion: 0.29
+Nodes (3): SqliteConnection, ValueTask, ContainerTestDatabase
 
 ### Community 98 - ".UpdateCosts"
 Cohesion: 0.24
 Nodes (9): ProducesResponseType&lt;DriverTripBulkCostUpdateResponse&gt;, ProducesResponseType&lt;PagedResponse&lt;DriverTripCostResponse&gt;&gt;, Authorize, CancellationToken, HttpGet, HttpPut, IActionResult, Task (+1 more)
 
-### Community 99 - "InventoryCountRequest"
-Cohesion: 0.21
-Nodes (10): int, InventoryCountIncreaseCostRequest, InventoryCountLineUpdateRequest, InventoryCountReconcileRequest, InventoryCountRequest, InventoryCountUpdateRequest, InventoryCountLineUpdateRequestValidator, InventoryCountReconcileRequestValidator (+2 more)
+### Community 99 - "CurrentCompanyContext"
+Cohesion: 0.29
+Nodes (4): ClaimsPrincipal, CompanyClaimResolver, int, CurrentCompanyContext
 
 ### Community 100 - "DriverTripService"
 Cohesion: 0.31
 Nodes (4): CancellationToken, int, Task, DriverTripService
 
 ### Community 101 - "StatementResponses.cs"
-Cohesion: 0.20
-Nodes (9): CashboxStatementItemResponse, CashboxStatementResponse, CashboxStatementSummaryResponse, DriverStatementItemResponse, DriverStatementResponse, DriverStatementSummaryResponse, PartnerStatementItemResponse, PartnerStatementResponse (+1 more)
+Cohesion: 0.17
+Nodes (12): CancellationToken, Task, IFinancialStatementService, CashboxStatementItemResponse, CashboxStatementResponse, CashboxStatementSummaryResponse, DriverStatementItemResponse, DriverStatementResponse (+4 more)
 
-### Community 102 - ".IsValidRate"
-Cohesion: 0.15
-Nodes (6): int, ExchangeRateRules, Fact, InlineData, Theory, ExchangeRateRulesTests
+### Community 102 - ".Apply"
+Cohesion: 0.40
+Nodes (3): OpenApiOperation, OperationFilterContext, CashMovementTypesSwaggerDocumentation
 
 ### Community 103 - ".Apply"
 Cohesion: 0.27
 Nodes (6): IOpenApiSchema, ISchemaFilter, SchemaFilterContext, Type, EnumDocumentationFormatter, EnumSchemaDocumentationFilter
 
-### Community 104 - "StockOpeningBalanceRequest"
-Cohesion: 0.20
-Nodes (10): CancellationToken, Task, IStockOpeningBalanceService, int, StockOpeningBalanceLineRequest, StockOpeningBalanceRequest, StockOpeningBalanceUpdateRequest, StockOpeningBalanceLineRequestValidator (+2 more)
+### Community 104 - ".Apply"
+Cohesion: 0.40
+Nodes (3): OpenApiOperation, OperationFilterContext, DriversSwaggerDocumentation
 
 ### Community 105 - "JwtOptions"
-Cohesion: 0.14
-Nodes (11): ClaimsPrincipal, CompanyClaimResolver, IConfiguration, IServiceCollection, DependencyInjection, int, CurrentCompanyContext, string (+3 more)
-
-### Community 106 - ".GetRateAsync"
-Cohesion: 0.18
-Nodes (9): ExchangeRateImportItemResponse, ExchangeRateImportItemStatus, ExchangeRateImportResponse, CancellationToken, DateOnly, Task, ExternalExchangeRate, IExchangeRateProvider (+1 more)
+Cohesion: 0.27
+Nodes (7): IConfiguration, IServiceCollection, DependencyInjection, string, JwtOptions, JwtTokenOptions, RefreshTokenOptions
 
 ### Community 107 - "InventoryCount"
-Cohesion: 0.32
+Cohesion: 0.28
 Nodes (6): DateOnly, DateTime, ICollection, InventoryCount, EntityTypeBuilder, InventoryCountConfiguration
 
 ### Community 108 - "UserRequestValidatorTests"
-Cohesion: 0.60
-Nodes (3): Fact, Task, UserRequestValidatorTests
+Cohesion: 0.39
+Nodes (4): MiniErp.Tests.Users, Fact, Task, UserRequestValidatorTests
 
 ### Community 109 - ".GetAsync"
-Cohesion: 0.18
-Nodes (9): CancellationToken, Task, IInventoryCostReportService, InventoryCostReportFilterRequest, InventoryCostReportFilterRequestValidator, InventoryCostAllocationReportResponse, InventoryCostReportItemResponse, InventoryCostReportResponse (+1 more)
+Cohesion: 0.11
+Nodes (15): MovementProjection, CancellationToken, Task, IInventoryCostReportService, InventoryCostReportFilterRequest, InventoryCostReportFilterRequestValidator, InventoryCostAllocationReportResponse, InventoryCostReportItemResponse (+7 more)
 
 ### Community 110 - "ArabicValidationConfiguration"
 Cohesion: 0.29
 Nodes (5): MiniErp.Application.Common.Validation, LanguageManager, IReadOnlyDictionary, ArabicLanguageManager, ArabicValidationConfiguration
 
-### Community 111 - "ExchangeRateServiceTests"
-Cohesion: 0.11
-Nodes (19): DbConnection, DbTransaction, DbTransactionInterceptor, ExchangeRateRow, ExchangeRateTestDatabase, IsolationCaptureInterceptor, IsolationLevel, CancellationToken (+11 more)
-
-### Community 112 - ".SendAsync"
-Cohesion: 0.21
+### Community 112 - "FrankfurterExchangeRateProviderTests"
+Cohesion: 0.22
 Nodes (9): HttpMessageHandler, HttpRequestMessage, HttpResponseMessage, CancellationToken, Fact, Task, FrankfurterExchangeRateProviderTests, StubHandler (+1 more)
 
-### Community 113 - ".GetAllAsync"
-Cohesion: 0.38
-Nodes (6): CancellationToken, IReadOnlyList, Task, IStoreContainerService, StoreContainerResponse, StoreContainerWorkspaceResponse
-
-### Community 114 - "Migration"
+### Community 115 - "Migration"
 Cohesion: 0.50
-Nodes (3): Migration, MigrationBuilder, InitialIdentity
+Nodes (3): Migration, MigrationBuilder, AddTablesItemAndItemUnit
 
 ### Community 116 - ".GetCostEntryAsync"
 Cohesion: 0.21
@@ -711,21 +703,13 @@ Nodes (7): DriverTripCostFilterRequest, DriverTripCostFilterRequestValidator, Dr
 Cohesion: 0.33
 Nodes (4): CancellationToken, Task, WebApplication, DatabaseMigrationExtensions
 
-### Community 118 - ".GetSnapshotsAsync"
-Cohesion: 0.31
-Nodes (7): CancellationToken, DateOnly, IReadOnlyCollection, IReadOnlyDictionary, Task, IInventoryCostingService, InventoryCostSnapshot
-
 ### Community 119 - "MappingConfiguration"
 Cohesion: 0.40
 Nodes (3): bool, object, MappingConfiguration
 
-### Community 120 - "CashManagementValidatorTests"
-Cohesion: 0.23
-Nodes (5): CashPartyType, Fact, InlineData, Theory, CashManagementValidatorTests
-
-### Community 121 - "AllowAnonymousOperationFilter"
-Cohesion: 0.40
-Nodes (3): OpenApiOperation, OperationFilterContext, AllowAnonymousOperationFilter
+### Community 121 - "IOperationFilter"
+Cohesion: 0.18
+Nodes (7): IOperationFilter, OpenApiOperation, OperationFilterContext, AllowAnonymousOperationFilter, OpenApiOperation, OperationFilterContext, InventoryCountsSwaggerDocumentation
 
 ### Community 122 - ".Apply"
 Cohesion: 0.40
@@ -762,10 +746,6 @@ Nodes (3): OpenApiOperation, OperationFilterContext, DriverTripsSwaggerDocumenta
 ### Community 130 - ".Apply"
 Cohesion: 0.40
 Nodes (3): OpenApiOperation, OperationFilterContext, ExchangeRatesSwaggerDocumentation
-
-### Community 131 - "InventoryCostReportsSwaggerDocumentation.cs"
-Cohesion: 0.40
-Nodes (3): OpenApiOperation, OperationFilterContext, InventoryCostReportsSwaggerDocumentation
 
 ### Community 132 - ".Apply"
 Cohesion: 0.40
@@ -815,93 +795,61 @@ Nodes (3): decimal, int, PartnerOpeningBalanceAmountRules
 Cohesion: 0.33
 Nodes (3): MiniErp.Infrastructure.Persistence.Migrations, MigrationBuilder, AddInvoiceContentType
 
-### Community 178 - "MiniErp.Api.Errors"
-Cohesion: 0.25
-Nodes (3): MiniErp.Api.Errors, MiniErp.Api.Exceptions, MiniErp.Api.Validation
-
-### Community 179 - "MiniErp.Application.Features.PartnerOpeningBalances"
-Cohesion: 0.17
-Nodes (4): MiniErp.Application.Features.PartnerOpeningBalances, MiniErp.Tests.PartnerOpeningBalances, TypeAdapterConfig, PartnerOpeningBalanceMappingRegister
-
 ### Community 180 - "DriverTripBulkCostUpdateRequest"
 Cohesion: 0.33
 Nodes (5): int, DriverTripBulkCostUpdateRequest, DriverTripCostUpdateItem, DriverTripBulkCostUpdateRequestValidator, DriverTripCostUpdateItemValidator
 
 ### Community 181 - "Invoice"
-Cohesion: 0.11
+Cohesion: 0.10
 Nodes (15): ICollection, ItemsCategory, DateOnly, DateTime, ICollection, Invoice, Country, InvoiceContentType (+7 more)
-
-### Community 183 - "CashboxStatementFilterRequest"
-Cohesion: 0.29
-Nodes (6): CashboxStatementFilterRequest, DriverStatementFilterRequest, PartnerStatementFilterRequest, CashboxStatementFilterRequestValidator, DriverStatementFilterRequestValidator, PartnerStatementFilterRequestValidator
 
 ### Community 184 - "CompanyAndExchangeRateAuthorizationTests"
 Cohesion: 0.25
 Nodes (5): MiniErp.Tests.Authorization, Fact, InlineData, Theory, CompanyAndExchangeRateAuthorizationTests
 
-### Community 185 - "StockOpeningBalanceLine"
-Cohesion: 0.21
-Nodes (6): decimal, int, StockOpeningBalanceAmountRules, StockOpeningBalanceLine, EntityTypeBuilder, StockOpeningBalanceLineConfiguration
-
-### Community 186 - "IAsyncDisposable"
-Cohesion: 0.29
-Nodes (4): IAsyncDisposable, SqliteConnection, ValueTask, BusinessPartnerContainerStoreTestDatabase
-
-### Community 187 - "MiniErp.Application.Features.Companies"
-Cohesion: 0.20
-Nodes (3): MiniErp.Application.Features.Companies, TypeAdapterConfig, CompanyMappingRegister
+### Community 185 - "StockOpeningBalanceAmountRules"
+Cohesion: 0.40
+Nodes (3): decimal, int, StockOpeningBalanceAmountRules
 
 ### Community 188 - "DriverStatementRaw"
 Cohesion: 0.33
 Nodes (7): DriverStatementSourceType, PartnerStatementSourceType, DateOnly, DateTime, CashboxStatementRaw, DriverStatementRaw, PartnerStatementRaw
 
-### Community 189 - "StoreContainerUpsertRequest"
-Cohesion: 0.40
-Nodes (3): int, StoreContainerUpsertRequest, StoreContainerUpsertRequestValidator
-
 ### Community 190 - "AbstractValidator"
 Cohesion: 0.06
-Nodes (20): AbstractValidator, Expression, PaginationRequestValidator, BusinessPartnerFilterRequestValidator, CashVoucherFilterRequest, CashVoucherFilterRequestValidator, CashVoucherRequestValidator, CashVoucherUpdateRequestValidator (+12 more)
+Nodes (29): AbstractValidator, Expression, PaginationRequestValidator, CashVoucherUpdateRequestValidator, CashVoucherValidationRules, CompanyRequestValidator, CompanyUpdateRequestValidator, int (+21 more)
 
 ### Community 191 - "Q: Cross-project MiniErp feature flow impact analysis"
 Cohesion: 0.40
 Nodes (4): Answer, Outcome, Q: Cross-project MiniErp feature flow impact analysis, Source Nodes
 
-### Community 193 - "PaginationRequest"
-Cohesion: 0.39
-Nodes (5): int, PaginationRequest, CancellationToken, Task, IFinancialStatementService
-
 ### Community 204 - ".Apply"
 Cohesion: 0.40
 Nodes (3): OpenApiOperation, OperationFilterContext, ItemUnitsSwaggerDocumentation
-
-### Community 205 - ".Apply"
-Cohesion: 0.40
-Nodes (3): OpenApiOperation, OperationFilterContext, StoreContainersSwaggerDocumentation
 
 ### Community 212 - "StockAdjustmentsSwaggerDocumentation.cs"
 Cohesion: 0.40
 Nodes (3): OpenApiOperation, OperationFilterContext, StockAdjustmentsSwaggerDocumentation
 
 ## Knowledge Gaps
-- **97 isolated node(s):** `Asp.Versioning.Mvc (10.0.0)`, `Asp.Versioning.Mvc.ApiExplorer (10.0.0)`, `FluentValidation.DependencyInjectionExtensions (12.1.1)`, `Microsoft.EntityFrameworkCore.Design (10.0.10)`, `Microsoft.OpenApi (2.11.0)` (+92 more)
+- **98 isolated node(s):** `Asp.Versioning.Mvc (10.0.0)`, `Asp.Versioning.Mvc.ApiExplorer (10.0.0)`, `FluentValidation.DependencyInjectionExtensions (12.1.1)`, `Microsoft.EntityFrameworkCore.Design (10.0.10)`, `Microsoft.OpenApi (2.11.0)` (+93 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **48 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **56 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Result` connect `Result` to `StockOpeningBalanceService`, `PartnerOpeningBalanceServiceTests`, `StockAdjustmentService`, `BusinessPartnerService`, `AuthenticationService`, `InvoiceResponse`, `CashMovementTypeService`, `ItemsCategoryService`, `CashboxService`, `ApplicationUser`, `CountryService`, `ApiErrorResponseFactory`, `DriverService`, `InventoryCountService`, `.UpdateAsync`, `StoreContainerService`, `CashVoucherService`, `Task`, `SelectResponse`, `UserService`, `MiniErp.Application.Features.Users`, `Error`, `CompanyService`, `ExchangeRatesController`, `ItemUnitService`, `.GetAllAsync`, `StoreService`, `FinancialStatementService`, `.PrepareAsync`, `PaginationRequest`, `ExchangeRateService`, `.GetRateAsync`, `ContainerService`, `PagedResponse`, `.LoadMovementCostsAsync`, `DriverTripService`, `StockOpeningBalanceRequest`, `.GetRateAsync`, `.GetAsync`, `.GetAllAsync`, `.GetCostEntryAsync`?**
-  _High betweenness centrality (0.168) - this node is a cross-community bridge._
-- **Why does `ApplicationDbContext` connect `ApplicationDbContext` to `InvoiceServiceTests`, `PartnerOpeningBalanceServiceTests`, `StockAdjustmentService`, `.CreateAsync`, `MiniErp.Domain.Entities.Companies`, `ApplicationUser`, `Task`, `Company`, `AuditableEntity`, `Task`, `Task`, `AuditableEntityConfiguration`, `CurrencyCode`, `Task`, `Driver`, `StockOpeningBalanceServiceTests`, `AccessTokenCompanyTestDatabase`, `.CreateAsync`, `Invoice`, `Task`, `ItemMovement`, `Task`, `StockOpeningBalanceLine`, `IAsyncDisposable`, `CategoryTestDatabase`, `InventoryCostAllocation`, `Task`, `.CreateAsync`, `StockOpeningBalance`, `InventoryCount`, `ExchangeRateServiceTests`?**
-  _High betweenness centrality (0.119) - this node is a cross-community bridge._
-- **Why does `Error` connect `Error` to `StockOpeningBalanceService`, `PartnerOpeningBalanceServiceTests`, `StockAdjustmentService`, `BusinessPartnerService`, `AuthenticationService`, `CashMovementTypeService`, `ItemsCategoryService`, `CashboxService`, `InventoryCostingService`, `CountryService`, `ApiErrorResponseFactory`, `DriverService`, `InventoryCountService`, `.UpdateAsync`, `StoreContainerService`, `InventoryStockService`, `CashVoucherService`, `SelectResponse`, `UserService`, `CompanyService`, `ItemUnitService`, `ItemMovement`, `StoreService`, `Result`, `FinancialStatementService`, `.PrepareAsync`, `InvoiceLineRequest`, `ExchangeRateService`, `.GetRateAsync`, `ContainerService`, `DriverTripService`, `.GetSnapshotsAsync`?**
-  _High betweenness centrality (0.093) - this node is a cross-community bridge._
+- **Why does `Result` connect `Result` to `StockOpeningBalanceService`, `PartnerOpeningBalanceServiceTests`, `StockAdjustmentService`, `BusinessPartnerService`, `AuthenticationService`, `InvoiceResponse`, `CashMovementTypeService`, `ItemsCategoryService`, `CashboxService`, `ApplicationUser`, `CountryService`, `ApiErrorResponseFactory`, `DriverService`, `InventoryCountService`, `.UpdateAsync`, `StoreContainerService`, `.NotFound`, `Task`, `.Success`, `UserService`, `MiniErp.Application.Features.Users`, `Error`, `CompanyService`, `.GetAllAsync`, `StoreService`, `InventoryCountResponse`, `FinancialStatementService`, `.PrepareAsync`, `ExchangeRateService`, `.GetRateAsync`, `CashVoucherUpdateRequest`, `ContainerService`, `PaginationRequest`, `IScopedService`, `DriverTripService`, `StatementResponses.cs`, `.GetAsync`, `.GetCostEntryAsync`?**
+  _High betweenness centrality (0.173) - this node is a cross-community bridge._
+- **Why does `ApplicationDbContext` connect `ApplicationDbContext` to `InvoiceServiceTests`, `StockOpeningBalanceService`, `PartnerOpeningBalanceServiceTests`, `StockAdjustmentService`, `BusinessPartnerService`, `.CreateAsync`, `MiniErp.Domain.Entities.Companies`, `ApplicationUser`, `Task`, `Company`, `AuditableEntity`, `Task`, `Task`, `MiniErp.Infrastructure.Persistence.Configurations`, `CurrencyCode`, `Task`, `CashVoucher`, `StockOpeningBalanceServiceTests`, `AccessTokenCompanyTestDatabase`, `.CreateAsync`, `Invoice`, `Task`, `Task`, `CategoryTestDatabase`, `InventoryCostAllocation`, `ExchangeRate`, `.CreateAsync`, `StockOpeningBalance`, `ContainerTestDatabase`, `InventoryCount`?**
+  _High betweenness centrality (0.114) - this node is a cross-community bridge._
+- **Why does `Error` connect `Error` to `InvoiceServiceTests`, `StockOpeningBalanceService`, `PartnerOpeningBalanceServiceTests`, `StockAdjustmentService`, `BusinessPartnerService`, `AuthenticationService`, `CashMovementTypeService`, `ItemsCategoryService`, `CashboxService`, `InventoryCostingService`, `CountryService`, `ApiErrorResponseFactory`, `DriverService`, `InventoryCountService`, `.UpdateAsync`, `StoreContainerService`, `InventoryStockService`, `.NotFound`, `.Success`, `UserService`, `CompanyService`, `Result`, `StoreService`, `FinancialStatementService`, `.PrepareAsync`, `ExchangeRateService`, `.GetRateAsync`, `ContainerService`, `DriverTripService`, `.GetAsync`?**
+  _High betweenness centrality (0.100) - this node is a cross-community bridge._
 - **What connects `Asp.Versioning.Mvc (10.0.0)`, `Asp.Versioning.Mvc.ApiExplorer (10.0.0)`, `FluentValidation.DependencyInjectionExtensions (12.1.1)` to the rest of the system?**
-  _97 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _98 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `InvoiceServiceTests` be split into smaller, more focused modules?**
-  _Cohesion score 0.09241971620612398 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.05006493506493506 - nodes in this community are weakly interconnected._
+- **Should `StockOpeningBalanceService` be split into smaller, more focused modules?**
+  _Cohesion score 0.061122538936232734 - nodes in this community are weakly interconnected._
 - **Should `PartnerOpeningBalanceServiceTests` be split into smaller, more focused modules?**
   _Cohesion score 0.054431960049937576 - nodes in this community are weakly interconnected._
-- **Should `StockAdjustmentService` be split into smaller, more focused modules?**
-  _Cohesion score 0.060144346431435444 - nodes in this community are weakly interconnected._

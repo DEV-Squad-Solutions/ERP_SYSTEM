@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using static MiniErp.Application.Features.InventoryCostReports.InventoryCostReportErrors;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
@@ -30,20 +31,12 @@ public sealed class InventoryCostReportService(
 
         if (!filters.StoreId.HasValue || filters.StoreId.Value <= 0)
         {
-            return Result<InventoryCostReportResponse>.Failure(
-                Error.Validation(
-                    "InventoryCostReports.StoreRequired",
-                    "يجب اختيار مخزن صالح لتقرير متوسط التكلفة.",
-                    nameof(filters.StoreId)));
+            return Result<InventoryCostReportResponse>.Failure(StoreRequired());
         }
 
         if (!filters.ItemId.HasValue || filters.ItemId.Value <= 0)
         {
-            return Result<InventoryCostReportResponse>.Failure(
-                Error.Validation(
-                    "InventoryCostReports.ItemRequired",
-                    "يجب اختيار صنف صالح لتقرير متوسط التكلفة.",
-                    nameof(filters.ItemId)));
+            return Result<InventoryCostReportResponse>.Failure(ItemRequired());
         }
 
         var store = await dbContext.Stores
@@ -61,20 +54,12 @@ public sealed class InventoryCostReportService(
             .SingleOrDefaultAsync(cancellationToken);
         if (store is null)
         {
-            return Result<InventoryCostReportResponse>.Failure(
-                Error.NotFound(
-                "InventoryCostReports.StoreNotFound",
-                "مخزن تقرير متوسط التكلفة غير موجود أو لا ينتمي إلى الشركة الحالية.",
-                nameof(filters.StoreId)));
+            return Result<InventoryCostReportResponse>.Failure(StoreNotFound());
         }
 
         if (store.IsContainerStore)
         {
-            return Result<InventoryCostReportResponse>.Failure(
-                Error.Conflict(
-                    "InventoryCostReports.ProductStoreRequired",
-                    "تقرير متوسط تكلفة الأصناف متاح لمخازن المنتجات فقط.",
-                    nameof(filters.StoreId)));
+            return Result<InventoryCostReportResponse>.Failure(ProductStoreRequired());
         }
 
         var item = await dbContext.Items
@@ -92,11 +77,7 @@ public sealed class InventoryCostReportService(
             .SingleOrDefaultAsync(cancellationToken);
         if (item is null)
         {
-            return Result<InventoryCostReportResponse>.Failure(
-                Error.NotFound(
-                    "InventoryCostReports.ItemNotFound",
-                    "الصنف غير موجود أو لا ينتمي إلى الشركة الحالية.",
-                    nameof(filters.ItemId)));
+            return Result<InventoryCostReportResponse>.Failure(ItemNotFound());
         }
 
         var baseCurrency = await dbContext.CompanySettings
@@ -347,9 +328,7 @@ public sealed class InventoryCostReportService(
     private static Error? ValidatePagination(PaginationRequest pagination) =>
         pagination.PageNumber <= 0 ||
         pagination.PageSize is <= 0 or > PaginationRequest.MaxPageSize
-            ? Error.Validation(
-                "Pagination.Invalid",
-                $"يجب أن يكون رقم الصفحة أكبر من صفر وحجم الصفحة بين 1 و{PaginationRequest.MaxPageSize}.")
+            ? PaginationErrors.Invalid()
             : null;
 
     private sealed class MovementProjection

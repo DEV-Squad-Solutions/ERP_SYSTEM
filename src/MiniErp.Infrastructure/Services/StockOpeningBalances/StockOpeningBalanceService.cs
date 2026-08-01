@@ -1,4 +1,5 @@
 using System.Data;
+using static MiniErp.Application.Features.StockOpeningBalances.StockOpeningBalanceErrors;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -179,11 +180,7 @@ public sealed class StockOpeningBalanceService(
 
         if (request.RowVersion is not { Length: > 0 })
         {
-            return Result<StockOpeningBalanceResponse>.Failure(
-                Error.Validation(
-                    "StockOpeningBalances.RowVersionRequired",
-                    "يجب إرسال إصدار السجل الحالي للتعديل.",
-                    nameof(StockOpeningBalanceUpdateRequest.RowVersion)));
+            return Result<StockOpeningBalanceResponse>.Failure(RowVersionRequired());
         }
 
         await using var transaction = await dbContext.Database
@@ -694,26 +691,17 @@ public sealed class StockOpeningBalanceService(
 
         if (store is null)
         {
-            return Error.NotFound(
-                "StockOpeningBalances.StoreNotFound",
-                $"لم يتم العثور على المخزن رقم {storeId}.",
-                nameof(StockOpeningBalanceRequest.StoreId));
+            return StoreNotFound(storeId);
         }
 
         if (store.IsContainerStore)
         {
-            return Error.Conflict(
-                "StockOpeningBalances.ContainerStoreNotAllowed",
-                "يجب اختيار مخزن منتجات وليس مخزن عبوات.",
-                nameof(StockOpeningBalanceRequest.StoreId));
+            return ContainerStoreNotAllowed();
         }
 
         return store.IsActive
             ? null
-            : Error.Conflict(
-                "StockOpeningBalances.StoreInactive",
-                "لا يمكن استخدام مخزن غير نشط.",
-                nameof(StockOpeningBalanceRequest.StoreId));
+            : StoreInactive();
     }
 
     private async Task<Result<IReadOnlyDictionary<int, ItemSnapshot>>>
@@ -740,11 +728,7 @@ public sealed class StockOpeningBalanceService(
             .ToArray();
         if (missingIds.Length > 0)
         {
-            return Result<IReadOnlyDictionary<int, ItemSnapshot>>.Failure(
-                Error.NotFound(
-                    "StockOpeningBalances.ItemNotFound",
-                    $"لم يتم العثور على الأصناف ذات الأرقام: {string.Join(", ", missingIds)}.",
-                    nameof(StockOpeningBalanceLineRequest.ItemId)));
+            return Result<IReadOnlyDictionary<int, ItemSnapshot>>.Failure(ItemNotFound(missingIds));
         }
 
         var inactiveItemIds = items
@@ -753,11 +737,7 @@ public sealed class StockOpeningBalanceService(
             .ToArray();
         if (inactiveItemIds.Length > 0)
         {
-            return Result<IReadOnlyDictionary<int, ItemSnapshot>>.Failure(
-                Error.Conflict(
-                    "StockOpeningBalances.ItemInactive",
-                    $"لا يمكن استخدام الأصناف غير النشطة: {string.Join(", ", inactiveItemIds)}.",
-                    nameof(StockOpeningBalanceLineRequest.ItemId)));
+            return Result<IReadOnlyDictionary<int, ItemSnapshot>>.Failure(ItemInactive(inactiveItemIds));
         }
 
         var inactiveUnitItemIds = items
@@ -767,32 +747,8 @@ public sealed class StockOpeningBalanceService(
         return inactiveUnitItemIds.Length == 0
             ? Result<IReadOnlyDictionary<int, ItemSnapshot>>.Success(itemsById)
             : Result<IReadOnlyDictionary<int, ItemSnapshot>>.Failure(
-                Error.Conflict(
-                    "StockOpeningBalances.ItemUnitInactive",
-                    $"وحدات قياس الأصناف التالية غير نشطة: {string.Join(", ", inactiveUnitItemIds)}.",
-                    nameof(StockOpeningBalanceLineRequest.ItemId)));
+                ItemUnitInactive(inactiveUnitItemIds));
     }
-
-    private static Error InvalidId() =>
-        Error.Validation(
-            "StockOpeningBalances.InvalidId",
-            "يجب أن يكون رقم الرصيد الافتتاحي أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "StockOpeningBalances.NotFound",
-            $"لم يتم العثور على الرصيد الافتتاحي رقم {id}.");
-
-    private static Error DocumentNumberExists(string number) =>
-        Error.Conflict(
-            "StockOpeningBalances.DocumentNumberExists",
-            $"رقم المستند '{number}' مستخدم بالفعل.",
-            nameof(StockOpeningBalanceRequest.DocumentNumber));
-
-    private static Error Concurrency() =>
-        Error.Conflict(
-            "StockOpeningBalances.Concurrency",
-            "تم تعديل المستند بواسطة عملية أخرى؛ أعد تحميله ثم حاول مرة أخرى.");
 
     private sealed record OpeningMovementCost(
         InventoryCostStatus CostStatus,

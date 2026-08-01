@@ -1,4 +1,5 @@
 using Mapster;
+using static MiniErp.Application.Features.CashMovementTypes.CashMovementTypeErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
@@ -259,10 +260,7 @@ public sealed class CashMovementTypeService(
                 cancellationToken);
 
         return exists
-            ? Error.Conflict(
-                "CashMovementTypes.NameExists",
-                $"نوع الحركة النقدية '{movementType.Name}' موجود بالفعل في نفس الاتجاه.",
-                nameof(CashMovementTypeRequest.Name))
+            ? NameExists(movementType.Name)
             : null;
     }
 
@@ -286,34 +284,4 @@ public sealed class CashMovementTypeService(
                     voucher.CashMovementTypeId == cashMovementTypeId,
                 cancellationToken);
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "CashMovementTypes.InvalidId",
-            "يجب أن يكون رقم نوع الحركة النقدية أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "CashMovementTypes.NotFound",
-            $"لم يتم العثور على نوع الحركة النقدية رقم {id}.");
-
-    private static Error RowVersionRequired() =>
-        Error.Validation(
-            "CashMovementTypes.RowVersionRequired",
-            "يجب إرسال إصدار نوع الحركة النقدية الحالي للتعديل.",
-            nameof(CashMovementTypeUpdateRequest.RowVersion));
-
-    private static Error Concurrency() =>
-        Error.Conflict(
-            "CashMovementTypes.Concurrency",
-            "تم تعديل نوع الحركة النقدية بواسطة مستخدم آخر. أعد تحميل البيانات ثم حاول مرة أخرى.");
-
-    private static Error HasVouchers() =>
-        Error.Conflict(
-            "CashMovementTypes.HasVouchers",
-            "لا يمكن حذف نوع الحركة النقدية لارتباطه بسندات حالية أو تاريخية. يمكن إلغاء تنشيطه بدلاً من ذلك.");
-
-    private static Error UsedSemanticsChangeNotAllowed() =>
-        Error.Conflict(
-            "CashMovementTypes.UsedSemanticsChangeNotAllowed",
-            "لا يمكن تغيير اتجاه أو أثر نوع الحركة بعد استخدامه في سند نقدية.");
 }

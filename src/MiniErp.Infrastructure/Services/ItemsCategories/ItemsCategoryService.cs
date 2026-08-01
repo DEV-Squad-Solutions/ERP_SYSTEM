@@ -1,4 +1,5 @@
 using Mapster;
+using static MiniErp.Application.Features.ItemsCategories.ItemsCategoryErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
@@ -257,35 +258,4 @@ public sealed class ItemsCategoryService(
                 category.Id == id)
             .ProjectToType<ItemsCategoryResponse>();
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "ItemsCategories.InvalidId",
-            "يجب أن يكون رقم تصنيف الأصناف أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "ItemsCategories.NotFound",
-            $"لم يتم العثور على تصنيف الأصناف رقم {id}.");
-
-    private static Error NameExists(string name) =>
-        Error.Conflict(
-            "ItemsCategories.NameExists",
-            $"تصنيف الأصناف النشط '{name}' موجود بالفعل.",
-            nameof(ItemsCategoryRequest.Name));
-
-    private static Error RowVersionRequired() =>
-        Error.Validation(
-            "ItemsCategories.RowVersionRequired",
-            "يجب إرسال إصدار تصنيف الأصناف الحالي للتعديل.",
-            nameof(ItemsCategoryUpdateRequest.RowVersion));
-
-    private static Error Concurrency() =>
-        Error.Conflict(
-            "ItemsCategories.Concurrency",
-            "تم تعديل تصنيف الأصناف بواسطة مستخدم آخر. أعد تحميل البيانات ثم حاول مرة أخرى.");
-
-    private static Error HasInvoices() =>
-        Error.Conflict(
-            "ItemsCategories.HasInvoices",
-            "لا يمكن حذف تصنيف الأصناف لارتباطه بفواتير حالية أو تاريخية. يمكن إلغاء تنشيطه بدلاً من ذلك.");
 }

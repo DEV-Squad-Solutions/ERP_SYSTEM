@@ -1,4 +1,5 @@
 using System.Data;
+using static MiniErp.Application.Features.Cashboxes.CashboxErrors;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -307,14 +308,8 @@ public sealed class CashboxService(
                 duplicate.Code,
                 cashbox.Code,
                 StringComparison.OrdinalIgnoreCase)
-            ? Error.Conflict(
-                "Cashboxes.CodeExists",
-                $"كود صندوق النقدية '{cashbox.Code}' مستخدم بالفعل.",
-                nameof(CashboxRequest.Code))
-            : Error.Conflict(
-                "Cashboxes.NameExists",
-                $"اسم صندوق النقدية '{cashbox.Name}' مستخدم بالفعل.",
-                nameof(CashboxRequest.Name));
+            ? CodeExists(cashbox.Code)
+            : NameExists(cashbox.Name);
     }
 
     private async Task<bool> HasVouchersAsync(
@@ -328,34 +323,4 @@ public sealed class CashboxService(
                     voucher.CashboxId == cashboxId,
                 cancellationToken);
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "Cashboxes.InvalidId",
-            "يجب أن يكون رقم صندوق النقدية أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "Cashboxes.NotFound",
-            $"لم يتم العثور على صندوق النقدية رقم {id}.");
-
-    private static Error RowVersionRequired() =>
-        Error.Validation(
-            "Cashboxes.RowVersionRequired",
-            "يجب إرسال إصدار صندوق النقدية الحالي للتعديل.",
-            nameof(CashboxUpdateRequest.RowVersion));
-
-    private static Error Concurrency() =>
-        Error.Conflict(
-            "Cashboxes.Concurrency",
-            "تم تعديل صندوق النقدية بواسطة مستخدم آخر. أعد تحميل البيانات ثم حاول مرة أخرى.");
-
-    private static Error HasVouchers() =>
-        Error.Conflict(
-            "Cashboxes.HasVouchers",
-            "لا يمكن حذف صندوق النقدية لارتباطه بسندات نقدية حالية أو تاريخية. يمكن إلغاء تنشيطه بدلاً من ذلك.");
-
-    private static Error OpeningOrCurrencyChangeNotAllowed() =>
-        Error.Conflict(
-            "Cashboxes.OpeningOrCurrencyChangeNotAllowed",
-            "لا يمكن تغيير الرصيد الافتتاحي أو العملة بعد إنشاء سندات على صندوق النقدية.");
 }
