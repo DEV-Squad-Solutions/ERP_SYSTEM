@@ -794,9 +794,9 @@ public sealed partial class InvoiceService
         CancellationToken cancellationToken)
     {
         var affectedCashboxIds = new HashSet<int>();
-        if (currentVoucher is not null)
+        if (currentVoucher?.CashboxId is int currentCashboxId)
         {
-            affectedCashboxIds.Add(currentVoucher.CashboxId);
+            affectedCashboxIds.Add(currentCashboxId);
         }
 
         if (proposedCashboxId.HasValue)

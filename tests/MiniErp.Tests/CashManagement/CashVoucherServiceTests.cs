@@ -42,6 +42,77 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
+    public async Task InitialSaveCreatesDraftWithAutomaticNumberAndNoCashEffect()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+
+        var result = await service.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 8, 1),
+                Direction: CashDirection.Receipt,
+                Amount: 250m,
+                Notes: "Collected before posting details"));
+        var cashbox = await database.CreateCashboxService(1)
+            .GetByIdAsync(1);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value.IsDraft);
+        Assert.StartsWith("RCV-20260801-", result.Value.VoucherNumber);
+        Assert.Null(result.Value.CashboxId);
+        Assert.Null(result.Value.CashMovementTypeId);
+        Assert.Equal("Collected before posting details", result.Value.Notes);
+        Assert.Equal(1000m, cashbox.Value.CurrentBalance);
+        Assert.Empty(await database.Context.BusinessPartnerMovements
+            .Where(movement => movement.CashVoucherId == result.Value.Id)
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task EditingDraftAddsPostingDetailsAndKeepsAutomaticNumber()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var created = await database.CreateVoucherService(1).AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 8, 1),
+                Direction: CashDirection.Receipt,
+                Amount: 250m,
+                Notes: "Collected before posting details"));
+
+        await using var updateContext = database.CreateAdditionalContext();
+        var updated = await database.CreateVoucherService(1, updateContext)
+            .UpdateAsync(
+                created.Value.Id,
+                new CashVoucherUpdateRequest(
+                    created.Value.VoucherNumber,
+                    created.Value.VoucherDate,
+                    created.Value.Direction,
+                    CashboxId: 1,
+                    CashMovementTypeId: 3,
+                    PartyType: CashPartyType.None,
+                    BusinessPartnerId: null,
+                    DriverId: null,
+                    DriverTripId: null,
+                    ExternalPartyName: null,
+                    Amount: created.Value.Amount,
+                    ReferenceNumber: "POSTED",
+                    Description: "Completed draft",
+                    Notes: created.Value.Notes,
+                    RowVersion: created.Value.RowVersion));
+        var cashbox = await database.CreateCashboxService(1)
+            .GetByIdAsync(1);
+
+        Assert.True(updated.IsSuccess);
+        Assert.False(updated.Value.IsDraft);
+        Assert.Equal(created.Value.VoucherNumber, updated.Value.VoucherNumber);
+        Assert.Equal(1, updated.Value.CashboxId);
+        Assert.Equal(3, updated.Value.CashMovementTypeId);
+        Assert.Equal(1250m, cashbox.Value.CurrentBalance);
+    }
+
+    [Fact]
     public async Task PaymentCannotMakeCashboxNegative()
     {
         await using var database =

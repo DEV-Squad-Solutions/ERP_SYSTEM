@@ -86,17 +86,17 @@ internal static class CashVoucherValidationRules
 
     private static void AddRules<TRequest>(
         AbstractValidator<TRequest> validator,
-        System.Linq.Expressions.Expression<Func<TRequest, string>>
+        System.Linq.Expressions.Expression<Func<TRequest, string?>>
             voucherNumber,
         System.Linq.Expressions.Expression<Func<TRequest, DateOnly>>
             voucherDate,
         System.Linq.Expressions.Expression<Func<TRequest, CashDirection>>
             direction,
-        System.Linq.Expressions.Expression<Func<TRequest, int>>
+        System.Linq.Expressions.Expression<Func<TRequest, int?>>
             cashboxId,
-        System.Linq.Expressions.Expression<Func<TRequest, int>>
+        System.Linq.Expressions.Expression<Func<TRequest, int?>>
             cashMovementTypeId,
-        System.Linq.Expressions.Expression<Func<TRequest, CashPartyType>>
+        System.Linq.Expressions.Expression<Func<TRequest, CashPartyType?>>
             partyType,
         System.Linq.Expressions.Expression<Func<TRequest, int?>>
             businessPartnerId,
@@ -115,11 +115,12 @@ internal static class CashVoucherValidationRules
         System.Linq.Expressions.Expression<Func<TRequest, string?>>
             notes)
     {
+        var cashboxIdAccessor = cashboxId.Compile();
+        var cashMovementTypeIdAccessor = cashMovementTypeId.Compile();
         var partyTypeAccessor = partyType.Compile();
         var driverTripIdAccessor = driverTripId.Compile();
 
         validator.RuleFor(voucherNumber)
-            .NotEmpty()
             .MaximumLength(CashVoucherRequest.VoucherNumberMaximumLength);
 
         validator.RuleFor(voucherDate)
@@ -127,9 +128,23 @@ internal static class CashVoucherValidationRules
             .WithMessage("تاريخ سند النقدية مطلوب.");
 
         validator.RuleFor(direction).IsInEnum();
-        validator.RuleFor(cashboxId).GreaterThan(0);
-        validator.RuleFor(cashMovementTypeId).GreaterThan(0);
-        validator.RuleFor(partyType).IsInEnum();
+        validator.RuleFor(cashboxId)
+            .GreaterThan(0)
+            .When(request => cashboxIdAccessor(request).HasValue);
+        validator.RuleFor(cashMovementTypeId)
+            .GreaterThan(0)
+            .When(request => cashMovementTypeIdAccessor(request).HasValue);
+        validator.RuleFor(partyType)
+            .Must(value =>
+                !value.HasValue || Enum.IsDefined(value.Value))
+            .WithMessage("نوع الطرف غير صالح.");
+
+        validator.RuleFor(request => request)
+            .Must(request =>
+                cashboxIdAccessor(request).HasValue ==
+                cashMovementTypeIdAccessor(request).HasValue)
+            .WithMessage(
+                "اختر الصندوق ونوع الحركة معًا عند استكمال السند.");
 
         validator.RuleFor(businessPartnerId)
             .NotNull()

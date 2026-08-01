@@ -123,7 +123,8 @@ public sealed class FinancialStatementService(
             .Where(voucher =>
                 string.IsNullOrEmpty(search) ||
                 voucher.VoucherNumber.Contains(search) ||
-                voucher.CashMovementType.Name.Contains(search) ||
+                (voucher.CashMovementType != null &&
+                 voucher.CashMovementType.Name.Contains(search)) ||
                 (voucher.BusinessPartner != null &&
                  voucher.BusinessPartner.Name.Contains(search)) ||
                 (voucher.Driver != null &&
@@ -205,7 +206,7 @@ public sealed class FinancialStatementService(
                     Date = voucher.VoucherDate,
                     VoucherNumber = voucher.VoucherNumber,
                     MovementName =
-                        voucher.CashMovementType.Name,
+                        voucher.CashMovementType!.Name,
                     Description = voucher.Description,
                     PartyName = voucher.BusinessPartner != null
                         ? voucher.BusinessPartner.Name
@@ -726,7 +727,7 @@ public sealed class FinancialStatementService(
                     ? voucher.DriverTrip!.InvoiceNumber
                     : null,
                 DriverTripId = voucher.DriverTripId,
-                MovementTypeName = voucher.CashMovementType.Name,
+                MovementTypeName = voucher.CashMovementType!.Name,
                 Description = voucher.Description,
                 CashPaid = voucher.Direction == CashDirection.Payment
                     ? voucher.Amount
@@ -735,7 +736,7 @@ public sealed class FinancialStatementService(
                     ? voucher.Amount
                     : 0m,
                 TripCost = 0m,
-                CashboxName = voucher.Cashbox.Name,
+                CashboxName = voucher.Cashbox!.Name,
                 ReferenceNumber = voucher.ReferenceNumber,
                 Direction = voucher.Direction,
                 CashMovementTypeId = voucher.CashMovementTypeId

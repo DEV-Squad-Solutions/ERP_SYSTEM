@@ -96,6 +96,12 @@ public static class CashVoucherErrors
             $"لم يتم العثور على رحلة رقم {id} تخص السائق المحدد.",
             nameof(CashVoucherRequest.DriverTripId));
 
+    public static Error PostingReferencesMustBeTogether() =>
+        Error.Validation(
+            "CashVouchers.PostingReferencesMustBeTogether",
+            "اختر الصندوق ونوع الحركة معًا عند استكمال السند.",
+            nameof(CashVoucherRequest.CashboxId));
+
     public static Error InsufficientCashboxBalance(int cashboxId) =>
         Error.Conflict(
             "CashVouchers.InsufficientCashboxBalance",

@@ -4071,26 +4071,15 @@ public sealed class InvoiceServiceTests
                 : 0m);
 
         return new InvoiceRequest(
-            invoiceNumber ?? $"INV-{Guid.NewGuid():N}",
-            invoiceType,
-            paymentTerm,
-            invoiceDate ?? new DateOnly(2026, 7, 25),
-            null,
-            1,
-            storeId,
-            containerStoreId,
-            null,
-            driverId,
-            null,
-            false,
-            null,
-            null,
-            null,
-            discountAmount,
-            requestedPaidAmount,
-            null,
-            requestedLines,
-            containerLines ?? [],
+            InvoiceNumber: invoiceNumber ?? $"INV-{Guid.NewGuid():N}",
+            InvoiceType: invoiceType,
+            ItemsCategoryId: null,
+            ContentType: InvoiceContentType.Items,
+            PaymentTerm: paymentTerm,
+            InvoiceDate: invoiceDate ?? new DateOnly(2026, 7, 25),
+            DueDate: null,
+            StoreId: storeId,
+            BusinessPartnerId: 1,
             PartnerInvoiceNo: null,
             CashboxId: requestedPaidAmount > 0m ? 1 : null,
             CashMovementTypeId: requestedPaidAmount > 0m
@@ -4098,7 +4087,25 @@ public sealed class InvoiceServiceTests
                     InvoiceType.Sales or InvoiceType.PurchaseReturn
                     ? 1
                     : 2
-                : null);
+                : null,
+            ExchangeRate: null,
+            CashboxExchangeRate: null,
+            WBWeight: 0m,
+            WBScaleDifference: 0m,
+            WBDiscount: 0m,
+            ContainerStoreId: containerStoreId,
+            CountryId: null,
+            DriverId: driverId,
+            ActualDriverId: null,
+            UsesExternalDriver: false,
+            ExternalDriverName: null,
+            VehicleNumber: null,
+            ExportInvoiceCode: null,
+            DiscountAmount: discountAmount,
+            PaidAmount: requestedPaidAmount,
+            Notes: null,
+            Lines: requestedLines,
+            ContainerLines: containerLines ?? []);
     }
 
     private static async Task SeedInvoiceFilterDataAsync(

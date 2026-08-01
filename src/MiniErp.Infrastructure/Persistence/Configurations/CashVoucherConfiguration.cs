@@ -37,6 +37,10 @@ public sealed class CashVoucherConfiguration
                     "([PartyType] = 4 AND [BusinessPartnerId] IS NULL AND " +
                     "[DriverId] IS NULL AND [DriverTripId] IS NULL AND " +
                     "[ExternalPartyName] IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_CashVouchers_PostingReferencesTogether",
+                    "([CashboxId] IS NULL AND [CashMovementTypeId] IS NULL) OR " +
+                    "([CashboxId] IS NOT NULL AND [CashMovementTypeId] IS NOT NULL)");
             });
 
         builder.HasKey(voucher => voucher.Id);
@@ -222,6 +226,7 @@ public sealed class CashVoucherConfiguration
                 cashbox.CompanyId,
                 cashbox.Id
             })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(voucher => voucher.CashMovementType)
@@ -236,6 +241,7 @@ public sealed class CashVoucherConfiguration
                 movementType.CompanyId,
                 movementType.Id
             })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(voucher => voucher.BusinessPartner)

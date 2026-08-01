@@ -120,6 +120,37 @@ public sealed class CashManagementValidatorTests
     }
 
     [Fact]
+    public void CashVoucherValidator_AcceptsInitialDraftFields()
+    {
+        var validator = new CashVoucherRequestValidator();
+        var result = validator.Validate(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 8, 1),
+                Direction: CashDirection.Receipt,
+                Amount: 125m,
+                Notes: "Initial receipt"));
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void CashVoucherValidator_RequiresPostingReferencesTogether()
+    {
+        var validator = new CashVoucherRequestValidator();
+        var result = validator.Validate(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 8, 1),
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                Amount: 50m,
+                Notes: "Incomplete posting data"));
+
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName == string.Empty);
+    }
+
+    [Fact]
     public void UpdateValidators_RequireEightByteRowVersions()
     {
         var cashboxResult = new CashboxUpdateRequestValidator().Validate(

@@ -180,7 +180,9 @@ public sealed class InvoiceMappingRegister : IRegister
                 response => response.CashboxName,
                 invoice => invoice.PaymentVouchers
                     .OrderBy(voucher => voucher.Id)
-                    .Select(voucher => voucher.Cashbox.Name)
+                    .Select(voucher => voucher.Cashbox == null
+                        ? null
+                        : voucher.Cashbox.Name)
                     .FirstOrDefault())
             .Map(
                 response => response.CashMovementTypeId,
@@ -192,7 +194,9 @@ public sealed class InvoiceMappingRegister : IRegister
                 response => response.CashMovementTypeName,
                 invoice => invoice.PaymentVouchers
                     .OrderBy(voucher => voucher.Id)
-                    .Select(voucher => voucher.CashMovementType.Name)
+                    .Select(voucher => voucher.CashMovementType == null
+                        ? null
+                        : voucher.CashMovementType.Name)
                     .FirstOrDefault())
             .Map(
                 response => response.CashboxCurrency,
@@ -304,7 +308,9 @@ public sealed class InvoiceMappingRegister : IRegister
                 response => response.CashboxName,
                 invoice => invoice.PaymentVouchers
                     .OrderBy(voucher => voucher.Id)
-                    .Select(voucher => voucher.Cashbox.Name)
+                    .Select(voucher => voucher.Cashbox == null
+                        ? null
+                        : voucher.Cashbox.Name)
                     .FirstOrDefault())
             .Map(
                 response => response.CashMovementTypeId,
@@ -316,7 +322,9 @@ public sealed class InvoiceMappingRegister : IRegister
                 response => response.CashMovementTypeName,
                 invoice => invoice.PaymentVouchers
                     .OrderBy(voucher => voucher.Id)
-                    .Select(voucher => voucher.CashMovementType.Name)
+                    .Select(voucher => voucher.CashMovementType == null
+                        ? null
+                        : voucher.CashMovementType.Name)
                     .FirstOrDefault())
             .Map(
                 response => response.CashboxCurrency,

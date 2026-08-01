@@ -25,13 +25,13 @@ public sealed class CashVoucher : AuditableEntity
 
     public CashDirection Direction { get; set; }
 
-    public int CashboxId { get; set; }
+    public int? CashboxId { get; set; }
 
-    public Cashbox Cashbox { get; set; } = null!;
+    public Cashbox? Cashbox { get; set; }
 
-    public int CashMovementTypeId { get; set; }
+    public int? CashMovementTypeId { get; set; }
 
-    public CashMovementType CashMovementType { get; set; } = null!;
+    public CashMovementType? CashMovementType { get; set; }
 
     public CashPartyType PartyType { get; set; }
 
@@ -70,6 +70,9 @@ public sealed class CashVoucher : AuditableEntity
     public DateTime LastModifiedAt { get; private set; }
 
     public byte[] RowVersion { get; private set; } = [];
+
+    public bool IsDraft =>
+        !CashboxId.HasValue || !CashMovementTypeId.HasValue;
 
     public InvoicePayment? InvoicePayment { get; set; }
 

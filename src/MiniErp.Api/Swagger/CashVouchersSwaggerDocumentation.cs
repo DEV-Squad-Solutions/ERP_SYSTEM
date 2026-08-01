@@ -27,23 +27,23 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
             nameof(CashVouchersController.GetById) => (
                 "Get a cash voucher",
                 SwaggerOperationDescription.Create(
-                    "Returns one voucher with cashbox, type, party, optional source invoice, transaction/base amounts, resolved exchange-rate snapshot, and concurrency token.",
+                    "Returns one voucher with its draft status, optional cashbox, optional movement type, party, optional source invoice, transaction/base amounts, resolved exchange-rate snapshot, and concurrency token.",
                     "A positive route id.",
                     "CompanyId, currency, and partner Debit/Credit are server-controlled. The frontend does not send or display an accounting-side selector.",
                     "Missing or other-company vouchers return 404.")),
             nameof(CashVouchersController.Create) => (
                 "Create a cash voucher",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Saves the voucher and its cash/partner effects atomically.",
-                    "Voucher number/date, Receipt or Payment, active cashbox, matching active movement type, party fields, positive amount, optional positive `exchangeRate`, and optional reference/description/notes. A null rate resolves the latest rate on or before the voucher date.",
-                    "Voucher number is required but may be duplicated. Choose direction and partyType, then load /CashMovementTypes/select using direction and forPartner=(partyType == Partner).",
-                    "The server posts partner Receipt as Credit and partner Payment as Debit. DriverTripId is optional, non-partner vouchers create no partner movement, and Payment cannot make the cashbox negative.")),
+                    "Admin only. A first save can create a draft; a completed voucher and its cash/partner effects are saved atomically.",
+                    "The first save requires only `voucherDate`, Receipt or Payment `direction`, a positive `amount`, and optional `notes`. `voucherNumber` is generated automatically when omitted. Omit both `cashboxId` and `cashMovementTypeId` to save a draft.",
+                    "To post immediately, provide both an active cashbox and matching active movement type together, plus the applicable party fields. An optional positive `exchangeRate` overrides automatic dated resolution.",
+                    "Drafts create no cashbox or partner movement. Completed partner Receipt is Credit and Payment is Debit; Payment cannot make the cashbox negative.")),
             nameof(CashVouchersController.Update) => (
                 "Update a cash voucher",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Replaces a manual voucher and all derived effects, including its base-currency snapshot, atomically.",
-                    "Editable fields plus the original base64 rowVersion.",
-                    "Apply the same conditional UI fields and movement-type filtering as Create. The old effects are removed and the new effects are applied exactly once.",
+                    "Admin only. Replaces a manual draft or completed voucher and all derived effects, including its base-currency snapshot, atomically.",
+                    "Editable fields plus the original base64 rowVersion. Voucher number is server-generated and immutable.",
+                    "Providing both cashbox and movement type completes a draft. Omitting both keeps it as a draft. The old effects are removed and the new effects are applied exactly once.",
                     "A stale token returns CashVouchers.Concurrency. An invoice-generated voucher returns CashVouchers.InvoiceGeneratedReadOnly and must be changed through its invoice.")),
             nameof(CashVouchersController.Delete) => (
                 "Delete a cash voucher",

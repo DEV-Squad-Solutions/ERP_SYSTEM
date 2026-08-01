@@ -8,10 +8,10 @@ public sealed record CashVoucherResponse(
     string VoucherNumber,
     DateOnly VoucherDate,
     CashDirection Direction,
-    int CashboxId,
-    string CashboxName,
-    int CashMovementTypeId,
-    string CashMovementTypeName,
+    int? CashboxId,
+    string? CashboxName,
+    int? CashMovementTypeId,
+    string? CashMovementTypeName,
     CashPartyType PartyType,
     int? BusinessPartnerId,
     string? BusinessPartnerName,
@@ -30,6 +30,8 @@ public sealed record CashVoucherResponse(
     string? Notes,
     byte[] RowVersion)
 {
+    public bool IsDraft { get; init; }
+
     public int? InvoiceId { get; init; }
 
     public string? InvoiceNumber { get; init; }

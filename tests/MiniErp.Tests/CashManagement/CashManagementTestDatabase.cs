@@ -307,8 +307,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 VoucherNumber TEXT NOT NULL COLLATE NOCASE,
                 VoucherDate TEXT NOT NULL,
                 Direction INTEGER NOT NULL,
-                CashboxId INTEGER NOT NULL,
-                CashMovementTypeId INTEGER NOT NULL,
+                CashboxId INTEGER NULL,
+                CashMovementTypeId INTEGER NULL,
                 PartyType INTEGER NOT NULL,
                 BusinessPartnerId INTEGER NULL,
                 DriverId INTEGER NULL,
@@ -333,7 +333,10 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 DeletedById TEXT NULL,
                 DeletedOn TEXT NULL,
                 DeletedByPc TEXT NULL,
-                IsDeleted INTEGER NOT NULL
+                IsDeleted INTEGER NOT NULL,
+                CONSTRAINT CK_CashVouchers_PostingReferencesTogether CHECK (
+                    (CashboxId IS NULL AND CashMovementTypeId IS NULL) OR
+                    (CashboxId IS NOT NULL AND CashMovementTypeId IS NOT NULL))
             );
 
             CREATE INDEX IX_CashVouchers_Company_Number

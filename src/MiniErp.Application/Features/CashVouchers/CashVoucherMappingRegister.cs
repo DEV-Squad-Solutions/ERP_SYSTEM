@@ -15,7 +15,7 @@ public sealed class CashVoucherMappingRegister : IRegister
             .Ignore(voucher => voucher.InvoicePayment)
             .Map(
                 voucher => voucher.VoucherNumber,
-                request => request.VoucherNumber.Trim())
+                request => Normalize(request.VoucherNumber) ?? string.Empty)
             .Map(
                 voucher => voucher.ExternalPartyName,
                 request => Normalize(request.ExternalPartyName))
@@ -36,7 +36,7 @@ public sealed class CashVoucherMappingRegister : IRegister
             .Ignore(voucher => voucher.InvoicePayment)
             .Map(
                 voucher => voucher.VoucherNumber,
-                request => request.VoucherNumber.Trim())
+                request => Normalize(request.VoucherNumber) ?? string.Empty)
             .Map(
                 voucher => voucher.ExternalPartyName,
                 request => Normalize(request.ExternalPartyName))
@@ -56,10 +56,18 @@ public sealed class CashVoucherMappingRegister : IRegister
                     : voucher.Company.Settings.BaseCurrency)
             .Map(
                 response => response.CashboxName,
-                voucher => voucher.Cashbox.Name)
+                voucher => voucher.Cashbox == null
+                    ? null
+                    : voucher.Cashbox.Name)
             .Map(
                 response => response.CashMovementTypeName,
-                voucher => voucher.CashMovementType.Name)
+                voucher => voucher.CashMovementType == null
+                    ? null
+                    : voucher.CashMovementType.Name)
+            .Map(
+                response => response.IsDraft,
+                voucher => !voucher.CashboxId.HasValue ||
+                    !voucher.CashMovementTypeId.HasValue)
             .Map(
                 response => response.BusinessPartnerName,
                 voucher => voucher.BusinessPartner == null
