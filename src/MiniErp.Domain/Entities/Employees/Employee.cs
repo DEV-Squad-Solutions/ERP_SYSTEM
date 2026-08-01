@@ -22,7 +22,7 @@ namespace MiniErp.Domain.Entities.Employees
         public string? Address { get; set; }
 
         public EmployeeType Type { get; set; } = EmployeeType.Daily;
-        public decimal? DailyRate { get; set; } // Applicable if Type is Daily
+        public decimal? DailySalary { get; set; } // Applicable if Type is Daily
         public decimal? MonthlySalary { get; set; } // Applicable if Type is Monthly
 
         public bool IsActive { get; set; } = true;

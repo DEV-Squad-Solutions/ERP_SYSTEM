@@ -26,9 +26,6 @@ namespace MiniErp.Domain.Entities.Payroll
         public string EmployeeName { get; set; } = default!;
         public EmployeeType EmployeeType { get; set; }
 
-        public decimal? DailyRateApplied { get; set; }
-        public decimal? MonthlySalaryApplied { get; set; }
-
         // Attendance Summary
         public int DaysWorked { get; set; }
         public int AbsentDays { get; set; }
