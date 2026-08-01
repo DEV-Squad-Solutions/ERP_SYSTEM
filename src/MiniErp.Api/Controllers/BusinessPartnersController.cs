@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.BusinessPartners;
+using MiniErp.Application.Features.PartnerItemReports;
 
 namespace MiniErp.Api.Controllers;
 
@@ -10,7 +11,8 @@ namespace MiniErp.Api.Controllers;
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
 public sealed class BusinessPartnersController(
-    IBusinessPartnerService businessPartnerService)
+    IBusinessPartnerService businessPartnerService,
+    IPartnerItemReportService partnerItemReportService)
     : ApiControllerBase
 {
     [HttpGet]
@@ -59,6 +61,19 @@ public sealed class BusinessPartnersController(
     {
         var result = await businessPartnerService.GetContainerStoreAsync(
             id,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [HttpGet("item-report")]
+    [ProducesResponseType<PartnerItemReportResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetItemReport(
+        [FromQuery] PartnerItemReportFilterRequest filters,
+        CancellationToken cancellationToken)
+    {
+        var result = await partnerItemReportService.GetAsync(
+            filters,
             cancellationToken);
         return this.ToActionResult(result);
     }

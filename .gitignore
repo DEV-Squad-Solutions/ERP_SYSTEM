@@ -10,9 +10,5 @@ client/*.tsbuildinfo
 .codex/
 artifacts
 
-# Graphify local runtime state (the graph, report, and HTML remain versioned)
-graphify-out/.graphify_python
-graphify-out/.graphify_root
-graphify-out/manifest.json
-graphify-out/cost.json
-graphify-out/cache/
+# Graphify generated output
+graphify-out/
