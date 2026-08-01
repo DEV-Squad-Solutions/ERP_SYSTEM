@@ -42,12 +42,6 @@ public sealed class PayrollEntryConfiguration
             .HasConversion<int>()
             .IsRequired();
 
-        builder.Property(entry => entry.DailyRateApplied)
-            .HasPrecision(18, 2);
-
-        builder.Property(entry => entry.MonthlySalaryApplied)
-            .HasPrecision(18, 2);
-
         builder.Property(entry => entry.OvertimeHours)
             .HasPrecision(18, 2);
 

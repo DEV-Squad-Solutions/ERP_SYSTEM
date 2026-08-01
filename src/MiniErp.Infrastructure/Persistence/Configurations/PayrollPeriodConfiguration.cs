@@ -23,6 +23,11 @@ public sealed class PayrollPeriodConfiguration
             period.CompanyId,
             period.Id
         });
+        builder.Property(e => e.Code)
+            .HasComputedColumnSql(
+                "N'Roll-' + RIGHT(N'000' + CAST([Id] AS NVARCHAR(10)), 3)",
+                stored: true)
+            .IsUnicode();
 
         builder.Property(period => period.Name)
             .HasMaxLength(100)
@@ -38,6 +43,36 @@ public sealed class PayrollPeriodConfiguration
 
         builder.Property(period => period.EndDate)
             .HasColumnType("date")
+            .IsRequired();
+
+        builder.Property(period => period.TotalEmployees)
+            .IsRequired();
+
+        builder.Property(period => period.TotalMonthlyEmployees)
+            .IsRequired();
+
+        builder.Property(period =>period.TotalDailyEmployees)
+            .IsRequired();
+
+        builder.Property(period => period.TotalDebits)
+            .IsRequired();
+
+        builder.Property(period => period.TotalCredits)
+            .IsRequired();
+
+        builder.Property(period => period.TotalNetSalary)
+            .IsRequired();
+
+        builder.Property(period => period.TotalGrossSalary)
+            .IsRequired();
+
+        builder.Property(period => period.TotalWorkedDays)
+            .IsRequired();
+
+        builder.Property(period => period.TotalAbsentDays)
+            .IsRequired();
+
+        builder.Property(period => period.TotalOvertimeDays)
             .IsRequired();
 
         builder.Property(period => period.Status)

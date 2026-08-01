@@ -75,10 +75,10 @@ public sealed class ApplicationDbContext(
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PayrollPeriod> PayrollPeriods => Set<PayrollPeriod>();
-    public DbSet<PayrollEntry> PayrollPeriodLines => Set<PayrollEntry>();
+    public DbSet<PayrollEntry> PayrollEntries => Set<PayrollEntry>();
     public DbSet<Employee> Employees => Set<Employee>();
     public DbSet<EmployeeAttendance> EmployeeAttendances => Set<EmployeeAttendance>();
-    public DbSet<EmployeeTransaction> PayrollDeductions => Set<EmployeeTransaction>();
+    public DbSet<EmployeeTransaction> EmployeeTransactions => Set<EmployeeTransaction>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

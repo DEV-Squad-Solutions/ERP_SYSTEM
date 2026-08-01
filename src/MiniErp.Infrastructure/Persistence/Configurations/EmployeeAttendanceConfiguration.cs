@@ -49,12 +49,13 @@ public sealed class EmployeeAttendanceConfiguration
             .IsRequired();
 
         builder.Property(attendance => attendance.WorkOverTimeRatio)
-            .HasConversion<int>();
+            .HasConversion<int>()
+            .IsRequired();
             
 
         builder.Property(attendance => attendance.WorkDaysDeductionRatio)
-            .HasConversion<int>();
-            
+            .HasConversion<int>()
+            .IsRequired();
 
         builder.Property(attendance => attendance.WorkLocation)
             .HasMaxLength(200);

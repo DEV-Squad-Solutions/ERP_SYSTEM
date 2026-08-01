@@ -14,7 +14,7 @@ public sealed class EmployeeConfiguration : AuditableEntityConfiguration<Employe
         {
             table.HasCheckConstraint(
                 "CK_Employees_SalaryRates_NonNegative",
-                "([DailyRate] IS NULL OR [DailyRate] >= 0) AND ([MonthlySalary] IS NULL OR [MonthlySalary] >= 0)");
+                "([DailySalary] IS NULL OR [DailySalary] >= 0) AND ([MonthlySalary] IS NULL OR [MonthlySalary] >= 0)");
         });
 
         builder.HasKey(employee => employee.Id);
@@ -24,8 +24,9 @@ public sealed class EmployeeConfiguration : AuditableEntityConfiguration<Employe
 
         builder.Property(e => e.Code)
             .HasComputedColumnSql(
-                "'Emp-' + RIGHT('00000' + CAST([EmployeeNumber] AS VARCHAR(5)), 5)",
-                stored: true);
+                "N'Emp-' + RIGHT(N'000' + CAST([Id] AS NVARCHAR(10)), 3)",
+                stored: true)
+            .IsUnicode();
 
         builder.HasIndex(employee => new { employee.CompanyId, employee.Code })
             .IsUnique()
@@ -47,7 +48,7 @@ public sealed class EmployeeConfiguration : AuditableEntityConfiguration<Employe
             .HasConversion<int>()
             .IsRequired();
 
-        builder.Property(employee => employee.DailyRate)
+        builder.Property(employee => employee.DailySalary  )
             .HasPrecision(18,2);
 
         builder.Property(employee => employee.MonthlySalary)
