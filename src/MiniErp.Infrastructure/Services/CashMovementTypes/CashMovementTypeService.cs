@@ -1,3 +1,4 @@
+using System.Data;
 using Mapster;
 using static MiniErp.Application.Features.CashMovementTypes.CashMovementTypeErrors;
 using Microsoft.EntityFrameworkCore;
@@ -121,6 +122,11 @@ public sealed class CashMovementTypeService(
         CashMovementTypeRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
         var movementType = request.Adapt<CashMovementType>();
         movementType.CompanyId = companyId;
 
@@ -133,10 +139,19 @@ public sealed class CashMovementTypeService(
             return Result<CashMovementTypeResponse>.Failure(duplicateError);
         }
 
+        foreach (var invoiceType in GetDefaultInvoiceTypes(movementType))
+        {
+            await ClearExistingDefaultAsync(
+                invoiceType,
+                excludedId: null,
+                cancellationToken);
+        }
+
         dbContext.CashMovementTypes.Add(movementType);
         await dbContext.SaveChangesAsync(cancellationToken);
         var response = await ProjectResponseQuery(movementType.Id)
             .FirstAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Result<CashMovementTypeResponse>.Success(response);
     }
 
@@ -155,6 +170,11 @@ public sealed class CashMovementTypeService(
             return Result<CashMovementTypeResponse>.Failure(
                 RowVersionRequired());
         }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var movementType = await dbContext.CashMovementTypes
             .FirstOrDefaultAsync(
@@ -196,18 +216,28 @@ public sealed class CashMovementTypeService(
             request.RowVersion;
         request.Adapt(movementType);
 
+        foreach (var invoiceType in GetDefaultInvoiceTypes(movementType))
+        {
+            await ClearExistingDefaultAsync(
+                invoiceType,
+                excludedId: id,
+                cancellationToken);
+        }
+
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
+            await transaction.RollbackAsync(cancellationToken);
             dbContext.ChangeTracker.Clear();
             return Result<CashMovementTypeResponse>.Failure(Concurrency());
         }
 
         var response = await ProjectResponseQuery(id)
             .FirstAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Result<CashMovementTypeResponse>.Success(response);
     }
 
@@ -284,4 +314,73 @@ public sealed class CashMovementTypeService(
                     voucher.CashMovementTypeId == cashMovementTypeId,
                 cancellationToken);
 
+    private async Task ClearExistingDefaultAsync(
+        InvoiceType invoiceType,
+        int? excludedId,
+        CancellationToken cancellationToken)
+    {
+        var query = dbContext.CashMovementTypes.Where(entity =>
+            entity.CompanyId == companyId &&
+            (!excludedId.HasValue || entity.Id != excludedId.Value));
+
+        _ = invoiceType switch
+        {
+            InvoiceType.Sales => await query
+                .Where(entity => entity.IsDefaultForSales)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(
+                        entity => entity.IsDefaultForSales,
+                        false),
+                    cancellationToken),
+            InvoiceType.Purchase => await query
+                .Where(entity => entity.IsDefaultForPurchase)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(
+                        entity => entity.IsDefaultForPurchase,
+                        false),
+                    cancellationToken),
+            InvoiceType.SalesReturn => await query
+                .Where(entity => entity.IsDefaultForSalesReturn)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(
+                        entity => entity.IsDefaultForSalesReturn,
+                        false),
+                    cancellationToken),
+            InvoiceType.PurchaseReturn => await query
+                .Where(entity => entity.IsDefaultForPurchaseReturn)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(
+                        entity => entity.IsDefaultForPurchaseReturn,
+                        false),
+                    cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(invoiceType),
+                invoiceType,
+                "Unsupported invoice type.")
+        };
+    }
+
+    private static IEnumerable<InvoiceType> GetDefaultInvoiceTypes(
+        CashMovementType movementType)
+    {
+        if (movementType.IsDefaultForSales)
+        {
+            yield return InvoiceType.Sales;
+        }
+
+        if (movementType.IsDefaultForPurchase)
+        {
+            yield return InvoiceType.Purchase;
+        }
+
+        if (movementType.IsDefaultForSalesReturn)
+        {
+            yield return InvoiceType.SalesReturn;
+        }
+
+        if (movementType.IsDefaultForPurchaseReturn)
+        {
+            yield return InvoiceType.PurchaseReturn;
+        }
+    }
 }

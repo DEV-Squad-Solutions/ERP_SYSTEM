@@ -102,7 +102,6 @@ public sealed class InvoicePaymentTermTests
             BusinessPartnerId: 1,
             PartnerInvoiceNo: null,
             CashboxId: paidAmount > 0m ? 1 : null,
-            CashMovementTypeId: paidAmount > 0m ? 1 : null,
             ExchangeRate: null,
             CashboxExchangeRate: null,
             WBWeight: 0m,
@@ -155,6 +154,15 @@ public sealed class InvoicePaymentTermTests
         Assert.Contains(
             typeof(InvoiceListResponse).GetProperties(),
             property => property.Name == "WBTotal");
+        Assert.DoesNotContain(
+            typeof(InvoiceRequest).GetProperties(),
+            property => property.Name == "CashMovementTypeId");
+        Assert.DoesNotContain(
+            typeof(InvoiceUpdateRequest).GetProperties(),
+            property => property.Name == "CashMovementTypeId");
+        Assert.Contains(
+            typeof(InvoiceResponse).GetProperties(),
+            property => property.Name == "CashMovementTypeId");
     }
 
     [Fact]
@@ -172,7 +180,6 @@ public sealed class InvoicePaymentTermTests
             BusinessPartnerId: 1,
             PartnerInvoiceNo: null,
             CashboxId: null,
-            CashMovementTypeId: null,
             ExchangeRate: null,
             CashboxExchangeRate: null,
             WBWeight: 0m,

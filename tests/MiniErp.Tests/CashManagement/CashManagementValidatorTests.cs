@@ -39,14 +39,46 @@ public sealed class CashManagementValidatorTests
                 "Type",
                 (CashDirection)999,
                 ForPartner: true,
-                true,
-                null));
+                IsActive: true,
+                IsDefaultForSales: false,
+                IsDefaultForPurchase: false,
+                IsDefaultForSalesReturn: false,
+                IsDefaultForPurchaseReturn: false,
+                Notes: null));
 
         Assert.Contains(
             result.Errors,
             error =>
                 error.PropertyName ==
                 nameof(CashMovementTypeRequest.Direction));
+    }
+
+    [Theory]
+    [InlineData(false, true, CashDirection.Receipt)]
+    [InlineData(true, false, CashDirection.Receipt)]
+    [InlineData(true, true, CashDirection.Payment)]
+    public void MovementTypeValidator_RejectsInvalidInvoiceDefault(
+        bool forPartner,
+        bool isActive,
+        CashDirection direction)
+    {
+        var validator = new CashMovementTypeRequestValidator();
+        var result = validator.Validate(
+            new CashMovementTypeRequest(
+                "Invoice default",
+                direction,
+                forPartner,
+                isActive,
+                IsDefaultForSales: true,
+                IsDefaultForPurchase: false,
+                IsDefaultForSalesReturn: false,
+                IsDefaultForPurchaseReturn: false,
+                Notes: null));
+
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName ==
+                nameof(CashMovementTypeRequest.IsDefaultForSales));
     }
 
     [Theory]
@@ -168,9 +200,13 @@ public sealed class CashManagementValidatorTests
                     "Type",
                     CashDirection.Receipt,
                     ForPartner: false,
-                    true,
-                    null,
-                    null));
+                    IsActive: true,
+                    IsDefaultForSales: false,
+                    IsDefaultForPurchase: false,
+                    IsDefaultForSalesReturn: false,
+                    IsDefaultForPurchaseReturn: false,
+                    Notes: null,
+                    RowVersion: null));
         var voucherResult = new CashVoucherUpdateRequestValidator().Validate(
             new CashVoucherUpdateRequest(
                 "CV-1",

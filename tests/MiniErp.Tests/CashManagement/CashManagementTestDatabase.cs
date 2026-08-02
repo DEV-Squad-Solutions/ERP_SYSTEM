@@ -256,6 +256,10 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Direction INTEGER NOT NULL,
                 PartnerEffect INTEGER NOT NULL,
                 IsActive INTEGER NOT NULL DEFAULT 1,
+                IsDefaultForSales INTEGER NOT NULL DEFAULT 0,
+                IsDefaultForPurchase INTEGER NOT NULL DEFAULT 0,
+                IsDefaultForSalesReturn INTEGER NOT NULL DEFAULT 0,
+                IsDefaultForPurchaseReturn INTEGER NOT NULL DEFAULT 0,
                 Notes TEXT NULL,
                 RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
                 CreatedById TEXT NOT NULL,
@@ -267,12 +271,37 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 DeletedById TEXT NULL,
                 DeletedOn TEXT NULL,
                 DeletedByPc TEXT NULL,
-                IsDeleted INTEGER NOT NULL
+                IsDeleted INTEGER NOT NULL,
+                CONSTRAINT CK_CashMovementTypes_InvoiceDefaults
+                    CHECK (
+                        ((IsDefaultForSales = 0 AND
+                          IsDefaultForPurchaseReturn = 0) OR
+                         (IsActive = 1 AND Direction = 1 AND PartnerEffect = 2))
+                        AND
+                        ((IsDefaultForPurchase = 0 AND
+                          IsDefaultForSalesReturn = 0) OR
+                         (IsActive = 1 AND Direction = 2 AND PartnerEffect = 1)))
             );
 
             CREATE UNIQUE INDEX UX_CashMovementTypes_Company_Direction_Name
             ON CashMovementTypes (CompanyId, Direction, Name)
             WHERE IsDeleted = 0;
+
+            CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForSales
+            ON CashMovementTypes (CompanyId, IsDefaultForSales)
+            WHERE IsDeleted = 0 AND IsDefaultForSales = 1;
+
+            CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForPurchase
+            ON CashMovementTypes (CompanyId, IsDefaultForPurchase)
+            WHERE IsDeleted = 0 AND IsDefaultForPurchase = 1;
+
+            CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForSalesReturn
+            ON CashMovementTypes (CompanyId, IsDefaultForSalesReturn)
+            WHERE IsDeleted = 0 AND IsDefaultForSalesReturn = 1;
+
+            CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForPurchaseReturn
+            ON CashMovementTypes (CompanyId, IsDefaultForPurchaseReturn)
+            WHERE IsDeleted = 0 AND IsDefaultForPurchaseReturn = 1;
 
             CREATE TABLE DriverTrips (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -488,19 +517,25 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
 
             INSERT INTO CashMovementTypes (
                 Id, CompanyId, Name, Direction, PartnerEffect, IsActive,
+                IsDefaultForSales, IsDefaultForPurchase,
+                IsDefaultForSalesReturn, IsDefaultForPurchaseReturn,
                 CreatedById, CreatedOn, CreatedByPc, IsDeleted)
             VALUES
-                (1, 1, 'Customer Collection', 1, 2, 1,
+                (1, 1, 'Customer Collection', 1, 2, 1, 1, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (2, 1, 'Supplier Payment', 2, 1, 1,
+                (2, 1, 'Supplier Payment', 2, 1, 1, 0, 1, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (3, 1, 'Other Receipt', 1, 0, 1,
+                (3, 1, 'Other Receipt', 1, 0, 1, 0, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (4, 1, 'Driver Advance', 2, 0, 1,
+                (4, 1, 'Driver Advance', 2, 0, 1, 0, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (5, 1, 'Inactive Payment', 2, 0, 0,
+                (5, 1, 'Inactive Payment', 2, 0, 0, 0, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (6, 2, 'Other Receipt', 1, 0, 1,
+                (6, 2, 'Other Receipt', 1, 0, 1, 0, 0, 0, 0,
+                 'test', '2026-01-01', 'test', 0),
+                (7, 1, 'Supplier Refund', 1, 2, 1, 0, 0, 0, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (8, 1, 'Customer Refund', 2, 1, 1, 0, 0, 1, 0,
                  'test', '2026-01-01', 'test', 0);
 
             INSERT INTO DriverTrips (

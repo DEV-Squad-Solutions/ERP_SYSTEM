@@ -1,4 +1,5 @@
 using MiniErp.Application.Common.Results;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.Invoices;
 
@@ -398,16 +399,10 @@ public static class InvoiceErrors
             "اختر صندوق النقدية لتسجيل الدفعة.",
             nameof(InvoiceRequest.CashboxId));
 
-    public static Error CashMovementTypeRequiredForPayment() =>
-        Error.Validation(
-            "Invoices.CashMovementTypeRequiredForPayment",
-            "اختر نوع الحركة النقدية لتسجيل الدفعة.",
-            nameof(InvoiceRequest.CashMovementTypeId));
-
     public static Error PaymentReferencesNotAllowed() =>
         Error.Validation(
             "Invoices.PaymentReferencesNotAllowed",
-            "لا تختر صندوقًا أو نوع حركة نقدية بدون إدخال دفعة.");
+            "لا تختر صندوقًا بدون إدخال مبلغ مدفوع.");
 
     public static Error CashboxNotFound(int id) =>
         Error.NotFound(
@@ -426,28 +421,22 @@ public static class InvoiceErrors
             "عملة الصندوق مختلفة عن عملة الفاتورة.",
             nameof(InvoiceRequest.CashboxId));
 
-    public static Error CashMovementTypeNotFound(int id) =>
-        Error.NotFound(
-            "Invoices.CashMovementTypeNotFound",
-            $"نوع الحركة النقدية رقم {id} غير موجود.",
-            nameof(InvoiceRequest.CashMovementTypeId));
-
-    public static Error CashMovementTypeInactive() =>
+    public static Error DefaultCashMovementTypeNotFound(
+        InvoiceType invoiceType) =>
         Error.Conflict(
-            "Invoices.CashMovementTypeInactive",
-            "نوع الحركة النقدية غير نشط.");
+            "Invoices.DefaultCashMovementTypeNotFound",
+            $"لا توجد حركة افتراضية لفاتورة {GetInvoiceTypeName(invoiceType)}. " +
+            "عيّنها من شاشة أنواع القبض والصرف.");
 
-    public static Error CashMovementTypeDirectionMismatch() =>
-        Error.Conflict(
-            "Invoices.CashMovementTypeDirectionMismatch",
-            "نوع الحركة النقدية لا يناسب نوع الفاتورة.",
-            nameof(InvoiceRequest.CashMovementTypeId));
-
-    public static Error CashMovementTypePartnerEffectMismatch() =>
-        Error.Conflict(
-            "Invoices.CashMovementTypePartnerEffectMismatch",
-            "نوع الحركة النقدية لا يناسب حساب الشريك.",
-            nameof(InvoiceRequest.CashMovementTypeId));
+    private static string GetInvoiceTypeName(InvoiceType invoiceType) =>
+        invoiceType switch
+        {
+            InvoiceType.Sales => "البيع",
+            InvoiceType.Purchase => "الشراء",
+            InvoiceType.SalesReturn => "مرتجع البيع",
+            InvoiceType.PurchaseReturn => "مرتجع الشراء",
+            _ => "هذا النوع"
+        };
 
     public static Error InsufficientCashboxBalance(int cashboxId) =>
         Error.Conflict(

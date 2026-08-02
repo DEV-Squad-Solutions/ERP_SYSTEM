@@ -629,7 +629,6 @@ public sealed partial class InvoiceService
     private async Task<Result<PaymentPreparation?>> PreparePaymentAsync(
         Invoice invoice,
         int? cashboxId,
-        int? cashMovementTypeId,
         decimal? requestedCashboxExchangeRate,
         int? currentInvoiceId,
         CancellationToken cancellationToken)
@@ -659,7 +658,7 @@ public sealed partial class InvoiceService
 
         if (invoice.PaidAmount <= 0m)
         {
-            if (cashboxId.HasValue || cashMovementTypeId.HasValue)
+            if (cashboxId.HasValue)
             {
                 return Result<PaymentPreparation?>.Failure(
                     PaymentReferencesNotAllowed());
@@ -682,12 +681,6 @@ public sealed partial class InvoiceService
                 CashboxRequiredForPayment());
         }
 
-        if (!cashMovementTypeId.HasValue)
-        {
-            return Result<PaymentPreparation?>.Failure(
-                CashMovementTypeRequiredForPayment());
-        }
-
         var cashbox = await dbContext.Cashboxes
             .AsNoTracking()
             .FirstOrDefaultAsync(candidate =>
@@ -708,40 +701,50 @@ public sealed partial class InvoiceService
                 CashboxInactive());
         }
 
-        var movementType = await dbContext.CashMovementTypes
+        var expectedDirection = InvoiceMovementRules.GetPaymentDirection(
+            invoice.InvoiceType);
+        var expectedEffect = InvoiceMovementRules.GetPaymentPartnerEffect(
+            invoice.InvoiceType);
+
+        var movementType = currentVoucher?.CashMovementTypeId is int currentTypeId
+            ? await dbContext.CashMovementTypes
+                .AsNoTracking()
+                .FirstOrDefaultAsync(candidate =>
+                    candidate.CompanyId == companyId &&
+                    candidate.Id == currentTypeId &&
+                    candidate.Direction == expectedDirection &&
+                    candidate.PartnerEffect == expectedEffect,
+                    cancellationToken)
+            : null;
+
+        var defaultMovementTypes = dbContext.CashMovementTypes
             .AsNoTracking()
-            .FirstOrDefaultAsync(candidate =>
+            .Where(candidate =>
                 candidate.CompanyId == companyId &&
-                candidate.Id == cashMovementTypeId.Value,
-                cancellationToken);
+                candidate.Direction == expectedDirection &&
+                candidate.PartnerEffect == expectedEffect &&
+                candidate.IsActive);
+
+        defaultMovementTypes = invoice.InvoiceType switch
+        {
+            InvoiceType.Sales => defaultMovementTypes.Where(
+                candidate => candidate.IsDefaultForSales),
+            InvoiceType.Purchase => defaultMovementTypes.Where(
+                candidate => candidate.IsDefaultForPurchase),
+            InvoiceType.SalesReturn => defaultMovementTypes.Where(
+                candidate => candidate.IsDefaultForSalesReturn),
+            InvoiceType.PurchaseReturn => defaultMovementTypes.Where(
+                candidate => candidate.IsDefaultForPurchaseReturn),
+            _ => defaultMovementTypes.Where(candidate => false)
+        };
+
+        movementType ??= await defaultMovementTypes
+            .FirstOrDefaultAsync(cancellationToken);
+
         if (movementType is null)
         {
             return Result<PaymentPreparation?>.Failure(
-                CashMovementTypeNotFound(cashMovementTypeId.Value));
-        }
-
-        if (!movementType.IsActive &&
-            (currentVoucher is null ||
-             currentVoucher.CashMovementTypeId != movementType.Id))
-        {
-            return Result<PaymentPreparation?>.Failure(
-                CashMovementTypeInactive());
-        }
-
-        var expectedDirection = InvoiceMovementRules.GetPaymentDirection(
-            invoice.InvoiceType);
-        if (movementType.Direction != expectedDirection)
-        {
-            return Result<PaymentPreparation?>.Failure(
-                CashMovementTypeDirectionMismatch());
-        }
-
-        var expectedEffect = InvoiceMovementRules.GetPaymentPartnerEffect(
-            invoice.InvoiceType);
-        if (movementType.PartnerEffect != expectedEffect)
-        {
-            return Result<PaymentPreparation?>.Failure(
-                CashMovementTypePartnerEffectMismatch());
+                DefaultCashMovementTypeNotFound(invoice.InvoiceType));
         }
 
         var exchangeRateResult = await exchangeRateResolver.ResolveAsync(

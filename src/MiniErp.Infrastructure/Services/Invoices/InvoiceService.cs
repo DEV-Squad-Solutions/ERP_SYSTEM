@@ -163,7 +163,6 @@ public sealed partial class InvoiceService(
         var paymentPreparation = await PreparePaymentAsync(
             invoice,
             request.CashboxId,
-            request.CashMovementTypeId,
             request.CashboxExchangeRate,
             currentInvoiceId: null,
             cancellationToken);
@@ -307,7 +306,6 @@ public sealed partial class InvoiceService(
         var paymentPreparation = await PreparePaymentAsync(
             invoice,
             request.CashboxId,
-            request.CashMovementTypeId,
             request.CashboxExchangeRate,
             currentInvoiceId: id,
             cancellationToken);

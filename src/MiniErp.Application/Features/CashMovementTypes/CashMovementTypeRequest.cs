@@ -7,6 +7,10 @@ public sealed record CashMovementTypeRequest(
     CashDirection Direction,
     bool ForPartner,
     bool IsActive,
+    bool IsDefaultForSales,
+    bool IsDefaultForPurchase,
+    bool IsDefaultForSalesReturn,
+    bool IsDefaultForPurchaseReturn,
     string? Notes)
 {
     public const int NameMaximumLength = 200;
@@ -19,5 +23,9 @@ public sealed record CashMovementTypeUpdateRequest(
     CashDirection Direction,
     bool ForPartner,
     bool IsActive,
+    bool IsDefaultForSales,
+    bool IsDefaultForPurchase,
+    bool IsDefaultForSalesReturn,
+    bool IsDefaultForPurchaseReturn,
     string? Notes,
     byte[]? RowVersion);

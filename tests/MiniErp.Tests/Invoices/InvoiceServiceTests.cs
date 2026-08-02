@@ -120,8 +120,7 @@ public sealed class InvoiceServiceTests
             ContentType = InvoiceContentType.Containers,
             Lines = [],
             PaidAmount = 0m,
-            CashboxId = null,
-            CashMovementTypeId = null
+            CashboxId = null
         };
 
         var result = await database.CreateService().AddAsync(request);
@@ -2434,6 +2433,47 @@ public sealed class InvoiceServiceTests
         Assert.Equal(18m, persisted.Total);
     }
 
+    [Theory]
+    [InlineData(InvoiceType.Sales, 1, CashDirection.Receipt)]
+    [InlineData(InvoiceType.PurchaseReturn, 4, CashDirection.Receipt)]
+    [InlineData(InvoiceType.Purchase, 2, CashDirection.Payment)]
+    [InlineData(InvoiceType.SalesReturn, 3, CashDirection.Payment)]
+    public async Task Add_PaymentUsesDefaultMovementTypeForInvoiceType(
+        InvoiceType invoiceType,
+        int expectedMovementTypeId,
+        CashDirection expectedDirection)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(invoiceType, PaymentTerm.Cash));
+        var voucher = await database.Context.CashVouchers.SingleAsync();
+
+        Assert.True(
+            result.IsSuccess,
+            result.IsFailure ? result.Error.Description : null);
+        Assert.Equal(expectedMovementTypeId, voucher.CashMovementTypeId);
+        Assert.Equal(expectedDirection, voucher.Direction);
+    }
+
+    [Fact]
+    public async Task Add_PaymentRequiresConfiguredDefaultMovementType()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.CashMovementTypes
+            .ExecuteUpdateAsync(setters => setters.SetProperty(
+                movementType => movementType.IsDefaultForSales,
+                false));
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(InvoiceType.Sales, PaymentTerm.Cash));
+
+        Assert.Equal(
+            "Invoices.DefaultCashMovementTypeNotFound",
+            result.Error.Code);
+        Assert.Empty(await database.Context.Invoices.ToListAsync());
+    }
+
     [Fact]
     public async Task Add_PersistsNormalizedPartnerInvoiceNumberInContracts()
     {
@@ -4082,12 +4122,6 @@ public sealed class InvoiceServiceTests
             BusinessPartnerId: 1,
             PartnerInvoiceNo: null,
             CashboxId: requestedPaidAmount > 0m ? 1 : null,
-            CashMovementTypeId: requestedPaidAmount > 0m
-                ? invoiceType is
-                    InvoiceType.Sales or InvoiceType.PurchaseReturn
-                    ? 1
-                    : 2
-                : null,
             ExchangeRate: null,
             CashboxExchangeRate: null,
             WBWeight: 0m,
@@ -4221,12 +4255,6 @@ public sealed class InvoiceServiceTests
             invoice.RowVersion,
             PartnerInvoiceNo: invoice.PartnerInvoiceNo,
             CashboxId: requestedPaidAmount > 0m ? 1 : null,
-            CashMovementTypeId: requestedPaidAmount > 0m
-                ? requestedInvoiceType is
-                    InvoiceType.Sales or InvoiceType.PurchaseReturn
-                    ? 1
-                    : 2
-                : null,
             ItemsCategoryId: invoice.ItemsCategoryId);
     }
 
@@ -4834,6 +4862,10 @@ public sealed class InvoiceServiceTests
                     Direction INTEGER NOT NULL,
                     PartnerEffect INTEGER NOT NULL,
                     IsActive INTEGER NOT NULL DEFAULT 1,
+                    IsDefaultForSales INTEGER NOT NULL DEFAULT 0,
+                    IsDefaultForPurchase INTEGER NOT NULL DEFAULT 0,
+                    IsDefaultForSalesReturn INTEGER NOT NULL DEFAULT 0,
+                    IsDefaultForPurchaseReturn INTEGER NOT NULL DEFAULT 0,
                     Notes TEXT NULL,
                     RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
                     CreatedById TEXT NOT NULL,
@@ -4845,8 +4877,33 @@ public sealed class InvoiceServiceTests
                     DeletedById TEXT NULL,
                     DeletedOn TEXT NULL,
                     DeletedByPc TEXT NULL,
-                    IsDeleted INTEGER NOT NULL
+                    IsDeleted INTEGER NOT NULL,
+                    CONSTRAINT CK_CashMovementTypes_InvoiceDefaults
+                        CHECK (
+                            ((IsDefaultForSales = 0 AND
+                              IsDefaultForPurchaseReturn = 0) OR
+                             (IsActive = 1 AND Direction = 1 AND PartnerEffect = 2))
+                            AND
+                            ((IsDefaultForPurchase = 0 AND
+                              IsDefaultForSalesReturn = 0) OR
+                             (IsActive = 1 AND Direction = 2 AND PartnerEffect = 1)))
                 );
+
+                CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForSales
+                ON CashMovementTypes (CompanyId, IsDefaultForSales)
+                WHERE IsDeleted = 0 AND IsDefaultForSales = 1;
+
+                CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForPurchase
+                ON CashMovementTypes (CompanyId, IsDefaultForPurchase)
+                WHERE IsDeleted = 0 AND IsDefaultForPurchase = 1;
+
+                CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForSalesReturn
+                ON CashMovementTypes (CompanyId, IsDefaultForSalesReturn)
+                WHERE IsDeleted = 0 AND IsDefaultForSalesReturn = 1;
+
+                CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForPurchaseReturn
+                ON CashMovementTypes (CompanyId, IsDefaultForPurchaseReturn)
+                WHERE IsDeleted = 0 AND IsDefaultForPurchaseReturn = 1;
 
                 CREATE TABLE CashVouchers (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -5012,11 +5069,17 @@ public sealed class InvoiceServiceTests
 
                 INSERT INTO CashMovementTypes (
                     Id, CompanyId, Name, Direction, PartnerEffect, IsActive,
+                    IsDefaultForSales, IsDefaultForPurchase,
+                    IsDefaultForSalesReturn, IsDefaultForPurchaseReturn,
                     CreatedById, CreatedOn, CreatedByPc, IsDeleted)
                 VALUES
-                    (1, 1, 'Customer Collection', 1, 2, 1,
+                    (1, 1, 'Customer Collection', 1, 2, 1, 1, 0, 0, 0,
                      'test', '2026-01-01', 'test', 0),
-                    (2, 1, 'Supplier Payment', 2, 1, 1,
+                    (2, 1, 'Supplier Payment', 2, 1, 1, 0, 1, 0, 0,
+                     'test', '2026-01-01', 'test', 0),
+                    (3, 1, 'Customer Refund', 2, 1, 1, 0, 0, 1, 0,
+                     'test', '2026-01-01', 'test', 0),
+                    (4, 1, 'Supplier Refund', 1, 2, 1, 0, 0, 0, 1,
                      'test', '2026-01-01', 'test', 0);
 
                 INSERT INTO StockOpeningBalances (

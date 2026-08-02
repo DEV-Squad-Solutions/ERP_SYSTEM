@@ -664,21 +664,11 @@ internal static class InvoiceValidationRules
             .GreaterThan(0)
             .When(request => request.CashboxId.HasValue);
 
-        validator.RuleFor(request => request.CashMovementTypeId)
-            .GreaterThan(0)
-            .When(request => request.CashMovementTypeId.HasValue);
-
         validator.RuleFor(request => request.CashboxId)
             .NotNull()
             .When(request => request.PaidAmount > 0m)
             .WithMessage("صندوق النقدية مطلوب عند تسجيل دفعة.")
             .WithErrorCode("Invoices.CashboxRequiredForPayment");
-
-        validator.RuleFor(request => request.CashMovementTypeId)
-            .NotNull()
-            .When(request => request.PaidAmount > 0m)
-            .WithMessage("نوع الحركة النقدية مطلوب عند تسجيل دفعة.")
-            .WithErrorCode("Invoices.CashMovementTypeRequiredForPayment");
 
         validator.RuleFor(request => request.CashboxId)
             .Null()
@@ -686,11 +676,6 @@ internal static class InvoiceValidationRules
             .WithMessage("لا يجوز تحديد صندوق نقدية دون دفعة.")
             .WithErrorCode("Invoices.CashboxNotAllowedWithoutPayment");
 
-        validator.RuleFor(request => request.CashMovementTypeId)
-            .Null()
-            .When(request => request.PaidAmount <= 0m)
-            .WithMessage("لا يجوز تحديد نوع حركة نقدية دون دفعة.")
-            .WithErrorCode("Invoices.CashMovementTypeNotAllowedWithoutPayment");
     }
 
     private static void AddPaymentVoucherShapeRules(
@@ -700,21 +685,11 @@ internal static class InvoiceValidationRules
             .GreaterThan(0)
             .When(request => request.CashboxId.HasValue);
 
-        validator.RuleFor(request => request.CashMovementTypeId)
-            .GreaterThan(0)
-            .When(request => request.CashMovementTypeId.HasValue);
-
         validator.RuleFor(request => request.CashboxId)
             .NotNull()
             .When(request => request.PaidAmount > 0m)
             .WithMessage("صندوق النقدية مطلوب عند تسجيل دفعة.")
             .WithErrorCode("Invoices.CashboxRequiredForPayment");
-
-        validator.RuleFor(request => request.CashMovementTypeId)
-            .NotNull()
-            .When(request => request.PaidAmount > 0m)
-            .WithMessage("نوع الحركة النقدية مطلوب عند تسجيل دفعة.")
-            .WithErrorCode("Invoices.CashMovementTypeRequiredForPayment");
 
         validator.RuleFor(request => request.CashboxId)
             .Null()
@@ -722,11 +697,6 @@ internal static class InvoiceValidationRules
             .WithMessage("لا يجوز تحديد صندوق نقدية دون دفعة.")
             .WithErrorCode("Invoices.CashboxNotAllowedWithoutPayment");
 
-        validator.RuleFor(request => request.CashMovementTypeId)
-            .Null()
-            .When(request => request.PaidAmount <= 0m)
-            .WithMessage("لا يجوز تحديد نوع حركة نقدية دون دفعة.")
-            .WithErrorCode("Invoices.CashMovementTypeNotAllowedWithoutPayment");
     }
 
     private static bool TryCalculateNetTotal(

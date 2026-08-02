@@ -1473,43 +1473,50 @@ public static class DevelopmentDataSeeder
             {
                 Name = "Customer Collection",
                 Direction = CashDirection.Receipt,
-                PartnerEffect = PartnerAccountEffect.Credit
+                PartnerEffect = PartnerAccountEffect.Credit,
+                DefaultInvoiceType = (InvoiceType?)InvoiceType.Sales
             },
             new
             {
                 Name = "Supplier Refund",
                 Direction = CashDirection.Receipt,
-                PartnerEffect = PartnerAccountEffect.Credit
+                PartnerEffect = PartnerAccountEffect.Credit,
+                DefaultInvoiceType = (InvoiceType?)InvoiceType.PurchaseReturn
             },
             new
             {
                 Name = "Other Receipt",
                 Direction = CashDirection.Receipt,
-                PartnerEffect = PartnerAccountEffect.None
+                PartnerEffect = PartnerAccountEffect.None,
+                DefaultInvoiceType = (InvoiceType?)null
             },
             new
             {
                 Name = "Supplier Payment",
                 Direction = CashDirection.Payment,
-                PartnerEffect = PartnerAccountEffect.Debit
+                PartnerEffect = PartnerAccountEffect.Debit,
+                DefaultInvoiceType = (InvoiceType?)InvoiceType.Purchase
             },
             new
             {
                 Name = "Customer Refund",
                 Direction = CashDirection.Payment,
-                PartnerEffect = PartnerAccountEffect.Debit
+                PartnerEffect = PartnerAccountEffect.Debit,
+                DefaultInvoiceType = (InvoiceType?)InvoiceType.SalesReturn
             },
             new
             {
                 Name = "Driver Advance",
                 Direction = CashDirection.Payment,
-                PartnerEffect = PartnerAccountEffect.None
+                PartnerEffect = PartnerAccountEffect.None,
+                DefaultInvoiceType = (InvoiceType?)null
             },
             new
             {
                 Name = "Other Payment",
                 Direction = CashDirection.Payment,
-                PartnerEffect = PartnerAccountEffect.None
+                PartnerEffect = PartnerAccountEffect.None,
+                DefaultInvoiceType = (InvoiceType?)null
             }
         };
 
@@ -1520,10 +1527,22 @@ public static class DevelopmentDataSeeder
 
         foreach (var seed in movementTypeSeeds)
         {
-            if (existingMovementTypes.Any(entity =>
+            var existingMovementType = existingMovementTypes
+                .FirstOrDefault(entity =>
                     entity.Direction == seed.Direction &&
-                    entity.Name == seed.Name))
+                    entity.Name == seed.Name);
+            if (existingMovementType is not null)
             {
+                if (seed.DefaultInvoiceType is InvoiceType invoiceType &&
+                    !existingMovementTypes.Any(entity =>
+                        !entity.IsDeleted &&
+                        IsDefaultForInvoiceType(entity, invoiceType)))
+                {
+                    SetDefaultForInvoiceType(
+                        existingMovementType,
+                        invoiceType);
+                }
+
                 continue;
             }
 
@@ -1536,11 +1555,57 @@ public static class DevelopmentDataSeeder
                 IsActive = true,
                 Notes = "Development seed movement type"
             };
+
+            if (seed.DefaultInvoiceType is InvoiceType defaultInvoiceType &&
+                !existingMovementTypes.Any(entity =>
+                    !entity.IsDeleted &&
+                    IsDefaultForInvoiceType(entity, defaultInvoiceType)))
+            {
+                SetDefaultForInvoiceType(
+                    movementType,
+                    defaultInvoiceType);
+            }
+
             dbContext.CashMovementTypes.Add(movementType);
             existingMovementTypes.Add(movementType);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        static bool IsDefaultForInvoiceType(
+            CashMovementType movementType,
+            InvoiceType invoiceType) =>
+            invoiceType switch
+            {
+                InvoiceType.Sales => movementType.IsDefaultForSales,
+                InvoiceType.Purchase => movementType.IsDefaultForPurchase,
+                InvoiceType.SalesReturn =>
+                    movementType.IsDefaultForSalesReturn,
+                InvoiceType.PurchaseReturn =>
+                    movementType.IsDefaultForPurchaseReturn,
+                _ => false
+            };
+
+        static void SetDefaultForInvoiceType(
+            CashMovementType movementType,
+            InvoiceType invoiceType)
+        {
+            switch (invoiceType)
+            {
+                case InvoiceType.Sales:
+                    movementType.IsDefaultForSales = true;
+                    break;
+                case InvoiceType.Purchase:
+                    movementType.IsDefaultForPurchase = true;
+                    break;
+                case InvoiceType.SalesReturn:
+                    movementType.IsDefaultForSalesReturn = true;
+                    break;
+                case InvoiceType.PurchaseReturn:
+                    movementType.IsDefaultForPurchaseReturn = true;
+                    break;
+            }
+        }
 
         const string voucherNumberPrefix = "SEED-CASH-RECEIPT";
         var voucherNumber = $"{voucherNumberPrefix}-{company.Id}";

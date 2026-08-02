@@ -21,6 +21,16 @@ public sealed class CashMovementTypeConfiguration
                 table.HasCheckConstraint(
                     "CK_CashMovementTypes_PartnerEffect",
                     "[PartnerEffect] IN (0, 1, 2)");
+                table.HasCheckConstraint(
+                    "CK_CashMovementTypes_InvoiceDefaults",
+                    "(([IsDefaultForSales] = 0 AND " +
+                    "[IsDefaultForPurchaseReturn] = 0) OR " +
+                    "([IsActive] = 1 AND [Direction] = 1 AND " +
+                    "[PartnerEffect] = 2)) AND " +
+                    "(([IsDefaultForPurchase] = 0 AND " +
+                    "[IsDefaultForSalesReturn] = 0) OR " +
+                    "([IsActive] = 1 AND [Direction] = 2 AND " +
+                    "[PartnerEffect] = 1))");
             });
 
         builder.HasKey(movementType => movementType.Id);
@@ -53,6 +63,22 @@ public sealed class CashMovementTypeConfiguration
             .HasDefaultValue(true)
             .IsRequired();
 
+        builder.Property(movementType => movementType.IsDefaultForSales)
+            .HasDefaultValue(false)
+            .IsRequired();
+
+        builder.Property(movementType => movementType.IsDefaultForPurchase)
+            .HasDefaultValue(false)
+            .IsRequired();
+
+        builder.Property(movementType => movementType.IsDefaultForSalesReturn)
+            .HasDefaultValue(false)
+            .IsRequired();
+
+        builder.Property(movementType => movementType.IsDefaultForPurchaseReturn)
+            .HasDefaultValue(false)
+            .IsRequired();
+
         builder.Property(movementType => movementType.Notes)
             .HasMaxLength(1_000);
 
@@ -77,6 +103,48 @@ public sealed class CashMovementTypeConfiguration
             movementType.Name,
             movementType.Id
         });
+
+        builder.HasIndex(movementType => new
+        {
+            movementType.CompanyId,
+            movementType.IsDefaultForSales
+        })
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0 AND [IsDefaultForSales] = 1")
+            .HasDatabaseName(
+                "IX_CashMovementTypes_CompanyId_DefaultForSales");
+
+        builder.HasIndex(movementType => new
+        {
+            movementType.CompanyId,
+            movementType.IsDefaultForPurchase
+        })
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0 AND [IsDefaultForPurchase] = 1")
+            .HasDatabaseName(
+                "IX_CashMovementTypes_CompanyId_DefaultForPurchase");
+
+        builder.HasIndex(movementType => new
+        {
+            movementType.CompanyId,
+            movementType.IsDefaultForSalesReturn
+        })
+            .IsUnique()
+            .HasFilter(
+                "[IsDeleted] = 0 AND [IsDefaultForSalesReturn] = 1")
+            .HasDatabaseName(
+                "IX_CashMovementTypes_CompanyId_DefaultForSalesReturn");
+
+        builder.HasIndex(movementType => new
+        {
+            movementType.CompanyId,
+            movementType.IsDefaultForPurchaseReturn
+        })
+            .IsUnique()
+            .HasFilter(
+                "[IsDeleted] = 0 AND [IsDefaultForPurchaseReturn] = 1")
+            .HasDatabaseName(
+                "IX_CashMovementTypes_CompanyId_DefaultForPurchaseReturn");
 
         builder.HasOne(movementType => movementType.Company)
             .WithMany()

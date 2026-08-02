@@ -111,8 +111,12 @@ public sealed class CashMasterServiceTests
                 " customer collection ",
                 CashDirection.Receipt,
                 ForPartner: true,
-                true,
-                null));
+                IsActive: true,
+                IsDefaultForSales: false,
+                IsDefaultForPurchase: false,
+                IsDefaultForSalesReturn: false,
+                IsDefaultForPurchaseReturn: false,
+                Notes: null));
         var createdVoucher = await vouchers.AddAsync(
             CreateGeneralVoucher(
                 "CV-TYPE-1",
@@ -127,9 +131,13 @@ public sealed class CashMasterServiceTests
                 movementType.Value.Name,
                 CashDirection.Payment,
                 ForPartner: false,
-                true,
-                movementType.Value.Notes,
-                movementType.Value.RowVersion));
+                IsActive: true,
+                IsDefaultForSales: false,
+                IsDefaultForPurchase: false,
+                IsDefaultForSalesReturn: false,
+                IsDefaultForPurchaseReturn: false,
+                Notes: movementType.Value.Notes,
+                RowVersion: movementType.Value.RowVersion));
         var delete = await types.DeleteAsync(3);
 
         Assert.Equal("CashMovementTypes.NameExists", duplicate.Error.Code);
@@ -170,6 +178,58 @@ public sealed class CashMasterServiceTests
             item => item.Name == "Inactive Payment");
     }
 
+    [Fact]
+    public async Task MovementType_NewInvoiceDefaultReplacesExactInvoiceTypeOnly()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateMovementTypeService(companyId: 1);
+
+        var created = await service.AddAsync(
+            new CashMovementTypeRequest(
+                "Alternative Collection",
+                CashDirection.Receipt,
+                ForPartner: true,
+                IsActive: true,
+                IsDefaultForSales: true,
+                IsDefaultForPurchase: false,
+                IsDefaultForSalesReturn: false,
+                IsDefaultForPurchaseReturn: false,
+                Notes: null));
+        var defaults = await database.Context.CashMovementTypes
+            .Where(movementType =>
+                movementType.IsDefaultForSales ||
+                movementType.IsDefaultForPurchase ||
+                movementType.IsDefaultForSalesReturn ||
+                movementType.IsDefaultForPurchaseReturn)
+            .OrderBy(movementType => movementType.Id)
+            .Select(movementType => new
+            {
+                movementType.Id,
+                movementType.IsDefaultForSales,
+                movementType.IsDefaultForPurchase,
+                movementType.IsDefaultForSalesReturn,
+                movementType.IsDefaultForPurchaseReturn
+            })
+            .ToListAsync();
+
+        Assert.True(created.IsSuccess);
+        Assert.Equal(4, defaults.Count);
+        Assert.Contains(defaults, item =>
+            item.Id == created.Value.Id &&
+            item.IsDefaultForSales);
+        Assert.Contains(defaults, item =>
+            item.Id == 2 &&
+            item.IsDefaultForPurchase);
+        Assert.Contains(defaults, item =>
+            item.Id == 7 &&
+            item.IsDefaultForPurchaseReturn);
+        Assert.Contains(defaults, item =>
+            item.Id == 8 &&
+            item.IsDefaultForSalesReturn);
+        Assert.DoesNotContain(defaults, item => item.Id == 1);
+    }
+
     [Theory]
     [InlineData(
         CashDirection.Receipt,
@@ -201,8 +261,12 @@ public sealed class CashMasterServiceTests
                 $"Derived {direction} {forPartner}",
                 direction,
                 forPartner,
-                true,
-                null));
+                IsActive: true,
+                IsDefaultForSales: false,
+                IsDefaultForPurchase: false,
+                IsDefaultForSalesReturn: false,
+                IsDefaultForPurchaseReturn: false,
+                Notes: null));
         var storedEffect = await database.Context.CashMovementTypes
             .Where(entity => entity.Id == result.Value.Id)
             .Select(entity => entity.PartnerEffect)
