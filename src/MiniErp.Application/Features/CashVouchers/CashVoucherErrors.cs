@@ -46,61 +46,61 @@ public static class CashVoucherErrors
         Error.NotFound(
             "CashVouchers.MovementTypeNotFound",
             $"لم يتم العثور على نوع الحركة النقدية رقم {id}.",
-            nameof(CashVoucherRequest.CashMovementTypeId));
+            nameof(CashVoucherUpdateRequest.CashMovementTypeId));
 
     public static Error MovementTypeInactive() =>
         Error.Conflict(
             "CashVouchers.MovementTypeInactive",
             "لا يمكن استخدام نوع حركة نقدية غير نشط في سند جديد.",
-            nameof(CashVoucherRequest.CashMovementTypeId));
+            nameof(CashVoucherUpdateRequest.CashMovementTypeId));
 
     public static Error MovementTypeDirectionMismatch() =>
         Error.Conflict(
             "CashVouchers.MovementTypeDirectionMismatch",
             "اتجاه نوع الحركة النقدية لا يطابق اتجاه السند.",
-            nameof(CashVoucherRequest.CashMovementTypeId));
+            nameof(CashVoucherUpdateRequest.CashMovementTypeId));
 
     public static Error MovementTypeNotForPartner() =>
         Error.Conflict(
             "CashVouchers.MovementTypeNotForPartner",
             "نوع الحركة النقدية المختار غير مخصص لحسابات العملاء أو الموردين.",
-            nameof(CashVoucherRequest.CashMovementTypeId));
+            nameof(CashVoucherUpdateRequest.CashMovementTypeId));
 
     public static Error MovementTypeForPartnerOnly() =>
         Error.Conflict(
             "CashVouchers.MovementTypeForPartnerOnly",
             "نوع الحركة النقدية المختار مخصص للعملاء أو الموردين فقط.",
-            nameof(CashVoucherRequest.PartyType));
+            nameof(CashVoucherUpdateRequest.PartyType));
 
     public static Error PartnerNotFound(int? id) =>
         Error.NotFound(
             "CashVouchers.PartnerNotFound",
             $"لم يتم العثور على العميل أو المورد رقم {id}.",
-            nameof(CashVoucherRequest.BusinessPartnerId));
+            nameof(CashVoucherUpdateRequest.BusinessPartnerId));
 
     public static Error PartnerCurrencyMismatch() =>
         Error.Conflict(
             "CashVouchers.PartnerCurrencyMismatch",
-            "عملة صندوق النقدية لا تطابق عملة العميل أو المورد.",
-            nameof(CashVoucherRequest.BusinessPartnerId));
+            "عملة الصندوق مختلفة عن عملة العميل أو المورد. اختر صندوقًا بنفس العملة.",
+            nameof(CashVoucherUpdateRequest.BusinessPartnerId));
 
     public static Error DriverNotFound(int? id) =>
         Error.NotFound(
             "CashVouchers.DriverNotFound",
             $"لم يتم العثور على السائق رقم {id}.",
-            nameof(CashVoucherRequest.DriverId));
+            nameof(CashVoucherUpdateRequest.DriverId));
 
     public static Error DriverTripNotFound(int id) =>
         Error.NotFound(
             "CashVouchers.DriverTripNotFound",
             $"لم يتم العثور على رحلة رقم {id} تخص السائق المحدد.",
-            nameof(CashVoucherRequest.DriverTripId));
+            nameof(CashVoucherUpdateRequest.DriverTripId));
 
     public static Error PostingReferencesMustBeTogether() =>
         Error.Validation(
             "CashVouchers.PostingReferencesMustBeTogether",
             "اختر الصندوق ونوع الحركة معًا عند استكمال السند.",
-            nameof(CashVoucherRequest.CashboxId));
+            nameof(CashVoucherUpdateRequest.CashboxId));
 
     public static Error InsufficientCashboxBalance(int cashboxId) =>
         Error.Conflict(

@@ -39,8 +39,7 @@ public sealed class CashVoucherConfiguration
                     "[ExternalPartyName] IS NOT NULL)");
                 table.HasCheckConstraint(
                     "CK_CashVouchers_PostingReferencesTogether",
-                    "([CashboxId] IS NULL AND [CashMovementTypeId] IS NULL) OR " +
-                    "([CashboxId] IS NOT NULL AND [CashMovementTypeId] IS NOT NULL)");
+                    "[CashMovementTypeId] IS NULL OR [CashboxId] IS NOT NULL");
             });
 
         builder.HasKey(voucher => voucher.Id);

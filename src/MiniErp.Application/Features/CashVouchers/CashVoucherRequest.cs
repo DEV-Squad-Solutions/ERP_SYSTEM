@@ -3,21 +3,11 @@ using MiniErp.Domain.Enums;
 namespace MiniErp.Application.Features.CashVouchers;
 
 public sealed record CashVoucherRequest(
-    string? VoucherNumber = null,
-    DateOnly VoucherDate = default,
-    CashDirection Direction = default,
-    int? CashboxId = null,
-    int? CashMovementTypeId = null,
-    CashPartyType? PartyType = null,
-    int? BusinessPartnerId = null,
-    int? DriverId = null,
-    int? DriverTripId = null,
-    string? ExternalPartyName = null,
-    decimal Amount = 0m,
-    string? ReferenceNumber = null,
-    string? Description = null,
-    string? Notes = null,
-    decimal? ExchangeRate = null)
+    DateOnly VoucherDate,
+    CashDirection Direction,
+    int CashboxId,
+    decimal Amount,
+    string? Description)
 {
     public const int VoucherNumberMaximumLength = 100;
 
@@ -31,7 +21,6 @@ public sealed record CashVoucherRequest(
 }
 
 public sealed record CashVoucherUpdateRequest(
-    string? VoucherNumber,
     DateOnly VoucherDate,
     CashDirection Direction,
     int? CashboxId,

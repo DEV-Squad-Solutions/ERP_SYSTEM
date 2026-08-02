@@ -1,5 +1,7 @@
+using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
+using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.CashVouchers;
 using MiniErp.Application.Features.DriverTrips;
 using MiniErp.Application.Features.Statements;
@@ -23,27 +25,34 @@ public sealed class FinancialStatementServiceTests
             await CashManagementTestDatabase.CreateAsync();
         var vouchers = database.CreateVoucherService(companyId: 1);
 
-        await vouchers.AddAsync(
+        await AddVoucherAsync(vouchers,
             CreateGeneralVoucher(
                 "CV-BEFORE",
                 new DateOnly(2026, 7, 10),
                 CashDirection.Receipt,
                 3,
                 100m));
-        await vouchers.AddAsync(
+        await AddVoucherAsync(vouchers,
             CreateGeneralVoucher(
                 "CV-PERIOD-PAY",
                 new DateOnly(2026, 7, 22),
                 CashDirection.Payment,
                 4,
                 40m));
-        await vouchers.AddAsync(
+        await AddVoucherAsync(vouchers,
             CreateGeneralVoucher(
                 "CV-PERIOD-RECEIPT",
                 new DateOnly(2026, 7, 23),
                 CashDirection.Receipt,
                 3,
                 25m));
+        await vouchers.AddAsync(
+            new CashVoucherRequest(
+                new DateOnly(2026, 7, 24),
+                CashDirection.Receipt,
+                CashboxId: 1,
+                Amount: 500m,
+                Description: "Draft excluded from the statement"));
 
         var result = await database.CreateStatementService(1)
             .GetCashboxStatementAsync(
@@ -61,6 +70,7 @@ public sealed class FinancialStatementServiceTests
         Assert.Equal(25m, result.Value.Summary.TotalReceipts);
         Assert.Equal(40m, result.Value.Summary.TotalPayments);
         Assert.Equal(1085m, result.Value.Summary.ClosingBalance);
+        Assert.Equal(2, result.Value.TotalCount);
         Assert.Equal(
             [1060m, 1085m],
             result.Value.Items.Select(item => item.Balance).ToArray());
@@ -71,7 +81,8 @@ public sealed class FinancialStatementServiceTests
     {
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
-        var voucher = await database.CreateVoucherService(1).AddAsync(
+        var voucher = await AddVoucherAsync(
+            database.CreateVoucherService(1),
             CreatePartnerVoucher(
                 "CV-PARTNER-STMT",
                 new DateOnly(2026, 7, 15),
@@ -107,19 +118,82 @@ public sealed class FinancialStatementServiceTests
     }
 
     [Fact]
+    public async Task ForeignCurrencyPartnerStatementReturnsOriginalAndEgpValues()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE BusinessPartners SET Currency = 2 WHERE Id = 2;
+
+            INSERT INTO PartnerOpeningBalances (
+                Id, CompanyId, BusinessPartnerId, DocumentNumber,
+                DocumentDate, Currency, ExchangeRate, BalanceType,
+                Amount, BaseAmount, Notes,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                2, 1, 2, 'OPEN-USD', '2026-07-01', 2, 50, 1,
+                100, 5000, 'USD opening',
+                'test', '2026-07-01', 'test', 0);
+
+            INSERT INTO BusinessPartnerMovements (
+                Id, CompanyId, BusinessPartnerId, InvoiceId,
+                CashVoucherId, MovementType, MovementDate, Currency,
+                Debit, Credit, ExchangeRate, BaseDebit, BaseCredit,
+                Description, CreatedById, CreatedOn, CreatedByPc,
+                IsDeleted)
+            VALUES (
+                2, 1, 2, 2, NULL, 1, '2026-07-10', 2,
+                20, 0, 51, 1020, 0,
+                'USD invoice', 'test', '2026-07-10', 'test', 0);
+            """);
+
+        var result = await database.CreateStatementService(1)
+            .GetPartnerStatementAsync(
+                Page(),
+                new PartnerStatementFilterRequest(2));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CurrencyCode.USD, result.Value.Currency);
+        Assert.Equal(CurrencyCode.EGP, result.Value.BaseCurrency);
+        Assert.Collection(
+            result.Value.Items,
+            opening =>
+            {
+                Assert.Equal(100m, opening.DebitAmount);
+                Assert.Equal(50m, opening.ExchangeRate);
+                Assert.Equal(5000m, opening.BaseDebitAmount);
+                Assert.Equal(100m, opening.BalanceAmount);
+                Assert.Equal(5000m, opening.BaseBalanceAmount);
+            },
+            invoice =>
+            {
+                Assert.Equal(20m, invoice.DebitAmount);
+                Assert.Equal(51m, invoice.ExchangeRate);
+                Assert.Equal(1020m, invoice.BaseDebitAmount);
+                Assert.Equal(120m, invoice.BalanceAmount);
+                Assert.Equal(6020m, invoice.BaseBalanceAmount);
+            });
+        Assert.Equal(120m, result.Value.Summary.ClosingBalanceAmount);
+        Assert.Equal(
+            6020m,
+            result.Value.Summary.BaseClosingBalanceAmount);
+    }
+
+    [Fact]
     public async Task DriverStatementIncludesGeneralLinkedAndTripCostRows()
     {
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
         var vouchers = database.CreateVoucherService(1);
-        await vouchers.AddAsync(
+        await AddVoucherAsync(vouchers,
             CreateDriverVoucher(
                 "CV-DRIVER-GENERAL",
                 new DateOnly(2026, 7, 18),
                 CashDirection.Payment,
                 tripId: null,
                 amount: 100m));
-        await vouchers.AddAsync(
+        await AddVoucherAsync(vouchers,
             CreateDriverVoucher(
                 "CV-DRIVER-LINKED",
                 new DateOnly(2026, 7, 21),
@@ -186,7 +260,7 @@ public sealed class FinancialStatementServiceTests
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
         var vouchers = database.CreateVoucherService(1);
-        var created = await vouchers.AddAsync(
+        var created = await AddVoucherAsync(vouchers,
             CreateDriverVoucher(
                 "CV-DELETED",
                 new DateOnly(2026, 7, 25),
@@ -220,14 +294,13 @@ public sealed class FinancialStatementServiceTests
             PageSize = 20
         };
 
-    private static CashVoucherRequest CreateGeneralVoucher(
+    private static VoucherTestRequest CreateGeneralVoucher(
         string number,
         DateOnly date,
         CashDirection direction,
         int movementTypeId,
         decimal amount) =>
         new(
-            number,
             date,
             direction,
             1,
@@ -242,14 +315,13 @@ public sealed class FinancialStatementServiceTests
             number,
             null);
 
-    private static CashVoucherRequest CreatePartnerVoucher(
+    private static VoucherTestRequest CreatePartnerVoucher(
         string number,
         DateOnly date,
         CashDirection direction,
         int movementTypeId,
         decimal amount) =>
         new(
-            number,
             date,
             direction,
             1,
@@ -264,14 +336,13 @@ public sealed class FinancialStatementServiceTests
             number,
             null);
 
-    private static CashVoucherRequest CreateDriverVoucher(
+    private static VoucherTestRequest CreateDriverVoucher(
         string number,
         DateOnly date,
         CashDirection direction,
         int? tripId,
         decimal amount) =>
         new(
-            number,
             date,
             direction,
             1,
@@ -285,4 +356,54 @@ public sealed class FinancialStatementServiceTests
             "REF-DRIVER",
             number,
             null);
+
+    private static async Task<Result<CashVoucherResponse>> AddVoucherAsync(
+        ICashVoucherService service,
+        VoucherTestRequest request)
+    {
+        var draft = await service.AddAsync(
+            new CashVoucherRequest(
+                request.VoucherDate,
+                request.Direction,
+                request.CashboxId,
+                request.Amount,
+                request.Description));
+        if (draft.IsFailure)
+        {
+            return draft;
+        }
+
+        return await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                request.VoucherDate,
+                request.Direction,
+                request.CashboxId,
+                request.CashMovementTypeId,
+                request.PartyType,
+                request.BusinessPartnerId,
+                request.DriverId,
+                request.DriverTripId,
+                request.ExternalPartyName,
+                request.Amount,
+                request.ReferenceNumber,
+                request.Description,
+                request.Notes,
+                draft.Value.RowVersion));
+    }
+
+    private sealed record VoucherTestRequest(
+        DateOnly VoucherDate,
+        CashDirection Direction,
+        int CashboxId,
+        int CashMovementTypeId,
+        CashPartyType PartyType,
+        int? BusinessPartnerId,
+        int? DriverId,
+        int? DriverTripId,
+        string? ExternalPartyName,
+        decimal Amount,
+        string? ReferenceNumber,
+        string? Description,
+        string? Notes);
 }

@@ -87,14 +87,14 @@ public sealed class CashManagementValidatorTests
     [InlineData(CashPartyType.Driver, null, 1, null, null)]
     [InlineData(CashPartyType.Driver, null, 1, 1, null)]
     [InlineData(CashPartyType.Other, null, null, null, "Outside party")]
-    public void CashVoucherValidator_AcceptsEveryValidPartyShape(
+    public void CashVoucherUpdateValidator_AcceptsEveryValidPartyShape(
         CashPartyType partyType,
         int? partnerId,
         int? driverId,
         int? tripId,
         string? externalPartyName)
     {
-        var validator = new CashVoucherRequestValidator();
+        var validator = new CashVoucherUpdateRequestValidator();
         var result = validator.Validate(
             CreateVoucher(
                 partyType,
@@ -107,12 +107,11 @@ public sealed class CashManagementValidatorTests
     }
 
     [Fact]
-    public void CashVoucherValidator_RejectsMismatchedPartyFieldsAndAmount()
+    public void CashVoucherUpdateValidator_RejectsMismatchedPartyFieldsAndAmount()
     {
-        var validator = new CashVoucherRequestValidator();
+        var validator = new CashVoucherUpdateRequestValidator();
         var result = validator.Validate(
-            new CashVoucherRequest(
-                "CV-1",
+            new CashVoucherUpdateRequest(
                 new DateOnly(2026, 7, 27),
                 CashDirection.Payment,
                 1,
@@ -125,30 +124,33 @@ public sealed class CashManagementValidatorTests
                 0m,
                 null,
                 null,
-                null));
+                null,
+                new byte[8]));
 
         Assert.Contains(
             result.Errors,
             error =>
                 error.PropertyName ==
-                nameof(CashVoucherRequest.BusinessPartnerId));
-        Assert.Contains(
-            result.Errors,
-            error =>
-                error.PropertyName == nameof(CashVoucherRequest.DriverId));
+                nameof(CashVoucherUpdateRequest.BusinessPartnerId));
         Assert.Contains(
             result.Errors,
             error =>
                 error.PropertyName ==
-                nameof(CashVoucherRequest.DriverTripId));
+                nameof(CashVoucherUpdateRequest.DriverId));
         Assert.Contains(
             result.Errors,
             error =>
                 error.PropertyName ==
-                nameof(CashVoucherRequest.ExternalPartyName));
+                nameof(CashVoucherUpdateRequest.DriverTripId));
         Assert.Contains(
             result.Errors,
-            error => error.PropertyName == nameof(CashVoucherRequest.Amount));
+            error =>
+                error.PropertyName ==
+                nameof(CashVoucherUpdateRequest.ExternalPartyName));
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName ==
+                nameof(CashVoucherUpdateRequest.Amount));
     }
 
     [Fact]
@@ -159,27 +161,44 @@ public sealed class CashManagementValidatorTests
             new CashVoucherRequest(
                 VoucherDate: new DateOnly(2026, 8, 1),
                 Direction: CashDirection.Receipt,
+                CashboxId: 1,
                 Amount: 125m,
-                Notes: "Initial receipt"));
+                Description: "Initial receipt"));
 
         Assert.True(result.IsValid);
     }
 
     [Fact]
-    public void CashVoucherValidator_RequiresPostingReferencesTogether()
+    public void CashVoucherContracts_DoNotAcceptVoucherNumber()
+    {
+        Assert.Equal(
+            ["Amount", "CashboxId", "Description", "Direction", "VoucherDate"],
+            typeof(CashVoucherRequest)
+                .GetProperties()
+                .Select(property => property.Name)
+                .OrderBy(name => name)
+                .ToArray());
+        Assert.DoesNotContain(
+            typeof(CashVoucherUpdateRequest).GetProperties(),
+            property => property.Name == "VoucherNumber");
+    }
+
+    [Fact]
+    public void CashVoucherValidator_RequiresCashbox()
     {
         var validator = new CashVoucherRequestValidator();
         var result = validator.Validate(
             new CashVoucherRequest(
                 VoucherDate: new DateOnly(2026, 8, 1),
                 Direction: CashDirection.Payment,
-                CashboxId: 1,
+                CashboxId: 0,
                 Amount: 50m,
-                Notes: "Incomplete posting data"));
+                Description: "Initial payment"));
 
         Assert.Contains(
             result.Errors,
-            error => error.PropertyName == string.Empty);
+            error => error.PropertyName ==
+                nameof(CashVoucherRequest.CashboxId));
     }
 
     [Fact]
@@ -209,7 +228,6 @@ public sealed class CashManagementValidatorTests
                     RowVersion: null));
         var voucherResult = new CashVoucherUpdateRequestValidator().Validate(
             new CashVoucherUpdateRequest(
-                "CV-1",
                 new DateOnly(2026, 7, 27),
                 CashDirection.Receipt,
                 1,
@@ -265,14 +283,13 @@ public sealed class CashManagementValidatorTests
                 nameof(DriverTripBulkCostUpdateRequest.Items));
     }
 
-    private static CashVoucherRequest CreateVoucher(
+    private static CashVoucherUpdateRequest CreateVoucher(
         CashPartyType partyType,
         int? partnerId,
         int? driverId,
         int? tripId,
         string? externalPartyName) =>
         new(
-            "CV-1",
             new DateOnly(2026, 7, 27),
             CashDirection.Receipt,
             1,
@@ -285,5 +302,6 @@ public sealed class CashManagementValidatorTests
             10m,
             null,
             null,
-            null);
+            null,
+            new byte[8]);
 }

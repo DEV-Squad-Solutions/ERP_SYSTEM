@@ -6,6 +6,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
+using MiniErp.Application.Features.PartnerItemReports;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Containers;
@@ -20,6 +21,7 @@ using MiniErp.Infrastructure.Persistence.Interceptors;
 using MiniErp.Infrastructure.Services.Inventory;
 using MiniErp.Infrastructure.Services.Invoices;
 using MiniErp.Infrastructure.Services.Pagination;
+using MiniErp.Infrastructure.Services.PartnerItemReports;
 
 namespace MiniErp.Tests.Invoices;
 
@@ -3413,6 +3415,7 @@ public sealed class InvoiceServiceTests
         Assert.Equal(17m, details.Value.Total);
         Assert.Equal(4m, details.Value.PaidAmount);
         Assert.Equal(13m, details.Value.RemainingAmount);
+        Assert.Equal(2, Assert.Single(details.Value.Lines).Count);
 
         Assert.True(list.IsSuccess);
         var item = Assert.Single(list.Value.Items);
@@ -3423,6 +3426,31 @@ public sealed class InvoiceServiceTests
         Assert.Equal(13m, item.RemainingAmount);
         Assert.Equal(1, item.LineCount);
         Assert.Equal(0, item.ContainerLineCount);
+    }
+
+    [Fact]
+    public async Task PartnerItemReportReturnsPersistedInvoiceLineCount()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var created = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines: [new InvoiceLineRequest(1, 3, 4m, 10m, null)]));
+
+        Assert.True(created.IsSuccess);
+        database.Context.ChangeTracker.Clear();
+
+        var report = await database.CreatePartnerItemReportService()
+            .GetAsync(
+                new PartnerItemReportFilterRequest(
+                    BusinessPartnerId: 1,
+                    ItemId: 1));
+
+        Assert.True(report.IsSuccess);
+        var movement = Assert.Single(report.Value.Movements);
+        Assert.Equal(3, movement.Count);
+        Assert.Equal(created.Value.Id, movement.InvoiceId);
     }
 
     [Fact]
@@ -4413,6 +4441,9 @@ public sealed class InvoiceServiceTests
                     TimeProvider.System),
                 TimeProvider.System);
         }
+
+        public PartnerItemReportService CreatePartnerItemReportService() =>
+            new(Context, new TestCurrentCompanyContext(1));
 
         public async ValueTask DisposeAsync()
         {

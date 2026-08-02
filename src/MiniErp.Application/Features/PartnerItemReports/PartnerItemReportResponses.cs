@@ -7,6 +7,7 @@ public sealed record PartnerItemReportMovementResponse(
     string InvoiceNumber,
     DateOnly InvoiceDate,
     string MovementType,
+    int Count,
     decimal Quantity,
     decimal Weight,
     decimal UnitPrice,

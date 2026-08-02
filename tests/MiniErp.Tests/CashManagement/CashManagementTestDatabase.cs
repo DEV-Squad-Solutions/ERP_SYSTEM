@@ -364,8 +364,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 DeletedByPc TEXT NULL,
                 IsDeleted INTEGER NOT NULL,
                 CONSTRAINT CK_CashVouchers_PostingReferencesTogether CHECK (
-                    (CashboxId IS NULL AND CashMovementTypeId IS NULL) OR
-                    (CashboxId IS NOT NULL AND CashMovementTypeId IS NOT NULL))
+                    CashMovementTypeId IS NULL OR CashboxId IS NOT NULL)
             );
 
             CREATE INDEX IX_CashVouchers_Company_Number
@@ -483,6 +482,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 (3, 2, 'BP-3', 'Other Company Partner', 1, 10000, 1,
                  'test', '2026-01-01', 'test', 0),
                 (4, 1, 'BP-4', 'Inactive Partner', 1, 10000, 0,
+                 'test', '2026-01-01', 'test', 0),
+                (5, 1, 'BP-USD', 'USD Partner', 2, 10000, 1,
                  'test', '2026-01-01', 'test', 0);
 
             INSERT INTO Drivers (
@@ -513,6 +514,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 (3, 1, 'INACTIVE', 'Inactive Cashbox', 1, 500, 0,
                  'test', '2026-01-01', 'test', 0),
                 (4, 2, 'MAIN', 'Other Company Cashbox', 1, 1000, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (5, 1, 'USD', 'USD Cashbox', 2, 100, 1,
                  'test', '2026-01-01', 'test', 0);
 
             INSERT INTO CashMovementTypes (

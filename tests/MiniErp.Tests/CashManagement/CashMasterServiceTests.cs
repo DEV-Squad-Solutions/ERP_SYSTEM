@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
+using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.CashMovementTypes;
 using MiniErp.Application.Features.CashVouchers;
 using MiniErp.Application.Features.Cashboxes;
@@ -70,7 +71,7 @@ public sealed class CashMasterServiceTests
         var vouchers = database.CreateVoucherService(companyId: 1);
         var cashboxes = database.CreateCashboxService(companyId: 1);
 
-        var created = await vouchers.AddAsync(
+        var created = await AddVoucherAsync(vouchers,
             CreateGeneralVoucher(
                 "CV-MASTER-1",
                 CashDirection.Receipt,
@@ -117,7 +118,7 @@ public sealed class CashMasterServiceTests
                 IsDefaultForSalesReturn: false,
                 IsDefaultForPurchaseReturn: false,
                 Notes: null));
-        var createdVoucher = await vouchers.AddAsync(
+        var createdVoucher = await AddVoucherAsync(vouchers,
             CreateGeneralVoucher(
                 "CV-TYPE-1",
                 CashDirection.Receipt,
@@ -288,14 +289,13 @@ public sealed class CashMasterServiceTests
             true,
             null);
 
-    private static CashVoucherRequest CreateGeneralVoucher(
+    private static VoucherTestRequest CreateGeneralVoucher(
         string number,
         CashDirection direction,
         int cashboxId,
         int movementTypeId,
         decimal amount) =>
         new(
-            number,
             new DateOnly(2026, 7, 27),
             direction,
             cashboxId,
@@ -309,4 +309,54 @@ public sealed class CashMasterServiceTests
             null,
             null,
             null);
+
+    private static async Task<Result<CashVoucherResponse>> AddVoucherAsync(
+        ICashVoucherService service,
+        VoucherTestRequest request)
+    {
+        var draft = await service.AddAsync(
+            new CashVoucherRequest(
+                request.VoucherDate,
+                request.Direction,
+                request.CashboxId,
+                request.Amount,
+                request.Description));
+        if (draft.IsFailure)
+        {
+            return draft;
+        }
+
+        return await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                request.VoucherDate,
+                request.Direction,
+                request.CashboxId,
+                request.CashMovementTypeId,
+                request.PartyType,
+                request.BusinessPartnerId,
+                request.DriverId,
+                request.DriverTripId,
+                request.ExternalPartyName,
+                request.Amount,
+                request.ReferenceNumber,
+                request.Description,
+                request.Notes,
+                draft.Value.RowVersion));
+    }
+
+    private sealed record VoucherTestRequest(
+        DateOnly VoucherDate,
+        CashDirection Direction,
+        int CashboxId,
+        int CashMovementTypeId,
+        CashPartyType PartyType,
+        int? BusinessPartnerId,
+        int? DriverId,
+        int? DriverTripId,
+        string? ExternalPartyName,
+        decimal Amount,
+        string? ReferenceNumber,
+        string? Description,
+        string? Notes);
 }

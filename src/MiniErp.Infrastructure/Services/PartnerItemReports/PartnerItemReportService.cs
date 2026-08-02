@@ -157,6 +157,7 @@ public sealed class PartnerItemReportService(
                 row.InvoiceDate,
                 row.InvoiceType == InvoiceType.Sales ? "sale" : "purchase",
                 row.Count,
+                row.Count,
                 row.Count * row.UnitWeight,
                 row.Price,
                 row.Total))
@@ -195,7 +196,7 @@ public sealed class PartnerItemReportService(
         string InvoiceNumber,
         DateOnly InvoiceDate,
         InvoiceType InvoiceType,
-        decimal Count,
+        int Count,
         decimal UnitWeight,
         decimal Price,
         decimal Total);

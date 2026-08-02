@@ -61,6 +61,8 @@ public sealed record PartnerStatementItemResponse(
     string BalanceDescription,
     string? ReferenceNumber)
 {
+    public decimal ExchangeRate { get; init; }
+
     public decimal BaseDebitAmount { get; init; }
 
     public decimal BaseCreditAmount { get; init; }

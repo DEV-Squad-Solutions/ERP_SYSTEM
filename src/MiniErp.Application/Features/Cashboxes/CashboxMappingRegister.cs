@@ -38,19 +38,25 @@ public sealed class CashboxMappingRegister : IRegister
             .Map(
                 response => response.CurrentBalance,
                 cashbox => cashbox.OpeningBalance +
-                    cashbox.Vouchers.Sum(voucher =>
-                        voucher.Direction == CashDirection.Receipt
-                            ? voucher.Amount
-                            : -voucher.Amount));
+                    cashbox.Vouchers
+                        .Where(voucher =>
+                            voucher.CashMovementTypeId.HasValue)
+                        .Sum(voucher =>
+                            voucher.Direction == CashDirection.Receipt
+                                ? voucher.Amount
+                                : -voucher.Amount));
 
         config.ForType<Cashbox, CashboxSelectResponse>()
             .Map(
                 response => response.CurrentBalance,
                 cashbox => cashbox.OpeningBalance +
-                    cashbox.Vouchers.Sum(voucher =>
-                        voucher.Direction == CashDirection.Receipt
-                            ? voucher.Amount
-                            : -voucher.Amount));
+                    cashbox.Vouchers
+                        .Where(voucher =>
+                            voucher.CashMovementTypeId.HasValue)
+                        .Sum(voucher =>
+                            voucher.Direction == CashDirection.Receipt
+                                ? voucher.Amount
+                                : -voucher.Amount));
     }
 
     private static string? Normalize(string? value) =>

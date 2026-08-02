@@ -98,4 +98,12 @@ public sealed class CashVoucher : AuditableEntity
             Amount,
             ExchangeRate);
     }
+
+    public void InitializeDraft(CurrencyCode currency)
+    {
+        Currency = currency;
+        ExchangeRateId = null;
+        ExchangeRate = 1m;
+        BaseAmount = 0m;
+    }
 }

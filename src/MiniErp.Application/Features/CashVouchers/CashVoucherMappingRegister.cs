@@ -14,18 +14,8 @@ public sealed class CashVoucherMappingRegister : IRegister
             .Ignore(voucher => voucher.BaseAmount)
             .Ignore(voucher => voucher.InvoicePayment)
             .Map(
-                voucher => voucher.VoucherNumber,
-                request => Normalize(request.VoucherNumber) ?? string.Empty)
-            .Map(
-                voucher => voucher.ExternalPartyName,
-                request => Normalize(request.ExternalPartyName))
-            .Map(
-                voucher => voucher.ReferenceNumber,
-                request => Normalize(request.ReferenceNumber))
-            .Map(
                 voucher => voucher.Description,
-                request => Normalize(request.Description))
-            .Map(voucher => voucher.Notes, request => Normalize(request.Notes));
+                request => Normalize(request.Description));
 
         config.ForType<CashVoucherUpdateRequest, CashVoucher>()
             .Ignore(voucher => voucher.RowVersion)
@@ -34,9 +24,6 @@ public sealed class CashVoucherMappingRegister : IRegister
             .Ignore(voucher => voucher.ExchangeRate)
             .Ignore(voucher => voucher.BaseAmount)
             .Ignore(voucher => voucher.InvoicePayment)
-            .Map(
-                voucher => voucher.VoucherNumber,
-                request => Normalize(request.VoucherNumber) ?? string.Empty)
             .Map(
                 voucher => voucher.ExternalPartyName,
                 request => Normalize(request.ExternalPartyName))
@@ -54,6 +41,24 @@ public sealed class CashVoucherMappingRegister : IRegister
                 voucher => voucher.Company.Settings == null
                     ? Domain.Enums.CurrencyCode.EGP
                     : voucher.Company.Settings.BaseCurrency)
+            .Map(
+                response => response.ExchangeRate,
+                voucher => voucher.CashMovementTypeId.HasValue &&
+                    voucher.Currency ==
+                        (voucher.Company.Settings == null
+                            ? Domain.Enums.CurrencyCode.EGP
+                            : voucher.Company.Settings.BaseCurrency)
+                        ? 1m
+                        : voucher.ExchangeRate)
+            .Map(
+                response => response.BaseAmount,
+                voucher => voucher.CashMovementTypeId.HasValue &&
+                    voucher.Currency ==
+                        (voucher.Company.Settings == null
+                            ? Domain.Enums.CurrencyCode.EGP
+                            : voucher.Company.Settings.BaseCurrency)
+                        ? voucher.Amount
+                        : voucher.BaseAmount)
             .Map(
                 response => response.CashboxName,
                 voucher => voucher.Cashbox == null

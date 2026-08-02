@@ -60,6 +60,7 @@ public sealed class FinancialStatementService(
                 .Where(voucher =>
                     voucher.CompanyId == companyId &&
                     voucher.CashboxId == cashbox.Id &&
+                    voucher.CashMovementTypeId.HasValue &&
                     voucher.VoucherDate < filters.FromDate.Value)
                 .SumAsync(
                     voucher =>
@@ -74,6 +75,7 @@ public sealed class FinancialStatementService(
                 .Where(voucher =>
                     voucher.CompanyId == companyId &&
                     voucher.CashboxId == cashbox.Id &&
+                    voucher.CashMovementTypeId.HasValue &&
                     voucher.VoucherDate < filters.FromDate.Value)
                 .SumAsync(
                     voucher =>
@@ -90,7 +92,8 @@ public sealed class FinancialStatementService(
             .AsNoTracking()
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
-                voucher.CashboxId == cashbox.Id)
+                voucher.CashboxId == cashbox.Id &&
+                voucher.CashMovementTypeId.HasValue)
             .Where(voucher =>
                 !filters.FromDate.HasValue ||
                 voucher.VoucherDate >= filters.FromDate.Value)
@@ -427,6 +430,7 @@ public sealed class FinancialStatementService(
                 PartnerBalanceDescription(runningBalance),
                 row.ReferenceNumber)
             {
+                ExchangeRate = row.ExchangeRate,
                 BaseDebitAmount = row.BaseDebit,
                 BaseCreditAmount = row.BaseCredit,
                 BaseBalanceAmount = Math.Abs(runningBaseBalance)
@@ -661,6 +665,7 @@ public sealed class FinancialStatementService(
                 Description = movement.Description,
                 Debit = movement.Debit,
                 Credit = movement.Credit,
+                ExchangeRate = movement.ExchangeRate,
                 BaseDebit = movement.BaseDebit,
                 BaseCredit = movement.BaseCredit,
                 ReferenceNumber = movement.CashVoucherId.HasValue
@@ -693,6 +698,7 @@ public sealed class FinancialStatementService(
                     PartnerBalanceType.Payable
                     ? balance.Amount
                     : 0m,
+                ExchangeRate = balance.ExchangeRate,
                 BaseDebit = balance.BalanceType ==
                     PartnerBalanceType.Receivable
                     ? balance.BaseAmount
@@ -850,6 +856,8 @@ public sealed class FinancialStatementService(
         public string? Description { get; init; }
         public decimal Debit { get; init; }
         public decimal Credit { get; init; }
+
+        public decimal ExchangeRate { get; init; }
 
         public decimal BaseDebit { get; init; }
 
