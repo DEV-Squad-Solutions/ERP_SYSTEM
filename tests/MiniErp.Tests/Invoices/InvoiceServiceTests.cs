@@ -3429,7 +3429,7 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task PartnerItemReportReturnsPersistedInvoiceLineCount()
+    public async Task PartnerItemReportUsesPersistedInvoiceLineAmounts()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var created = await database.CreateService().AddAsync(
@@ -3450,7 +3450,15 @@ public sealed class InvoiceServiceTests
         Assert.True(report.IsSuccess);
         var movement = Assert.Single(report.Value.Movements);
         Assert.Equal(3, movement.Count);
+        Assert.Equal(4m, movement.Weight);
+        Assert.Equal(12m, movement.Quantity);
+        Assert.Equal(10m, movement.UnitPrice);
+        Assert.Equal(120m, movement.TotalAmount);
         Assert.Equal(created.Value.Id, movement.InvoiceId);
+        Assert.Equal(12m, report.Value.Summary.TotalPurchaseQuantity);
+        Assert.Equal(4m, report.Value.Summary.TotalPurchaseWeight);
+        Assert.Equal(0m, report.Value.Summary.TotalSalesQuantity);
+        Assert.Equal(0m, report.Value.Summary.TotalSalesWeight);
     }
 
     [Fact]
@@ -4656,7 +4664,8 @@ public sealed class InvoiceServiceTests
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
                     InvoiceId INTEGER NOT NULL,
-                    ItemId INTEGER NOT NULL,
+                    ItemId INTEGER NULL,
+                    ItemName TEXT NULL,
                     ItemUnitId INTEGER NOT NULL,
                     SourceInvoiceLineId INTEGER NULL,
                     ReturnUnitCost NUMERIC NULL,

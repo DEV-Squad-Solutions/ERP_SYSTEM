@@ -142,25 +142,28 @@ public sealed class PartnerItemReportService(
                 line.Invoice.InvoiceType,
                 line.Count,
                 line.Weight,
+                line.Quantity,
                 line.Price,
                 line.Total))
             .ToListAsync(cancellationToken);
 
-        // The report's quantity is the entered count. Weight is the total
-        // line weight (count x unit weight), matching the requested contract.
+        // InvoiceLine is the source of truth for the report amounts:
+        // quantity = count * weight and total = quantity * unit price.
         var movements = rows
             .Select(row => new PartnerItemReportMovementResponse(
-                row.ItemId,
-                row.ItemName,
-                row.InvoiceId,
-                row.InvoiceNumber,
-                row.InvoiceDate,
-                row.InvoiceType == InvoiceType.Sales ? "sale" : "purchase",
-                row.Count,
-                row.Count,
-                row.Count * row.UnitWeight,
-                row.Price,
-                row.Total))
+                ItemId: row.ItemId,
+                ItemName: row.ItemName,
+                InvoiceId: row.InvoiceId,
+                InvoiceNumber: row.InvoiceNumber,
+                InvoiceDate: row.InvoiceDate,
+                MovementType: row.InvoiceType == InvoiceType.Sales
+                    ? "sale"
+                    : "purchase",
+                Count: row.Count,
+                Weight: row.Weight,
+                Quantity: row.Quantity,
+                UnitPrice: row.Price,
+                TotalAmount: row.Total))
             .ToArray();
 
         var summary = new PartnerItemReportSummaryResponse(
@@ -197,7 +200,8 @@ public sealed class PartnerItemReportService(
         DateOnly InvoiceDate,
         InvoiceType InvoiceType,
         int Count,
-        decimal UnitWeight,
+        decimal Weight,
+        decimal Quantity,
         decimal Price,
         decimal Total);
 }

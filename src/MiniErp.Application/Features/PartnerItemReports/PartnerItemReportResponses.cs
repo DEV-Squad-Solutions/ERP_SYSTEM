@@ -8,8 +8,8 @@ public sealed record PartnerItemReportMovementResponse(
     DateOnly InvoiceDate,
     string MovementType,
     int Count,
-    decimal Quantity,
     decimal Weight,
+    decimal Quantity,
     decimal UnitPrice,
     decimal TotalAmount);
 

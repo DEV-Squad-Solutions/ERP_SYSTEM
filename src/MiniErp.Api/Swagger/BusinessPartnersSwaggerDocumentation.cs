@@ -50,8 +50,8 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Returns sales and purchase invoice movements with optional business-partner and item filters. The report is company-scoped and read-only.",
                     "A bearer token containing one `company_id`. Optional query fields are `businessPartnerId`, `itemId`, `countryId`, `search`, `movementType`, `fromDate`, and `toDate`.",
-                    "When `businessPartnerId` is supplied, it must be positive and company-owned; when omitted, all business partners are included. When `itemId` is omitted, all items are included; when supplied, it must be positive. `movementType` accepts `Sales` or `Purchase`; and the start date cannot be after the end date. Search matches invoice number, partner invoice number, or notes. Every movement returns the persisted invoice-line `count` together with quantity and weight.",
-                    "Returns `quantity` from the invoice-line count, `weight` as count multiplied by unit weight, and line `unitPrice` and `totalAmount`. Sales and purchase returns are not included.")),
+                    "When `businessPartnerId` is supplied, it must be positive and company-owned; when omitted, all business partners are included. When `itemId` is omitted, all items are included; when supplied, it must be positive. `movementType` accepts `Sales` or `Purchase`; and the start date cannot be after the end date. Search matches invoice number, partner invoice number, or notes. Every movement returns the persisted invoice-line count, weight, calculated quantity, unit price, and total.",
+                    "Uses the same values as the invoice line: `quantity = count * weight` and `totalAmount = quantity * unitPrice`. The reported calculated values are read from the persisted invoice line, including the invoice money rounding. Sales and purchase returns are not included.")),
             nameof(BusinessPartnersController.Create) => (
                 "Create a business partner",
                 SwaggerOperationDescription.Create(
