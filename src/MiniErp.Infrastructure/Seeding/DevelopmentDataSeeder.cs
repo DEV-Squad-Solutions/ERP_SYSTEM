@@ -1138,11 +1138,12 @@ public static class DevelopmentDataSeeder
             .AsNoTracking()
             .Where(line =>
                 line.CompanyId == companyId &&
+                line.ItemId.HasValue &&
                 (line.Invoice.ExportInvoiceCode == "SEED-CASH" ||
                  line.Invoice.ExportInvoiceCode == "SEED-CREDIT"))
             .Select(line => new InventoryCostingKey(
                 line.Invoice.StoreId,
-                line.ItemId))
+                line.ItemId!.Value))
             .ToListAsync(cancellationToken);
         var keys = openingBalanceKeys
             .Concat(invoiceKeys)
@@ -1362,14 +1363,14 @@ public static class DevelopmentDataSeeder
                 var inbound = InvoiceMovementRules.IsInbound(
                     invoice.InvoiceType);
 
-                foreach (var line in invoice.Lines)
+                foreach (var line in invoice.Lines.Where(l => l.ItemId.HasValue))
                 {
                     dbContext.ItemMovements.Add(
                         new ItemMovement
                         {
                             CompanyId = company.Id,
                             StoreId = invoice.StoreId,
-                            ItemId = line.ItemId,
+                            ItemId = line.ItemId!.Value,
                             ItemUnitId = line.ItemUnitId,
                             MovementType = itemMovementType,
                             ReferenceId = invoice.Id,

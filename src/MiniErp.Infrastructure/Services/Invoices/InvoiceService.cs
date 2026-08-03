@@ -111,9 +111,10 @@ public sealed partial class InvoiceService(
 
         await inventoryCostingService.LockAsync(
             request.Lines
+                .Where(line => line.ItemId.HasValue)
                 .Select(line => new InventoryCostingKey(
                     request.StoreId,
-                    line.ItemId))
+                    line.ItemId!.Value))
                 .Distinct()
                 .ToArray(),
             cancellationToken);
@@ -249,10 +250,12 @@ public sealed partial class InvoiceService(
         var oldCostingKeys = GetCostingKeys(oldItemMovements);
         await inventoryCostingService.LockAsync(
             oldCostingKeys
-                .Concat(request.Lines.Select(line =>
-                    new InventoryCostingKey(
-                        request.StoreId,
-                        line.ItemId)))
+                .Concat(request.Lines
+                    .Where(line => line.ItemId.HasValue)
+                    .Select(line =>
+                        new InventoryCostingKey(
+                            request.StoreId,
+                            line.ItemId!.Value)))
                 .Distinct()
                 .ToArray(),
             cancellationToken);

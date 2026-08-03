@@ -22,7 +22,16 @@ public sealed partial class InvoiceService
             line.Count = count;
             line.Weight = weight;
             line.CompanyId = companyId;
-            line.ItemUnitId = preparation.ItemUnitIds[requestLine.ItemId];
+
+            if (requestLine.ItemId.HasValue)
+            {
+                line.ItemUnitId = preparation.ItemUnitIds[requestLine.ItemId.Value];
+            }
+            else
+            {
+                line.ItemName = requestLine.ItemName?.Trim();
+            }
+
             ApplyReturnCostInput(
                 invoice.InvoiceType,
                 line,
@@ -48,10 +57,15 @@ public sealed partial class InvoiceService
         InvoiceUpdateRequest request,
         PreparedInvoice preparation)
     {
-        var incomingByItem = request.Lines.ToDictionary(line => line.ItemId);
-        foreach (var existingLine in invoice.Lines.ToList())
+        var catalogLines = request.Lines.Where(line => line.ItemId.HasValue).ToList();
+        var freeTextLines = request.Lines.Where(line => !line.ItemId.HasValue).ToList();
+
+        var incomingByItem = catalogLines.ToDictionary(line => line.ItemId!.Value);
+
+        // Update or remove existing catalog-based lines
+        foreach (var existingLine in invoice.Lines.Where(l => l.ItemId.HasValue).ToList())
         {
-            if (!incomingByItem.TryGetValue(existingLine.ItemId, out var incoming))
+            if (!incomingByItem.TryGetValue(existingLine.ItemId!.Value, out var incoming))
             {
                 dbContext.InvoiceLines.Remove(existingLine);
                 invoice.Lines.Remove(existingLine);
@@ -73,15 +87,23 @@ public sealed partial class InvoiceService
                 ? null
                 : incoming.Notes.Trim();
             existingLine.ItemUnitId =
-                preparation.ItemUnitIds[incoming.ItemId];
+                preparation.ItemUnitIds[incoming.ItemId!.Value];
         }
 
+        // Remove all existing free-text lines (they'll be re-added)
+        foreach (var existingFreeText in invoice.Lines.Where(l => !l.ItemId.HasValue).ToList())
+        {
+            dbContext.InvoiceLines.Remove(existingFreeText);
+            invoice.Lines.Remove(existingFreeText);
+        }
+
+        // Add new catalog lines
         var existingItemIds = invoice.Lines
-            .Where(line => !line.IsDeleted)
-            .Select(line => line.ItemId)
+            .Where(line => !line.IsDeleted && line.ItemId.HasValue)
+            .Select(line => line.ItemId!.Value)
             .ToHashSet();
-        foreach (var incoming in request.Lines.Where(line =>
-                     !existingItemIds.Contains(line.ItemId)))
+        foreach (var incoming in catalogLines.Where(line =>
+                     !existingItemIds.Contains(line.ItemId!.Value)))
         {
             var line = incoming.Adapt<InvoiceLine>();
             TryGetEffectiveLineValues(
@@ -91,7 +113,26 @@ public sealed partial class InvoiceService
             line.Count = count;
             line.Weight = weight;
             line.CompanyId = companyId;
-            line.ItemUnitId = preparation.ItemUnitIds[incoming.ItemId];
+            line.ItemUnitId = preparation.ItemUnitIds[incoming.ItemId!.Value];
+            ApplyReturnCostInput(
+                invoice.InvoiceType,
+                line,
+                incoming);
+            invoice.Lines.Add(line);
+        }
+
+        // Add all free-text lines
+        foreach (var incoming in freeTextLines)
+        {
+            var line = incoming.Adapt<InvoiceLine>();
+            TryGetEffectiveLineValues(
+                incoming,
+                out var count,
+                out var weight);
+            line.Count = count;
+            line.Weight = weight;
+            line.CompanyId = companyId;
+            line.ItemName = incoming.ItemName?.Trim();
             ApplyReturnCostInput(
                 invoice.InvoiceType,
                 line,

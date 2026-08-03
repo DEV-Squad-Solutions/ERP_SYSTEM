@@ -11,8 +11,17 @@ public sealed class InvoiceLineRequestValidator
 {
     public InvoiceLineRequestValidator()
     {
+        RuleFor(line => line)
+            .Must(line => line.ItemId.HasValue || !string.IsNullOrWhiteSpace(line.ItemName))
+            .WithMessage("يجب تحديد صنف من الكتالوج أو إدخال اسم صنف نصي.");
+
         RuleFor(line => line.ItemId)
-            .GreaterThan(0);
+            .GreaterThan(0)
+            .When(line => line.ItemId.HasValue);
+
+        RuleFor(line => line.ItemName)
+            .MaximumLength(200)
+            .When(line => !string.IsNullOrWhiteSpace(line.ItemName));
 
         RuleFor(line => line.Count)
             .GreaterThan(0)
@@ -296,7 +305,10 @@ internal static class InvoiceValidationRules
             .WithMessage("كل سطر في الفاتورة مطلوب.")
             .Must(lines => lines is not null &&
                 lines.All(line => line is not null) &&
-                lines.Select(line => line.ItemId).Distinct().Count() == lines.Count)
+                lines.Where(line => line.ItemId.HasValue)
+                    .Select(line => line.ItemId)
+                    .Distinct().Count() ==
+                lines.Count(line => line.ItemId.HasValue))
             .WithMessage("لا يجوز تكرار الصنف في سطور الفاتورة.");
 
         validator.RuleFor(request => request.ContainerLines)
@@ -431,7 +443,10 @@ internal static class InvoiceValidationRules
             .WithMessage("كل سطر في الفاتورة مطلوب.")
             .Must(lines => lines is not null &&
                 lines.All(line => line is not null) &&
-                lines.Select(line => line.ItemId).Distinct().Count() == lines.Count)
+                lines.Where(line => line.ItemId.HasValue)
+                    .Select(line => line.ItemId)
+                    .Distinct().Count() ==
+                lines.Count(line => line.ItemId.HasValue))
             .WithMessage("لا يجوز تكرار الصنف في سطور الفاتورة.");
 
         validator.RuleFor(request => request.ContainerLines)

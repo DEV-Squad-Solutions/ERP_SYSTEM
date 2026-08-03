@@ -46,8 +46,9 @@ public sealed partial class InvoiceService
                 (invoice.VehicleNumber != null &&
                  invoice.VehicleNumber.Contains(search)) ||
                 invoice.Lines.Any(line =>
-                    line.Item.Code.Contains(search) ||
-                    line.Item.Name.Contains(search)) ||
+                    line.Item != null &&
+                    (line.Item.Code.Contains(search) ||
+                    line.Item.Name.Contains(search))) ||
                 invoice.ContainerLines.Any(line =>
                     line.Container.Code.Contains(search) ||
                     line.Container.Name.Contains(search)));
@@ -334,8 +335,9 @@ public sealed partial class InvoiceService
             Lines = response.Lines
                 .Select(line =>
                 {
-                    if (!movements.TryGetValue(
-                            line.ItemId,
+                    if (!line.ItemId.HasValue ||
+                        !movements.TryGetValue(
+                            line.ItemId.Value,
                             out var movement))
                     {
                         return line;

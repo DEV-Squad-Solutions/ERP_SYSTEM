@@ -19,7 +19,10 @@ public sealed class InvoiceMappingRegister : IRegister
         config.ForType<InvoiceLineRequest, InvoiceLine>()
             .Map(
                 line => line.Notes,
-                request => Normalize(request.Notes));
+                request => Normalize(request.Notes))
+            .Map(
+                line => line.ItemName,
+                request => Normalize(request.ItemName));
 
         config.ForType<InvoiceRequest, Invoice>()
             .Ignore(invoice => invoice.Lines)
@@ -109,9 +112,9 @@ public sealed class InvoiceMappingRegister : IRegister
     private static void RegisterLineMappings(TypeAdapterConfig config)
     {
         config.ForType<InvoiceLine, InvoiceLineResponse>()
-            .Map(response => response.ItemCode, line => line.Item.Code)
-            .Map(response => response.ItemName, line => line.Item.Name)
-            .Map(response => response.ItemUnitName, line => line.ItemUnit.Name);
+            .Map(response => response.ItemCode, line => line.Item != null ? line.Item.Code : null)
+            .Map(response => response.ItemName, line => line.Item != null ? line.Item.Name : line.ItemName)
+            .Map(response => response.ItemUnitName, line => line.ItemUnit != null ? line.ItemUnit.Name : null);
 
         config.ForType<InvoiceContainerLine, InvoiceContainerLineResponse>()
             .Map(response => response.ContainerCode, line => line.Container.Code)

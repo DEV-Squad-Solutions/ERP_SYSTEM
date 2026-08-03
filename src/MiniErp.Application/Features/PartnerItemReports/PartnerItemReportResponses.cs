@@ -1,7 +1,7 @@
 namespace MiniErp.Application.Features.PartnerItemReports;
 
 public sealed record PartnerItemReportMovementResponse(
-    int ItemId,
+    int? ItemId,
     string ItemName,
     int InvoiceId,
     string InvoiceNumber,

@@ -135,7 +135,7 @@ public sealed class PartnerItemReportService(
             .ThenBy(line => line.Id)
             .Select(line => new MovementProjection(
                 line.ItemId,
-                line.Item.Name,
+                line.Item != null ? line.Item.Name : line.ItemName ?? string.Empty,
                 line.Invoice.Id,
                 line.Invoice.InvoiceNumber,
                 line.Invoice.InvoiceDate,
@@ -190,7 +190,7 @@ public sealed class PartnerItemReportService(
     }
 
     private sealed record MovementProjection(
-        int ItemId,
+        int? ItemId,
         string ItemName,
         int InvoiceId,
         string InvoiceNumber,

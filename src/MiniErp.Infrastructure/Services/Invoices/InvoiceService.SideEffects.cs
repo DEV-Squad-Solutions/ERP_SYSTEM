@@ -339,8 +339,8 @@ public sealed partial class InvoiceService
         }
 
         var activeLines = invoice.Lines
-            .Where(line => !line.IsDeleted)
-            .ToDictionary(line => line.ItemId);
+            .Where(line => !line.IsDeleted && line.ItemId.HasValue)
+            .ToDictionary(line => line.ItemId!.Value);
         var existingItemIds = new HashSet<int>();
         var movementType =
             InvoiceMovementRules.GetItemMovementType(invoice.InvoiceType);
@@ -354,7 +354,7 @@ public sealed partial class InvoiceService
                 continue;
             }
 
-            existingItemIds.Add(line.ItemId);
+            existingItemIds.Add(line.ItemId!.Value);
             movement.StoreId = invoice.StoreId;
             movement.ItemUnitId = line.ItemUnitId;
             movement.MovementType = movementType;
@@ -366,14 +366,14 @@ public sealed partial class InvoiceService
         }
 
         foreach (var line in activeLines.Values.Where(line =>
-                     !existingItemIds.Contains(line.ItemId)))
+                     !existingItemIds.Contains(line.ItemId!.Value)))
         {
             dbContext.ItemMovements.Add(
                 new ItemMovement
                 {
                     CompanyId = companyId,
                     StoreId = invoice.StoreId,
-                    ItemId = line.ItemId,
+                    ItemId = line.ItemId!.Value,
                     ItemUnitId = line.ItemUnitId,
                     MovementType = movementType,
                     ReferenceId = invoice.Id,
@@ -402,10 +402,10 @@ public sealed partial class InvoiceService
     private static IReadOnlyCollection<InventoryCostingKey> GetCostingKeys(
         Invoice invoice) =>
         invoice.Lines
-            .Where(line => !line.IsDeleted)
+            .Where(line => !line.IsDeleted && line.ItemId.HasValue)
             .Select(line => new InventoryCostingKey(
                 invoice.StoreId,
-                line.ItemId))
+                line.ItemId!.Value))
             .Distinct()
             .ToArray();
 

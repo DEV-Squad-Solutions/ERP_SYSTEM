@@ -16,13 +16,15 @@ public sealed class InvoiceLine : AuditableEntity
 
     public Invoice Invoice { get; set; } = null!;
 
-    public int ItemId { get; set; }
+    public int? ItemId { get; set; }
 
-    public Item Item { get; set; } = null!;
+    public Item? Item { get; set; }
 
-    public int ItemUnitId { get; set; }
+    public string? ItemName { get; set; }
 
-    public ItemUnit ItemUnit { get; set; } = null!;
+    public int? ItemUnitId { get; set; }
+
+    public ItemUnit? ItemUnit { get; set; }
 
     public int? SourceInvoiceLineId { get; set; }
 

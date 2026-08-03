@@ -204,11 +204,12 @@ public sealed partial class InvoiceService
 
                 var invalidLinkedLines = lines.Where(line =>
                         line.SourceInvoiceLineId.HasValue &&
+                        line.ItemId.HasValue &&
                         (!validById.TryGetValue(
                              line.SourceInvoiceLineId.Value,
                              out var sourceItemId) ||
-                         sourceItemId != line.ItemId))
-                    .Select(line => line.ItemId)
+                         sourceItemId != line.ItemId.Value))
+                    .Select(line => line.ItemId!.Value)
                     .ToArray();
                 if (invalidLinkedLines.Length > 0)
                 {
@@ -224,7 +225,9 @@ public sealed partial class InvoiceService
                 PaymentTermInvalid(nameof(InvoiceRequest.PaymentTerm)));
         }
 
-        if (lines.GroupBy(line => line.ItemId).Any(group => group.Count() > 1))
+        if (lines.Where(line => line.ItemId.HasValue)
+            .GroupBy(line => line.ItemId)
+            .Any(group => group.Count() > 1))
         {
             return Failure(
                 DuplicateItemIds());
@@ -488,22 +491,25 @@ public sealed partial class InvoiceService
         }
 
         var itemIds = lines
-            .Select(line => line.ItemId)
+            .Where(line => line.ItemId.HasValue)
+            .Select(line => line.ItemId!.Value)
             .Distinct()
             .ToArray();
-        var items = await dbContext.Items
-            .AsNoTracking()
-            .Where(item =>
-                item.CompanyId == companyId &&
-                itemIds.Contains(item.Id))
-            .Select(item => new
-            {
-                item.Id,
-                item.ItemUnitId,
-                item.IsActive,
-                ItemUnitIsActive = item.ItemUnit.IsActive
-            })
-            .ToListAsync(cancellationToken);
+        var items = itemIds.Length > 0
+            ? await dbContext.Items
+                .AsNoTracking()
+                .Where(item =>
+                    item.CompanyId == companyId &&
+                    itemIds.Contains(item.Id))
+                .Select(item => new
+                {
+                    item.Id,
+                    item.ItemUnitId,
+                    item.IsActive,
+                    ItemUnitIsActive = item.ItemUnit.IsActive
+                })
+                .ToListAsync(cancellationToken)
+            : [];
         var itemsById = items.ToDictionary(item => item.Id);
         var missingItemIds = itemIds
             .Except(itemsById.Keys)
@@ -883,6 +889,11 @@ public sealed partial class InvoiceService
         var stockLines = new List<InventoryStockLine>(lines.Count);
         foreach (var line in lines)
         {
+            if (!line.ItemId.HasValue)
+            {
+                continue;
+            }
+
             if (!TryGetEffectiveLineValues(
                     line,
                     out var count,
@@ -901,7 +912,7 @@ public sealed partial class InvoiceService
                 return InvalidCalculatedAmounts(InvoiceCalculationErrorKind.Quantity);
             }
 
-            stockLines.Add(new InventoryStockLine(line.ItemId, quantity));
+            stockLines.Add(new InventoryStockLine(line.ItemId.Value, quantity));
         }
 
         var replacedMovement = currentInvoiceId is int invoiceId
@@ -950,6 +961,11 @@ public sealed partial class InvoiceService
         var requestedByItem = new Dictionary<int, decimal>();
         foreach (var line in lines)
         {
+            if (!line.ItemId.HasValue)
+            {
+                continue;
+            }
+
             if (!TryGetEffectiveLineValues(
                     line,
                     out var count,
@@ -968,8 +984,8 @@ public sealed partial class InvoiceService
                 return InvalidCalculatedAmounts(InvoiceCalculationErrorKind.Quantity);
             }
 
-            requestedByItem[line.ItemId] =
-                requestedByItem.GetValueOrDefault(line.ItemId) + quantity;
+            requestedByItem[line.ItemId.Value] =
+                requestedByItem.GetValueOrDefault(line.ItemId.Value) + quantity;
         }
 
         // 3. A new inbound invoice only adds stock, so it cannot create a

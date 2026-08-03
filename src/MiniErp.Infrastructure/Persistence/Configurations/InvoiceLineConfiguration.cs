@@ -50,11 +50,12 @@ public sealed class InvoiceLineConfiguration
         builder.Property(line => line.InvoiceId)
             .IsRequired();
 
-        builder.Property(line => line.ItemId)
-            .IsRequired();
+        builder.Property(line => line.ItemId);
 
-        builder.Property(line => line.ItemUnitId)
-            .IsRequired();
+        builder.Property(line => line.ItemName)
+            .HasMaxLength(200);
+
+        builder.Property(line => line.ItemUnitId);
 
         builder.Property(line => line.SourceInvoiceLineId);
 
@@ -124,6 +125,7 @@ public sealed class InvoiceLineConfiguration
                 item.CompanyId,
                 item.Id
             })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(line => line.ItemUnit)
@@ -138,6 +140,7 @@ public sealed class InvoiceLineConfiguration
                 unit.CompanyId,
                 unit.Id
             })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(line => line.SourceInvoiceLine)
@@ -168,6 +171,6 @@ public sealed class InvoiceLineConfiguration
             line.ItemId
         })
             .IsUnique()
-            .HasFilter("[IsDeleted] = 0");
+            .HasFilter("[IsDeleted] = 0 AND [ItemId] IS NOT NULL");
     }
 }

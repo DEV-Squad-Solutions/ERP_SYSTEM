@@ -3,14 +3,15 @@ using MiniErp.Domain.Enums;
 namespace MiniErp.Application.Features.Invoices;
 
 public sealed record InvoiceLineRequest(
-    int ItemId,
+    int? ItemId,
     int? Count,
     decimal? Weight,
     decimal Price,
     string? Notes,
     int? SourceInvoiceLineId = null,
     decimal? ReturnUnitCost = null,
-    decimal? Quantity = null);
+    decimal? Quantity = null,
+    string? ItemName = null);
 
 public sealed record InvoiceContainerLineRequest(
     int ContainerId,
