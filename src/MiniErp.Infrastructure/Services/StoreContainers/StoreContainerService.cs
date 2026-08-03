@@ -133,9 +133,9 @@ public sealed class StoreContainerService(
 
         return Result<StoreContainerWorkspaceResponse>.Success(
             new StoreContainerWorkspaceResponse(
-                store,
-                businessPartner,
-                containers));
+                ContainerStore: store,
+                BusinessPartner: businessPartner,
+                Containers: containers));
     }
 
     private async Task<IReadOnlyList<StoreContainerWorkspaceContainerResponse>>
@@ -174,14 +174,14 @@ public sealed class StoreContainerService(
 
         return rows
             .Select(container => new StoreContainerWorkspaceContainerResponse(
-                container.Id,
-                container.CompanyId,
-                container.Code,
-                container.Name,
-                container.Description,
-                container.IsActive,
-                container.StoreContainerId.HasValue,
-                container.StoreContainerId))
+                Id: container.Id,
+                CompanyId: container.CompanyId,
+                Code: container.Code,
+                Name: container.Name,
+                Description: container.Description,
+                IsActive: container.IsActive,
+                IsAssigned: container.StoreContainerId.HasValue,
+                StoreContainerId: container.StoreContainerId))
             .ToList();
     }
 

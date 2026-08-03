@@ -192,37 +192,37 @@ public sealed class InventoryCostReportService(
                             : entry.Allocation.InboundMovementId;
                         var related = timelineById[relatedId];
                         return new InventoryCostAllocationReportResponse(
-                            entry.Allocation.Id,
-                            entry.IsInboundAllocation,
-                            related.Id,
-                            related.MovementDate,
-                            related.MovementType,
-                            related.ReferenceNumber,
-                            entry.Allocation.Quantity,
-                            entry.Allocation.UnitCost,
-                            entry.Allocation.TotalCost);
+                            Id: entry.Allocation.Id,
+                            IsInboundAllocation: entry.IsInboundAllocation,
+                            RelatedMovementId: related.Id,
+                            RelatedMovementDate: related.MovementDate,
+                            RelatedMovementType: related.MovementType,
+                            RelatedReferenceNumber: related.ReferenceNumber,
+                            Quantity: entry.Allocation.Quantity,
+                            UnitCost: entry.Allocation.UnitCost,
+                            TotalCost: entry.Allocation.TotalCost);
                     })
                     .ToArray());
 
         var items = pageMovements
             .Select(movement => new InventoryCostReportItemResponse(
-                movement.Id,
-                movement.MovementDate,
-                movement.CreatedOn,
-                movement.MovementType,
-                movement.ReferenceId,
-                movement.ReferenceNumber,
-                movement.Description,
-                movement.QuantityIn,
-                movement.QuantityOut,
-                movement.CostStatus,
-                movement.PendingCostQuantity,
-                movement.UnitCost,
-                movement.TotalCost,
-                movement.QuantityAfter,
-                movement.AverageCostAfter,
-                movement.InventoryValueAfter,
-                allocationByMovementId.GetValueOrDefault(
+                MovementId: movement.Id,
+                MovementDate: movement.MovementDate,
+                CreatedOn: movement.CreatedOn,
+                MovementType: movement.MovementType,
+                ReferenceId: movement.ReferenceId,
+                ReferenceNumber: movement.ReferenceNumber,
+                Description: movement.Description,
+                QuantityIn: movement.QuantityIn,
+                QuantityOut: movement.QuantityOut,
+                CostStatus: movement.CostStatus,
+                PendingCostQuantity: movement.PendingCostQuantity,
+                UnitCost: movement.UnitCost,
+                TotalCost: movement.TotalCost,
+                QuantityAfter: movement.QuantityAfter,
+                AverageCostAfter: movement.AverageCostAfter,
+                InventoryValueAfter: movement.InventoryValueAfter,
+                Allocations: allocationByMovementId.GetValueOrDefault(
                     movement.Id,
                     [])))
             .ToArray();
@@ -265,54 +265,54 @@ public sealed class InventoryCostReportService(
             .SingleOrDefaultAsync(cancellationToken);
 
         var summary = new InventoryCostReportSummaryResponse(
-            openingMovement?.QuantityAfter ?? 0m,
-            openingMovement?.AverageCostAfter ?? 0m,
-            openingMovement?.InventoryValueAfter ?? 0m,
-            periodMovements.Sum(movement => movement.QuantityIn),
-            periodMovements.Sum(movement => movement.QuantityOut),
-            periodMovements
+            OpeningQuantity: openingMovement?.QuantityAfter ?? 0m,
+            OpeningAverageCost: openingMovement?.AverageCostAfter ?? 0m,
+            OpeningInventoryValue: openingMovement?.InventoryValueAfter ?? 0m,
+            TotalQuantityIn: periodMovements.Sum(movement => movement.QuantityIn),
+            TotalQuantityOut: periodMovements.Sum(movement => movement.QuantityOut),
+            TotalInboundCost: periodMovements
                 .Where(movement => movement.QuantityIn > 0m)
                 .Sum(movement => movement.TotalCost),
-            periodMovements
+            TotalOutboundCost: periodMovements
                 .Where(movement => movement.QuantityOut > 0m)
                 .Sum(movement => movement.TotalCost),
-            closingMovement?.QuantityAfter ?? 0m,
-            closingMovement?.AverageCostAfter ?? 0m,
-            closingMovement?.InventoryValueAfter ?? 0m,
-            currentBalance?.Quantity ?? 0m,
-            currentBalance?.AverageCost ?? 0m,
-            currentBalance?.InventoryValue ?? 0m,
-            asOfMovements
+            ClosingQuantity: closingMovement?.QuantityAfter ?? 0m,
+            ClosingAverageCost: closingMovement?.AverageCostAfter ?? 0m,
+            ClosingInventoryValue: closingMovement?.InventoryValueAfter ?? 0m,
+            CurrentQuantity: currentBalance?.Quantity ?? 0m,
+            CurrentAverageCost: currentBalance?.AverageCost ?? 0m,
+            CurrentInventoryValue: currentBalance?.InventoryValue ?? 0m,
+            PendingCostQuantity: asOfMovements
                 .Where(movement =>
                     movement.QuantityOut > 0m &&
                     movement.PendingCostQuantity > 0m)
                 .Sum(movement => movement.PendingCostQuantity),
-            asOfMovements.Count(movement =>
+            PendingMovementCount: asOfMovements.Count(movement =>
                 movement.CostStatus is
                     InventoryCostStatus.Pending or
                     InventoryCostStatus.PartiallyCosted),
-            periodMovements.Count(movement =>
+            RevaluedMovementCount: periodMovements.Count(movement =>
                 movement.CostStatus == InventoryCostStatus.Revalued));
 
         return Result<InventoryCostReportResponse>.Success(
             new InventoryCostReportResponse(
-                store.Id,
-                store.Code,
-                store.Name,
-                item.Id,
-                item.Code,
-                item.Name,
-                item.ItemUnitName,
-                baseCurrency,
-                filters.FromDate,
-                filters.ToDate,
-                items,
-                pagination.PageNumber,
-                pagination.PageSize,
-                totalCount,
-                (int)Math.Ceiling(
+                StoreId: store.Id,
+                StoreCode: store.Code,
+                StoreName: store.Name,
+                ItemId: item.Id,
+                ItemCode: item.Code,
+                ItemName: item.Name,
+                ItemUnitName: item.ItemUnitName,
+                BaseCurrency: baseCurrency,
+                FromDate: filters.FromDate,
+                ToDate: filters.ToDate,
+                Items: items,
+                PageNumber: pagination.PageNumber,
+                PageSize: pagination.PageSize,
+                TotalCount: totalCount,
+                TotalPages: (int)Math.Ceiling(
                     totalCount / (double)pagination.PageSize),
-                summary));
+                Summary: summary));
     }
 
     private static bool MatchesSearch(

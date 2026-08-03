@@ -133,10 +133,13 @@ public sealed class PartnerItemReportService(
             .OrderBy(line => line.Invoice.InvoiceDate)
             .ThenBy(line => line.Invoice.Id)
             .ThenBy(line => line.Id)
-            .Select(line => new MovementProjection(
+            .Select(line => new
+            {
                 line.ItemId,
-                line.Item != null ? line.Item.Name : line.ItemName ?? string.Empty,
-                line.Invoice.Id,
+                ItemName = line.Item != null
+                    ? line.Item.Name
+                    : line.ItemName ?? string.Empty,
+                InvoiceId = line.Invoice.Id,
                 line.Invoice.InvoiceNumber,
                 line.Invoice.InvoiceDate,
                 line.Invoice.InvoiceType,
@@ -144,7 +147,8 @@ public sealed class PartnerItemReportService(
                 line.Weight,
                 line.Quantity,
                 line.Price,
-                line.Total))
+                line.Total
+            })
             .ToListAsync(cancellationToken);
 
         // InvoiceLine is the source of truth for the report amounts:
@@ -167,41 +171,28 @@ public sealed class PartnerItemReportService(
             .ToArray();
 
         var summary = new PartnerItemReportSummaryResponse(
-            movements
+            TotalSalesQuantity: movements
                 .Where(movement => movement.MovementType == "sale")
                 .Sum(movement => movement.Quantity),
-            movements
+            TotalPurchaseQuantity: movements
                 .Where(movement => movement.MovementType == "purchase")
                 .Sum(movement => movement.Quantity),
-            movements
+            TotalSalesWeight: movements
                 .Where(movement => movement.MovementType == "sale")
                 .Sum(movement => movement.Weight),
-            movements
+            TotalPurchaseWeight: movements
                 .Where(movement => movement.MovementType == "purchase")
                 .Sum(movement => movement.Weight));
 
         return Result<PartnerItemReportResponse>.Success(
             new PartnerItemReportResponse(
-                filters.BusinessPartnerId,
-                partnerName,
-                item?.Id,
-                item?.Name,
-                filters.FromDate,
-                filters.ToDate,
-                summary,
-                movements));
+                BusinessPartnerId: filters.BusinessPartnerId,
+                BusinessPartnerName: partnerName,
+                ItemId: item?.Id,
+                ItemName: item?.Name,
+                FromDate: filters.FromDate,
+                ToDate: filters.ToDate,
+                Summary: summary,
+                Movements: movements));
     }
-
-    private sealed record MovementProjection(
-        int? ItemId,
-        string ItemName,
-        int InvoiceId,
-        string InvoiceNumber,
-        DateOnly InvoiceDate,
-        InvoiceType InvoiceType,
-        int Count,
-        decimal Weight,
-        decimal Quantity,
-        decimal Price,
-        decimal Total);
 }

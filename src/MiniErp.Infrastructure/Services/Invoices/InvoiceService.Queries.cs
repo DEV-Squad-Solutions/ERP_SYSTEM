@@ -147,15 +147,20 @@ public sealed partial class InvoiceService
             .SingleOrDefaultAsync(cancellationToken);
 
         return totals is null
-            ? (0, new InvoiceSummaryResponse(0m, 0m, 0m, 0m, 0m))
+            ? (0, new InvoiceSummaryResponse(
+                Subtotal: 0m,
+                DiscountAmount: 0m,
+                Total: 0m,
+                PaidAmount: 0m,
+                RemainingAmount: 0m))
             : (
                 totals.TotalCount,
                 new InvoiceSummaryResponse(
-                    totals.Subtotal,
-                    totals.DiscountAmount,
-                    totals.Total,
-                    totals.PaidAmount,
-                    totals.RemainingAmount));
+                    Subtotal: totals.Subtotal,
+                    DiscountAmount: totals.DiscountAmount,
+                    Total: totals.Total,
+                    PaidAmount: totals.PaidAmount,
+                    RemainingAmount: totals.RemainingAmount));
     }
 
     public async Task<Result<InvoiceItemBalanceResponse>> GetItemBalanceAsync(
@@ -279,16 +284,16 @@ public sealed partial class InvoiceService
 
         return Result<InvoiceItemBalanceResponse>.Success(
             new InvoiceItemBalanceResponse(
-                storeId,
-                store.Name,
-                itemId,
-                item.Name,
-                item.ItemUnitId,
-                item.ItemUnitName,
-                asOfDate,
-                balances[itemId],
-                costSnapshot.AverageCost,
-                costSnapshot.InventoryValue));
+                StoreId: storeId,
+                StoreName: store.Name,
+                ItemId: itemId,
+                ItemName: item.Name,
+                ItemUnitId: item.ItemUnitId,
+                ItemUnitName: item.ItemUnitName,
+                AsOfDate: asOfDate,
+                Balance: balances[itemId],
+                AverageCost: costSnapshot.AverageCost,
+                InventoryValue: costSnapshot.InventoryValue));
     }
 
     private IQueryable<InvoiceResponse> ProjectResponseQuery(int id) =>

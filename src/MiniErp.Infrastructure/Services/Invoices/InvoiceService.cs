@@ -74,12 +74,12 @@ public sealed partial class InvoiceService(
 
         return Result<InvoicePagedResponse>.Success(
             new InvoicePagedResponse(
-                page.Items,
-                page.PageNumber,
-                page.PageSize,
-                page.TotalCount,
-                page.TotalPages,
-                aggregate.Summary));
+                Items: page.Items,
+                PageNumber: page.PageNumber,
+                PageSize: page.PageSize,
+                TotalCount: page.TotalCount,
+                TotalPages: page.TotalPages,
+                Summary: aggregate.Summary));
     }
 
     public async Task<Result<InvoiceResponse>> GetByIdAsync(

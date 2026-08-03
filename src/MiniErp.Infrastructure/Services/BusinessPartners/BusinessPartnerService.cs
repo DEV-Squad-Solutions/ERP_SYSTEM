@@ -250,8 +250,8 @@ public sealed class BusinessPartnerService(
 
         return Result<BusinessPartnerContainerStoreResponse>.Success(
             new BusinessPartnerContainerStoreResponse(
-                containerStore,
-                containers));
+                ContainerStore: containerStore,
+                Containers: containers));
     }
 
     private async Task<IReadOnlyList<StoreContainerWorkspaceContainerResponse>>
@@ -318,14 +318,14 @@ public sealed class BusinessPartnerService(
                 .Where(assignment => assignment.StoreId == storeId)
                 .Select(assignment =>
                     new StoreContainerWorkspaceContainerResponse(
-                        assignment.Id,
-                        assignment.CompanyId,
-                        assignment.Code,
-                        assignment.Name,
-                        assignment.Description,
-                        assignment.IsActive,
-                        true,
-                        assignment.StoreContainerId))
+                        Id: assignment.Id,
+                        CompanyId: assignment.CompanyId,
+                        Code: assignment.Code,
+                        Name: assignment.Name,
+                        Description: assignment.Description,
+                        IsActive: assignment.IsActive,
+                        IsAssigned: true,
+                        StoreContainerId: assignment.StoreContainerId))
                 .ToList();
         }
 
@@ -435,14 +435,14 @@ public sealed class BusinessPartnerService(
                     }
 
                     return new StoreContainerWorkspaceContainerResponse(
-                        container.Id,
-                        container.CompanyId,
-                        container.Code,
-                        container.Name,
-                        container.Description,
-                        container.IsActive,
-                        storeContainerId.HasValue,
-                        storeContainerId);
+                        Id: container.Id,
+                        CompanyId: container.CompanyId,
+                        Code: container.Code,
+                        Name: container.Name,
+                        Description: container.Description,
+                        IsActive: container.IsActive,
+                        IsAssigned: storeContainerId.HasValue,
+                        StoreContainerId: storeContainerId);
                 })
                 .ToList();
 

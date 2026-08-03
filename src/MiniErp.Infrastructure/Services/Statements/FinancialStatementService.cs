@@ -245,16 +245,16 @@ public sealed class FinancialStatementService(
             runningBaseBalance +=
                 row.BaseReceiptAmount - row.BasePaymentAmount;
             return new CashboxStatementItemResponse(
-                row.CashVoucherId,
-                row.Date,
-                row.VoucherNumber,
-                row.MovementName,
-                row.Description,
-                row.PartyName,
-                row.ReceiptAmount,
-                row.PaymentAmount,
-                runningBalance,
-                row.ReferenceNumber)
+                CashVoucherId: row.CashVoucherId,
+                Date: row.Date,
+                VoucherNumber: row.VoucherNumber,
+                MovementName: row.MovementName,
+                Description: row.Description,
+                PartyName: row.PartyName,
+                ReceiptAmount: row.ReceiptAmount,
+                PaymentAmount: row.PaymentAmount,
+                Balance: runningBalance,
+                ReferenceNumber: row.ReferenceNumber)
             {
                 BaseReceiptAmount = row.BaseReceiptAmount,
                 BasePaymentAmount = row.BasePaymentAmount,
@@ -264,19 +264,19 @@ public sealed class FinancialStatementService(
 
         return Result<CashboxStatementResponse>.Success(
             new CashboxStatementResponse(
-                cashbox.Id,
-                cashbox.Name,
-                cashbox.Currency,
-                items,
-                pagination.PageNumber,
-                pagination.PageSize,
-                totalCount,
-                GetTotalPages(totalCount, pagination.PageSize),
-                new CashboxStatementSummaryResponse(
-                    openingBalance,
-                    totalReceipts,
-                    totalPayments,
-                    openingBalance + totalReceipts - totalPayments)
+                CashboxId: cashbox.Id,
+                CashboxName: cashbox.Name,
+                Currency: cashbox.Currency,
+                Items: items,
+                PageNumber: pagination.PageNumber,
+                PageSize: pagination.PageSize,
+                TotalCount: totalCount,
+                TotalPages: GetTotalPages(totalCount, pagination.PageSize),
+                Summary: new CashboxStatementSummaryResponse(
+                    OpeningBalance: openingBalance,
+                    TotalReceipts: totalReceipts,
+                    TotalPayments: totalPayments,
+                    ClosingBalance: openingBalance + totalReceipts - totalPayments)
                 {
                     BaseOpeningBalance = baseOpeningBalance,
                     BaseTotalReceipts = totalBaseReceipts,
@@ -420,15 +420,15 @@ public sealed class FinancialStatementService(
             runningBalance += row.Debit - row.Credit;
             runningBaseBalance += row.BaseDebit - row.BaseCredit;
             return new PartnerStatementItemResponse(
-                row.Date,
-                row.DocumentNumber,
-                PartnerMovementName(row.MovementType),
-                row.Description,
-                row.Debit,
-                row.Credit,
-                Math.Abs(runningBalance),
-                PartnerBalanceDescription(runningBalance),
-                row.ReferenceNumber)
+                Date: row.Date,
+                DocumentNumber: row.DocumentNumber,
+                MovementName: PartnerMovementName(row.MovementType),
+                Description: row.Description,
+                DebitAmount: row.Debit,
+                CreditAmount: row.Credit,
+                BalanceAmount: Math.Abs(runningBalance),
+                BalanceDescription: PartnerBalanceDescription(runningBalance),
+                ReferenceNumber: row.ReferenceNumber)
             {
                 ExchangeRate = row.ExchangeRate,
                 BaseDebitAmount = row.BaseDebit,
@@ -443,19 +443,19 @@ public sealed class FinancialStatementService(
             baseOpeningBalance + totalBaseDebit - totalBaseCredit;
         return Result<PartnerStatementResponse>.Success(
             new PartnerStatementResponse(
-                partner.Id,
-                partner.Name,
-                partner.Currency,
-                items,
-                pagination.PageNumber,
-                pagination.PageSize,
-                totalCount,
-                GetTotalPages(totalCount, pagination.PageSize),
-                new PartnerStatementSummaryResponse(
-                    Math.Abs(openingBalance),
-                    PartnerBalanceDescription(openingBalance),
-                    Math.Abs(closingBalance),
-                    PartnerBalanceDescription(closingBalance))
+                BusinessPartnerId: partner.Id,
+                BusinessPartnerName: partner.Name,
+                Currency: partner.Currency,
+                Items: items,
+                PageNumber: pagination.PageNumber,
+                PageSize: pagination.PageSize,
+                TotalCount: totalCount,
+                TotalPages: GetTotalPages(totalCount, pagination.PageSize),
+                Summary: new PartnerStatementSummaryResponse(
+                    OpeningBalanceAmount: Math.Abs(openingBalance),
+                    OpeningBalanceDescription: PartnerBalanceDescription(openingBalance),
+                    ClosingBalanceAmount: Math.Abs(closingBalance),
+                    ClosingBalanceDescription: PartnerBalanceDescription(closingBalance))
                 {
                     BaseOpeningBalanceAmount =
                         Math.Abs(baseOpeningBalance),
@@ -595,26 +595,26 @@ public sealed class FinancialStatementService(
             runningBalance +=
                 row.CashPaid - row.CashReceived - row.TripCost;
             return new DriverStatementItemResponse(
-                row.SourceId,
-                row.Date,
-                row.SourceNumber,
-                DriverSourceName(row.SourceType),
-                row.InvoiceNumber,
-                row.DriverTripId,
-                row.DriverTripId.HasValue
+                SourceId: row.SourceId,
+                Date: row.Date,
+                DocumentNumber: row.SourceNumber,
+                SourceName: DriverSourceName(row.SourceType),
+                InvoiceNumber: row.InvoiceNumber,
+                DriverTripId: row.DriverTripId,
+                DriverTripNumber: row.DriverTripId.HasValue
                     ? $"TR-{row.DriverTripId.Value}"
                     : null,
-                row.SourceType == DriverStatementSourceType.DriverTrip
+                MovementName: row.SourceType == DriverStatementSourceType.DriverTrip
                     ? "تكلفة رحلة"
                     : row.MovementTypeName ?? "سند نقدية",
-                row.Description,
-                row.CashPaid,
-                row.CashReceived,
-                row.TripCost,
-                Math.Abs(runningBalance),
-                DriverBalanceDescription(runningBalance),
-                row.CashboxName,
-                row.ReferenceNumber);
+                Description: row.Description,
+                AmountPaidToDriver: row.CashPaid,
+                AmountReceivedFromDriver: row.CashReceived,
+                TripCost: row.TripCost,
+                BalanceAmount: Math.Abs(runningBalance),
+                BalanceDescription: DriverBalanceDescription(runningBalance),
+                CashboxName: row.CashboxName,
+                ReferenceNumber: row.ReferenceNumber);
         }).ToList();
 
         var closingBalance =
@@ -624,21 +624,21 @@ public sealed class FinancialStatementService(
             totalTripCost;
         return Result<DriverStatementResponse>.Success(
             new DriverStatementResponse(
-                driver.Id,
-                driver.Name,
-                items,
-                pagination.PageNumber,
-                pagination.PageSize,
-                totalCount,
-                GetTotalPages(totalCount, pagination.PageSize),
-                new DriverStatementSummaryResponse(
-                    Math.Abs(openingBalance),
-                    DriverBalanceDescription(openingBalance),
-                    totalCashPaid,
-                    totalCashReceived,
-                    totalTripCost,
-                    Math.Abs(closingBalance),
-                    DriverBalanceDescription(closingBalance))));
+                DriverId: driver.Id,
+                DriverName: driver.Name,
+                Items: items,
+                PageNumber: pagination.PageNumber,
+                PageSize: pagination.PageSize,
+                TotalCount: totalCount,
+                TotalPages: GetTotalPages(totalCount, pagination.PageSize),
+                Summary: new DriverStatementSummaryResponse(
+                    OpeningBalanceAmount: Math.Abs(openingBalance),
+                    OpeningBalanceDescription: DriverBalanceDescription(openingBalance),
+                    TotalPaidToDriver: totalCashPaid,
+                    TotalReceivedFromDriver: totalCashReceived,
+                    TotalTripCost: totalTripCost,
+                    ClosingBalanceAmount: Math.Abs(closingBalance),
+                    ClosingBalanceDescription: DriverBalanceDescription(closingBalance))));
     }
 
     private IQueryable<PartnerStatementRaw> CreatePartnerRows(

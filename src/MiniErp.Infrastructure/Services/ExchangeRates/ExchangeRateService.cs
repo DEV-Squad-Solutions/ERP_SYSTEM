@@ -125,14 +125,14 @@ public sealed class ExchangeRateService(
             ? Result<ExchangeRateResolutionResponse>.Failure(result.Error)
             : Result<ExchangeRateResolutionResponse>.Success(
                 new ExchangeRateResolutionResponse(
-                    result.Value.ExchangeRateId,
-                    result.Value.BaseCurrency,
-                    result.Value.Currency,
-                    result.Value.RequestedDate,
-                    result.Value.RateDate,
-                    result.Value.Rate,
-                    result.Value.Source,
-                    result.Value.IsBaseCurrency));
+                    ExchangeRateId: result.Value.ExchangeRateId,
+                    BaseCurrency: result.Value.BaseCurrency,
+                    Currency: result.Value.Currency,
+                    RequestedDate: result.Value.RequestedDate,
+                    RateDate: result.Value.RateDate,
+                    Rate: result.Value.Rate,
+                    Source: result.Value.Source,
+                    IsBaseCurrency: result.Value.IsBaseCurrency));
     }
 
     async Task<Result<ResolvedExchangeRate>> IExchangeRateResolver.ResolveAsync(
@@ -179,12 +179,12 @@ public sealed class ExchangeRateService(
             {
                 var rate = providerResult.Value;
                 items.Add(new ExchangeRateImportPreviewItemResponse(
-                    rate.Currency,
-                    rate.BaseCurrency,
-                    rate.RequestedDate,
-                    rate.RateDate,
-                    rate.Rate,
-                    null));
+                    Currency: rate.Currency,
+                    BaseCurrency: rate.BaseCurrency,
+                    RequestedDate: rate.RequestedDate,
+                    RateDate: rate.RateDate,
+                    Rate: rate.Rate,
+                    Error: null));
                 receivedCount++;
                 continue;
             }
@@ -194,25 +194,26 @@ public sealed class ExchangeRateService(
                 "ExchangeRates.ProviderUnsupportedCurrency")
             {
                 items.Add(new ExchangeRateImportPreviewItemResponse(
-                    currency,
-                    baseCurrency.Value,
-                    request.RateDate,
-                    null,
-                    null,
-                    providerResult.Error.Description));
+                    Currency: currency,
+                    BaseCurrency: baseCurrency.Value,
+                    RequestedDate: request.RateDate,
+                    RateDate: null,
+                    Rate: null,
+                    Error: providerResult.Error.Description));
                 continue;
             }
 
             return Result<ExchangeRateImportPreviewResponse>.Failure(providerResult.Error);
         }
 
-        return Result<ExchangeRateImportPreviewResponse>.Success(new(
-            request.RateDate,
-            exchangeRateProvider.Name,
-            baseCurrency.Value,
-            currencies.Length,
-            receivedCount,
-            items));
+        return Result<ExchangeRateImportPreviewResponse>.Success(
+            new ExchangeRateImportPreviewResponse(
+                RequestedDate: request.RateDate,
+                Provider: exchangeRateProvider.Name,
+                BaseCurrency: baseCurrency.Value,
+                RequestedCount: currencies.Length,
+                ReceivedCount: receivedCount,
+                Items: items));
     }
 
     public async Task<Result<ExchangeRateImportResponse>> ImportAsync(
@@ -256,9 +257,13 @@ public sealed class ExchangeRateService(
                 "ExchangeRates.ProviderUnsupportedCurrency")
             {
                 items.Add(new ExchangeRateImportItemResponse(
-                    currency, baseCurrency.Value, request.RateDate, null, null,
-                    ExchangeRateImportItemStatus.Failed,
-                    providerResult.Error.Description));
+                    Currency: currency,
+                    BaseCurrency: baseCurrency.Value,
+                    RequestedDate: request.RateDate,
+                    RateDate: null,
+                    Rate: null,
+                    Status: ExchangeRateImportItemStatus.Failed,
+                    Reason: providerResult.Error.Description));
                 continue;
             }
 
@@ -351,8 +356,13 @@ public sealed class ExchangeRateService(
         ExternalExchangeRate externalRate,
         ExchangeRateImportItemStatus status,
         string? reason) => new(
-        externalRate.Currency, externalRate.BaseCurrency, externalRate.RequestedDate,
-        externalRate.RateDate, externalRate.Rate, status, reason);
+        Currency: externalRate.Currency,
+        BaseCurrency: externalRate.BaseCurrency,
+        RequestedDate: externalRate.RequestedDate,
+        RateDate: externalRate.RateDate,
+        Rate: externalRate.Rate,
+        Status: status,
+        Reason: reason);
 
     private static ExchangeRateImportResponse BuildImportResponse(
         DateOnly requestedDate, string provider, int requestedCount, int receivedCount,
@@ -362,8 +372,16 @@ public sealed class ExchangeRateService(
         var updated = items.Count(item => item.Status == ExchangeRateImportItemStatus.Updated);
         var skipped = items.Count(item => item.Status == ExchangeRateImportItemStatus.Skipped);
         var failed = items.Count(item => item.Status == ExchangeRateImportItemStatus.Failed);
-        return new(requestedDate, provider, requestedCount, receivedCount,
-            imported, updated, skipped, failed, items);
+        return new ExchangeRateImportResponse(
+            RequestedDate: requestedDate,
+            Provider: provider,
+            RequestedCount: requestedCount,
+            ReceivedCount: receivedCount,
+            ImportedCount: imported,
+            UpdatedCount: updated,
+            SkippedCount: skipped,
+            FailedCount: failed,
+            Items: items);
     }
 
     public async Task<Result<ExchangeRateResponse>> AddAsync(
