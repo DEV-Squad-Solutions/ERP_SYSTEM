@@ -49,6 +49,32 @@ public sealed class InvoicesController(
         return this.ToActionResult(result);
     }
 
+    /// <summary>
+    /// Lists original sales or purchase invoices that still have quantities
+    /// available for the selected return invoice.
+    /// </summary>
+    /// <remarks>
+    /// SalesReturn selects from Sales invoices. PurchaseReturn selects from
+    /// Purchase invoices. Results are limited to the current company, selected
+    /// partner and store, and invoices dated on or before asOfDate. When a
+    /// returned line is linked to a source line, the backend uses the original
+    /// unit price and allocates the original invoice discount proportionally.
+    /// </remarks>
+    [HttpGet("return-sources")]
+    [ProducesResponseType<PagedResponse<InvoiceReturnSourceResponse>>(
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetReturnSources(
+        [FromQuery] PaginationRequest pagination,
+        [FromQuery] InvoiceReturnSourceFilterRequest filters,
+        CancellationToken cancellationToken)
+    {
+        var result = await invoiceService.GetReturnSourcesAsync(
+            pagination,
+            filters,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("{id:int}")]
     [ProducesResponseType<InvoiceResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

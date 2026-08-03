@@ -160,10 +160,18 @@ public sealed partial class InvoiceService
                 ItemLinesRequired());
         }
 
-        if (invoice.InvoiceType != InvoiceType.SalesReturn &&
+        if (invoice.InvoiceType is not
+            (InvoiceType.SalesReturn or InvoiceType.PurchaseReturn) &&
             lines.Any(line =>
                 line.SourceInvoiceLineId.HasValue ||
                 line.ReturnUnitCost.HasValue))
+        {
+            return Failure(
+                ReturnCostFieldsNotAllowed());
+        }
+
+        if (invoice.InvoiceType == InvoiceType.PurchaseReturn &&
+            lines.Any(line => line.ReturnUnitCost.HasValue))
         {
             return Failure(
                 ReturnCostFieldsNotAllowed());
@@ -175,49 +183,18 @@ public sealed partial class InvoiceService
                 ReturnUnitCostInvalid());
         }
 
-        if (invoice.InvoiceType == InvoiceType.SalesReturn)
+        var preparedReturnSourcesResult =
+            await PrepareReturnSourcesAsync(
+                invoice,
+                lines,
+                currentInvoiceId,
+                cancellationToken);
+        if (preparedReturnSourcesResult.IsFailure)
         {
-            var linkedLineIds = lines
-                .Where(line => line.SourceInvoiceLineId.HasValue)
-                .Select(line => line.SourceInvoiceLineId!.Value)
-                .Distinct()
-                .ToArray();
-            if (linkedLineIds.Length > 0)
-            {
-                var validSources = await dbContext.InvoiceLines
-                    .AsNoTracking()
-                    .Where(source =>
-                        source.CompanyId == companyId &&
-                        linkedLineIds.Contains(source.Id) &&
-                        source.Invoice.CompanyId == companyId &&
-                        source.Invoice.InvoiceType == InvoiceType.Sales &&
-                        source.Invoice.StoreId == invoice.StoreId)
-                    .Select(source => new
-                    {
-                        source.Id,
-                        source.ItemId
-                    })
-                    .ToListAsync(cancellationToken);
-                var validById = validSources.ToDictionary(
-                    source => source.Id,
-                    source => source.ItemId);
-
-                var invalidLinkedLines = lines.Where(line =>
-                        line.SourceInvoiceLineId.HasValue &&
-                        line.ItemId.HasValue &&
-                        (!validById.TryGetValue(
-                             line.SourceInvoiceLineId.Value,
-                             out var sourceItemId) ||
-                         sourceItemId != line.ItemId.Value))
-                    .Select(line => line.ItemId!.Value)
-                    .ToArray();
-                if (invalidLinkedLines.Length > 0)
-                {
-                    return Failure(
-                        InvalidSalesReturnSource());
-                }
-            }
+            return Failure(preparedReturnSourcesResult.Error);
         }
+
+        var preparedReturnSources = preparedReturnSourcesResult.Value;
 
         if (!Enum.IsDefined(typeof(PaymentTerm), invoice.PaymentTerm))
         {
@@ -592,10 +569,209 @@ public sealed partial class InvoiceService
 
         return Result<PreparedInvoice>.Success(
             new PreparedInvoice(
-                partner.Currency,
-                items.ToDictionary(
+                Currency: partner.Currency,
+                ItemUnitIds: items.ToDictionary(
                     item => item.Id,
-                    item => item.ItemUnitId)));
+                    item => item.ItemUnitId),
+                ReturnSourceLines: preparedReturnSources.Lines,
+                ReturnDiscountAmount:
+                    preparedReturnSources.DiscountAmount));
+    }
+
+    private async Task<Result<PreparedReturnSources>>
+        PrepareReturnSourcesAsync(
+            Invoice invoice,
+            IReadOnlyList<InvoiceLineRequest> lines,
+            int? currentInvoiceId,
+            CancellationToken cancellationToken)
+    {
+        if (invoice.InvoiceType is not
+            (InvoiceType.SalesReturn or InvoiceType.PurchaseReturn))
+        {
+            return Result<PreparedReturnSources>.Success(
+                PreparedReturnSources.Empty);
+        }
+
+        var linkedLines = lines
+            .Where(line => line.SourceInvoiceLineId.HasValue)
+            .ToArray();
+        if (linkedLines.Length == 0)
+        {
+            return Result<PreparedReturnSources>.Success(
+                PreparedReturnSources.Empty);
+        }
+
+        if (linkedLines.Length != lines.Count ||
+            linkedLines.Any(line => !line.ItemId.HasValue))
+        {
+            return Result<PreparedReturnSources>.Failure(
+                ReturnLinesMustUseOneSourceInvoice());
+        }
+
+        var linkedLineIds = linkedLines
+            .Select(line => line.SourceInvoiceLineId!.Value)
+            .Distinct()
+            .ToArray();
+        var sourceType = invoice.InvoiceType == InvoiceType.SalesReturn
+            ? InvoiceType.Sales
+            : InvoiceType.Purchase;
+        var returnType = invoice.InvoiceType;
+        var sourceLines = await dbContext.InvoiceLines
+            .AsNoTracking()
+            .Where(source =>
+                source.CompanyId == companyId &&
+                linkedLineIds.Contains(source.Id) &&
+                source.ItemId.HasValue &&
+                source.Invoice.CompanyId == companyId &&
+                source.Invoice.InvoiceType == sourceType &&
+                source.Invoice.ContentType == InvoiceContentType.Items &&
+                source.Invoice.BusinessPartnerId ==
+                    invoice.BusinessPartnerId &&
+                source.Invoice.StoreId == invoice.StoreId &&
+                source.Invoice.InvoiceDate <= invoice.InvoiceDate)
+            .Select(source => new
+            {
+                source.Id,
+                source.InvoiceId,
+                ItemId = source.ItemId!.Value,
+                SourceQuantity = source.Quantity,
+                UnitPrice = source.Price,
+                SourceInvoiceSubtotal = source.Invoice.Lines.Sum(
+                    line => line.Total),
+                SourceInvoiceDiscount = source.Invoice.DiscountAmount,
+                ReturnedQuantity = dbContext.InvoiceLines
+                    .Where(returnLine =>
+                        returnLine.CompanyId == companyId &&
+                        returnLine.SourceInvoiceLineId == source.Id &&
+                        returnLine.Invoice.InvoiceType == returnType &&
+                        (!currentInvoiceId.HasValue ||
+                         returnLine.InvoiceId != currentInvoiceId.Value))
+                    .Sum(returnLine =>
+                        (decimal?)returnLine.Quantity) ?? 0m
+            })
+            .ToListAsync(cancellationToken);
+
+        if (sourceLines.Count != linkedLineIds.Length ||
+            sourceLines.Select(source => source.InvoiceId)
+                .Distinct()
+                .Count() != 1)
+        {
+            return Result<PreparedReturnSources>.Failure(
+                InvalidReturnSource());
+        }
+
+        var sourceById = sourceLines.ToDictionary(source => source.Id);
+        decimal currentReturnGross = 0m;
+        foreach (var line in linkedLines)
+        {
+            if (!sourceById.TryGetValue(
+                    line.SourceInvoiceLineId!.Value,
+                    out var source) ||
+                source.ItemId != line.ItemId)
+            {
+                return Result<PreparedReturnSources>.Failure(
+                    InvalidReturnSource());
+            }
+
+            if (!TryGetEffectiveLineValues(
+                    line,
+                    out var count,
+                    out var weight) ||
+                !InvoiceAmountRules.TryCalculate(
+                    count,
+                    weight,
+                    source.UnitPrice,
+                    out var requestedQuantity,
+                    out var requestedTotal))
+            {
+                return Result<PreparedReturnSources>.Failure(
+                    InvalidCalculatedAmounts(
+                        InvoiceCalculationErrorKind.LineQuantityOrTotal));
+            }
+
+            var availableQuantity =
+                source.SourceQuantity - source.ReturnedQuantity;
+            if (requestedQuantity > availableQuantity)
+            {
+                return Result<PreparedReturnSources>.Failure(
+                    ReturnQuantityExceedsAvailable(
+                        source.Id,
+                        availableQuantity));
+            }
+
+            currentReturnGross += requestedTotal;
+        }
+
+        var sourceInvoiceId = sourceLines[0].InvoiceId;
+        var sourceSubtotal = sourceLines[0].SourceInvoiceSubtotal;
+        var sourceDiscount = sourceLines[0].SourceInvoiceDiscount;
+        var previousReturnedGross = await dbContext.InvoiceLines
+            .AsNoTracking()
+            .Where(returnLine =>
+                returnLine.CompanyId == companyId &&
+                returnLine.SourceInvoiceLineId.HasValue &&
+                returnLine.SourceInvoiceLine!.InvoiceId == sourceInvoiceId &&
+                returnLine.Invoice.InvoiceType == returnType &&
+                (!currentInvoiceId.HasValue ||
+                 returnLine.InvoiceId != currentInvoiceId.Value))
+            .SumAsync(
+                returnLine =>
+                    (decimal?)(returnLine.Quantity *
+                        returnLine.SourceInvoiceLine!.Price),
+                cancellationToken) ?? 0m;
+        var discountAmount = CalculateReturnDiscount(
+            sourceSubtotal,
+            sourceDiscount,
+            previousReturnedGross,
+            currentReturnGross);
+        var preparedLines = sourceLines.ToDictionary(
+            source => source.Id,
+            source => new PreparedReturnSourceLine(
+                SourceInvoiceLineId: source.Id,
+                SourceInvoiceId: source.InvoiceId,
+                UnitPrice: source.UnitPrice));
+
+        return Result<PreparedReturnSources>.Success(
+            new PreparedReturnSources(
+                Lines: preparedLines,
+                DiscountAmount: discountAmount));
+    }
+
+    private static decimal CalculateReturnDiscount(
+        decimal sourceSubtotal,
+        decimal sourceDiscount,
+        decimal previousReturnedGross,
+        decimal currentReturnGross)
+    {
+        if (sourceSubtotal <= 0m || sourceDiscount <= 0m)
+        {
+            return 0m;
+        }
+
+        static decimal Allocate(
+            decimal subtotal,
+            decimal discount,
+            decimal returnedGross) =>
+            returnedGross >= subtotal
+                ? discount
+                : decimal.Round(
+                    discount * returnedGross / subtotal,
+                    InvoiceAmountRules.MoneyScale,
+                    MidpointRounding.AwayFromZero);
+
+        var allocatedBefore = Allocate(
+            sourceSubtotal,
+            sourceDiscount,
+            previousReturnedGross);
+        var allocatedAfter = Allocate(
+            sourceSubtotal,
+            sourceDiscount,
+            previousReturnedGross + currentReturnGross);
+
+        return decimal.Round(
+            Math.Max(0m, allocatedAfter - allocatedBefore),
+            InvoiceAmountRules.MoneyScale,
+            MidpointRounding.AwayFromZero);
     }
 
     private static Error? ValidateAmounts(Invoice invoice)

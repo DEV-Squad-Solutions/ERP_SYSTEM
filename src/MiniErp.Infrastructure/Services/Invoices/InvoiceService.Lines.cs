@@ -21,6 +21,9 @@ public sealed partial class InvoiceService
                 out var weight);
             line.Count = count;
             line.Weight = weight;
+            line.Price = GetPreparedReturnPrice(
+                requestLine,
+                preparation);
             line.CompanyId = companyId;
 
             if (requestLine.ItemId.HasValue)
@@ -78,7 +81,9 @@ public sealed partial class InvoiceService
                 out var weight);
             existingLine.Count = count;
             existingLine.Weight = weight;
-            existingLine.Price = incoming.Price;
+            existingLine.Price = GetPreparedReturnPrice(
+                incoming,
+                preparation);
             ApplyReturnCostInput(
                 invoice.InvoiceType,
                 existingLine,
@@ -112,6 +117,9 @@ public sealed partial class InvoiceService
                 out var weight);
             line.Count = count;
             line.Weight = weight;
+            line.Price = GetPreparedReturnPrice(
+                incoming,
+                preparation);
             line.CompanyId = companyId;
             line.ItemUnitId = preparation.ItemUnitIds[incoming.ItemId!.Value];
             ApplyReturnCostInput(
@@ -131,6 +139,9 @@ public sealed partial class InvoiceService
                 out var weight);
             line.Count = count;
             line.Weight = weight;
+            line.Price = GetPreparedReturnPrice(
+                incoming,
+                preparation);
             line.CompanyId = companyId;
             line.ItemName = incoming.ItemName?.Trim();
             ApplyReturnCostInput(
@@ -153,8 +164,35 @@ public sealed partial class InvoiceService
             return;
         }
 
+        if (invoiceType == InvoiceType.PurchaseReturn)
+        {
+            line.SourceInvoiceLineId = request.SourceInvoiceLineId;
+            line.ReturnUnitCost = null;
+            return;
+        }
+
         line.SourceInvoiceLineId = null;
         line.ReturnUnitCost = null;
+    }
+
+    private static decimal GetPreparedReturnPrice(
+        InvoiceLineRequest request,
+        PreparedInvoice preparation) =>
+        request.SourceInvoiceLineId is int sourceInvoiceLineId &&
+        preparation.ReturnSourceLines.TryGetValue(
+            sourceInvoiceLineId,
+            out var source)
+            ? source.UnitPrice
+            : request.Price;
+
+    private static void ApplyPreparedReturnDiscount(
+        Invoice invoice,
+        PreparedInvoice preparation)
+    {
+        if (preparation.ReturnDiscountAmount.HasValue)
+        {
+            invoice.DiscountAmount = preparation.ReturnDiscountAmount.Value;
+        }
     }
 
     private void ReplaceContainerLines(

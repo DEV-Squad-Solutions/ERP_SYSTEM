@@ -133,6 +133,7 @@ public sealed partial class InvoiceService(
 
         invoice.CompanyId = companyId;
         invoice.Currency = preparation.Value.Currency;
+        ApplyPreparedReturnDiscount(invoice, preparation.Value);
 
         var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
             invoice.Currency,
@@ -238,6 +239,13 @@ public sealed partial class InvoiceService(
             return Result<InvoiceResponse>.Failure(Concurrency());
         }
 
+        if (await HasActiveLinkedReturnsAsync(
+                invoice.Lines.Select(line => line.Id).ToArray(),
+                cancellationToken))
+        {
+            return Result<InvoiceResponse>.Failure(LinkedSalesReturnsExist());
+        }
+
         if (await HasCashVoucherTripReferencesAsync(id, cancellationToken))
         {
             return Result<InvoiceResponse>.Failure(
@@ -278,6 +286,7 @@ public sealed partial class InvoiceService(
         request.Adapt(invoice);
         NormalizeDriverValues(invoice);
         invoice.Currency = preparation.Value.Currency;
+        ApplyPreparedReturnDiscount(invoice, preparation.Value);
 
         var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
             invoice.Currency,
@@ -391,7 +400,7 @@ public sealed partial class InvoiceService(
             return Result.Failure(DriverTripHasCashVouchers());
         }
 
-        if (await HasActiveLinkedSalesReturnsAsync(
+        if (await HasActiveLinkedReturnsAsync(
                 invoice.Lines.Select(line => line.Id).ToArray(),
                 cancellationToken))
         {

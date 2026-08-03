@@ -17,6 +17,7 @@ public sealed class InvoiceMappingRegister : IRegister
     private static void RegisterRequestMappings(TypeAdapterConfig config)
     {
         config.ForType<InvoiceLineRequest, InvoiceLine>()
+            .Ignore(line => line.Quantity)
             .Map(
                 line => line.Notes,
                 request => Normalize(request.Notes))

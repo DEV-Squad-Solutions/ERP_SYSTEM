@@ -297,6 +297,297 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public async Task LinkedPurchaseReturn_UsesOriginalPriceProportionalDiscountAndCurrentAverageCost()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 10,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 10),
+                storeId: 2,
+                discountAmount: 10m))).Value;
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 10,
+                        Weight: 1m,
+                        Price: 20m,
+                        Notes: null)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 11),
+                storeId: 2));
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 4,
+                        Weight: 1m,
+                        Price: 99m,
+                        Notes: null,
+                        SourceInvoiceLineId: source.Lines.Single().Id)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 20),
+                storeId: 2));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var line = Assert.Single(result.Value.Lines);
+        Assert.Equal(source.Lines.Single().Id, line.SourceInvoiceLineId);
+        Assert.Equal(10m, line.Price);
+        Assert.Equal(40m, line.Total);
+        Assert.Equal(4m, result.Value.DiscountAmount);
+        Assert.Equal(36m, result.Value.Total);
+        Assert.Equal(15m, line.UnitCost);
+        Assert.Equal(15m, line.AverageCostAfter);
+    }
+
+    [Fact]
+    public void InvoiceReturnType_ExposesOnlySalesAndPurchaseReturns()
+    {
+        Assert.Equal(
+            [InvoiceReturnType.SalesReturn, InvoiceReturnType.PurchaseReturn],
+            Enum.GetValues<InvoiceReturnType>());
+        Assert.Equal(3, (int)InvoiceReturnType.SalesReturn);
+        Assert.Equal(4, (int)InvoiceReturnType.PurchaseReturn);
+    }
+
+    [Fact]
+    public async Task GetReturnSources_ReturnsOnlyRemainingQuantityForPartnerStoreAndDate()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 10,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 10),
+                storeId: 2,
+                discountAmount: 20m))).Value;
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 3,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null,
+                        SourceInvoiceLineId: source.Lines.Single().Id)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 15),
+                storeId: 2));
+
+        var result = await service.GetReturnSourcesAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new InvoiceReturnSourceFilterRequest(
+                BusinessPartnerId: 1,
+                StoreId: 2,
+                ReturnType: InvoiceReturnType.PurchaseReturn,
+                AsOfDate: new DateOnly(2026, 7, 20)));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var invoice = Assert.Single(result.Value.Items);
+        Assert.Equal(source.Id, invoice.InvoiceId);
+        Assert.Equal(100m, invoice.OriginalSubtotal);
+        Assert.Equal(20m, invoice.OriginalDiscountAmount);
+        Assert.Equal(80m, invoice.OriginalTotal);
+        var line = Assert.Single(invoice.Lines);
+        Assert.Equal(source.Lines.Single().Id, line.SourceInvoiceLineId);
+        Assert.Equal(10m, line.OriginalQuantity);
+        Assert.Equal(3m, line.ReturnedQuantity);
+        Assert.Equal(7m, line.AvailableQuantity);
+        Assert.Equal(10m, line.UnitPrice);
+    }
+
+    [Fact]
+    public async Task GetReturnSources_IncludesFullyReturnedLinesWhenInvoiceStillHasAvailableItems()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 3,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null),
+                    new InvoiceLineRequest(
+                        ItemId: 2,
+                        Count: 5,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 10),
+                storeId: 2))).Value;
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 3,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null,
+                        SourceInvoiceLineId: source.Lines.Single(
+                            line => line.ItemId == 1).Id)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 15),
+                storeId: 2));
+
+        var result = await service.GetReturnSourcesAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new InvoiceReturnSourceFilterRequest(
+                BusinessPartnerId: 1,
+                StoreId: 2,
+                ReturnType: InvoiceReturnType.PurchaseReturn,
+                AsOfDate: new DateOnly(2026, 7, 20)));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var invoice = Assert.Single(result.Value.Items);
+        Assert.Equal(2, invoice.Lines.Count);
+        Assert.Equal(
+            0m,
+            invoice.Lines.Single(line => line.ItemId == 1)
+                .AvailableQuantity);
+        Assert.Equal(
+            5m,
+            invoice.Lines.Single(line => line.ItemId == 2)
+                .AvailableQuantity);
+    }
+
+    [Fact]
+    public async Task LinkedReturn_RejectsQuantityAboveRemainingSourceQuantity()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 2,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null)
+                ],
+                storeId: 2))).Value;
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 3,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null,
+                        SourceInvoiceLineId: source.Lines.Single().Id)
+                ],
+                storeId: 2));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.ReturnQuantityExceedsAvailable",
+            result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Delete_BlocksPurchaseReferencedByActivePurchaseReturn()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 5,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null)
+                ],
+                storeId: 2))).Value;
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 1,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null,
+                        SourceInvoiceLineId: source.Lines.Single().Id)
+                ],
+                storeId: 2));
+
+        var result = await service.DeleteAsync(source.Id);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.LinkedSalesReturnsExist", result.Error.Code);
+    }
+
+    [Fact]
     public async Task LinkedSalesReturn_UsesFullyCostedSourceSaleCost()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
@@ -310,26 +601,39 @@ public sealed class InvoiceServiceTests
             CreateRequest(
                 InvoiceType.Sales,
                 storeId: 2,
-                lines: [new InvoiceLineRequest(1, 2, 1m, 30m, null)]))).Value;
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 2,
+                        Weight: 1m,
+                        Price: 30m,
+                        Notes: null)
+                ],
+                discountAmount: 6m))).Value;
 
         var result = await service.AddAsync(
             CreateRequest(
                 InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
                 storeId: 2,
                 lines:
                 [
                     new InvoiceLineRequest(
-                        1,
-                        1,
-                        1m,
-                        30m,
-                        null,
-                        sale.Lines.Single().Id)
+                        ItemId: 1,
+                        Count: 1,
+                        Weight: 1m,
+                        Price: 99m,
+                        Notes: null,
+                        SourceInvoiceLineId: sale.Lines.Single().Id)
                 ]));
 
         Assert.True(result.IsSuccess, result.Error.Description);
         var line = Assert.Single(result.Value.Lines);
         Assert.Equal(sale.Lines.Single().Id, line.SourceInvoiceLineId);
+        Assert.Equal(30m, line.Price);
+        Assert.Equal(3m, result.Value.DiscountAmount);
+        Assert.Equal(27m, result.Value.Total);
         Assert.Equal(12m, line.UnitCost);
         Assert.Equal(12m, line.AverageCostAfter);
     }

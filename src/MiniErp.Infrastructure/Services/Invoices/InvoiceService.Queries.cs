@@ -378,7 +378,7 @@ public sealed partial class InvoiceService
                     invoice.Id == id,
                 cancellationToken);
 
-    private Task<bool> HasActiveLinkedSalesReturnsAsync(
+    private Task<bool> HasActiveLinkedReturnsAsync(
         IReadOnlyCollection<int> sourceLineIds,
         CancellationToken cancellationToken) =>
         sourceLineIds.Count > 0
@@ -388,7 +388,8 @@ public sealed partial class InvoiceService
                     line.SourceInvoiceLineId.HasValue &&
                     sourceLineIds.Contains(
                         line.SourceInvoiceLineId.Value) &&
-                    line.Invoice.InvoiceType == InvoiceType.SalesReturn,
+                    (line.Invoice.InvoiceType == InvoiceType.SalesReturn ||
+                     line.Invoice.InvoiceType == InvoiceType.PurchaseReturn),
                 cancellationToken)
             : Task.FromResult(false);
 

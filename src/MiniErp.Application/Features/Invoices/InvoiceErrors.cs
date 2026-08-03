@@ -107,7 +107,7 @@ public static class InvoiceErrors
     public static Error ReturnCostFieldsNotAllowed() =>
         Error.Validation(
             "Invoices.ReturnCostFieldsNotAllowed",
-            "بيانات تكلفة المرتجع تستخدم فقط مع مرتجع البيع.",
+            "تكلفة وحدة المرتجع تستخدم فقط مع مرتجع البيع. ربط الفاتورة الأصلية متاح لمرتجع البيع ومرتجع الشراء.",
             nameof(InvoiceLineRequest.ReturnUnitCost));
 
     public static Error ReturnUnitCostInvalid() =>
@@ -121,6 +121,62 @@ public static class InvoiceErrors
             "Invoices.InvalidSalesReturnSource",
             "اختر سطر بيع أصلي من نفس الشركة والمخزن والصنف.",
             nameof(InvoiceLineRequest.SourceInvoiceLineId));
+
+    public static Error InvalidReturnSource() =>
+        Error.Validation(
+            "Invoices.InvalidReturnSource",
+            "الفاتورة الأصلية المختارة لا تناسب هذا المرتجع. اختر فاتورة لنفس الطرف والمخزن والصنف، ويجب ألا يكون تاريخها بعد تاريخ المرتجع.",
+            nameof(InvoiceLineRequest.SourceInvoiceLineId));
+
+    public static Error ReturnQuantityExceedsAvailable(
+        int sourceInvoiceLineId,
+        decimal availableQuantity) =>
+        Error.Conflict(
+            "Invoices.ReturnQuantityExceedsAvailable",
+            $"الكمية المطلوبة أكبر من الكمية المتاحة للمرتجع. المتاح من السطر {sourceInvoiceLineId} هو {availableQuantity}.",
+            nameof(InvoiceLineRequest.SourceInvoiceLineId));
+
+    public static Error ReturnLinesMustUseOneSourceInvoice() =>
+        Error.Validation(
+            "Invoices.ReturnLinesMustUseOneSourceInvoice",
+            "اختر كل أصناف المرتجع من فاتورة أصلية واحدة. لا تخلط سطوراً مرتبطة وغير مرتبطة في نفس المرتجع.",
+            nameof(InvoiceLineRequest.SourceInvoiceLineId));
+
+    public static Error ReturnSourcePartnerInvalid() =>
+        Error.Validation(
+            "Invoices.ReturnSourcePartnerInvalid",
+            "اختر العميل أو المورد أولاً.",
+            nameof(InvoiceReturnSourceFilterRequest.BusinessPartnerId));
+
+    public static Error ReturnSourceStoreInvalid() =>
+        Error.Validation(
+            "Invoices.ReturnSourceStoreInvalid",
+            "اختر المخزن أولاً.",
+            nameof(InvoiceReturnSourceFilterRequest.StoreId));
+
+    public static Error ReturnSourceTypeInvalid() =>
+        Error.Validation(
+            "Invoices.ReturnSourceTypeInvalid",
+            "نوع المرتجع يجب أن يكون مرتجع بيع أو مرتجع شراء.",
+            nameof(InvoiceReturnSourceFilterRequest.ReturnType));
+
+    public static Error ReturnSourceDateRequired() =>
+        Error.Validation(
+            "Invoices.ReturnSourceDateRequired",
+            "اختر تاريخ المرتجع أولاً.",
+            nameof(InvoiceReturnSourceFilterRequest.AsOfDate));
+
+    public static Error ReturnSourceSearchInvalid() =>
+        Error.Validation(
+            "Invoices.ReturnSourceSearchInvalid",
+            "نص البحث طويل. الحد الأقصى 100 حرف.",
+            nameof(InvoiceReturnSourceFilterRequest.Search));
+
+    public static Error CurrentReturnInvoiceInvalid() =>
+        Error.Validation(
+            "Invoices.CurrentReturnInvoiceInvalid",
+            "رقم فاتورة المرتجع الحالية غير صحيح.",
+            nameof(InvoiceReturnSourceFilterRequest.CurrentReturnInvoiceId));
 
     public static Error DuplicateItemIds() =>
         Error.Validation(
@@ -381,7 +437,7 @@ public static class InvoiceErrors
     public static Error LinkedSalesReturnsExist() =>
         Error.Conflict(
             "Invoices.LinkedSalesReturnsExist",
-            "لا يمكن حذف الفاتورة لوجود مرتجع بيع مرتبط بها.");
+            "لا يمكن تعديل أو حذف الفاتورة لوجود مرتجع مرتبط بها.");
 
     public static Error CashInvoiceMustBeFullyPaid() =>
         Error.Validation(

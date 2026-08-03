@@ -21,6 +21,11 @@ public interface IInvoiceService
         int? invoiceId = null,
         CancellationToken cancellationToken = default);
 
+    Task<Result<PagedResponse<InvoiceReturnSourceResponse>>> GetReturnSourcesAsync(
+        PaginationRequest pagination,
+        InvoiceReturnSourceFilterRequest filters,
+        CancellationToken cancellationToken = default);
+
     Task<Result<InvoiceResponse>> AddAsync(
         InvoiceRequest request,
         CancellationToken cancellationToken = default);

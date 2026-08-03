@@ -31,6 +31,13 @@ public sealed class InvoicesSwaggerDocumentation : IOperationFilter
                     "Positive `storeId` and `itemId`, plus required `asOfDate`. During invoice editing, send the optional current `invoiceId` so that invoice's existing movement is excluded and the displayed quantity is available to the replacement invoice.",
                     "The store and item must be active, belong to the selected company, and the store must be a product store. This informational balance does not replace the full historical stock validation performed when the invoice is saved.",
                     "Invalid values return 400. Missing or other-company records return 404. Inactive references or a container store return 409.")),
+            nameof(InvoicesController.GetReturnSources) => (
+                "Get original invoices available for a return",
+                SwaggerOperationDescription.Create(
+                    "Fills the original-invoice selector for a sales or purchase return. SalesReturn loads Sales invoices; PurchaseReturn loads Purchase invoices. Results are restricted to the current company, selected partner and store, invoices dated on or before asOfDate, and invoices with at least one quantity still available to return.",
+                    "Required positive businessPartnerId and storeId, required returnType (`SalesReturn` or `PurchaseReturn` only), required ISO asOfDate, and valid pagination. Optional search matches the application invoice number or partner invoice number. When editing, send currentReturnInvoiceId so its existing quantities are excluded from the already-returned total.",
+                    "Every returned line includes originalQuantity, returnedQuantity, availableQuantity, original unitPrice, and originalTotal. Fully returned lines may remain in an eligible invoice for display but have availableQuantity zero. Saving the return revalidates availability, enforces the original price, and calculates the proportional discount on the backend.",
+                    "Invalid filters return 400. Concurrent or excessive return quantities are rejected when the return is saved. An empty result means no matching invoice has a returnable quantity.")),
             nameof(InvoicesController.GetById) => (
                 "Get an invoice",
                 SwaggerOperationDescription.Create(
