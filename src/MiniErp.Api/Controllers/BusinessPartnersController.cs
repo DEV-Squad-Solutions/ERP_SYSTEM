@@ -31,7 +31,7 @@ public sealed class BusinessPartnersController(
     }
 
     [HttpGet("select")]
-    [ProducesResponseType<IReadOnlyList<SelectResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<IReadOnlyList<BusinessPartnerSelectResponse>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetSelect(CancellationToken cancellationToken)
     {
         var result = await businessPartnerService.GetSelectAsync(cancellationToken);

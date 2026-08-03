@@ -141,7 +141,7 @@ public sealed class BusinessPartnerService(
         return query;
     }
 
-    public async Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
+    public async Task<Result<IReadOnlyList<BusinessPartnerSelectResponse>>> GetSelectAsync(
         CancellationToken cancellationToken = default)
     {
         var response = await dbContext.BusinessPartners
@@ -151,10 +151,10 @@ public sealed class BusinessPartnerService(
                 partner.IsActive)
             .OrderBy(partner => partner.Name)
             .ThenBy(partner => partner.Id)
-            .ProjectToType<SelectResponse>()
+            .ProjectToType<BusinessPartnerSelectResponse>()
             .ToListAsync(cancellationToken);
 
-        return Result<IReadOnlyList<SelectResponse>>.Success(response);
+        return Result<IReadOnlyList<BusinessPartnerSelectResponse>>.Success(response);
     }
 
     public async Task<Result<BusinessPartnerResponse>> GetByIdAsync(
