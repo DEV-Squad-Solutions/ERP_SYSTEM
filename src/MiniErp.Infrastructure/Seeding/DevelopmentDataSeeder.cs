@@ -227,30 +227,30 @@ public static class DevelopmentDataSeeder
                 company,
                 cancellationToken);
 
-            await SeedEmployeesAsync(
-                dbContext, 
-                company, 
-                cancellationToken);
+            //await SeedEmployeesAsync(
+                //dbContext, 
+                //company, 
+                //cancellationToken);
 
-            await SeedAttendanceAsync(
-                dbContext, 
-                company, 
-                cancellationToken);
+            //await SeedAttendanceAsync(
+            //    dbContext, 
+            //    company, 
+            //    cancellationToken);
 
-            await SeedEmployeeTransactionsAsync(
-                dbContext, 
-                company, 
-                cancellationToken);
+            //await SeedEmployeeTransactionsAsync(
+            //    dbContext, 
+            //    company, 
+            //    cancellationToken);
 
-            await SeedPayrollPeriodsAsync(
-                dbContext, 
-                company, 
-                cancellationToken);
+            //await SeedPayrollPeriodsAsync(
+            //    dbContext, 
+            //    company, 
+            //    cancellationToken);
 
-            await SeedPayrollEntriesAsync(
-                dbContext, 
-                company, 
-                cancellationToken);
+            //await SeedPayrollEntriesAsync(
+            //    dbContext, 
+            //    company, 
+            //    cancellationToken);
 
         }
     }

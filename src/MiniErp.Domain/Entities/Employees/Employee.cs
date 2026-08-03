@@ -24,7 +24,8 @@ namespace MiniErp.Domain.Entities.Employees
         public EmployeeType Type { get; set; } = EmployeeType.Daily;
         public decimal? DailySalary { get; set; } // Applicable if Type is Daily
         public decimal? MonthlySalary { get; set; } // Applicable if Type is Monthly
-
+        public int? RequiredWorkingDaysPerMonth { get; set; } = 26;
+        public DateOnly? LastDayOfReceivingSalary { get; set; }
         public bool IsActive { get; set; } = true;
     }
 }

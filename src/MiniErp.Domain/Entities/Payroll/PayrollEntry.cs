@@ -12,8 +12,10 @@ namespace MiniErp.Domain.Entities.Payroll
     {
         public int Id { get; set; }
 
-        public int PayrollPeriodId { get; set; }
-        public PayrollPeriod PayrollPeriod { get; set; } = default!;
+        //public int PayrollPeriodId { get; set; }
+        //public PayrollPeriod PayrollPeriod { get; set; } = default!;
+        public DateOnly StartDate { get; set; }
+        public DateOnly EndDate { get; set; }
 
         public int CompanyId { get; set; }
         public Company Company { get; set; } = null!;
@@ -27,9 +29,14 @@ namespace MiniErp.Domain.Entities.Payroll
         public EmployeeType EmployeeType { get; set; }
 
         // Attendance Summary
-        public int DaysWorked { get; set; }
+        public int PresentDays { get; set; }
         public int AbsentDays { get; set; }
-        public decimal OvertimeHours { get; set; }
+        public int WorkedDays { get; set; }
+        public decimal Overtimebydayunit { get; set; }
+        public decimal RequiredWorkingDays { get; set; } = 26;
+        public decimal? SalaryPerDay { get; set; }
+        public decimal CalculatedSalary { get; set; }
+        public bool IsTakeSalary { get; set; }
 
         // Manual Transactions
         public decimal TotalCredits { get; set; } = default!;

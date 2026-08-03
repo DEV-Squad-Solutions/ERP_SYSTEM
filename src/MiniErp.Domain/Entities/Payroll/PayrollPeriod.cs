@@ -18,8 +18,7 @@ namespace MiniErp.Domain.Entities.Payroll
         public DateOnly StartDate { get; set; }
         public DateOnly EndDate { get; set; }
         public PayrollPeriodStatus Status { get; set; }
-
-        // Summary
+        public int WorkingDaysInPeriod { get; set; } = 26;
         public int? TotalEmployees { get; set; }
         public int? TotalMonthlyEmployees { get; set; }
         public int? TotalDailyEmployees { get; set; }

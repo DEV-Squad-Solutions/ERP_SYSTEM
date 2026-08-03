@@ -21,7 +21,7 @@ namespace MiniErp.Domain.Entities.Employees
         public DateOnly WorkDate { get; set; }
         public TimeOnly? CheckIn { get; set; }
         public TimeOnly? CheckOut { get; set; }
-        public decimal? WorkHours { get; set; }
+        public TimeOnly? WorkHours { get; set; }
         public WorkDayRatio WorkDayRatio { get; set; }=WorkDayRatio.FullDay;
         public WorkDayRatio? WorkOverTimeRatio { get; set; }
         public WorkDayRatio? WorkDaysDeductionRatio { get; set; }
