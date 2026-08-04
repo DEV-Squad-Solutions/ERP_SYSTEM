@@ -11,6 +11,9 @@ public static class ArabicValidationConfiguration
         {
             ["DocumentDate"] = "تاريخ المستند",
             ["DocumentNumber"] = "رقم المستند",
+            ["TransferDate"] = "تاريخ التحويل",
+            ["SourceStoreId"] = "مخزن المصدر",
+            ["DestinationStoreId"] = "مخزن الوجهة",
             ["ItemId"] = "الصنف",
             ["InvoiceNumber"] = "رقم الفاتورة",
             ["Lines"] = "سطور المستند",

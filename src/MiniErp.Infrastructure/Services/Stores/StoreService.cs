@@ -286,6 +286,14 @@ public sealed class StoreService(
                     adjustment.CompanyId == companyId &&
                     adjustment.StoreId == storeId,
                 cancellationToken) ||
+        await dbContext.StockTransfers
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                transfer =>
+                    transfer.CompanyId == companyId &&
+                    (transfer.SourceStoreId == storeId ||
+                     transfer.DestinationStoreId == storeId),
+                cancellationToken) ||
         await dbContext.InventoryCounts
             .IgnoreQueryFilters()
             .AnyAsync(

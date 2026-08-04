@@ -188,6 +188,13 @@ public sealed class ItemUnitService(
                         line.CompanyId == companyId &&
                         line.ItemUnitId == id,
                     cancellationToken) ||
+            await dbContext.StockTransferLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.ItemUnitId == id,
+                    cancellationToken) ||
             await dbContext.InventoryCountLines
                 .IgnoreQueryFilters()
                 .AnyAsync(

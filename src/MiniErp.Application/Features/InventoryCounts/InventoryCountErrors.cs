@@ -71,6 +71,12 @@ public static class InventoryCountErrors
             "يجب إرسال مجموعة أصناف لقطة الجرد كاملة دون إضافة أو حذف أو تكرار.",
             nameof(InventoryCountUpdateRequest.Lines));
 
+    public static Error NegativePhysicalQuantity() =>
+        Error.Validation(
+            "InventoryCounts.NegativePhysicalQuantity",
+            "الكمية الفعلية يجب ألا تكون سالبة.",
+            nameof(InventoryCountUpdateRequest.Lines));
+
     public static Error ReconciledImmutable() =>
         Error.Conflict(
             "InventoryCounts.ReconciledImmutable",

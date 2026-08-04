@@ -120,7 +120,7 @@ public sealed class CompanyService(
             StockBalanceCheckMode = request.StockBalanceCheckMode ??
                 StockBalanceCheckMode.DateCheck
         };
-      
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<CompanyResponse>.Success(company.Adapt<CompanyResponse>());
@@ -358,6 +358,12 @@ public sealed class CompanyService(
         await dbContext.StockAdjustmentLines
             .IgnoreQueryFilters()
             .AnyAsync(line => line.CompanyId == targetCompanyId, cancellationToken) ||
+        await dbContext.StockTransfers
+            .IgnoreQueryFilters()
+            .AnyAsync(transfer => transfer.CompanyId == targetCompanyId, cancellationToken) ||
+        await dbContext.StockTransferLines
+            .IgnoreQueryFilters()
+            .AnyAsync(line => line.CompanyId == targetCompanyId, cancellationToken) ||
         await dbContext.InventoryCounts
             .IgnoreQueryFilters()
             .AnyAsync(count => count.CompanyId == targetCompanyId, cancellationToken) ||
@@ -402,6 +408,10 @@ public sealed class CompanyService(
                 entity => entity.CompanyId == targetCompanyId, cancellationToken)) return "stock adjustment";
         if (await dbContext.StockAdjustmentLines.IgnoreQueryFilters().AnyAsync(
                 entity => entity.CompanyId == targetCompanyId, cancellationToken)) return "stock adjustment line";
+        if (await dbContext.StockTransfers.IgnoreQueryFilters().AnyAsync(
+                entity => entity.CompanyId == targetCompanyId, cancellationToken)) return "stock transfer";
+        if (await dbContext.StockTransferLines.IgnoreQueryFilters().AnyAsync(
+                entity => entity.CompanyId == targetCompanyId, cancellationToken)) return "stock transfer line";
         if (await dbContext.InventoryCounts.IgnoreQueryFilters().AnyAsync(
                 entity => entity.CompanyId == targetCompanyId, cancellationToken)) return "inventory count";
         if (await dbContext.InventoryCountLines.IgnoreQueryFilters().AnyAsync(

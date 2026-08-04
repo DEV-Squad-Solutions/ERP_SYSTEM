@@ -27,6 +27,10 @@ public sealed class StoreServiceTests
             { "InventoryCount", true },
             { "ItemMovement", false },
             { "ItemMovement", true },
+            { "StockTransferSource", false },
+            { "StockTransferSource", true },
+            { "StockTransferDestination", false },
+            { "StockTransferDestination", true },
             { "InvoiceContainerStore", false },
             { "InvoiceContainerStore", true },
             { "ContainerMovement", false },
@@ -188,7 +192,9 @@ public sealed class StoreServiceTests
             "StockOpeningBalance" or
             "StockAdjustment" or
             "InventoryCount" or
-            "ItemMovement";
+            "ItemMovement" or
+            "StockTransferSource" or
+            "StockTransferDestination";
         var storeId = changesProductStoreRole ? 10 : 11;
         var request = changesProductStoreRole
             ? new StoreRequest(
@@ -388,6 +394,22 @@ public sealed class StoreServiceTests
                              Id, CompanyId, StoreId, IsDeleted)
                          VALUES (1, 1, 10, {deletedValue});
                          """),
+                "StockTransferSource" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockTransfers (
+                             Id, CompanyId, SourceStoreId,
+                             DestinationStoreId, IsDeleted)
+                         VALUES (1, 1, 10, 14, {deletedValue});
+                         """),
+                "StockTransferDestination" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockTransfers (
+                             Id, CompanyId, SourceStoreId,
+                             DestinationStoreId, IsDeleted)
+                         VALUES (1, 1, 14, 10, {deletedValue});
+                         """),
                 "ContainerMovement" =>
                     Context.Database.ExecuteSqlInterpolatedAsync(
                         $"""
@@ -525,6 +547,14 @@ public sealed class StoreServiceTests
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
                     StoreId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE StockTransfers (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    SourceStoreId INTEGER NOT NULL,
+                    DestinationStoreId INTEGER NOT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
 

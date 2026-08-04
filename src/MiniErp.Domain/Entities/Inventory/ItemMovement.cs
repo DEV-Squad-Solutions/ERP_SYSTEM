@@ -88,4 +88,9 @@ public sealed class ItemMovement : AuditableEntity
         InventoryValueAfter =
             InventoryCostRules.RoundValue(inventoryValueAfter);
     }
+
+    public void SetTransferUnitCost(decimal unitCost)
+    {
+        UnitCost = InventoryCostRules.RoundUnitCost(unitCost);
+    }
 }

@@ -41,16 +41,21 @@ public sealed class InventoryCostingService(
         IReadOnlyCollection<InventoryCostingKey> keys,
         CancellationToken cancellationToken = default)
     {
-        var orderedKeys = keys
-            .Distinct()
-            .OrderBy(key => key.StoreId)
-            .ThenBy(key => key.ItemId)
-            .ToArray();
-
-        await LockAsync(orderedKeys, cancellationToken);
-
-        foreach (var key in orderedKeys)
+        var keyComparer = Comparer<InventoryCostingKey>.Create((left, right) =>
         {
+            var storeComparison = left.StoreId.CompareTo(right.StoreId);
+            return storeComparison != 0
+                ? storeComparison
+                : left.ItemId.CompareTo(right.ItemId);
+        });
+        var pendingKeys = new SortedSet<InventoryCostingKey>(keys, keyComparer);
+
+        await LockAsync(pendingKeys.ToArray(), cancellationToken);
+
+        while (pendingKeys.Count > 0)
+        {
+            var key = pendingKeys.Min!;
+            pendingKeys.Remove(key);
             var balance = await LockBalanceAsync(
                 key,
                 createIfMissing: true,
@@ -64,9 +69,100 @@ public sealed class InventoryCostingService(
             {
                 return error;
             }
+
+            var transferSynchronization =
+                await SynchronizeTransferInboundCostsAsync(
+                key,
+                cancellationToken);
+            if (transferSynchronization.Error is not null)
+            {
+                return transferSynchronization.Error;
+            }
+
+            foreach (var dependentKey in transferSynchronization.Keys)
+            {
+                pendingKeys.Add(dependentKey);
+            }
         }
 
         return null;
+    }
+
+    private async Task<TransferSynchronizationResult>
+        SynchronizeTransferInboundCostsAsync(
+            InventoryCostingKey sourceKey,
+            CancellationToken cancellationToken)
+    {
+        var outboundMovements = await dbContext.ItemMovements
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.StoreId == sourceKey.StoreId &&
+                movement.ItemId == sourceKey.ItemId &&
+                movement.MovementType == ItemMovementType.TransferOut)
+            .ToListAsync(cancellationToken);
+        if (outboundMovements.Count == 0)
+        {
+            return TransferSynchronizationResult.Empty;
+        }
+
+        var referenceIds = outboundMovements
+            .Select(movement => movement.ReferenceId)
+            .Distinct()
+            .ToArray();
+        var inboundMovements = await dbContext.ItemMovements
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.ItemId == sourceKey.ItemId &&
+                movement.MovementType == ItemMovementType.TransferIn &&
+                referenceIds.Contains(movement.ReferenceId))
+            .ToListAsync(cancellationToken);
+        var inboundByReference = inboundMovements.ToDictionary(
+            movement => movement.ReferenceId);
+        var dependentKeys = new HashSet<InventoryCostingKey>();
+
+        foreach (var outbound in outboundMovements)
+        {
+            if (!inboundByReference.TryGetValue(
+                    outbound.ReferenceId,
+                    out var inbound))
+            {
+                continue;
+            }
+
+            if (!outbound.UnitCost.HasValue)
+            {
+                if (inbound.UnitCost != 0m)
+                {
+                    inbound.SetTransferUnitCost(0m);
+                    dependentKeys.Add(new InventoryCostingKey(
+                        inbound.StoreId,
+                        inbound.ItemId));
+                }
+
+                continue;
+            }
+
+            if (
+                inbound.UnitCost == outbound.UnitCost)
+            {
+                continue;
+            }
+
+            inbound.SetTransferUnitCost(outbound.UnitCost.Value);
+            dependentKeys.Add(new InventoryCostingKey(
+                inbound.StoreId,
+                inbound.ItemId));
+        }
+
+        return new TransferSynchronizationResult(null, dependentKeys);
+    }
+
+    private sealed record TransferSynchronizationResult(
+        Error? Error,
+        IReadOnlyCollection<InventoryCostingKey> Keys)
+    {
+        public static TransferSynchronizationResult Empty { get; } =
+            new(null, []);
     }
 
     public async Task<IReadOnlyDictionary<int, InventoryCostSnapshot>>
@@ -365,9 +461,8 @@ public sealed class InventoryCostingService(
                 }
 
             case ItemMovementType.TransferIn:
-                return movement.UnitCost.HasValue
-                    ? InboundCostResult.Success(movement.UnitCost.Value)
-                    : InboundCostResult.Failure(TransferUnitCostRequired());
+                return InboundCostResult.Success(
+                    movement.UnitCost ?? 0m);
 
             default:
                 return InboundCostResult.Failure(InvalidInboundMovementType());

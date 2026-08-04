@@ -64,6 +64,11 @@ public sealed class ApplicationDbContext(
     public DbSet<StockAdjustmentLine> StockAdjustmentLines =>
         Set<StockAdjustmentLine>();
 
+    public DbSet<StockTransfer> StockTransfers => Set<StockTransfer>();
+
+    public DbSet<StockTransferLine> StockTransferLines =>
+        Set<StockTransferLine>();
+
     public DbSet<InventoryCount> InventoryCounts =>
         Set<InventoryCount>();
 

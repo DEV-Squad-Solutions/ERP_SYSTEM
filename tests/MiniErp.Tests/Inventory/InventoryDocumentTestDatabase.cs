@@ -9,6 +9,7 @@ using MiniErp.Infrastructure.Services.Inventory;
 using MiniErp.Infrastructure.Services.InventoryCounts;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.StockAdjustments;
+using MiniErp.Infrastructure.Services.StockTransfers;
 
 namespace MiniErp.Tests.Inventory;
 
@@ -64,6 +65,21 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
             currentCompany,
             stockService,
             costingService,
+            TimeProvider.System);
+    }
+
+    public StockTransferService CreateStockTransferService(int companyId = 1)
+    {
+        var currentCompany = new TestCurrentCompanyContext(companyId);
+        return new StockTransferService(
+            Context,
+            new PaginationService(),
+            currentCompany,
+            new InventoryStockService(Context, currentCompany),
+            new InventoryCostingService(
+                Context,
+                currentCompany,
+                TimeProvider.System),
             TimeProvider.System);
     }
 
@@ -428,6 +444,56 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
                 ItemId)
             WHERE IsDeleted = 0;
 
+            CREATE TABLE StockTransfers (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                DocumentNumber TEXT NOT NULL,
+                TransferDate TEXT NOT NULL,
+                SourceStoreId INTEGER NOT NULL,
+                DestinationStoreId INTEGER NOT NULL,
+                Notes TEXT NULL,
+                LastModifiedAt TEXT NOT NULL,
+                RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IX_StockTransfers_CompanyId_DocumentNumber
+            ON StockTransfers (CompanyId, DocumentNumber)
+            WHERE IsDeleted = 0;
+
+            CREATE TABLE StockTransferLines (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                StockTransferId INTEGER NOT NULL,
+                ItemId INTEGER NOT NULL,
+                ItemUnitId INTEGER NOT NULL,
+                Quantity NUMERIC NOT NULL CHECK (Quantity > 0),
+                Notes TEXT NULL,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE UNIQUE INDEX UX_StockTransferLines_Company_Transfer_Item
+            ON StockTransferLines (CompanyId, StockTransferId, ItemId)
+            WHERE IsDeleted = 0;
+
             CREATE TRIGGER AdvanceStockAdjustmentRowVersion
             AFTER UPDATE ON StockAdjustments
             BEGIN
@@ -440,6 +506,14 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
             AFTER UPDATE ON InventoryCounts
             BEGIN
                 UPDATE InventoryCounts
+                SET RowVersion = randomblob(8)
+                WHERE Id = NEW.Id;
+            END;
+
+            CREATE TRIGGER AdvanceStockTransferRowVersion
+            AFTER UPDATE ON StockTransfers
+            BEGIN
+                UPDATE StockTransfers
                 SET RowVersion = randomblob(8)
                 WHERE Id = NEW.Id;
             END;
@@ -468,6 +542,8 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
                  0, 1, 'test', '2026-01-01', 'test', 0),
                 (2, 1, NULL, 'CONT', 'Container Store', NULL,
                  1, 1, 'test', '2026-01-01', 'test', 0),
+                (4, 1, NULL, 'SECOND', 'Second Store', NULL,
+                 0, 1, 'test', '2026-01-01', 'test', 0),
                 (3, 2, NULL, 'OTHER', 'Other Store', NULL,
                  0, 1, 'test', '2026-01-01', 'test', 0);
 

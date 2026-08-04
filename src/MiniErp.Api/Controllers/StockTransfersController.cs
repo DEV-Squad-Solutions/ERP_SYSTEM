@@ -2,26 +2,26 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
 using MiniErp.Application.Common.Models;
-using MiniErp.Application.Features.InventoryCounts;
+using MiniErp.Application.Features.StockTransfers;
 
 namespace MiniErp.Api.Controllers;
 
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-public sealed class InventoryCountsController(
-    IInventoryCountService inventoryCountService)
+public sealed class StockTransfersController(
+    IStockTransferService stockTransferService)
     : ApiControllerBase
 {
     [HttpGet]
-    [ProducesResponseType<PagedResponse<InventoryCountListResponse>>(
+    [ProducesResponseType<PagedResponse<StockTransferListResponse>>(
         StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
-        [FromQuery] InventoryCountFilterRequest filters,
+        [FromQuery] StockTransferFilterRequest filters,
         CancellationToken cancellationToken)
     {
-        var result = await inventoryCountService.GetAllAsync(
+        var result = await stockTransferService.GetAllAsync(
             pagination,
             filters,
             cancellationToken);
@@ -29,13 +29,13 @@ public sealed class InventoryCountsController(
     }
 
     [HttpGet("{id:int}")]
-    [ProducesResponseType<InventoryCountResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<StockTransferResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(
         int id,
         CancellationToken cancellationToken)
     {
-        var result = await inventoryCountService.GetByIdAsync(
+        var result = await stockTransferService.GetByIdAsync(
             id,
             cancellationToken);
         return this.ToActionResult(result);
@@ -43,18 +43,16 @@ public sealed class InventoryCountsController(
 
     [Authorize(Roles = "Admin")]
     [HttpPost]
-    [ProducesResponseType<InventoryCountResponse>(
-        StatusCodes.Status201Created)]
+    [ProducesResponseType<StockTransferResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Create(
-        InventoryCountRequest request,
+        StockTransferRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await inventoryCountService.AddAsync(
+        var result = await stockTransferService.AddAsync(
             request,
             cancellationToken);
-
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -65,32 +63,15 @@ public sealed class InventoryCountsController(
 
     [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}")]
-    [ProducesResponseType<InventoryCountResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<StockTransferResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Update(
         int id,
-        InventoryCountUpdateRequest request,
+        StockTransferUpdateRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await inventoryCountService.UpdateAsync(
-            id,
-            request,
-            cancellationToken);
-        return this.ToActionResult(result);
-    }
-
-    [Authorize(Roles = "Admin")]
-    [HttpPost("{id:int}/reconcile")]
-    [ProducesResponseType<InventoryCountResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> Reconcile(
-        int id,
-        InventoryCountReconcileRequest request,
-        CancellationToken cancellationToken)
-    {
-        var result = await inventoryCountService.ReconcileAsync(
+        var result = await stockTransferService.UpdateAsync(
             id,
             request,
             cancellationToken);
@@ -104,12 +85,10 @@ public sealed class InventoryCountsController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(
         int id,
-        [FromQuery] byte[]? rowVersion,
         CancellationToken cancellationToken)
     {
-        var result = await inventoryCountService.DeleteAsync(
+        var result = await stockTransferService.DeleteAsync(
             id,
-            rowVersion,
             cancellationToken);
         return this.ToActionResult(result);
     }

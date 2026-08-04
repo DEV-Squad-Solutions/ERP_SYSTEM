@@ -273,6 +273,8 @@ public sealed class CompanyServiceTests
     [InlineData("StockOpeningBalanceLines")]
     [InlineData("StockAdjustments")]
     [InlineData("StockAdjustmentLines")]
+    [InlineData("StockTransfers")]
+    [InlineData("StockTransferLines")]
     [InlineData("InventoryCounts")]
     [InlineData("InventoryCountLines")]
     [InlineData("ItemStoreBalances")]
@@ -321,6 +323,8 @@ public sealed class CompanyServiceTests
     [InlineData("StockOpeningBalanceLines")]
     [InlineData("StockAdjustments")]
     [InlineData("StockAdjustmentLines")]
+    [InlineData("StockTransfers")]
+    [InlineData("StockTransferLines")]
     [InlineData("InventoryCounts")]
     [InlineData("InventoryCountLines")]
     [InlineData("ItemStoreBalances")]
@@ -638,6 +642,8 @@ public sealed class CompanyServiceTests
                 CREATE TABLE StockOpeningBalanceLines (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, IsDeleted INTEGER NOT NULL);
                 CREATE TABLE StockAdjustments (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, IsDeleted INTEGER NOT NULL);
                 CREATE TABLE StockAdjustmentLines (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, IsDeleted INTEGER NOT NULL);
+                CREATE TABLE StockTransfers (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, IsDeleted INTEGER NOT NULL);
+                CREATE TABLE StockTransferLines (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, IsDeleted INTEGER NOT NULL);
                 CREATE TABLE InventoryCounts (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, IsDeleted INTEGER NOT NULL);
                 CREATE TABLE InventoryCountLines (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, IsDeleted INTEGER NOT NULL);
                 CREATE TABLE ItemStoreBalances (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, IsDeleted INTEGER NOT NULL);

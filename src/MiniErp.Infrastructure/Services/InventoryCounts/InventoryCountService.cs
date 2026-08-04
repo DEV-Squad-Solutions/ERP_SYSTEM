@@ -292,23 +292,6 @@ public sealed class InventoryCountService(
         }
 
         var itemIds = count.Lines.Select(line => line.ItemId).ToArray();
-        var stockChanged = await inventoryStockService
-            .HasStockChangesSinceAsync(
-                count.StoreId,
-                itemIds,
-                count.SnapshotTakenAt,
-                cancellationToken);
-        var currentBalances = await inventoryStockService.GetBalancesAsync(
-            count.StoreId,
-            itemIds,
-            count.CountDate,
-            cancellationToken: cancellationToken);
-        var balanceChanged = count.Lines.Any(line =>
-            currentBalances[line.ItemId] != line.SystemQuantity);
-        if (stockChanged || balanceChanged)
-        {
-            return Result<InventoryCountResponse>.Failure(SnapshotStale());
-        }
 
         var increaseItemIds = count.Lines
             .Where(line =>
@@ -348,6 +331,24 @@ public sealed class InventoryCountService(
                 .ToArray(),
             cancellationToken);
 
+        var stockChanged = await inventoryStockService
+            .HasStockChangesSinceAsync(
+                count.StoreId,
+                itemIds,
+                count.SnapshotTakenAt,
+                cancellationToken);
+        var currentBalances = await inventoryStockService.GetBalancesAsync(
+            count.StoreId,
+            itemIds,
+            count.CountDate,
+            cancellationToken: cancellationToken);
+        var balanceChanged = count.Lines.Any(line =>
+            currentBalances[line.ItemId] != line.SystemQuantity);
+        if (stockChanged || balanceChanged)
+        {
+            return Result<InventoryCountResponse>.Failure(SnapshotStale());
+        }
+
         var decreaseLines = count.Lines
             .Where(line =>
                 line.PhysicalQuantity!.Value < line.SystemQuantity)
@@ -386,8 +387,7 @@ public sealed class InventoryCountService(
             count,
             StockAdjustmentDirection.Decrease,
             decreaseNumber,
-            utcNow,
-            increaseCosts);
+            utcNow);
 
         var generatedNumbers = new[] { increase, decrease }
             .Where(adjustment => adjustment is not null)
@@ -472,6 +472,7 @@ public sealed class InventoryCountService(
 
     public async Task<Result> DeleteAsync(
         int id,
+        byte[]? rowVersion,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -479,13 +480,25 @@ public sealed class InventoryCountService(
             return Result.Failure(InvalidId());
         }
 
+        if (rowVersion is not { Length: 8 })
+        {
+            return Result.Failure(RowVersionRequired());
+        }
+
         await using var transaction = await dbContext.Database
-            .BeginTransactionAsync(cancellationToken);
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var count = await LoadForWriteAsync(id, cancellationToken);
         if (count is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        if (!count.RowVersion.SequenceEqual(rowVersion))
+        {
+            return Result.Failure(Concurrency());
         }
 
         if (count.ReconciledAt.HasValue ||
@@ -497,6 +510,9 @@ public sealed class InventoryCountService(
         {
             return Result.Failure(ReconciledImmutable());
         }
+
+        var entry = dbContext.Entry(count);
+        entry.Property(item => item.RowVersion).OriginalValue = rowVersion;
 
         dbContext.InventoryCountLines.RemoveRange(count.Lines);
         dbContext.InventoryCounts.Remove(count);
@@ -587,10 +603,15 @@ public sealed class InventoryCountService(
         InventoryCount count,
         IReadOnlyCollection<InventoryCountLineUpdateRequest> lines)
     {
+        if (lines.Any(line =>
+                line.PhysicalQuantity.HasValue &&
+                line.PhysicalQuantity.Value < 0m))
+        {
+            return NegativePhysicalQuantity();
+        }
+
         if (lines.Count != count.Lines.Count ||
-            lines.Any(line =>
-                line.ItemId <= 0 ||
-                line.PhysicalQuantity < 0m) ||
+            lines.Any(line => line.ItemId <= 0) ||
             lines.Select(line => line.ItemId).Distinct().Count() != lines.Count)
         {
             return LinesDoNotMatchSnapshot();
@@ -609,7 +630,7 @@ public sealed class InventoryCountService(
         StockAdjustmentDirection direction,
         string documentNumber,
         DateTime utcNow,
-        IReadOnlyDictionary<int, decimal> increaseCosts)
+        IReadOnlyDictionary<int, decimal>? increaseCosts = null)
     {
         var adjustment = new StockAdjustment
         {
@@ -644,7 +665,7 @@ public sealed class InventoryCountService(
                     Quantity = quantity,
                     UnitCost =
                         direction == StockAdjustmentDirection.Increase
-                            ? increaseCosts[countLine.ItemId]
+                            ? increaseCosts![countLine.ItemId]
                             : null,
                     Reason = countLine.Notes
                 });

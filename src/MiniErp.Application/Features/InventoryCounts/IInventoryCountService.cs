@@ -30,5 +30,6 @@ public interface IInventoryCountService
 
     Task<Result> DeleteAsync(
         int id,
+        byte[]? rowVersion,
         CancellationToken cancellationToken = default);
 }
