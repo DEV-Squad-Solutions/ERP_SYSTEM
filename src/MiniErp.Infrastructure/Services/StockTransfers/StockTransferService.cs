@@ -236,14 +236,15 @@ public sealed class StockTransferService(
             oldKeys.Concat(newSourceKeys).Concat(newDestinationKeys).ToArray(),
             cancellationToken);
 
+        var sourceMovementReference = MovementReference(
+            ItemMovementType.TransferOut,
+            transfer.Id,
+            transfer.DocumentNumber);
         var sourceStockError = await ValidateStockAsync(
             transfer.SourceStoreId,
             request.TransferDate,
             request.Lines,
-            MovementReference(
-                ItemMovementType.TransferOut,
-                transfer.Id,
-                transfer.DocumentNumber),
+            sourceMovementReference,
             $"تعديل تحويل المخزون {transfer.DocumentNumber}",
             cancellationToken);
         if (sourceStockError is not null)
@@ -438,15 +439,24 @@ public sealed class StockTransferService(
         }
 
         var itemIds = lines.Select(line => line.ItemId).Distinct().ToArray();
-        var items = await dbContext.Items
+        var itemData = await dbContext.Items
             .AsNoTracking()
             .Where(item => item.CompanyId == companyId && itemIds.Contains(item.Id))
-            .Select(item => new ItemSnapshot(
+            .Select(item => new
+            {
                 item.Id,
                 item.ItemUnitId,
                 item.IsActive,
-                item.ItemUnit.IsActive))
+                ItemUnitIsActive = item.ItemUnit != null &&
+                    item.ItemUnit.IsActive
+            })
             .ToListAsync(cancellationToken);
+        var items = itemData.Select(item => new ItemSnapshot(
+            Id: item.Id,
+            ItemUnitId: item.ItemUnitId,
+            IsActive: item.IsActive,
+            ItemUnitIsActive: item.ItemUnitIsActive))
+            .ToList();
         var missingIds = itemIds.Except(items.Select(item => item.Id)).ToArray();
         if (missingIds.Length > 0)
         {
@@ -549,7 +559,10 @@ public sealed class StockTransferService(
                     new InventoryStockLine(line.ItemId, line.Quantity)).ToArray(),
                 ReplacedMovement: replacedMovement,
                 OperationDescription: operationDescription,
-                ErrorFieldName: nameof(StockTransferRequest.Lines)),
+                ErrorFieldName: nameof(StockTransferRequest.Lines),
+                DateCoverageErrorWhenChecksDisabled:
+                    MiniErp.Application.Features.Inventory.InventoryErrors
+                        .TransferUnitCostRequired()),
             cancellationToken);
 
     private void AddLines(

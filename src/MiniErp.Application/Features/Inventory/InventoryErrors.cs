@@ -83,9 +83,9 @@ public static class InventoryErrors
             "returnUnitCost");
 
     public static Error TransferUnitCostRequired() =>
-        Error.Validation(
+        Error.Conflict(
             "Inventory.TransferUnitCostRequired",
-            "لا يمكن احتساب تكلفة التحويل الوارد بدون تكلفة مصدر.",
+            "لا يوجد رصيد مُسعّر كافٍ في مخزن المصدر لإتمام التحويل. أضف رصيد الصنف وتكلفته أولاً أو قلّل كمية التحويل.",
             CostFieldName);
 
     public static Error InvalidInboundMovementType() =>

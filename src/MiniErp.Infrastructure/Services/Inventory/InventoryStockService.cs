@@ -98,15 +98,26 @@ public sealed class InventoryStockService(
         }
 
         var mode = await GetBalanceCheckModeAsync(cancellationToken);
-        if (mode == StockBalanceCheckMode.None)
+        if (mode == StockBalanceCheckMode.None &&
+            proposal.DateCoverageErrorWhenChecksDisabled is null)
         {
             return null;
         }
 
-        if (mode is StockBalanceCheckMode.DateCheck or StockBalanceCheckMode.Both)
+        if (mode == StockBalanceCheckMode.None)
+        {
+            return await ValidateDateBalanceAsync(
+                proposal,
+                proposal.DateCoverageErrorWhenChecksDisabled,
+                cancellationToken);
+        }
+
+        if (mode is StockBalanceCheckMode.DateCheck or StockBalanceCheckMode.Both ||
+            proposal.DateCoverageErrorWhenChecksDisabled is not null)
         {
             var dateError = await ValidateDateBalanceAsync(
                 proposal,
+                proposedOutboundError: null,
                 cancellationToken);
             if (dateError is not null)
             {
@@ -121,6 +132,7 @@ public sealed class InventoryStockService(
 
     private async Task<Error?> ValidateDateBalanceAsync(
         InventoryStockProposal proposal,
+        Error? proposedOutboundError,
         CancellationToken cancellationToken)
     {
         var requestedByItem = proposal.Lines
@@ -305,14 +317,15 @@ public sealed class InventoryStockService(
                 if (stockEvent.IsProposed &&
                     stockEvent.QuantityOut > 0m)
                 {
-                    return InventoryErrors.InsufficientStockAtDate(
-                        itemName,
-                        itemId,
-                        storeId,
-                        stockEvent.Date,
-                        availableBeforeMovement,
-                        stockEvent.QuantityOut,
-                        proposal.ErrorFieldName);
+                    return proposedOutboundError ??
+                        InventoryErrors.InsufficientStockAtDate(
+                            itemName,
+                            itemId,
+                            storeId,
+                            stockEvent.Date,
+                            availableBeforeMovement,
+                            stockEvent.QuantityOut,
+                            proposal.ErrorFieldName);
                 }
 
                 return InventoryErrors.HistoricalStockConflict(

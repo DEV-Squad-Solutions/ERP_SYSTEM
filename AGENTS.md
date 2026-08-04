@@ -17,3 +17,17 @@ Rules:
 - Do not rely on positional argument order for financial, quantity, pagination, currency, or date fields. The source property and target parameter name must be visible at the construction site.
 - Named arguments are not supported inside LINQ expression trees. For EF Core projections, use an anonymous type or a member-initialized projection with explicit property names instead of a long positional constructor.
 - Add property-level regression assertions for fields that could be swapped while still compiling.
+
+## Automatic multi-agent routing
+
+For complex tasks, automatically delegate independent work:
+
+- Use `luna_explorer` for code exploration, relationship tracing,
+  documentation research, test-log analysis, and other read-only work.
+- Use `sol_worker` for architecture decisions, implementation,
+  concurrency, financial logic, migrations, and difficult debugging.
+- Luna must not edit files.
+- Sol owns code modifications.
+- Run independent investigations in parallel.
+- Wait for all agents and combine their results before the final response.
+- Do not use multiple write agents on overlapping files.

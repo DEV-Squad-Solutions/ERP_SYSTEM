@@ -177,6 +177,37 @@ public sealed class StockOpeningBalanceServiceTests
     }
 
     [Fact]
+    public async Task Update_NonEmptyDifferentLengthRowVersion_ReachesConcurrencyCheck()
+    {
+        await using var database = await StockOpeningBalanceTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var openingBalance = (await service.AddAsync(CreateRequest())).Value;
+
+        var result = await service.UpdateAsync(
+            openingBalance.Id,
+            new StockOpeningBalanceUpdateRequest(
+                StoreId: openingBalance.StoreId,
+                DocumentNumber: openingBalance.DocumentNumber,
+                DocumentDate: openingBalance.DocumentDate,
+                Lines:
+                [
+                    new StockOpeningBalanceLineRequest(
+                        ItemId: 1,
+                        Count: 10,
+                        Weight: 2m,
+                        Price: 3m,
+                        Notes: null)
+                ],
+                Notes: openingBalance.Notes,
+                RowVersion: [1, 2, 3, 4]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "StockOpeningBalances.Concurrency",
+            result.Error.Code);
+    }
+
+    [Fact]
     public async Task RequestValidators_AcceptNormalizedMaximumLengths()
     {
         var documentNumber =

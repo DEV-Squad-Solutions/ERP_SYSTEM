@@ -636,8 +636,6 @@ public sealed partial class InvoiceService
                 ItemId = source.ItemId!.Value,
                 SourceQuantity = source.Quantity,
                 UnitPrice = source.Price,
-                SourceInvoiceSubtotal = source.Invoice.Lines.Sum(
-                    line => line.Total),
                 SourceInvoiceDiscount = source.Invoice.DiscountAmount,
                 ReturnedQuantity = dbContext.InvoiceLines
                     .Where(returnLine =>
@@ -661,7 +659,7 @@ public sealed partial class InvoiceService
         }
 
         var sourceById = sourceLines.ToDictionary(source => source.Id);
-        decimal currentReturnGross = 0m;
+        var requestedQuantities = new Dictionary<int, decimal>();
         foreach (var line in linkedLines)
         {
             if (!sourceById.TryGetValue(
@@ -682,7 +680,7 @@ public sealed partial class InvoiceService
                     weight,
                     source.UnitPrice,
                     out var requestedQuantity,
-                    out var requestedTotal))
+                    out _))
             {
                 return Result<PreparedReturnSources>.Failure(
                     InvalidCalculatedAmounts(
@@ -699,31 +697,29 @@ public sealed partial class InvoiceService
                         availableQuantity));
             }
 
-            currentReturnGross += requestedTotal;
+            requestedQuantities[source.Id] = requestedQuantity;
         }
 
         var sourceInvoiceId = sourceLines[0].InvoiceId;
-        var sourceSubtotal = sourceLines[0].SourceInvoiceSubtotal;
         var sourceDiscount = sourceLines[0].SourceInvoiceDiscount;
-        var previousReturnedGross = await dbContext.InvoiceLines
+        var sourceInvoiceLineCount = await dbContext.InvoiceLines
             .AsNoTracking()
-            .Where(returnLine =>
-                returnLine.CompanyId == companyId &&
-                returnLine.SourceInvoiceLineId.HasValue &&
-                returnLine.SourceInvoiceLine!.InvoiceId == sourceInvoiceId &&
-                returnLine.Invoice.InvoiceType == returnType &&
-                (!currentInvoiceId.HasValue ||
-                 returnLine.InvoiceId != currentInvoiceId.Value))
-            .SumAsync(
-                returnLine =>
-                    (decimal?)(returnLine.Quantity *
-                        returnLine.SourceInvoiceLine!.Price),
-                cancellationToken) ?? 0m;
-        var discountAmount = CalculateReturnDiscount(
-            sourceSubtotal,
-            sourceDiscount,
-            previousReturnedGross,
-            currentReturnGross);
+            .CountAsync(
+                sourceLine =>
+                    sourceLine.CompanyId == companyId &&
+                    sourceLine.InvoiceId == sourceInvoiceId,
+                cancellationToken);
+        var isFullOriginalInvoiceReturn =
+            linkedLineIds.Length == sourceInvoiceLineCount &&
+            sourceLines.All(source =>
+                source.ReturnedQuantity == 0m &&
+                requestedQuantities.TryGetValue(
+                    source.Id,
+                    out var requestedQuantity) &&
+                requestedQuantity == source.SourceQuantity);
+        var discountAmount = isFullOriginalInvoiceReturn
+            ? sourceDiscount
+            : 0m;
         var preparedLines = sourceLines.ToDictionary(
             source => source.Id,
             source => new PreparedReturnSourceLine(
@@ -735,43 +731,6 @@ public sealed partial class InvoiceService
             new PreparedReturnSources(
                 Lines: preparedLines,
                 DiscountAmount: discountAmount));
-    }
-
-    private static decimal CalculateReturnDiscount(
-        decimal sourceSubtotal,
-        decimal sourceDiscount,
-        decimal previousReturnedGross,
-        decimal currentReturnGross)
-    {
-        if (sourceSubtotal <= 0m || sourceDiscount <= 0m)
-        {
-            return 0m;
-        }
-
-        static decimal Allocate(
-            decimal subtotal,
-            decimal discount,
-            decimal returnedGross) =>
-            returnedGross >= subtotal
-                ? discount
-                : decimal.Round(
-                    discount * returnedGross / subtotal,
-                    InvoiceAmountRules.MoneyScale,
-                    MidpointRounding.AwayFromZero);
-
-        var allocatedBefore = Allocate(
-            sourceSubtotal,
-            sourceDiscount,
-            previousReturnedGross);
-        var allocatedAfter = Allocate(
-            sourceSubtotal,
-            sourceDiscount,
-            previousReturnedGross + currentReturnGross);
-
-        return decimal.Round(
-            Math.Max(0m, allocatedAfter - allocatedBefore),
-            InvoiceAmountRules.MoneyScale,
-            MidpointRounding.AwayFromZero);
     }
 
     private static Error? ValidateAmounts(Invoice invoice)

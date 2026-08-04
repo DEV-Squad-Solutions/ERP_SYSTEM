@@ -297,7 +297,7 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task LinkedPurchaseReturn_UsesOriginalPriceProportionalDiscountAndCurrentAverageCost()
+    public async Task LinkedPurchaseReturn_UsesOriginalPriceWithoutDiscountAndCurrentAverageCost()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -355,10 +355,201 @@ public sealed class InvoiceServiceTests
         Assert.Equal(source.Lines.Single().Id, line.SourceInvoiceLineId);
         Assert.Equal(10m, line.Price);
         Assert.Equal(40m, line.Total);
-        Assert.Equal(4m, result.Value.DiscountAmount);
-        Assert.Equal(36m, result.Value.Total);
+        Assert.Equal(0m, result.Value.DiscountAmount);
+        Assert.Equal(40m, result.Value.Total);
         Assert.Equal(15m, line.UnitCost);
         Assert.Equal(15m, line.AverageCostAfter);
+    }
+
+    [Theory]
+    [InlineData(InvoiceType.Purchase, InvoiceType.PurchaseReturn)]
+    [InlineData(InvoiceType.Sales, InvoiceType.SalesReturn)]
+    public async Task LinkedReturn_FullOriginalInvoiceAppliesOriginalDiscount(
+        InvoiceType sourceType,
+        InvoiceType returnType)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        if (sourceType == InvoiceType.Sales)
+        {
+            var stockResult = await service.AddAsync(
+                CreateRequest(
+                    InvoiceType.Purchase,
+                    PaymentTerm.Credit,
+                    lines:
+                    [
+                        new InvoiceLineRequest(
+                            ItemId: 1,
+                            Count: 10,
+                            Weight: 1m,
+                            Price: 12m,
+                            Notes: null),
+                        new InvoiceLineRequest(
+                            ItemId: 2,
+                            Count: 10,
+                            Weight: 1m,
+                            Price: 12m,
+                            Notes: null)
+                    ],
+                    storeId: 2));
+            Assert.True(stockResult.IsSuccess, stockResult.Error.Description);
+        }
+
+        var sourceResult = await service.AddAsync(
+            CreateRequest(
+                sourceType,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 2,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null),
+                    new InvoiceLineRequest(
+                        ItemId: 2,
+                        Count: 3,
+                        Weight: 1m,
+                        Price: 20m,
+                        Notes: null)
+                ],
+                storeId: 2,
+                discountAmount: 8m));
+        Assert.True(sourceResult.IsSuccess, sourceResult.Error.Description);
+        var source = sourceResult.Value;
+        var sourceLinesByItem = source.Lines.ToDictionary(
+            line => line.ItemId);
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                returnType,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 2,
+                        Weight: 1m,
+                        Price: 99m,
+                        Notes: null,
+                        SourceInvoiceLineId: sourceLinesByItem[1].Id),
+                    new InvoiceLineRequest(
+                        ItemId: 2,
+                        Count: 3,
+                        Weight: 1m,
+                        Price: 99m,
+                        Notes: null,
+                        SourceInvoiceLineId: sourceLinesByItem[2].Id)
+                ],
+                storeId: 2));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(80m, result.Value.Subtotal);
+        Assert.Equal(8m, result.Value.DiscountAmount);
+        Assert.Equal(72m, result.Value.Total);
+        var firstLine = result.Value.Lines.Single(line => line.ItemId == 1);
+        Assert.Equal(2, firstLine.Count);
+        Assert.Equal(1m, firstLine.Weight);
+        Assert.Equal(2m, firstLine.Quantity);
+        Assert.Equal(10m, firstLine.Price);
+        Assert.Equal(20m, firstLine.Total);
+        var secondLine = result.Value.Lines.Single(line => line.ItemId == 2);
+        Assert.Equal(3, secondLine.Count);
+        Assert.Equal(1m, secondLine.Weight);
+        Assert.Equal(3m, secondLine.Quantity);
+        Assert.Equal(20m, secondLine.Price);
+        Assert.Equal(60m, secondLine.Total);
+    }
+
+    [Fact]
+    public async Task LinkedReturn_LaterRemainderAfterPartialReturnGetsNoDiscount()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var sourceResult = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 10,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null)
+                ],
+                storeId: 2,
+                discountAmount: 10m));
+        Assert.True(sourceResult.IsSuccess, sourceResult.Error.Description);
+        var source = sourceResult.Value;
+        var sourceLine = Assert.Single(source.Lines);
+
+        var partialResult = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 4,
+                        Weight: 1m,
+                        Price: 99m,
+                        Notes: null,
+                        SourceInvoiceLineId: sourceLine.Id)
+                ],
+                storeId: 2));
+        Assert.True(
+            partialResult.IsSuccess,
+            partialResult.Error.Description);
+        Assert.Equal(0m, partialResult.Value.DiscountAmount);
+
+        var previewResult = await service.GetReturnSourcesAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new InvoiceReturnSourceFilterRequest(
+                BusinessPartnerId: 1,
+                StoreId: 2,
+                ReturnType: InvoiceReturnType.PurchaseReturn,
+                AsOfDate: new DateOnly(2026, 7, 30)));
+        Assert.True(
+            previewResult.IsSuccess,
+            previewResult.Error.Description);
+        var preview = Assert.Single(previewResult.Value.Items);
+        Assert.Equal(10m, preview.OriginalDiscountAmount);
+        var previewLine = Assert.Single(preview.Lines);
+        Assert.Equal(10m, previewLine.OriginalQuantity);
+        Assert.Equal(4m, previewLine.ReturnedQuantity);
+        Assert.Equal(6m, previewLine.AvailableQuantity);
+
+        var remainderResult = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 6,
+                        Weight: 1m,
+                        Price: 99m,
+                        Notes: null,
+                        SourceInvoiceLineId: sourceLine.Id)
+                ],
+                storeId: 2));
+
+        Assert.True(
+            remainderResult.IsSuccess,
+            remainderResult.Error.Description);
+        Assert.Equal(60m, remainderResult.Value.Subtotal);
+        Assert.Equal(0m, remainderResult.Value.DiscountAmount);
+        Assert.Equal(60m, remainderResult.Value.Total);
+        Assert.Equal(10m, Assert.Single(remainderResult.Value.Lines).Price);
     }
 
     [Fact]
@@ -588,7 +779,7 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task LinkedSalesReturn_UsesFullyCostedSourceSaleCost()
+    public async Task LinkedSalesReturn_PartialReturnUsesNoDiscountAndFullyCostedSourceSaleCost()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -632,8 +823,8 @@ public sealed class InvoiceServiceTests
         var line = Assert.Single(result.Value.Lines);
         Assert.Equal(sale.Lines.Single().Id, line.SourceInvoiceLineId);
         Assert.Equal(30m, line.Price);
-        Assert.Equal(3m, result.Value.DiscountAmount);
-        Assert.Equal(27m, result.Value.Total);
+        Assert.Equal(0m, result.Value.DiscountAmount);
+        Assert.Equal(30m, result.Value.Total);
         Assert.Equal(12m, line.UnitCost);
         Assert.Equal(12m, line.AverageCostAfter);
     }

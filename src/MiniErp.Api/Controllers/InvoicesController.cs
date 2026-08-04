@@ -58,7 +58,8 @@ public sealed class InvoicesController(
     /// Purchase invoices. Results are limited to the current company, selected
     /// partner and store, and invoices dated on or before asOfDate. When a
     /// returned line is linked to a source line, the backend uses the original
-    /// unit price and allocates the original invoice discount proportionally.
+    /// unit price. The original invoice discount applies only when this return
+    /// document includes every original line at its full original quantity.
     /// </remarks>
     [HttpGet("return-sources")]
     [ProducesResponseType<PagedResponse<InvoiceReturnSourceResponse>>(

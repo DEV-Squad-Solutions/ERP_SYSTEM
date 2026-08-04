@@ -67,7 +67,7 @@ public sealed class StockTransferServiceTests
     }
 
     [Fact]
-    public async Task Create_WithoutACompleteSourceCost_UsesZeroCostWhenBalanceCheckIsDisabled()
+    public async Task Create_WithoutSourceCostCoverage_ReturnsTransferCostErrorWhenStockCheckIsDisabled()
     {
         await using var database = await InventoryDocumentTestDatabase.CreateAsync();
         await database.SetStockBalanceCheckModeAsync(StockBalanceCheckMode.None);
@@ -75,9 +75,14 @@ public sealed class StockTransferServiceTests
         var result = await database.CreateStockTransferService().AddAsync(
             Request("TR-NO-COST", 11m));
 
-        Assert.True(result.IsSuccess, result.Error.Description);
-        var line = Assert.Single(result.Value.Lines);
-        Assert.Equal(0m, line.DestinationUnitCost);
+        Assert.True(result.IsFailure);
+        Assert.Equal("Inventory.TransferUnitCostRequired", result.Error.Code);
+        Assert.Equal("unitCost", result.Error.FieldName);
+        Assert.Empty(await database.Context.StockTransfers.ToListAsync());
+        Assert.Empty(await database.Context.ItemMovements
+            .Where(movement => movement.MovementType == ItemMovementType.TransferOut ||
+                movement.MovementType == ItemMovementType.TransferIn)
+            .ToListAsync());
     }
 
     [Fact]

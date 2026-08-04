@@ -39,4 +39,5 @@ public sealed record InventoryStockProposal(
     IReadOnlyCollection<InventoryStockLine> Lines,
     InventoryMovementReference? ReplacedMovement,
     string OperationDescription,
-    string ErrorFieldName);
+    string ErrorFieldName,
+    Error? DateCoverageErrorWhenChecksDisabled = null);
