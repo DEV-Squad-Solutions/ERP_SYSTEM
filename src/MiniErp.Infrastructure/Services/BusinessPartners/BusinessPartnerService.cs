@@ -190,8 +190,8 @@ public sealed class BusinessPartnerService(
             .ProjectToType<StoreResponse>()
             .FirstOrDefaultAsync(cancellationToken);
 
-        var containers = await GetContainerWorkspaceAsync(
-            containerStore?.Id,
+        var containers = await GetAssignedContainersAsync(
+            containerStore?.Id ?? 0,
             cancellationToken);
 
         return Result<BusinessPartnerResponse>.Success(
@@ -331,134 +331,6 @@ public sealed class BusinessPartnerService(
 
         return result;
     }
-
-    private async Task<IReadOnlyList<StoreContainerWorkspaceContainerResponse>>
-        GetContainerWorkspaceAsync(
-            int? storeId,
-            CancellationToken cancellationToken)
-    {
-        if (!storeId.HasValue)
-        {
-            return [];
-        }
-
-        var workspaces = await GetContainerWorkspacesAsync(
-            [storeId.Value],
-            cancellationToken);
-
-        return workspaces.TryGetValue(storeId.Value, out var containers)
-            ? containers
-            : [];
-    }
-
-    private async Task<Dictionary<int, IReadOnlyList<StoreContainerWorkspaceContainerResponse>>>
-        GetContainerWorkspacesAsync(
-            IReadOnlyCollection<int> storeIds,
-            CancellationToken cancellationToken)
-    {
-        var distinctStoreIds = storeIds
-            .Where(storeId => storeId > 0)
-            .Distinct()
-            .ToArray();
-
-        if (distinctStoreIds.Length == 0)
-        {
-            return [];
-        }
-
-        var containerDefinitions = await dbContext.Containers
-            .AsNoTracking()
-            .Where(container =>
-                container.CompanyId == companyId &&
-                (container.IsActive ||
-                 container.StoreContainers.Any(assignment =>
-                     assignment.CompanyId == companyId &&
-                     distinctStoreIds.Contains(assignment.StoreId) &&
-                     assignment.IsActive)))
-            .OrderBy(container => container.Name)
-            .ThenBy(container => container.Id)
-            .Select(container => new ContainerWorkspaceDefinition(
-                container.Id,
-                container.CompanyId,
-                container.Code,
-                container.Name,
-                container.Description,
-                container.IsActive))
-            .ToListAsync(cancellationToken);
-
-        var assignments = await dbContext.StoreContainers
-            .AsNoTracking()
-            .Where(assignment =>
-                assignment.CompanyId == companyId &&
-                distinctStoreIds.Contains(assignment.StoreId) &&
-                assignment.IsActive)
-            .Select(assignment => new
-            {
-                assignment.StoreId,
-                assignment.ContainerId,
-                assignment.Id
-            })
-            .ToListAsync(cancellationToken);
-
-        var assignmentByStoreAndContainer = assignments
-            .GroupBy(assignment => assignment.StoreId)
-            .ToDictionary(
-                group => group.Key,
-                group => group
-                    .GroupBy(assignment => assignment.ContainerId)
-                    .ToDictionary(
-                        containerGroup => containerGroup.Key,
-                        containerGroup => containerGroup
-                            .Select(assignment => assignment.Id)
-                            .First()));
-
-        var result = new Dictionary<
-            int,
-            IReadOnlyList<StoreContainerWorkspaceContainerResponse>>();
-
-        foreach (var storeId in distinctStoreIds)
-        {
-            assignmentByStoreAndContainer.TryGetValue(
-                storeId,
-                out var assignmentByContainer);
-
-            var containers = containerDefinitions
-                .Select(container =>
-                {
-                    int? storeContainerId = null;
-                    if (assignmentByContainer is not null &&
-                        assignmentByContainer.TryGetValue(
-                            container.Id,
-                            out var assignmentId))
-                    {
-                        storeContainerId = assignmentId;
-                    }
-
-                    return new StoreContainerWorkspaceContainerResponse(
-                        Id: container.Id,
-                        CompanyId: container.CompanyId,
-                        Code: container.Code,
-                        Name: container.Name,
-                        Description: container.Description,
-                        IsActive: container.IsActive,
-                        IsAssigned: storeContainerId.HasValue,
-                        StoreContainerId: storeContainerId);
-                })
-                .ToList();
-
-            result[storeId] = containers;
-        }
-
-        return result;
-    }
-
-    private sealed record ContainerWorkspaceDefinition(
-        int Id,
-        int CompanyId,
-        string Code,
-        string Name,
-        string? Description,
-        bool IsActive);
 
     public async Task<Result<BusinessPartnerResponse>> AddAsync(
         BusinessPartnerRequest request,
@@ -618,50 +490,42 @@ public sealed class BusinessPartnerService(
             : null;
     }
 
-    private async Task<bool> HasFinancialRecordsAsync(
+    private Task<bool> HasFinancialRecordsAsync(
         int businessPartnerId,
         CancellationToken cancellationToken) =>
-        await dbContext.Invoices
-            .IgnoreQueryFilters()
-            .AnyAsync(
-                invoice =>
-                    invoice.CompanyId == companyId &&
-                    invoice.BusinessPartnerId == businessPartnerId,
-                cancellationToken) ||
-        await dbContext.PartnerOpeningBalances
-            .IgnoreQueryFilters()
-            .AnyAsync(
-                balance =>
-                    balance.CompanyId == companyId &&
-                    balance.BusinessPartnerId == businessPartnerId,
-                cancellationToken) ||
-        await dbContext.CashVouchers
-            .IgnoreQueryFilters()
-            .AnyAsync(
-                voucher =>
-                    voucher.CompanyId == companyId &&
-                    voucher.BusinessPartnerId == businessPartnerId,
-                cancellationToken) ||
-        await dbContext.BusinessPartnerMovements
-            .IgnoreQueryFilters()
-            .AnyAsync(
-                movement =>
-                    movement.CompanyId == companyId &&
-                    movement.BusinessPartnerId == businessPartnerId,
-                cancellationToken) ||
-        await dbContext.ContainerMovements
-            .IgnoreQueryFilters()
-            .AnyAsync(
-                movement =>
-                    movement.CompanyId == companyId &&
-                    movement.BusinessPartnerId == businessPartnerId,
-                cancellationToken) ||
-        await dbContext.DriverTrips
-            .IgnoreQueryFilters()
-            .AnyAsync(
-                trip =>
-                    trip.CompanyId == companyId &&
-                    trip.BusinessPartnerId == businessPartnerId,
-                cancellationToken);
+        dbContext.Companies
+            .Where(company => company.Id == companyId)
+            .Select(_ =>
+                dbContext.Invoices
+                    .IgnoreQueryFilters()
+                    .Any(invoice =>
+                        invoice.CompanyId == companyId &&
+                        invoice.BusinessPartnerId == businessPartnerId) ||
+                dbContext.PartnerOpeningBalances
+                    .IgnoreQueryFilters()
+                    .Any(balance =>
+                        balance.CompanyId == companyId &&
+                        balance.BusinessPartnerId == businessPartnerId) ||
+                dbContext.CashVouchers
+                    .IgnoreQueryFilters()
+                    .Any(voucher =>
+                        voucher.CompanyId == companyId &&
+                        voucher.BusinessPartnerId == businessPartnerId) ||
+                dbContext.BusinessPartnerMovements
+                    .IgnoreQueryFilters()
+                    .Any(movement =>
+                        movement.CompanyId == companyId &&
+                        movement.BusinessPartnerId == businessPartnerId) ||
+                dbContext.ContainerMovements
+                    .IgnoreQueryFilters()
+                    .Any(movement =>
+                        movement.CompanyId == companyId &&
+                        movement.BusinessPartnerId == businessPartnerId) ||
+                dbContext.DriverTrips
+                    .IgnoreQueryFilters()
+                    .Any(trip =>
+                        trip.CompanyId == companyId &&
+                        trip.BusinessPartnerId == businessPartnerId))
+            .FirstAsync(cancellationToken);
 
 }
