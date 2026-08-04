@@ -37,5 +37,6 @@ public interface IInvoiceService
 
     Task<Result> DeleteAsync(
         int id,
+        byte[]? rowVersion,
         CancellationToken cancellationToken = default);
 }

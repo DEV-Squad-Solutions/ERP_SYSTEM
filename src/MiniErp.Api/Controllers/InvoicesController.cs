@@ -131,9 +131,13 @@ public sealed class InvoicesController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(
         int id,
+        [FromQuery] byte[]? rowVersion,
         CancellationToken cancellationToken)
     {
-        var result = await invoiceService.DeleteAsync(id, cancellationToken);
+        var result = await invoiceService.DeleteAsync(
+            id,
+            rowVersion,
+            cancellationToken);
         return this.ToActionResult(result);
     }
 }

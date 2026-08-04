@@ -131,6 +131,14 @@ public sealed partial class InvoiceService(
             return Result<InvoiceResponse>.Failure(preparation.Error);
         }
 
+        if (await InvoiceNumberExistsAsync(
+                invoice.InvoiceNumber,
+                cancellationToken))
+        {
+            return Result<InvoiceResponse>.Failure(
+                InvoiceNumberExists(invoice.InvoiceNumber));
+        }
+
         invoice.CompanyId = companyId;
         invoice.Currency = preparation.Value.Currency;
         ApplyPreparedReturnDiscount(invoice, preparation.Value);
@@ -377,11 +385,17 @@ public sealed partial class InvoiceService(
 
     public async Task<Result> DeleteAsync(
         int id,
+        byte[]? rowVersion,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
         {
             return Result.Failure(InvalidId());
+        }
+
+        if (rowVersion is not { Length: 8 })
+        {
+            return Result.Failure(RowVersionRequired());
         }
 
         await using var transaction = await dbContext.Database
@@ -393,6 +407,11 @@ public sealed partial class InvoiceService(
         if (invoice is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        if (!invoice.RowVersion.SequenceEqual(rowVersion))
+        {
+            return Result.Failure(Concurrency());
         }
 
         if (await HasCashVoucherTripReferencesAsync(id, cancellationToken))
@@ -439,6 +458,10 @@ public sealed partial class InvoiceService(
             invoice,
             removeItemMovements: true,
             cancellationToken);
+
+        var entry = dbContext.Entry(invoice);
+        entry.Property(item => item.RowVersion).OriginalValue = rowVersion;
+
         dbContext.InvoiceLines.RemoveRange(invoice.Lines);
         dbContext.InvoiceContainerLines.RemoveRange(invoice.ContainerLines);
         dbContext.Invoices.Remove(invoice);

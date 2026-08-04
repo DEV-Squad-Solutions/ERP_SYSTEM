@@ -581,7 +581,7 @@ public sealed class InvoiceServiceTests
                 ],
                 storeId: 2));
 
-        var result = await service.DeleteAsync(source.Id);
+        var result = await service.DeleteAsync(source.Id, source.RowVersion);
 
         Assert.True(result.IsFailure);
         Assert.Equal("Invoices.LinkedSalesReturnsExist", result.Error.Code);
@@ -668,7 +668,7 @@ public sealed class InvoiceServiceTests
                         sale.Lines.Single().Id)
                 ]));
 
-        var result = await service.DeleteAsync(sale.Id);
+        var result = await service.DeleteAsync(sale.Id, sale.RowVersion);
 
         Assert.True(result.IsFailure);
         Assert.Equal("Invoices.LinkedSalesReturnsExist", result.Error.Code);
@@ -1840,7 +1840,7 @@ public sealed class InvoiceServiceTests
                 containerStoreId: 3,
                 driverId: 1))).Value;
 
-        var result = await service.DeleteAsync(created.Id);
+        var result = await service.DeleteAsync(created.Id, created.RowVersion);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(0, await database.Context.Invoices.CountAsync());
@@ -1869,7 +1869,7 @@ public sealed class InvoiceServiceTests
         var created = (await service.AddAsync(
             CreateRequest(InvoiceType.SalesReturn))).Value;
 
-        var result = await service.DeleteAsync(created.Id);
+        var result = await service.DeleteAsync(created.Id, created.RowVersion);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(0, await database.Context.Invoices.CountAsync());
@@ -1897,7 +1897,7 @@ public sealed class InvoiceServiceTests
             movementDate: new DateOnly(2026, 7, 26),
             quantityOut: 11m);
 
-        var result = await service.DeleteAsync(created.Id);
+        var result = await service.DeleteAsync(created.Id, created.RowVersion);
 
         Assert.True(result.IsFailure);
         Assert.Equal("Inventory.HistoricalStockConflict", result.Error.Code);
@@ -2082,7 +2082,7 @@ public sealed class InvoiceServiceTests
             END;
             """);
 
-        var result = await service.DeleteAsync(created.Id);
+        var result = await service.DeleteAsync(created.Id, created.RowVersion);
 
         Assert.True(result.IsFailure);
         Assert.Equal("Invoices.Concurrency", result.Error.Code);
@@ -2125,7 +2125,7 @@ public sealed class InvoiceServiceTests
             """);
 
         await Assert.ThrowsAsync<DbUpdateException>(
-            () => service.DeleteAsync(created.Id));
+            () => service.DeleteAsync(created.Id, created.RowVersion));
 
         database.Context.ChangeTracker.Clear();
         Assert.Equal(1, await database.Context.Invoices.CountAsync());

@@ -80,6 +80,12 @@ public static class InvoiceErrors
             "أدخل رقم الفاتورة (حتى 100 حرف).",
             nameof(InvoiceRequest.InvoiceNumber));
 
+    public static Error InvoiceNumberExists(string number) =>
+        Error.Conflict(
+            "Invoices.InvoiceNumberExists",
+            $"رقم الفاتورة '{number}' مستخدم بالفعل.",
+            nameof(InvoiceRequest.InvoiceNumber));
+
     public static Error ContentTypeInvalid() =>
         Error.Validation(
             "Invoices.ContentTypeInvalid",
