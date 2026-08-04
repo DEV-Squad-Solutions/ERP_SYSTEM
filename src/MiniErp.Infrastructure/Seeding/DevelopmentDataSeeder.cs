@@ -1654,51 +1654,7 @@ public static class DevelopmentDataSeeder
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private static async Task SeedPayrollEntriesAsync(
-        ApplicationDbContext dbContext,
-        Company company,
-        CancellationToken cancellationToken)
-    {
-        var period = await dbContext.PayrollPeriods
-            .FirstOrDefaultAsync(p => p.CompanyId == company.Id && p.Code == "PR-2026-07", cancellationToken);
-
-        if (period is null) return;
-
-        var employees = await dbContext.Employees
-            .Where(e => e.CompanyId == company.Id && e.IsActive)
-            .ToListAsync(cancellationToken);
-
-        if (employees.Count == 0) return;
-
-        var existingEntries = await dbContext.PayrollEntries
-            .IgnoreQueryFilters()
-            .Where(pe => pe.CompanyId == company.Id && pe.PayrollPeriodId == period.Id)
-            .AnyAsync(cancellationToken);
-
-        if (existingEntries) return;
-
-        var createdOn = DateTime.UtcNow;
-        var createdByPc = Environment.MachineName;
-
-        foreach (var employee in employees)
-        {
-            dbContext.PayrollEntries.Add(new PayrollEntry
-            {
-                CompanyId = company.Id,
-                PayrollPeriodId = period.Id,
-                EmployeeId = employee.Id,
-                GrossSalary = employee.DailySalary,
-                NetSalary = 1000,
-                TotalCredits = 0, // Would normally calculate from EmployeeTransactions
-                TotalDebits = 0, // Would normally calculate from Attendance/Transactions
-                CreatedById = SeedActor,
-                CreatedByPc = createdByPc,
-                CreatedOn = createdOn
-            });
-        }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-    }
+    
 
     private sealed record SeedUser(
         string UserName,

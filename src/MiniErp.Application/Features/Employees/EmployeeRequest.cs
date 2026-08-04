@@ -6,7 +6,6 @@ using System.Text;
 namespace MiniErp.Application.Features.Employees
 {
     public record EmployeeRequest(
-        string Code,
         string Name,
         string? JobTitle,
         string? PhoneNumber,
@@ -15,7 +14,6 @@ namespace MiniErp.Application.Features.Employees
         EmployeeType Type,
         decimal? Salary,
         int? RequiredWorkingDaysPerMonth = 26,
-        bool IsTakeSalary = true,
         bool IsActive = true
     );
 
