@@ -622,14 +622,42 @@ public sealed class ExchangeRateService(
                 return Result<ResolvedExchangeRate>.Failure(InvalidRate());
             }
 
+            var roundedRate = ExchangeRateRules.RoundRate(requestedRate.Value);
+
+            var existingRate = await dbContext.ExchangeRates
+                .FirstOrDefaultAsync(entity =>
+                    entity.CompanyId == companyId &&
+                    entity.Currency == currency &&
+                    entity.RateDate == date,
+                    cancellationToken);
+
+            int? exchangeRateId = existingRate?.Id;
+            if (existingRate is null)
+            {
+                var persisted = new ExchangeRate
+                {
+                    CompanyId = companyId,
+                    Currency = currency,
+                    RateDate = date,
+                    Rate = roundedRate,
+                    Source = ExchangeRateSource.Manual,
+                    Provider = null,
+                    Notes = null
+                };
+                persisted.Touch(timeProvider.GetUtcNow().UtcDateTime);
+                dbContext.ExchangeRates.Add(persisted);
+                await dbContext.SaveChangesAsync(cancellationToken);
+                exchangeRateId = persisted.Id;
+            }
+
             return Result<ResolvedExchangeRate>.Success(
                 new ResolvedExchangeRate(
-                    null,
+                    exchangeRateId,
                     baseCurrency,
                     currency,
                     date,
                     date,
-                    ExchangeRateRules.RoundRate(requestedRate.Value),
+                    roundedRate,
                     ExchangeRateSource.Manual,
                     false));
         }
