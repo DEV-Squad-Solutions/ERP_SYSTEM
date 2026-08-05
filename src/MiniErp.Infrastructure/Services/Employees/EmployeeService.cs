@@ -2,7 +2,6 @@
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
-using MiniErp.Application.Features.BusinessPartners;
 using MiniErp.Application.Features.Employees;
 using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Enums;
@@ -118,7 +117,6 @@ namespace MiniErp.Infrastructure.Services.Employees
             var employee = new Employee
             {
                 CompanyId = campanyId,
-                Code = request.Code.Trim(),
                 Name = request.Name.Trim(),
                 JobTitle = !string.IsNullOrWhiteSpace(request.JobTitle) ? request.JobTitle.Trim() : null,
                 PhoneNumber = !string.IsNullOrWhiteSpace(request.PhoneNumber) ? request.PhoneNumber.Trim() : null,
