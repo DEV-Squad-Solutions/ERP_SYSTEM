@@ -393,15 +393,6 @@ public sealed partial class InvoiceService
                 cancellationToken)
             : Task.FromResult(false);
 
-    private Task<bool> InvoiceNumberExistsAsync(
-        string invoiceNumber,
-        CancellationToken cancellationToken) =>
-        dbContext.Invoices.AnyAsync(
-            invoice =>
-                invoice.CompanyId == companyId &&
-                invoice.InvoiceNumber == invoiceNumber,
-            cancellationToken);
-
     private sealed record InvoiceLineCostSnapshot(
         int ItemId,
         InventoryCostStatus CostStatus,

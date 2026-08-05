@@ -131,14 +131,6 @@ public sealed partial class InvoiceService(
             return Result<InvoiceResponse>.Failure(preparation.Error);
         }
 
-        if (await InvoiceNumberExistsAsync(
-                invoice.InvoiceNumber,
-                cancellationToken))
-        {
-            return Result<InvoiceResponse>.Failure(
-                InvoiceNumberExists(invoice.InvoiceNumber));
-        }
-
         invoice.CompanyId = companyId;
         invoice.Currency = preparation.Value.Currency;
         ApplyPreparedReturnDiscount(invoice, preparation.Value);
