@@ -325,6 +325,14 @@ public static class InvoiceErrors
             "راجع أوزان الميزان. أدخل قيمًا غير سالبة ولا تتجاوز الوزن الكلي.",
             nameof(InvoiceRequest.WBWeight));
 
+    public static Error WBTotalDoesNotMatchItemWeight(
+        decimal wbTotal,
+        decimal totalItemWeight) =>
+        Error.Validation(
+            "Invoices.WBTotalDoesNotMatchItemWeight",
+            $"صافي وزن الميزان ({wbTotal}) يجب أن يساوي مجموع أوزان الأصناف ({totalItemWeight}).",
+            nameof(InvoiceRequest.WBWeight));
+
     public static Error InvalidDiscountAmount() =>
         Error.Validation(
             "Invoices.InvalidDiscountAmount",

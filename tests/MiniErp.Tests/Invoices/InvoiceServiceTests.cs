@@ -121,6 +121,7 @@ public sealed class InvoiceServiceTests
         {
             ContentType = InvoiceContentType.Containers,
             Lines = [],
+            WBWeight = 0m,
             PaidAmount = 0m,
             CashboxId = null
         };
@@ -2820,7 +2821,16 @@ public sealed class InvoiceServiceTests
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var request = CreateRequest(
             InvoiceType.SalesReturn,
-            PaymentTerm.Credit) with
+            PaymentTerm.Credit,
+            lines:
+            [
+                new InvoiceLineRequest(
+                    ItemId: 1,
+                    Count: 1,
+                    Weight: 122m,
+                    Price: 10m,
+                    Notes: null)
+            ]) with
         {
             WBWeight = 125.750000m,
             WBScaleDifference = 2.250000m,
@@ -2838,6 +2848,101 @@ public sealed class InvoiceServiceTests
         database.Context.ChangeTracker.Clear();
         var persisted = await database.Context.Invoices.SingleAsync();
         Assert.Equal(122.000000m, persisted.WBTotal);
+    }
+
+    [Fact]
+    public async Task Add_RejectsWeighbridgeTotalThatDoesNotMatchItemWeight()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit,
+            lines:
+            [
+                new InvoiceLineRequest(
+                    ItemId: 1,
+                    Count: 2,
+                    Weight: 5m,
+                    Price: 10m,
+                    Notes: null)
+            ]) with
+        {
+            WBWeight = 10m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.WBTotalDoesNotMatchItemWeight",
+            result.Error.Code);
+        Assert.Empty(database.Context.Invoices);
+    }
+
+    [Fact]
+    public async Task Add_RejectsZeroWeighbridgeTotalForItemInvoice()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit,
+            lines:
+            [
+                new InvoiceLineRequest(
+                    ItemId: 1,
+                    Count: 2,
+                    Weight: 5m,
+                    Price: 10m,
+                    Notes: null)
+            ]) with
+        {
+            WBWeight = 0m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.WBTotalDoesNotMatchItemWeight",
+            result.Error.Code);
+        Assert.Empty(database.Context.Invoices);
+    }
+
+    [Fact]
+    public async Task Update_RejectsZeroWeighbridgeTotalForItemInvoice()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var created = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit))).Value;
+        var request = CreateUpdateRequest(
+            created,
+            [new InvoiceLineRequest(1, 3, 2m, 10m, null)]) with
+        {
+            WBWeight = 0m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m
+        };
+
+        var result = await service.UpdateAsync(created.Id, request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.WBTotalDoesNotMatchItemWeight",
+            result.Error.Code);
+
+        database.Context.ChangeTracker.Clear();
+        var persisted = await database.Context.Invoices
+            .Include(invoice => invoice.Lines)
+            .SingleAsync(invoice => invoice.Id == created.Id);
+        Assert.Equal(created.WBTotal, persisted.WBTotal);
+        Assert.Equal(created.Lines.Single().Weight, persisted.Lines.Single().Weight);
     }
 
     [Fact]
@@ -4607,6 +4712,62 @@ public sealed class InvoiceServiceTests
             error => error.PropertyName == nameof(InvoiceRequest.ContainerLines));
     }
 
+    [Fact]
+    public void CreateValidator_RejectsZeroWeighbridgeTotalForItemInvoice()
+    {
+        var request = CreateRequest(InvoiceType.SalesReturn) with
+        {
+            WBWeight = 0m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m
+        };
+
+        var result = new InvoiceRequestValidator().Validate(request);
+
+        Assert.Contains(
+            result.Errors,
+            error =>
+                error.ErrorCode ==
+                "Invoices.WBTotalDoesNotMatchItemWeight");
+    }
+
+    [Fact]
+    public void UpdateValidator_RejectsZeroWeighbridgeTotalForItemInvoice()
+    {
+        var request = new InvoiceUpdateRequest(
+            InvoiceType: InvoiceType.SalesReturn,
+            PaymentTerm: PaymentTerm.Credit,
+            InvoiceDate: new DateOnly(2026, 7, 25),
+            DueDate: null,
+            BusinessPartnerId: 1,
+            StoreId: 1,
+            ContainerStoreId: null,
+            CountryId: null,
+            DriverId: null,
+            ActualDriverId: null,
+            UsesExternalDriver: false,
+            ExternalDriverName: null,
+            VehicleNumber: null,
+            ExportInvoiceCode: null,
+            DiscountAmount: 0m,
+            PaidAmount: 0m,
+            Notes: null,
+            Lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
+            ContainerLines: [],
+            RowVersion: new byte[8],
+            WBWeight: 0m,
+            WBScaleDifference: 0m,
+            WBDiscount: 0m);
+
+        var result = new InvoiceUpdateRequestValidator().Validate(request);
+
+        Assert.Contains(
+            result.Errors,
+            error =>
+                error.ErrorCode ==
+                "Invoices.WBTotalDoesNotMatchItemWeight");
+    }
+
     private static InvoiceRequest CreateRequest(
         InvoiceType invoiceType,
         PaymentTerm paymentTerm = PaymentTerm.Cash,
@@ -4655,7 +4816,7 @@ public sealed class InvoiceServiceTests
             CashboxId: requestedPaidAmount > 0m ? 1 : null,
             ExchangeRate: null,
             CashboxExchangeRate: null,
-            WBWeight: 0m,
+            WBWeight: CalculateRequestWeight(requestedLines),
             WBScaleDifference: 0m,
             WBDiscount: 0m,
             ContainerStoreId: containerStoreId,
@@ -4786,8 +4947,28 @@ public sealed class InvoiceServiceTests
             invoice.RowVersion,
             PartnerInvoiceNo: invoice.PartnerInvoiceNo,
             CashboxId: requestedPaidAmount > 0m ? 1 : null,
+            ContentType: invoice.ContentType,
+            WBWeight: invoice.ContentType == InvoiceContentType.Items
+                ? CalculateRequestWeight(lines) +
+                  invoice.WBScaleDifference +
+                  invoice.WBDiscount
+                : invoice.WBWeight,
+            WBScaleDifference: invoice.WBScaleDifference,
+            WBDiscount: invoice.WBDiscount,
             ItemsCategoryId: invoice.ItemsCategoryId);
     }
+
+    private static decimal CalculateRequestWeight(
+        IReadOnlyList<InvoiceLineRequest> lines) =>
+        decimal.Round(
+            lines.Sum(line =>
+                line.Count.GetValueOrDefault() <= 0 &&
+                line.Weight.GetValueOrDefault() <= 0m &&
+                line.Quantity.HasValue
+                    ? line.Quantity.Value
+                    : line.Weight.GetValueOrDefault()),
+            InvoiceAmountRules.QuantityScale,
+            MidpointRounding.AwayFromZero);
 
     private static decimal CalculateRequestTotal(
         IReadOnlyList<InvoiceLineRequest> lines,

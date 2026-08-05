@@ -744,6 +744,20 @@ public sealed partial class InvoiceService
             return InvalidWBTotal();
         }
 
+        if (invoice.ContentType == InvoiceContentType.Items)
+        {
+            var totalItemWeight = decimal.Round(
+                invoice.Lines.Sum(line => line.Weight),
+                InvoiceAmountRules.QuantityScale,
+                MidpointRounding.AwayFromZero);
+            if (invoice.WBTotal != totalItemWeight)
+            {
+                return WBTotalDoesNotMatchItemWeight(
+                    invoice.WBTotal,
+                    totalItemWeight);
+            }
+        }
+
         if (invoice.DiscountAmount < 0m ||
             !InvoiceAmountRules.IsValidMoney(invoice.DiscountAmount) ||
             invoice.DiscountAmount > invoice.Subtotal)
