@@ -1,0 +1,29 @@
+using MiniErp.Application.Common.Models;
+using MiniErp.Application.Common.Results;
+
+namespace MiniErp.Application.Features.EmployeeAttendance;
+
+public interface IEmployeeAttendanceService
+{
+    Task<Result<PagedResponse<EmployeeAttendanceResponse>>> GetAllAsync(
+        PaginationRequest pagination,
+        EmployeeAttendanceFilterRequest? filters = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<EmployeeAttendanceResponse>> GetByIdAsync(
+        int id,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<EmployeeAttendanceResponse>> AddAsync(
+        EmployeeAttendanceRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<EmployeeAttendanceResponse>> UpdateAsync(
+        int id,
+        EmployeeAttendanceRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result> DeleteAsync(
+        int id,
+        CancellationToken cancellationToken = default);
+}
