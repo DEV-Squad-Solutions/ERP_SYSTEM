@@ -12,7 +12,8 @@ public sealed class InventoryCostReportsSwaggerDocumentation
         OperationFilterContext context)
     {
         if (context.MethodInfo.DeclaringType !=
-            typeof(InventoryCostReportsController))
+            typeof(InventoryReportsController) ||
+            context.MethodInfo.Name != nameof(InventoryReportsController.GetCostReport))
         {
             return;
         }
