@@ -31,16 +31,14 @@ namespace MiniErp.Domain.Entities.Payroll
         // Attendance Summary
         public int PresentDays { get; set; }
         public int AbsentDays { get; set; }
-        public int WorkedDays { get; set; }
-        public decimal Overtimebydayunit { get; set; }
-        public decimal RequiredWorkingDays { get; set; } = 26;
-        public decimal? SalaryPerDay { get; set; }
-        public decimal CalculatedSalary { get; set; }
-        public bool IsTakeSalary { get; set; }
+        public decimal WorkedDaysbydayunit { get; set; }
+        public decimal? Overtimebydayunit { get; set; }
+        public decimal? Deductionbydayunit { get; set; }
+        public decimal? RequiredWorkingDays { get; set; } = 26;
 
         // Manual Transactions
-        public decimal TotalCredits { get; set; } = default!;
-        public decimal TotalDebits { get; set; } = default!;
+        public decimal Bonus { get; set; } = default!;
+        public decimal Deduction { get; set; } = default!;
 
         // Payroll
         public decimal? GrossSalary { get; set; } = default!;// Gross Salary before deductions

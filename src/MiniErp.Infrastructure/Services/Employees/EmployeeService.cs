@@ -182,7 +182,7 @@ namespace MiniErp.Infrastructure.Services.Employees
             employee.DailySalary = request.Type.ToString() == "Daily" ? request.Salary : employee.DailySalary;
             employee.MonthlySalary = request.Type.ToString() == "Monthly" ? request.Salary : employee.MonthlySalary;
 
-            dbContext.Employees.Update(employee);
+            dbContext.Employees.Update(employee).State = Microsoft.EntityFrameworkCore.EntityState.Modified;
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
