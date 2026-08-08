@@ -22,6 +22,12 @@ const string AllowAnyFrontendPolicy = "AllowAnyFrontend";
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Host.UseDefaultServiceProvider((_, options) =>
+{
+    options.ValidateOnBuild = true;
+    options.ValidateScopes = true;
+});
+
 MappingConfiguration.Register(typeof(InfrastructureAssemblyMarker).Assembly);
 ArabicValidationConfiguration.Configure();
 
