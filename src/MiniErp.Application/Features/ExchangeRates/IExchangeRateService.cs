@@ -41,12 +41,3 @@ public interface IExchangeRateService
         int id,
         CancellationToken cancellationToken = default);
 }
-
-public interface IExchangeRateResolver
-{
-    Task<Result<ResolvedExchangeRate>> ResolveAsync(
-        CurrencyCode currency,
-        DateOnly date,
-        decimal? requestedRate = null,
-        CancellationToken cancellationToken = default);
-}

@@ -12,7 +12,6 @@ using MiniErp.Application;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Validation;
-using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Seeding;
@@ -95,9 +94,6 @@ builder.Services.Scan(scan => scan
     .AddClasses(classes => classes.AssignableTo<IScopedService>())
     .AsMatchingInterface()
     .WithScopedLifetime());
-builder.Services.AddScoped<
-    IExchangeRateResolver,
-    MiniErp.Infrastructure.Services.ExchangeRates.ExchangeRateService>();
 builder.Services.AddSwaggerDocumentation(builder.Configuration);
 
 builder.Services.AddInfrastructure(builder.Configuration);

@@ -17,8 +17,9 @@ public sealed class ExchangeRateService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     TimeProvider timeProvider,
+    IExchangeRateResolver exchangeRateResolver,
     IExchangeRateProvider? exchangeRateProvider = null)
-    : IExchangeRateService, IExchangeRateResolver, IScopedService
+    : IExchangeRateService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
 
@@ -115,11 +116,11 @@ public sealed class ExchangeRateService(
         DateOnly date,
         CancellationToken cancellationToken = default)
     {
-        var result = await ResolveAsync(
+        var result = await exchangeRateResolver.ResolveAsync(
             currency,
             date,
             requestedRate: null,
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         return result.IsFailure
             ? Result<ExchangeRateResolutionResponse>.Failure(result.Error)
@@ -134,17 +135,6 @@ public sealed class ExchangeRateService(
                     Source: result.Value.Source,
                     IsBaseCurrency: result.Value.IsBaseCurrency));
     }
-
-    async Task<Result<ResolvedExchangeRate>> IExchangeRateResolver.ResolveAsync(
-        CurrencyCode currency,
-        DateOnly date,
-        decimal? requestedRate,
-        CancellationToken cancellationToken) =>
-        await ResolveAsync(
-            currency,
-            date,
-            requestedRate,
-            cancellationToken);
 
     public async Task<Result<ExchangeRateImportPreviewResponse>> PreviewImportAsync(
         ExchangeRateImportRequest request,
@@ -581,116 +571,6 @@ public sealed class ExchangeRateService(
 
         await transaction.CommitAsync(cancellationToken);
         return Result.Success();
-    }
-
-    private async Task<Result<ResolvedExchangeRate>> ResolveAsync(
-        CurrencyCode currency,
-        DateOnly date,
-        decimal? requestedRate,
-        CancellationToken cancellationToken)
-    {
-        if (!Enum.IsDefined(currency))
-        {
-            return Result<ResolvedExchangeRate>.Failure(InvalidCurrency());
-        }
-
-        var baseCurrency = await GetBaseCurrencyAsync(cancellationToken);
-        if (currency == baseCurrency)
-        {
-            if (requestedRate.HasValue && requestedRate.Value != 1m)
-            {
-                return Result<ResolvedExchangeRate>.Failure(
-                    BaseCurrencyRateMustBeOne());
-            }
-
-            return Result<ResolvedExchangeRate>.Success(
-                new ResolvedExchangeRate(
-                    null,
-                    baseCurrency,
-                    currency,
-                    date,
-                    null,
-                    1m,
-                    null,
-                    true));
-        }
-
-        if (requestedRate.HasValue)
-        {
-            if (!ExchangeRateRules.IsValidRate(requestedRate.Value))
-            {
-                return Result<ResolvedExchangeRate>.Failure(InvalidRate());
-            }
-
-            var roundedRate = ExchangeRateRules.RoundRate(requestedRate.Value);
-
-            var existingRate = await dbContext.ExchangeRates
-                .FirstOrDefaultAsync(entity =>
-                    entity.CompanyId == companyId &&
-                    entity.Currency == currency &&
-                    entity.RateDate == date,
-                    cancellationToken);
-
-            int? exchangeRateId = existingRate?.Id;
-            if (existingRate is null)
-            {
-                var persisted = new ExchangeRate
-                {
-                    CompanyId = companyId,
-                    Currency = currency,
-                    RateDate = date,
-                    Rate = roundedRate,
-                    Source = ExchangeRateSource.Manual,
-                    Provider = null,
-                    Notes = null
-                };
-                persisted.Touch(timeProvider.GetUtcNow().UtcDateTime);
-                dbContext.ExchangeRates.Add(persisted);
-                await dbContext.SaveChangesAsync(cancellationToken);
-                exchangeRateId = persisted.Id;
-            }
-
-            return Result<ResolvedExchangeRate>.Success(
-                new ResolvedExchangeRate(
-                    exchangeRateId,
-                    baseCurrency,
-                    currency,
-                    date,
-                    date,
-                    roundedRate,
-                    ExchangeRateSource.Manual,
-                    false));
-        }
-
-        var rate = await dbContext.ExchangeRates
-            .AsNoTracking()
-            .Where(entity =>
-                entity.CompanyId == companyId &&
-                entity.Currency == currency &&
-                entity.RateDate <= date)
-            .OrderByDescending(entity => entity.RateDate)
-            .ThenByDescending(entity => entity.Id)
-            .Select(entity => new
-            {
-                entity.Id,
-                entity.RateDate,
-                entity.Rate,
-                entity.Source
-            })
-            .FirstOrDefaultAsync(cancellationToken);
-
-        return rate is null
-            ? Result<ResolvedExchangeRate>.Failure(Missing(currency, date))
-            : Result<ResolvedExchangeRate>.Success(
-                new ResolvedExchangeRate(
-                    rate.Id,
-                    baseCurrency,
-                    currency,
-                    date,
-                    rate.RateDate,
-                    rate.Rate,
-                    rate.Source,
-                    false));
     }
 
     private async Task<CurrencyCode> GetBaseCurrencyAsync(
