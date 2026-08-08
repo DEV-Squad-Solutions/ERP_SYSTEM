@@ -40,7 +40,8 @@ public sealed class CashboxMappingRegister : IRegister
                 cashbox => cashbox.OpeningBalance +
                     cashbox.Vouchers
                         .Where(voucher =>
-                            voucher.CashMovementTypeId.HasValue)
+                            voucher.CashMovementTypeId.HasValue ||
+                            voucher.CashboxTransferId.HasValue)
                         .Sum(voucher =>
                             voucher.Direction == CashDirection.Receipt
                                 ? voucher.Amount
@@ -52,7 +53,8 @@ public sealed class CashboxMappingRegister : IRegister
                 cashbox => cashbox.OpeningBalance +
                     cashbox.Vouchers
                         .Where(voucher =>
-                            voucher.CashMovementTypeId.HasValue)
+                            voucher.CashMovementTypeId.HasValue ||
+                            voucher.CashboxTransferId.HasValue)
                         .Sum(voucher =>
                             voucher.Direction == CashDirection.Receipt
                                 ? voucher.Amount

@@ -93,7 +93,8 @@ public sealed class CashVoucherService(
                 !filters.IsDraft.HasValue ||
                 filters.IsDraft.Value ==
                 (!voucher.CashboxId.HasValue ||
-                 !voucher.CashMovementTypeId.HasValue))
+                 (!voucher.CashMovementTypeId.HasValue &&
+                  !voucher.CashboxTransferId.HasValue)))
             .Where(voucher =>
                 !filters.FromDate.HasValue ||
                 voucher.VoucherDate >= filters.FromDate.Value)
@@ -217,6 +218,12 @@ public sealed class CashVoucherService(
                 InvoiceGeneratedReadOnly());
         }
 
+        if (voucher.CashboxTransferId.HasValue)
+        {
+            return Result<CashVoucherResponse>.Failure(
+                TransferGeneratedReadOnly());
+        }
+
         var preparation = await PrepareAsync(
             request,
             voucher,
@@ -288,6 +295,11 @@ public sealed class CashVoucherService(
         if (voucher.InvoiceId.HasValue)
         {
             return Result.Failure(InvoiceGeneratedReadOnly());
+        }
+
+        if (voucher.CashboxTransferId.HasValue)
+        {
+            return Result.Failure(TransferGeneratedReadOnly());
         }
 
         var balanceError = await ValidateFinalBalancesAsync(
@@ -514,7 +526,8 @@ public sealed class CashVoucherService(
                     cashbox.OpeningBalance +
                     (cashbox.Vouchers
                         .Where(voucher =>
-                            voucher.CashMovementTypeId.HasValue &&
+                            (voucher.CashMovementTypeId.HasValue ||
+                             voucher.CashboxTransferId.HasValue) &&
                             (!excludedVoucherId.HasValue ||
                              voucher.Id != excludedVoucherId.Value))
                         .Sum(voucher =>

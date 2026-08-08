@@ -5,6 +5,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
 using MiniErp.Infrastructure.Services.Cashboxes;
+using MiniErp.Infrastructure.Services.CashboxTransfers;
 using MiniErp.Infrastructure.Services.CashMovementTypes;
 using MiniErp.Infrastructure.Services.CashVouchers;
 using MiniErp.Infrastructure.Services.DriverTrips;
@@ -74,6 +75,16 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             context ?? Context,
             new PaginationService(),
             new TestCurrentCompanyContext(companyId));
+
+    public CashboxTransferService CreateCashboxTransferService(
+        int companyId,
+        ApplicationDbContext? context = null) =>
+        new(
+            context ?? Context,
+            new PaginationService(),
+            new TestCurrentCompanyContext(companyId),
+            new MiniErp.Tests.TestExchangeRateResolver(),
+            TimeProvider.System);
 
     public CashVoucherService CreateVoucherService(
         int companyId,
@@ -329,10 +340,40 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 IsDeleted INTEGER NOT NULL
             );
 
+            CREATE TABLE CashboxTransfers (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                TransferNumber TEXT NOT NULL COLLATE NOCASE,
+                TransferDate TEXT NOT NULL,
+                SourceCashboxId INTEGER NOT NULL,
+                DestinationCashboxId INTEGER NOT NULL,
+                Description TEXT NULL,
+                Notes TEXT NULL,
+                LastModifiedAt TEXT NOT NULL,
+                RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL,
+                CONSTRAINT CK_CashboxTransfers_DifferentCashboxes CHECK (
+                    SourceCashboxId <> DestinationCashboxId)
+            );
+
+            CREATE UNIQUE INDEX IX_CashboxTransfers_Company_Number
+            ON CashboxTransfers (CompanyId, TransferNumber)
+            WHERE IsDeleted = 0;
+
             CREATE TABLE CashVouchers (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,
                 InvoiceId INTEGER NULL,
+                CashboxTransferId INTEGER NULL,
                 VoucherNumber TEXT NOT NULL COLLATE NOCASE,
                 VoucherDate TEXT NOT NULL,
                 Direction INTEGER NOT NULL,
@@ -364,12 +405,21 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 DeletedByPc TEXT NULL,
                 IsDeleted INTEGER NOT NULL,
                 CONSTRAINT CK_CashVouchers_PostingReferencesTogether CHECK (
-                    CashMovementTypeId IS NULL OR CashboxId IS NOT NULL)
+                    CashMovementTypeId IS NULL OR CashboxId IS NOT NULL),
+                CONSTRAINT CK_CashVouchers_TransferShape CHECK (
+                    CashboxTransferId IS NULL OR
+                    (CashboxId IS NOT NULL AND
+                     CashMovementTypeId IS NULL AND
+                     InvoiceId IS NULL AND PartyType = 1))
             );
 
             CREATE INDEX IX_CashVouchers_Company_Number
             ON CashVouchers (CompanyId, VoucherNumber)
             WHERE IsDeleted = 0;
+
+            CREATE UNIQUE INDEX IX_CashVouchers_Company_Transfer_Direction
+            ON CashVouchers (CompanyId, CashboxTransferId, Direction)
+            WHERE CashboxTransferId IS NOT NULL AND IsDeleted = 0;
 
             CREATE TABLE InvoicePayments (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -446,6 +496,13 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             AFTER UPDATE ON CashVouchers
             BEGIN
                 UPDATE CashVouchers SET RowVersion = randomblob(8)
+                WHERE Id = NEW.Id;
+            END;
+
+            CREATE TRIGGER AdvanceCashboxTransferRowVersion
+            AFTER UPDATE ON CashboxTransfers
+            BEGIN
+                UPDATE CashboxTransfers SET RowVersion = randomblob(8)
                 WHERE Id = NEW.Id;
             END;
 

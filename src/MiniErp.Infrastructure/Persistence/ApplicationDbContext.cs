@@ -44,6 +44,9 @@ public sealed class ApplicationDbContext
 
     public DbSet<CashVoucher> CashVouchers => Set<CashVoucher>();
 
+    public DbSet<CashboxTransfer> CashboxTransfers =>
+        Set<CashboxTransfer>();
+
     public DbSet<PartnerOpeningBalance> PartnerOpeningBalances =>
         Set<PartnerOpeningBalance>();
 

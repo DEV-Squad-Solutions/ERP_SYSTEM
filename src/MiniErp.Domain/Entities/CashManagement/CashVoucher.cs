@@ -19,6 +19,10 @@ public sealed class CashVoucher : AuditableEntity
 
     public Invoice? Invoice { get; set; }
 
+    public int? CashboxTransferId { get; set; }
+
+    public CashboxTransfer? CashboxTransfer { get; set; }
+
     public string VoucherNumber { get; set; } = string.Empty;
 
     public DateOnly VoucherDate { get; set; }
@@ -72,7 +76,8 @@ public sealed class CashVoucher : AuditableEntity
     public byte[] RowVersion { get; private set; } = [];
 
     public bool IsDraft =>
-        !CashboxId.HasValue || !CashMovementTypeId.HasValue;
+        !CashboxId.HasValue ||
+        (!CashMovementTypeId.HasValue && !CashboxTransferId.HasValue);
 
     public InvoicePayment? InvoicePayment { get; set; }
 

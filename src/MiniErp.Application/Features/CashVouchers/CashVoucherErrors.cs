@@ -30,6 +30,11 @@ public static class CashVoucherErrors
             "CashVouchers.InvoiceGeneratedReadOnly",
             "لا يمكن تعديل أو حذف سند السداد المنشأ تلقائياً من الفاتورة؛ عدّل الفاتورة نفسها.");
 
+    public static Error TransferGeneratedReadOnly() =>
+        Error.Conflict(
+            "CashVouchers.TransferGeneratedReadOnly",
+            "لا يمكن تعديل أو حذف سند منشأ من تحويل خزائن؛ عدّل التحويل نفسه.");
+
     public static Error CashboxNotFound(int id) =>
         Error.NotFound(
             "CashVouchers.CashboxNotFound",

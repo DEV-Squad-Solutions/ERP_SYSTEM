@@ -299,7 +299,7 @@ public sealed class ExchangeRateServiceTests
                     ON ExchangeRates (CompanyId, Currency, RateDate)
                     WHERE IsDeleted = 0;
                 CREATE TABLE Invoices (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, ExchangeRateId INTEGER NULL, IsDeleted INTEGER NOT NULL);
-                CREATE TABLE CashVouchers (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, ExchangeRateId INTEGER NULL, IsDeleted INTEGER NOT NULL);
+                CREATE TABLE CashVouchers (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, ExchangeRateId INTEGER NULL, CashboxTransferId INTEGER NULL, IsDeleted INTEGER NOT NULL);
                 CREATE TABLE PartnerOpeningBalances (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, ExchangeRateId INTEGER NULL, IsDeleted INTEGER NOT NULL);
                 CREATE TABLE Cashboxes (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, OpeningExchangeRateId INTEGER NULL, IsDeleted INTEGER NOT NULL);
                 INSERT INTO Companies (Id, Name, Address, CommercialRegister, TaxNumber, ManagerName, CreatedById, CreatedOn, CreatedByPc, IsDeleted)

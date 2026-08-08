@@ -494,6 +494,7 @@ public sealed class DriverServiceTests
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
                     DriverId INTEGER NULL,
+                    CashboxTransferId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );
                 """);

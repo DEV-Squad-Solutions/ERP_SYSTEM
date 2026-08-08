@@ -5660,6 +5660,7 @@ public sealed class InvoiceServiceTests
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
                     InvoiceId INTEGER NULL,
+                    CashboxTransferId INTEGER NULL,
                     VoucherNumber TEXT NOT NULL,
                     VoucherDate TEXT NOT NULL,
                     Direction INTEGER NOT NULL,

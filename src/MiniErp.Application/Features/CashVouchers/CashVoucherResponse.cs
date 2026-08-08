@@ -34,6 +34,8 @@ public sealed record CashVoucherResponse(
 
     public int? InvoiceId { get; init; }
 
+    public int? CashboxTransferId { get; init; }
+
     public string? InvoiceNumber { get; init; }
 
     public decimal? AppliedInvoiceAmount { get; init; }

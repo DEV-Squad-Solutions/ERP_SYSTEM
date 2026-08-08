@@ -40,6 +40,12 @@ public sealed class CashVoucherConfiguration
                 table.HasCheckConstraint(
                     "CK_CashVouchers_PostingReferencesTogether",
                     "[CashMovementTypeId] IS NULL OR [CashboxId] IS NOT NULL");
+                table.HasCheckConstraint(
+                    "CK_CashVouchers_TransferShape",
+                    "[CashboxTransferId] IS NULL OR " +
+                    "([CashboxId] IS NOT NULL AND " +
+                    "[CashMovementTypeId] IS NULL AND " +
+                    "[InvoiceId] IS NULL AND [PartyType] = 1)");
             });
 
         builder.HasKey(voucher => voucher.Id);
@@ -51,6 +57,8 @@ public sealed class CashVoucherConfiguration
             .IsRequired();
 
         builder.Property(voucher => voucher.InvoiceId);
+
+        builder.Property(voucher => voucher.CashboxTransferId);
 
         builder.HasAlternateKey(voucher => new
         {
@@ -75,6 +83,16 @@ public sealed class CashVoucherConfiguration
             voucher.InvoiceId
         })
             .HasFilter("[InvoiceId] IS NOT NULL AND [IsDeleted] = 0");
+
+        builder.HasIndex(voucher => new
+        {
+            voucher.CompanyId,
+            voucher.CashboxTransferId,
+            voucher.Direction
+        })
+            .IsUnique()
+            .HasFilter(
+                "[CashboxTransferId] IS NOT NULL AND [IsDeleted] = 0");
 
         builder.Property(voucher => voucher.VoucherDate)
             .HasColumnType("date")

@@ -37,6 +37,7 @@ public static class SwaggerExtensions
             options.OperationFilter<AuthenticationSwaggerDocumentation>();
             options.OperationFilter<BusinessPartnersSwaggerDocumentation>();
             options.OperationFilter<CashboxesSwaggerDocumentation>();
+            options.OperationFilter<CashboxTransfersSwaggerDocumentation>();
             options.OperationFilter<CashMovementTypesSwaggerDocumentation>();
             options.OperationFilter<CashVouchersSwaggerDocumentation>();
             options.OperationFilter<CompaniesSwaggerDocumentation>();

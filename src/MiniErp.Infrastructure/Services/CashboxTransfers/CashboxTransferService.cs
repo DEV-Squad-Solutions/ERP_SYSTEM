@@ -1,0 +1,753 @@
+using System.Data;
+using Microsoft.EntityFrameworkCore;
+using MiniErp.Application.Common.Abstractions;
+using MiniErp.Application.Common.Models;
+using MiniErp.Application.Common.Results;
+using MiniErp.Application.Features.CashboxTransfers;
+using MiniErp.Application.Features.ExchangeRates;
+using MiniErp.Domain.Entities.CashManagement;
+using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Enums;
+using MiniErp.Infrastructure.Persistence;
+using static MiniErp.Application.Features.CashboxTransfers.CashboxTransferErrors;
+
+namespace MiniErp.Infrastructure.Services.CashboxTransfers;
+
+public sealed class CashboxTransferService(
+    ApplicationDbContext dbContext,
+    IPaginationService paginationService,
+    ICurrentCompanyContext currentCompanyContext,
+    IExchangeRateResolver exchangeRateResolver,
+    TimeProvider timeProvider)
+    : ICashboxTransferService, IScopedService
+{
+    private readonly int companyId = currentCompanyContext.CompanyId;
+
+    public async Task<Result<PagedResponse<CashboxTransferListResponse>>>
+        GetAllAsync(
+            PaginationRequest pagination,
+            CashboxTransferFilterRequest filters,
+            CancellationToken cancellationToken = default)
+    {
+        if (ValidateFilters(filters) is { } filterError)
+        {
+            return Result<PagedResponse<CashboxTransferListResponse>>.Failure(
+                filterError);
+        }
+
+        var search = filters.Search?.Trim();
+        var query = dbContext.CashboxTransfers
+            .AsNoTracking()
+            .Where(transfer => transfer.CompanyId == companyId)
+            .Where(transfer =>
+                string.IsNullOrEmpty(search) ||
+                transfer.TransferNumber.Contains(search) ||
+                transfer.SourceCashbox.Name.Contains(search) ||
+                transfer.DestinationCashbox.Name.Contains(search) ||
+                (transfer.Description != null &&
+                 transfer.Description.Contains(search)))
+            .Where(transfer =>
+                !filters.SourceCashboxId.HasValue ||
+                transfer.SourceCashboxId == filters.SourceCashboxId.Value)
+            .Where(transfer =>
+                !filters.DestinationCashboxId.HasValue ||
+                transfer.DestinationCashboxId ==
+                    filters.DestinationCashboxId.Value)
+            .Where(transfer =>
+                !filters.FromDate.HasValue ||
+                transfer.TransferDate >= filters.FromDate.Value)
+            .Where(transfer =>
+                !filters.ToDate.HasValue ||
+                transfer.TransferDate <= filters.ToDate.Value)
+            .OrderByDescending(transfer => transfer.TransferDate)
+            .ThenByDescending(transfer => transfer.Id);
+
+        return await paginationService.PaginateAsync<
+            CashboxTransfer,
+            CashboxTransferListResponse>(
+                query,
+                pagination,
+                cancellationToken);
+    }
+
+    public async Task<Result<CashboxTransferResponse>> GetByIdAsync(
+        int id,
+        CancellationToken cancellationToken = default)
+    {
+        if (id <= 0)
+        {
+            return Result<CashboxTransferResponse>.Failure(InvalidId());
+        }
+
+        var response = await BuildResponseAsync(id, cancellationToken);
+        return response is null
+            ? Result<CashboxTransferResponse>.Failure(NotFound(id))
+            : Result<CashboxTransferResponse>.Success(response);
+    }
+
+    public async Task<Result<CashboxTransferResponse>> AddAsync(
+        CashboxTransferRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (ValidateRequestShape(
+                request.TransferDate,
+                request.SourceCashboxId,
+                request.DestinationCashboxId,
+                request.Amount,
+                request.Description,
+                request.Notes,
+                request.ExchangeRate) is { } shapeError)
+        {
+            return Result<CashboxTransferResponse>.Failure(shapeError);
+        }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
+        var preparation = await PrepareAsync(
+            request.TransferDate,
+            request.SourceCashboxId,
+            request.DestinationCashboxId,
+            request.ExchangeRate,
+            currentTransfer: null,
+            cancellationToken);
+        if (preparation.IsFailure)
+        {
+            return Result<CashboxTransferResponse>.Failure(
+                preparation.Error);
+        }
+
+        var balanceError = await ValidateFinalBalancesAsync(
+            excludedVouchers: [],
+            proposals:
+            [
+                new CashboxBalanceProposal(
+                    CashboxId: request.SourceCashboxId,
+                    Direction: CashDirection.Payment,
+                    Amount: request.Amount),
+                new CashboxBalanceProposal(
+                    CashboxId: request.DestinationCashboxId,
+                    Direction: CashDirection.Receipt,
+                    Amount: request.Amount)
+            ],
+            cancellationToken);
+        if (balanceError is not null)
+        {
+            return Result<CashboxTransferResponse>.Failure(balanceError);
+        }
+
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        var transfer = new CashboxTransfer
+        {
+            CompanyId = companyId,
+            TransferNumber = GenerateTransferNumber(request.TransferDate),
+            TransferDate = request.TransferDate,
+            SourceCashboxId = request.SourceCashboxId,
+            DestinationCashboxId = request.DestinationCashboxId,
+            Description = Normalize(request.Description),
+            Notes = Normalize(request.Notes)
+        };
+        transfer.Touch(now);
+        dbContext.CashboxTransfers.Add(transfer);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        dbContext.CashVouchers.AddRange(
+            CreateVoucher(
+                transfer,
+                preparation.Value.SourceCashbox,
+                CashDirection.Payment,
+                request.Amount,
+                preparation.Value.ExchangeRate,
+                now),
+            CreateVoucher(
+                transfer,
+                preparation.Value.DestinationCashbox,
+                CashDirection.Receipt,
+                request.Amount,
+                preparation.Value.ExchangeRate,
+                now));
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var response = await BuildResponseAsync(
+            transfer.Id,
+            cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return Result<CashboxTransferResponse>.Success(response!);
+    }
+
+    public async Task<Result<CashboxTransferResponse>> UpdateAsync(
+        int id,
+        CashboxTransferUpdateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (id <= 0)
+        {
+            return Result<CashboxTransferResponse>.Failure(InvalidId());
+        }
+
+        if (request.RowVersion is not { Length: 8 })
+        {
+            return Result<CashboxTransferResponse>.Failure(
+                RowVersionRequired());
+        }
+
+        if (ValidateRequestShape(
+                request.TransferDate,
+                request.SourceCashboxId,
+                request.DestinationCashboxId,
+                request.Amount,
+                request.Description,
+                request.Notes,
+                request.ExchangeRate) is { } shapeError)
+        {
+            return Result<CashboxTransferResponse>.Failure(shapeError);
+        }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+        var transfer = await dbContext.CashboxTransfers
+            .Include(entity => entity.Vouchers)
+            .SingleOrDefaultAsync(
+                entity =>
+                    entity.CompanyId == companyId &&
+                    entity.Id == id,
+                cancellationToken);
+        if (transfer is null)
+        {
+            return Result<CashboxTransferResponse>.Failure(NotFound(id));
+        }
+
+        if (!transfer.RowVersion.SequenceEqual(request.RowVersion))
+        {
+            return Result<CashboxTransferResponse>.Failure(Concurrency());
+        }
+
+        if (!TryGetVoucherPair(
+                transfer.Vouchers,
+                out var paymentVoucher,
+                out var receiptVoucher))
+        {
+            return Result<CashboxTransferResponse>.Failure(
+                InvalidVoucherPair());
+        }
+
+        var preparation = await PrepareAsync(
+            request.TransferDate,
+            request.SourceCashboxId,
+            request.DestinationCashboxId,
+            request.ExchangeRate,
+            transfer,
+            cancellationToken);
+        if (preparation.IsFailure)
+        {
+            return Result<CashboxTransferResponse>.Failure(
+                preparation.Error);
+        }
+
+        var balanceError = await ValidateFinalBalancesAsync(
+            excludedVouchers: [paymentVoucher, receiptVoucher],
+            proposals:
+            [
+                new CashboxBalanceProposal(
+                    CashboxId: request.SourceCashboxId,
+                    Direction: CashDirection.Payment,
+                    Amount: request.Amount),
+                new CashboxBalanceProposal(
+                    CashboxId: request.DestinationCashboxId,
+                    Direction: CashDirection.Receipt,
+                    Amount: request.Amount)
+            ],
+            cancellationToken);
+        if (balanceError is not null)
+        {
+            return Result<CashboxTransferResponse>.Failure(balanceError);
+        }
+
+        var entry = dbContext.Entry(transfer);
+        entry.Property(entity => entity.RowVersion).OriginalValue =
+            request.RowVersion;
+        transfer.TransferDate = request.TransferDate;
+        transfer.SourceCashboxId = request.SourceCashboxId;
+        transfer.DestinationCashboxId = request.DestinationCashboxId;
+        transfer.Description = Normalize(request.Description);
+        transfer.Notes = Normalize(request.Notes);
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        transfer.Touch(now);
+        entry.Property(entity => entity.LastModifiedAt).IsModified = true;
+
+        ApplyVoucher(
+            paymentVoucher,
+            transfer,
+            preparation.Value.SourceCashbox,
+            CashDirection.Payment,
+            request.Amount,
+            preparation.Value.ExchangeRate,
+            now);
+        ApplyVoucher(
+            receiptVoucher,
+            transfer,
+            preparation.Value.DestinationCashbox,
+            CashDirection.Receipt,
+            request.Amount,
+            preparation.Value.ExchangeRate,
+            now);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<CashboxTransferResponse>.Failure(Concurrency());
+        }
+
+        var response = await BuildResponseAsync(id, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return Result<CashboxTransferResponse>.Success(response!);
+    }
+
+    public async Task<Result> DeleteAsync(
+        int id,
+        CancellationToken cancellationToken = default)
+    {
+        if (id <= 0)
+        {
+            return Result.Failure(InvalidId());
+        }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+        var transfer = await dbContext.CashboxTransfers
+            .Include(entity => entity.Vouchers)
+            .SingleOrDefaultAsync(
+                entity =>
+                    entity.CompanyId == companyId &&
+                    entity.Id == id,
+                cancellationToken);
+        if (transfer is null)
+        {
+            return Result.Failure(NotFound(id));
+        }
+
+        if (!TryGetVoucherPair(
+                transfer.Vouchers,
+                out var paymentVoucher,
+                out var receiptVoucher))
+        {
+            return Result.Failure(InvalidVoucherPair());
+        }
+
+        var balanceError = await ValidateFinalBalancesAsync(
+            excludedVouchers: [paymentVoucher, receiptVoucher],
+            proposals: [],
+            cancellationToken);
+        if (balanceError is not null)
+        {
+            return Result.Failure(balanceError);
+        }
+
+        try
+        {
+            dbContext.CashVouchers.RemoveRange(
+                paymentVoucher,
+                receiptVoucher);
+            dbContext.CashboxTransfers.Remove(transfer);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return Result.Success();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result.Failure(Concurrency());
+        }
+    }
+
+    private async Task<Result<TransferPreparation>> PrepareAsync(
+        DateOnly transferDate,
+        int sourceCashboxId,
+        int destinationCashboxId,
+        decimal? requestedExchangeRate,
+        CashboxTransfer? currentTransfer,
+        CancellationToken cancellationToken)
+    {
+        if (sourceCashboxId == destinationCashboxId)
+        {
+            return Result<TransferPreparation>.Failure(
+                CashboxesMustDiffer());
+        }
+
+        var cashboxes = await dbContext.Cashboxes
+            .AsNoTracking()
+            .Where(cashbox =>
+                cashbox.CompanyId == companyId &&
+                (cashbox.Id == sourceCashboxId ||
+                 cashbox.Id == destinationCashboxId))
+            .ToListAsync(cancellationToken);
+        var sourceCashbox = cashboxes.SingleOrDefault(
+            cashbox => cashbox.Id == sourceCashboxId);
+        if (sourceCashbox is null)
+        {
+            return Result<TransferPreparation>.Failure(
+                CashboxNotFound(
+                    sourceCashboxId,
+                    nameof(CashboxTransferRequest.SourceCashboxId)));
+        }
+
+        var destinationCashbox = cashboxes.SingleOrDefault(
+            cashbox => cashbox.Id == destinationCashboxId);
+        if (destinationCashbox is null)
+        {
+            return Result<TransferPreparation>.Failure(
+                CashboxNotFound(
+                    destinationCashboxId,
+                    nameof(CashboxTransferRequest.DestinationCashboxId)));
+        }
+
+        var existingCashboxIds = currentTransfer is null
+            ? []
+            : new HashSet<int>
+            {
+                currentTransfer.SourceCashboxId,
+                currentTransfer.DestinationCashboxId
+            };
+        if (!sourceCashbox.IsActive &&
+            !existingCashboxIds.Contains(sourceCashbox.Id))
+        {
+            return Result<TransferPreparation>.Failure(
+                CashboxInactive(
+                    sourceCashbox.Id,
+                    nameof(CashboxTransferRequest.SourceCashboxId)));
+        }
+
+        if (!destinationCashbox.IsActive &&
+            !existingCashboxIds.Contains(destinationCashbox.Id))
+        {
+            return Result<TransferPreparation>.Failure(
+                CashboxInactive(
+                    destinationCashbox.Id,
+                    nameof(CashboxTransferRequest.DestinationCashboxId)));
+        }
+
+        if (sourceCashbox.Currency != destinationCashbox.Currency)
+        {
+            return Result<TransferPreparation>.Failure(
+                CurrencyMismatch());
+        }
+
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            sourceCashbox.Currency,
+            transferDate,
+            requestedExchangeRate,
+            cancellationToken);
+        if (exchangeRateResult.IsFailure)
+        {
+            return Result<TransferPreparation>.Failure(
+                exchangeRateResult.Error);
+        }
+
+        return Result<TransferPreparation>.Success(
+            new TransferPreparation(
+                SourceCashbox: sourceCashbox,
+                DestinationCashbox: destinationCashbox,
+                ExchangeRate: exchangeRateResult.Value));
+    }
+
+    private async Task<Error?> ValidateFinalBalancesAsync(
+        IReadOnlyCollection<CashVoucher> excludedVouchers,
+        IReadOnlyCollection<CashboxBalanceProposal> proposals,
+        CancellationToken cancellationToken)
+    {
+        var excludedVoucherIds = excludedVouchers
+            .Select(voucher => voucher.Id)
+            .ToArray();
+        var affectedCashboxIds = excludedVouchers
+            .Where(voucher => voucher.CashboxId.HasValue)
+            .Select(voucher => voucher.CashboxId!.Value)
+            .Concat(proposals.Select(proposal => proposal.CashboxId))
+            .Distinct()
+            .ToArray();
+
+        var balances = await dbContext.Cashboxes
+            .AsNoTracking()
+            .Where(cashbox =>
+                cashbox.CompanyId == companyId &&
+                affectedCashboxIds.Contains(cashbox.Id))
+            .Select(cashbox => new
+            {
+                cashbox.Id,
+                Balance = cashbox.OpeningBalance +
+                    (cashbox.Vouchers
+                        .Where(voucher =>
+                            (voucher.CashMovementTypeId.HasValue ||
+                             voucher.CashboxTransferId.HasValue) &&
+                            !excludedVoucherIds.Contains(voucher.Id))
+                        .Sum(voucher =>
+                            (decimal?)(voucher.Direction ==
+                                CashDirection.Receipt
+                                ? voucher.Amount
+                                : -voucher.Amount)) ?? 0m)
+            })
+            .ToDictionaryAsync(
+                cashbox => cashbox.Id,
+                cashbox => cashbox.Balance,
+                cancellationToken);
+
+        foreach (var proposal in proposals)
+        {
+            balances[proposal.CashboxId] +=
+                proposal.Direction == CashDirection.Receipt
+                    ? proposal.Amount
+                    : -proposal.Amount;
+        }
+
+        foreach (var (cashboxId, balance) in balances)
+        {
+            if (balance < 0m)
+            {
+                return InsufficientCashboxBalance(cashboxId);
+            }
+        }
+
+        return null;
+    }
+
+    private CashVoucher CreateVoucher(
+        CashboxTransfer transfer,
+        Cashbox cashbox,
+        CashDirection direction,
+        decimal amount,
+        ResolvedExchangeRate exchangeRate,
+        DateTime now)
+    {
+        var voucher = new CashVoucher();
+        ApplyVoucher(
+            voucher,
+            transfer,
+            cashbox,
+            direction,
+            amount,
+            exchangeRate,
+            now);
+        return voucher;
+    }
+
+    private void ApplyVoucher(
+        CashVoucher voucher,
+        CashboxTransfer transfer,
+        Cashbox cashbox,
+        CashDirection direction,
+        decimal amount,
+        ResolvedExchangeRate exchangeRate,
+        DateTime now)
+    {
+        voucher.CompanyId = companyId;
+        voucher.CashboxTransferId = transfer.Id;
+        voucher.CashboxTransfer = transfer;
+        voucher.InvoiceId = null;
+        voucher.VoucherNumber = direction == CashDirection.Payment
+            ? $"{transfer.TransferNumber}-OUT"
+            : $"{transfer.TransferNumber}-IN";
+        voucher.VoucherDate = transfer.TransferDate;
+        voucher.Direction = direction;
+        voucher.CashboxId = cashbox.Id;
+        voucher.CashMovementTypeId = null;
+        voucher.PartyType = CashPartyType.None;
+        voucher.BusinessPartnerId = null;
+        voucher.DriverId = null;
+        voucher.DriverTripId = null;
+        voucher.ExternalPartyName = null;
+        voucher.Amount = amount;
+        voucher.Currency = cashbox.Currency;
+        voucher.ReferenceNumber = transfer.TransferNumber;
+        voucher.Description = transfer.Description ??
+            $"Cashbox transfer {transfer.TransferNumber}";
+        voucher.Notes = transfer.Notes;
+        voucher.ApplyExchangeRate(
+            exchangeRate.ExchangeRateId,
+            exchangeRate.Rate);
+        voucher.Touch(now);
+    }
+
+    private async Task<CashboxTransferResponse?> BuildResponseAsync(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        var transfer = await dbContext.CashboxTransfers
+            .AsNoTracking()
+            .Where(entity =>
+                entity.CompanyId == companyId &&
+                entity.Id == id)
+            .Select(entity => new
+            {
+                entity.Id,
+                entity.CompanyId,
+                entity.TransferNumber,
+                entity.TransferDate,
+                entity.SourceCashboxId,
+                SourceCashboxName = entity.SourceCashbox.Name,
+                entity.DestinationCashboxId,
+                DestinationCashboxName = entity.DestinationCashbox.Name,
+                Currency = entity.SourceCashbox.Currency,
+                BaseCurrency = entity.Company.Settings == null
+                    ? CurrencyCode.EGP
+                    : entity.Company.Settings.BaseCurrency,
+                entity.Description,
+                entity.Notes,
+                entity.LastModifiedAt,
+                entity.RowVersion
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (transfer is null)
+        {
+            return null;
+        }
+
+        var vouchers = await dbContext.CashVouchers
+            .AsNoTracking()
+            .Where(voucher =>
+                voucher.CompanyId == companyId &&
+                voucher.CashboxTransferId == id)
+            .Select(voucher => new
+            {
+                voucher.Id,
+                voucher.VoucherNumber,
+                voucher.Direction,
+                voucher.Amount,
+                voucher.ExchangeRate,
+                voucher.BaseAmount
+            })
+            .ToListAsync(cancellationToken);
+        var paymentVoucher = vouchers.FirstOrDefault(
+            voucher => voucher.Direction == CashDirection.Payment);
+        var receiptVoucher = vouchers.FirstOrDefault(
+            voucher => voucher.Direction == CashDirection.Receipt);
+        if (vouchers.Count != 2 ||
+            vouchers.Count(voucher =>
+                voucher.Direction == CashDirection.Payment) != 1 ||
+            vouchers.Count(voucher =>
+                voucher.Direction == CashDirection.Receipt) != 1 ||
+            paymentVoucher is null ||
+            receiptVoucher is null)
+        {
+            return null;
+        }
+
+        return new CashboxTransferResponse(
+            Id: transfer.Id,
+            CompanyId: transfer.CompanyId,
+            TransferNumber: transfer.TransferNumber,
+            TransferDate: transfer.TransferDate,
+            SourceCashboxId: transfer.SourceCashboxId,
+            SourceCashboxName: transfer.SourceCashboxName,
+            DestinationCashboxId: transfer.DestinationCashboxId,
+            DestinationCashboxName: transfer.DestinationCashboxName,
+            Amount: paymentVoucher.Amount,
+            Currency: transfer.Currency,
+            BaseCurrency: transfer.BaseCurrency,
+            ExchangeRate: paymentVoucher.ExchangeRate,
+            BaseAmount: paymentVoucher.BaseAmount,
+            PaymentVoucherId: paymentVoucher.Id,
+            PaymentVoucherNumber: paymentVoucher.VoucherNumber,
+            ReceiptVoucherId: receiptVoucher.Id,
+            ReceiptVoucherNumber: receiptVoucher.VoucherNumber,
+            Description: transfer.Description,
+            Notes: transfer.Notes,
+            LastModifiedAt: transfer.LastModifiedAt,
+            RowVersion: transfer.RowVersion);
+    }
+
+    private static bool TryGetVoucherPair(
+        IEnumerable<CashVoucher> vouchers,
+        out CashVoucher paymentVoucher,
+        out CashVoucher receiptVoucher)
+    {
+        var voucherList = vouchers.ToList();
+        paymentVoucher = voucherList.FirstOrDefault(voucher =>
+            voucher.Direction == CashDirection.Payment)!;
+        receiptVoucher = voucherList.FirstOrDefault(voucher =>
+            voucher.Direction == CashDirection.Receipt)!;
+        return voucherList.Count == 2 &&
+            voucherList.Count(voucher =>
+                voucher.Direction == CashDirection.Payment) == 1 &&
+            voucherList.Count(voucher =>
+                voucher.Direction == CashDirection.Receipt) == 1 &&
+            paymentVoucher is not null &&
+            receiptVoucher is not null;
+    }
+
+    private static Error? ValidateRequestShape(
+        DateOnly transferDate,
+        int sourceCashboxId,
+        int destinationCashboxId,
+        decimal amount,
+        string? description,
+        string? notes,
+        decimal? exchangeRate)
+    {
+        if (sourceCashboxId == destinationCashboxId)
+        {
+            return CashboxesMustDiffer();
+        }
+
+        if (transferDate == default ||
+            sourceCashboxId <= 0 ||
+            destinationCashboxId <= 0 ||
+            amount <= 0m ||
+            decimal.Round(amount, 2) != amount ||
+            description?.Length >
+                CashboxTransferRequest.DescriptionMaximumLength ||
+            notes?.Length > CashboxTransferRequest.NotesMaximumLength ||
+            (exchangeRate.HasValue &&
+             !ExchangeRateRules.IsValidRate(exchangeRate.Value)))
+        {
+            return InvalidRequest();
+        }
+
+        return null;
+    }
+
+    private static Error? ValidateFilters(
+        CashboxTransferFilterRequest filters)
+    {
+        if (filters.Search?.Trim().Length > 100 ||
+            filters.SourceCashboxId is <= 0 ||
+            filters.DestinationCashboxId is <= 0 ||
+            filters.ToDate < filters.FromDate)
+        {
+            return FiltersInvalid();
+        }
+
+        return null;
+    }
+
+    private static string GenerateTransferNumber(DateOnly transferDate)
+    {
+        var suffix = Guid.NewGuid()
+            .ToString("N")[..8]
+            .ToUpperInvariant();
+        return $"TRF-{transferDate:yyyyMMdd}-{suffix}";
+    }
+
+    private static string? Normalize(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private sealed record TransferPreparation(
+        Cashbox SourceCashbox,
+        Cashbox DestinationCashbox,
+        ResolvedExchangeRate ExchangeRate);
+
+    private sealed record CashboxBalanceProposal(
+        int CashboxId,
+        CashDirection Direction,
+        decimal Amount);
+}

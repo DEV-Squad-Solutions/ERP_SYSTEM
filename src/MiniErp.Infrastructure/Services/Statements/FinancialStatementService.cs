@@ -60,7 +60,8 @@ public sealed class FinancialStatementService(
                 .Where(voucher =>
                     voucher.CompanyId == companyId &&
                     voucher.CashboxId == cashbox.Id &&
-                    voucher.CashMovementTypeId.HasValue &&
+                    (voucher.CashMovementTypeId.HasValue ||
+                     voucher.CashboxTransferId.HasValue) &&
                     voucher.VoucherDate < filters.FromDate.Value)
                 .SumAsync(
                     voucher =>
@@ -75,7 +76,8 @@ public sealed class FinancialStatementService(
                 .Where(voucher =>
                     voucher.CompanyId == companyId &&
                     voucher.CashboxId == cashbox.Id &&
-                    voucher.CashMovementTypeId.HasValue &&
+                    (voucher.CashMovementTypeId.HasValue ||
+                     voucher.CashboxTransferId.HasValue) &&
                     voucher.VoucherDate < filters.FromDate.Value)
                 .SumAsync(
                     voucher =>
@@ -93,7 +95,8 @@ public sealed class FinancialStatementService(
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
                 voucher.CashboxId == cashbox.Id &&
-                voucher.CashMovementTypeId.HasValue)
+                (voucher.CashMovementTypeId.HasValue ||
+                 voucher.CashboxTransferId.HasValue))
             .Where(voucher =>
                 !filters.FromDate.HasValue ||
                 voucher.VoucherDate >= filters.FromDate.Value)
@@ -208,8 +211,11 @@ public sealed class FinancialStatementService(
                     CashVoucherId = voucher.Id,
                     Date = voucher.VoucherDate,
                     VoucherNumber = voucher.VoucherNumber,
-                    MovementName =
-                        voucher.CashMovementType!.Name,
+                    MovementName = voucher.CashMovementType != null
+                        ? voucher.CashMovementType.Name
+                        : voucher.Direction == CashDirection.Payment
+                            ? "تحويل خزائن صادر"
+                            : "تحويل خزائن وارد",
                     Description = voucher.Description,
                     PartyName = voucher.BusinessPartner != null
                         ? voucher.BusinessPartner.Name
