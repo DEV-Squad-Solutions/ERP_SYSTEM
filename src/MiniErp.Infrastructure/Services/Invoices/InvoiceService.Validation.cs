@@ -19,66 +19,6 @@ public sealed partial class InvoiceService
         out decimal weight) =>
         InvoiceLineValues.TryGetEffective(request, out count, out weight);
 
-    private static Error? ValidateFilters(InvoiceFilterRequest filters)
-    {
-        if (filters.InvoiceNumber?.Trim().Length >
-            InvoiceRequest.InvoiceNumberMaximumLength)
-        {
-            return InvoiceNumberFilterInvalid();
-        }
-
-        if (filters.InvoiceType.HasValue &&
-            !Enum.IsDefined(
-                typeof(InvoiceType),
-                filters.InvoiceType.Value))
-        {
-            return InvoiceTypeInvalid(nameof(InvoiceFilterRequest.InvoiceType));
-        }
-
-        if (filters.PaymentTerm.HasValue &&
-            !Enum.IsDefined(
-                typeof(PaymentTerm),
-                filters.PaymentTerm.Value))
-        {
-            return PaymentTermInvalid(nameof(InvoiceFilterRequest.PaymentTerm));
-        }
-
-        if (filters.PriceStatus.HasValue &&
-            !Enum.IsDefined(
-                typeof(InvoicePriceStatus),
-                filters.PriceStatus.Value))
-        {
-            return InvalidFilter(InvoiceFilterErrorKind.PriceStatus);
-        }
-
-        if (filters.BusinessPartnerId is <= 0)
-        {
-            return InvalidFilter(InvoiceFilterErrorKind.BusinessPartnerId);
-        }
-
-        if (filters.CountryId is <= 0)
-        {
-            return InvalidFilter(InvoiceFilterErrorKind.CountryId);
-        }
-
-        if (filters.StoreId is <= 0)
-        {
-            return InvalidFilter(InvoiceFilterErrorKind.StoreId);
-        }
-
-        if (filters.DriverId is <= 0)
-        {
-            return InvalidFilter(InvoiceFilterErrorKind.DriverId);
-        }
-
-        if (filters.FromDate > filters.ToDate)
-        {
-            return InvalidFilter(InvoiceFilterErrorKind.DateRange);
-        }
-
-        return null;
-    }
-
     private async Task<Result<PreparedInvoice>> PrepareAsync(
         Invoice invoice,
         IReadOnlyList<InvoiceLineRequest> lines,

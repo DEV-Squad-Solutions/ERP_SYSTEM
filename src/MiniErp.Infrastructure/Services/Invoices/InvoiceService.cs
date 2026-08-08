@@ -3,7 +3,6 @@ using static MiniErp.Application.Features.Invoices.InvoiceErrors;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
-using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Application.Features.Invoices;
@@ -15,8 +14,8 @@ namespace MiniErp.Infrastructure.Services.Invoices;
 
 public sealed partial class InvoiceService(
     ApplicationDbContext dbContext,
-    IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
+    IInvoiceQueryService invoiceQueryService,
     IExchangeRateResolver exchangeRateResolver,
     IInvoiceInventoryService invoiceInventoryService,
     TimeProvider timeProvider)
@@ -31,71 +30,6 @@ public sealed partial class InvoiceService(
     ];
 
     private readonly int companyId = currentCompanyContext.CompanyId;
-
-    public async Task<Result<InvoicePagedResponse>> GetAllAsync(
-        PaginationRequest pagination,
-        InvoiceFilterRequest? filters = null,
-        CancellationToken cancellationToken = default)
-    {
-        filters ??= new InvoiceFilterRequest();
-        var filterError = ValidateFilters(filters);
-        if (filterError is not null)
-        {
-            return Result<InvoicePagedResponse>.Failure(
-                filterError);
-        }
-
-        var query = dbContext.Invoices
-            .AsNoTracking()
-            .Where(invoice => invoice.CompanyId == companyId);
-
-        query = ApplyFilters(query, filters);
-
-        var orderedQuery = query
-            .OrderByDescending(invoice => invoice.InvoiceDate)
-            .ThenByDescending(invoice => invoice.Id);
-
-        var aggregate = await GetSummaryAsync(query, cancellationToken);
-        var pageResult = await paginationService.PaginateAsync<
-            Invoice,
-            InvoiceListResponse>(
-            orderedQuery,
-            pagination,
-            aggregate.TotalCount,
-            cancellationToken);
-
-        if (pageResult.IsFailure)
-        {
-            return Result<InvoicePagedResponse>.Failure(pageResult.Error);
-        }
-
-        var page = pageResult.Value;
-
-        return Result<InvoicePagedResponse>.Success(
-            new InvoicePagedResponse(
-                Items: page.Items,
-                PageNumber: page.PageNumber,
-                PageSize: page.PageSize,
-                TotalCount: page.TotalCount,
-                TotalPages: page.TotalPages,
-                Summary: aggregate.Summary));
-    }
-
-    public async Task<Result<InvoiceResponse>> GetByIdAsync(
-        int id,
-        CancellationToken cancellationToken = default)
-    {
-        if (id <= 0)
-        {
-            return Result<InvoiceResponse>.Failure(InvalidId());
-        }
-
-        var response = await GetResponseAsync(id, cancellationToken);
-
-        return response is null
-            ? Result<InvoiceResponse>.Failure(NotFound(id))
-            : Result<InvoiceResponse>.Success(response);
-    }
 
     public async Task<Result<InvoiceResponse>> AddAsync(
         InvoiceRequest request,
@@ -197,12 +131,18 @@ public sealed partial class InvoiceService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var response = await GetResponseAsync(
+        var responseResult = await invoiceQueryService.GetByIdAsync(
             invoice.Id,
             cancellationToken);
+        if (responseResult.IsFailure)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<InvoiceResponse>.Failure(responseResult.Error);
+        }
 
         await transaction.CommitAsync(cancellationToken);
-        return Result<InvoiceResponse>.Success(response!);
+        return responseResult;
     }
 
     public async Task<Result<InvoiceResponse>> UpdateAsync(
@@ -368,10 +308,18 @@ public sealed partial class InvoiceService(
             return Result<InvoiceResponse>.Failure(Concurrency());
         }
 
-        var response = await GetResponseAsync(id, cancellationToken);
+        var responseResult = await invoiceQueryService.GetByIdAsync(
+            id,
+            cancellationToken);
+        if (responseResult.IsFailure)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<InvoiceResponse>.Failure(responseResult.Error);
+        }
 
         await transaction.CommitAsync(cancellationToken);
-        return Result<InvoiceResponse>.Success(response!);
+        return responseResult;
     }
 
     public async Task<Result> DeleteAsync(

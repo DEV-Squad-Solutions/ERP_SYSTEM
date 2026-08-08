@@ -1,15 +1,157 @@
 using Mapster;
 using static MiniErp.Application.Features.Invoices.InvoiceErrors;
 using Microsoft.EntityFrameworkCore;
+using MiniErp.Application.Common.Abstractions;
+using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
+using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.Invoices;
 
-public sealed partial class InvoiceService
+public sealed partial class InvoiceQueryService(
+    ApplicationDbContext dbContext,
+    IPaginationService paginationService,
+    ICurrentCompanyContext currentCompanyContext,
+    IInvoiceInventoryService invoiceInventoryService)
+    : IInvoiceQueryService, IScopedService
 {
+    private static readonly ItemMovementType[] InvoiceItemMovementTypes =
+    [
+        ItemMovementType.Sales,
+        ItemMovementType.SalesReturn,
+        ItemMovementType.Purchase,
+        ItemMovementType.PurchaseReturn
+    ];
+
+    private readonly int companyId = currentCompanyContext.CompanyId;
+
+    public async Task<Result<InvoicePagedResponse>> GetAllAsync(
+        PaginationRequest pagination,
+        InvoiceFilterRequest? filters = null,
+        CancellationToken cancellationToken = default)
+    {
+        filters ??= new InvoiceFilterRequest();
+        var filterError = ValidateFilters(filters);
+        if (filterError is not null)
+        {
+            return Result<InvoicePagedResponse>.Failure(filterError);
+        }
+
+        var query = dbContext.Invoices
+            .AsNoTracking()
+            .Where(invoice => invoice.CompanyId == companyId);
+
+        query = ApplyFilters(query, filters);
+
+        var orderedQuery = query
+            .OrderByDescending(invoice => invoice.InvoiceDate)
+            .ThenByDescending(invoice => invoice.Id);
+
+        var aggregate = await GetSummaryAsync(query, cancellationToken);
+        var pageResult = await paginationService.PaginateAsync<
+            Invoice,
+            InvoiceListResponse>(
+            orderedQuery,
+            pagination,
+            aggregate.TotalCount,
+            cancellationToken);
+
+        if (pageResult.IsFailure)
+        {
+            return Result<InvoicePagedResponse>.Failure(pageResult.Error);
+        }
+
+        var page = pageResult.Value;
+
+        return Result<InvoicePagedResponse>.Success(
+            new InvoicePagedResponse(
+                Items: page.Items,
+                PageNumber: page.PageNumber,
+                PageSize: page.PageSize,
+                TotalCount: page.TotalCount,
+                TotalPages: page.TotalPages,
+                Summary: aggregate.Summary));
+    }
+
+    public async Task<Result<InvoiceResponse>> GetByIdAsync(
+        int id,
+        CancellationToken cancellationToken = default)
+    {
+        if (id <= 0)
+        {
+            return Result<InvoiceResponse>.Failure(InvalidId());
+        }
+
+        var response = await GetResponseAsync(id, cancellationToken);
+
+        return response is null
+            ? Result<InvoiceResponse>.Failure(NotFound(id))
+            : Result<InvoiceResponse>.Success(response);
+    }
+
+    private static Error? ValidateFilters(InvoiceFilterRequest filters)
+    {
+        if (filters.InvoiceNumber?.Trim().Length >
+            InvoiceRequest.InvoiceNumberMaximumLength)
+        {
+            return InvoiceNumberFilterInvalid();
+        }
+
+        if (filters.InvoiceType.HasValue &&
+            !Enum.IsDefined(
+                typeof(InvoiceType),
+                filters.InvoiceType.Value))
+        {
+            return InvoiceTypeInvalid(nameof(InvoiceFilterRequest.InvoiceType));
+        }
+
+        if (filters.PaymentTerm.HasValue &&
+            !Enum.IsDefined(
+                typeof(PaymentTerm),
+                filters.PaymentTerm.Value))
+        {
+            return PaymentTermInvalid(nameof(InvoiceFilterRequest.PaymentTerm));
+        }
+
+        if (filters.PriceStatus.HasValue &&
+            !Enum.IsDefined(
+                typeof(InvoicePriceStatus),
+                filters.PriceStatus.Value))
+        {
+            return InvalidFilter(InvoiceFilterErrorKind.PriceStatus);
+        }
+
+        if (filters.BusinessPartnerId is <= 0)
+        {
+            return InvalidFilter(InvoiceFilterErrorKind.BusinessPartnerId);
+        }
+
+        if (filters.CountryId is <= 0)
+        {
+            return InvalidFilter(InvoiceFilterErrorKind.CountryId);
+        }
+
+        if (filters.StoreId is <= 0)
+        {
+            return InvalidFilter(InvoiceFilterErrorKind.StoreId);
+        }
+
+        if (filters.DriverId is <= 0)
+        {
+            return InvalidFilter(InvoiceFilterErrorKind.DriverId);
+        }
+
+        if (filters.FromDate > filters.ToDate)
+        {
+            return InvalidFilter(InvoiceFilterErrorKind.DateRange);
+        }
+
+        return null;
+    }
+
     private static IQueryable<Invoice> ApplyFilters(
         IQueryable<Invoice> query,
         InvoiceFilterRequest filters)
@@ -243,34 +385,6 @@ public sealed partial class InvoiceService
                 .ToArray()
         };
     }
-
-    private async Task<Invoice?> LoadForWriteAsync(
-        int id,
-        CancellationToken cancellationToken) =>
-        await dbContext.Invoices
-            .AsSplitQuery()
-            .Include(invoice => invoice.Lines)
-            .Include(invoice => invoice.ContainerLines)
-            .FirstOrDefaultAsync(
-                invoice =>
-                    invoice.CompanyId == companyId &&
-                    invoice.Id == id,
-                cancellationToken);
-
-    private Task<bool> HasActiveLinkedReturnsAsync(
-        IReadOnlyCollection<int> sourceLineIds,
-        CancellationToken cancellationToken) =>
-        sourceLineIds.Count > 0
-            ? dbContext.InvoiceLines.AnyAsync(
-                line =>
-                    line.CompanyId == companyId &&
-                    line.SourceInvoiceLineId.HasValue &&
-                    sourceLineIds.Contains(
-                        line.SourceInvoiceLineId.Value) &&
-                    (line.Invoice.InvoiceType == InvoiceType.SalesReturn ||
-                     line.Invoice.InvoiceType == InvoiceType.PurchaseReturn),
-                cancellationToken)
-            : Task.FromResult(false);
 
     private sealed record InvoiceLineCostSnapshot(
         int ItemId,

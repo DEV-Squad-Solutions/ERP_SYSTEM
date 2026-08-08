@@ -10,7 +10,8 @@ namespace MiniErp.Api.Controllers;
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
 public sealed class InvoicesController(
-    IInvoiceService invoiceService)
+    IInvoiceQueryService invoiceQueries,
+    IInvoiceService invoiceCommands)
     : ApiControllerBase
 {
     [HttpGet]
@@ -21,7 +22,7 @@ public sealed class InvoicesController(
         [FromQuery] InvoiceFilterRequest filters,
         CancellationToken cancellationToken)
     {
-        var result = await invoiceService.GetAllAsync(
+        var result = await invoiceQueries.GetAllAsync(
             pagination,
             filters,
             cancellationToken);
@@ -40,7 +41,7 @@ public sealed class InvoicesController(
         [FromQuery] int? invoiceId,
         CancellationToken cancellationToken)
     {
-        var result = await invoiceService.GetItemBalanceAsync(
+        var result = await invoiceQueries.GetItemBalanceAsync(
             storeId,
             itemId,
             asOfDate,
@@ -69,7 +70,7 @@ public sealed class InvoicesController(
         [FromQuery] InvoiceReturnSourceFilterRequest filters,
         CancellationToken cancellationToken)
     {
-        var result = await invoiceService.GetReturnSourcesAsync(
+        var result = await invoiceQueries.GetReturnSourcesAsync(
             pagination,
             filters,
             cancellationToken);
@@ -83,7 +84,7 @@ public sealed class InvoicesController(
         int id,
         CancellationToken cancellationToken)
     {
-        var result = await invoiceService.GetByIdAsync(id, cancellationToken);
+        var result = await invoiceQueries.GetByIdAsync(id, cancellationToken);
         return this.ToActionResult(result);
     }
 
@@ -96,7 +97,7 @@ public sealed class InvoicesController(
         InvoiceRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await invoiceService.AddAsync(
+        var result = await invoiceCommands.AddAsync(
             request,
             cancellationToken);
 
@@ -118,7 +119,7 @@ public sealed class InvoicesController(
         InvoiceUpdateRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await invoiceService.UpdateAsync(
+        var result = await invoiceCommands.UpdateAsync(
             id,
             request,
             cancellationToken);
@@ -135,7 +136,7 @@ public sealed class InvoicesController(
         [FromQuery] byte[]? rowVersion,
         CancellationToken cancellationToken)
     {
-        var result = await invoiceService.DeleteAsync(
+        var result = await invoiceCommands.DeleteAsync(
             id,
             rowVersion,
             cancellationToken);

@@ -7,7 +7,7 @@ using static MiniErp.Application.Features.Invoices.InvoiceErrors;
 
 namespace MiniErp.Infrastructure.Services.Invoices;
 
-public sealed partial class InvoiceService
+public sealed partial class InvoiceQueryService
 {
     public async Task<Result<PagedResponse<InvoiceReturnSourceResponse>>>
         GetReturnSourcesAsync(

@@ -468,6 +468,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         var sourceResult = await service.AddAsync(
             CreateRequest(
                 InvoiceType.Purchase,
@@ -507,7 +508,7 @@ public sealed class InvoiceServiceTests
             partialResult.Error.Description);
         Assert.Equal(0m, partialResult.Value.DiscountAmount);
 
-        var previewResult = await service.GetReturnSourcesAsync(
+        var previewResult = await queryService.GetReturnSourcesAsync(
             new MiniErp.Application.Common.Models.PaginationRequest
             {
                 PageNumber = 1,
@@ -568,6 +569,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         var source = (await service.AddAsync(
             CreateRequest(
                 InvoiceType.Purchase,
@@ -601,7 +603,7 @@ public sealed class InvoiceServiceTests
                 invoiceDate: new DateOnly(2026, 7, 15),
                 storeId: 2));
 
-        var result = await service.GetReturnSourcesAsync(
+        var result = await queryService.GetReturnSourcesAsync(
             new MiniErp.Application.Common.Models.PaginationRequest
             {
                 PageNumber = 1,
@@ -632,6 +634,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         var source = (await service.AddAsync(
             CreateRequest(
                 InvoiceType.Purchase,
@@ -671,7 +674,7 @@ public sealed class InvoiceServiceTests
                 invoiceDate: new DateOnly(2026, 7, 15),
                 storeId: 2));
 
-        var result = await service.GetReturnSourcesAsync(
+        var result = await queryService.GetReturnSourcesAsync(
             new MiniErp.Application.Common.Models.PaginationRequest
             {
                 PageNumber = 1,
@@ -3081,6 +3084,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         var request = CreateRequest(
             InvoiceType.SalesReturn,
             PaymentTerm.Credit) with
@@ -3089,8 +3093,8 @@ public sealed class InvoiceServiceTests
         };
 
         var created = await service.AddAsync(request);
-        var details = await service.GetByIdAsync(created.Value.Id);
-        var list = await service.GetAllAsync(
+        var details = await queryService.GetByIdAsync(created.Value.Id);
+        var list = await queryService.GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest());
 
         Assert.True(created.IsSuccess);
@@ -3113,6 +3117,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         var request = CreateRequest(
             InvoiceType.SalesReturn,
             PaymentTerm.Credit) with
@@ -3121,8 +3126,8 @@ public sealed class InvoiceServiceTests
         };
 
         var created = await service.AddAsync(request);
-        var details = await service.GetByIdAsync(created.Value.Id);
-        var list = await service.GetAllAsync(
+        var details = await queryService.GetByIdAsync(created.Value.Id);
+        var list = await queryService.GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest());
 
         Assert.True(created.IsSuccess);
@@ -3162,6 +3167,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         var created = await service.AddAsync(
             CreateRequest(
                 InvoiceType.SalesReturn,
@@ -3174,7 +3180,7 @@ public sealed class InvoiceServiceTests
         await database.Context.Database.ExecuteSqlRawAsync(
             "UPDATE ItemsCategories SET IsActive = 0 WHERE Id = 1;");
         database.Context.ChangeTracker.Clear();
-        var current = await service.GetByIdAsync(created.Value.Id);
+        var current = await queryService.GetByIdAsync(created.Value.Id);
         var lines = current.Value.Lines
             .Select(line => new InvoiceLineRequest(
                 line.ItemId,
@@ -3677,10 +3683,11 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         await service.AddAsync(CreateRequest(InvoiceType.Purchase));
         await service.AddAsync(CreateRequest(InvoiceType.SalesReturn));
 
-        var result = await service.GetAllAsync(
+        var result = await queryService.GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
             new InvoiceFilterRequest
             {
@@ -3724,7 +3731,7 @@ public sealed class InvoiceServiceTests
             movementDate: new DateOnly(2026, 7, 26),
             quantityOut: 5m);
 
-        var result = await database.CreateService().GetItemBalanceAsync(
+        var result = await database.CreateQueryService().GetItemBalanceAsync(
             storeId: 1,
             itemId: 1,
             asOfDate: new DateOnly(2026, 7, 25));
@@ -3741,16 +3748,17 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         var invoice = (await service.AddAsync(
             CreateRequest(
                 InvoiceType.Sales,
                 lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)]))).Value;
 
-        var currentBalance = await service.GetItemBalanceAsync(
+        var currentBalance = await queryService.GetItemBalanceAsync(
             storeId: 1,
             itemId: 1,
             asOfDate: invoice.InvoiceDate);
-        var availableForReplacement = await service.GetItemBalanceAsync(
+        var availableForReplacement = await queryService.GetItemBalanceAsync(
             storeId: 1,
             itemId: 1,
             asOfDate: invoice.InvoiceDate,
@@ -3777,7 +3785,7 @@ public sealed class InvoiceServiceTests
             """);
         database.Context.ChangeTracker.Clear();
 
-        var result = await database.CreateService().GetItemBalanceAsync(
+        var result = await database.CreateQueryService().GetItemBalanceAsync(
             storeId: 20,
             itemId: 1,
             asOfDate: new DateOnly(2026, 7, 25));
@@ -3792,7 +3800,7 @@ public sealed class InvoiceServiceTests
         await using var database = await InvoiceTestDatabase.CreateAsync();
         await SeedInvoiceFilterDataAsync(database);
 
-        var result = await database.CreateService().GetAllAsync(
+        var result = await database.CreateQueryService().GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
             new InvoiceFilterRequest
             {
@@ -3809,6 +3817,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
 
         await service.AddAsync(
             CreateRequest(
@@ -3827,7 +3836,7 @@ public sealed class InvoiceServiceTests
                 InvoiceType.Purchase,
                 PaymentTerm.Cash));
 
-        var result = await service.GetAllAsync(
+        var result = await queryService.GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest
             {
                 PageSize = 1
@@ -3852,9 +3861,10 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         await service.AddAsync(CreateRequest(InvoiceType.Purchase));
 
-        var result = await service.GetAllAsync(
+        var result = await queryService.GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
             new InvoiceFilterRequest
             {
@@ -3876,7 +3886,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
 
-        var result = await database.CreateService().GetAllAsync(
+        var result = await database.CreateQueryService().GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
             new InvoiceFilterRequest
             {
@@ -3893,7 +3903,7 @@ public sealed class InvoiceServiceTests
         await using var database = await InvoiceTestDatabase.CreateAsync();
         await SeedInvoiceFilterDataAsync(database);
 
-        var result = await database.CreateService().GetAllAsync(
+        var result = await database.CreateQueryService().GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
             new InvoiceFilterRequest
             {
@@ -3926,7 +3936,7 @@ public sealed class InvoiceServiceTests
         await using var database = await InvoiceTestDatabase.CreateAsync();
         await SeedInvoiceFilterDataAsync(database);
 
-        var result = await database.CreateService().GetAllAsync(
+        var result = await database.CreateQueryService().GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
             new InvoiceFilterRequest
             {
@@ -3942,7 +3952,7 @@ public sealed class InvoiceServiceTests
     public async Task GetAll_RejectsInvalidFiltersExplicitly()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
-        var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         var invalidFilters = new[]
         {
             new InvoiceFilterRequest
@@ -3984,7 +3994,7 @@ public sealed class InvoiceServiceTests
 
         foreach (var filters in invalidFilters)
         {
-            var result = await service.GetAllAsync(
+            var result = await queryService.GetAllAsync(
                 new MiniErp.Application.Common.Models.PaginationRequest(),
                 filters);
 
@@ -3997,6 +4007,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         var created = (await service.AddAsync(
             CreateRequest(
                 InvoiceType.SalesReturn,
@@ -4005,8 +4016,8 @@ public sealed class InvoiceServiceTests
                 paidAmount: 4m))).Value;
 
         database.Context.ChangeTracker.Clear();
-        var details = await service.GetByIdAsync(created.Id);
-        var list = await service.GetAllAsync(
+        var details = await queryService.GetByIdAsync(created.Id);
+        var list = await queryService.GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest());
 
         Assert.True(details.IsSuccess);
@@ -5112,27 +5123,43 @@ public sealed class InvoiceServiceTests
         public InvoiceService CreateService()
         {
             var companyContext = new TestCurrentCompanyContext(1);
-            var inventoryStockService = new InventoryStockService(
-                Context,
+            var invoiceInventoryService = CreateInvoiceInventoryService(
                 companyContext);
-            var inventoryCostingService = new InventoryCostingService(
-                Context,
-                companyContext,
-                TimeProvider.System);
-            var invoiceInventoryService = new InvoiceInventoryService(
-                Context,
-                companyContext,
-                inventoryStockService,
-                inventoryCostingService);
-
-            return new InvoiceService(
+            var invoiceQueryService = new InvoiceQueryService(
                 Context,
                 new PaginationService(),
                 companyContext,
+                invoiceInventoryService);
+
+            return new InvoiceService(
+                Context,
+                companyContext,
+                invoiceQueryService,
                 new MiniErp.Tests.TestExchangeRateResolver(),
                 invoiceInventoryService,
                 TimeProvider.System);
         }
+
+        public InvoiceQueryService CreateQueryService()
+        {
+            var companyContext = new TestCurrentCompanyContext(1);
+            return new InvoiceQueryService(
+                Context,
+                new PaginationService(),
+                companyContext,
+                CreateInvoiceInventoryService(companyContext));
+        }
+
+        private InvoiceInventoryService CreateInvoiceInventoryService(
+            ICurrentCompanyContext companyContext) =>
+            new(
+                Context,
+                companyContext,
+                new InventoryStockService(Context, companyContext),
+                new InventoryCostingService(
+                    Context,
+                    companyContext,
+                    TimeProvider.System));
 
         public PartnerItemReportService CreatePartnerItemReportService() =>
             new(Context, new TestCurrentCompanyContext(1));
