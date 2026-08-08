@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Errors;
 using MiniErp.Api.Exceptions;
 using MiniErp.Api.ModelBinding;
+using MiniErp.Api.Realtime;
 using MiniErp.Api.Swagger;
 using MiniErp.Api.Validation;
 using MiniErp.Application;
@@ -46,6 +47,8 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddSignalR();
+builder.Services.AddHostedService<RealtimeOutboxDispatcher>();
 builder.Services.Configure<ApiBehaviorOptions>(options =>
 {
     options.SuppressMapClientErrors = true;
@@ -124,5 +127,6 @@ app.UseCors(AllowAnyFrontendPolicy);
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<UpdatesHub>("/hubs/updates");
 
 app.Run();

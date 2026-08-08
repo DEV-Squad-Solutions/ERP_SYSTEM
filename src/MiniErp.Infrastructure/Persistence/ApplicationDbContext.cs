@@ -11,13 +11,24 @@ using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Logistics;
 using MiniErp.Domain.Entities.ReferenceData;
 using MiniErp.Infrastructure.Identity;
+using MiniErp.Infrastructure.Persistence.Interceptors;
+using MiniErp.Infrastructure.Persistence.Realtime;
 
 namespace MiniErp.Infrastructure.Persistence;
 
-public sealed class ApplicationDbContext(
-    DbContextOptions<ApplicationDbContext> options)
-    : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>(options)
+public sealed class ApplicationDbContext
+    : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>
 {
+    private readonly RealtimeChangeInterceptor? realtimeChangeInterceptor;
+
+    public ApplicationDbContext(
+        DbContextOptions<ApplicationDbContext> options,
+        RealtimeChangeInterceptor? realtimeChangeInterceptor = null)
+        : base(options)
+    {
+        this.realtimeChangeInterceptor = realtimeChangeInterceptor;
+    }
+
     public DbSet<Company> Companies => Set<Company>();
 
     public DbSet<CompanySettings> CompanySettings => Set<CompanySettings>();
@@ -103,6 +114,38 @@ public sealed class ApplicationDbContext(
     public DbSet<UserCompany> UserCompanies => Set<UserCompany>();
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+
+    public DbSet<RealtimeOutboxMessage> RealtimeOutboxMessages =>
+        Set<RealtimeOutboxMessage>();
+
+    public override int SaveChanges()
+    {
+        realtimeChangeInterceptor?.EnqueueNotifications(this);
+        return base.SaveChanges();
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        realtimeChangeInterceptor?.EnqueueNotifications(this);
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        realtimeChangeInterceptor?.EnqueueNotifications(this);
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        realtimeChangeInterceptor?.EnqueueNotifications(this);
+        return base.SaveChangesAsync(
+            acceptAllChangesOnSuccess,
+            cancellationToken);
+    }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

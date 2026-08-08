@@ -68,26 +68,32 @@ User create and update requests accept a `roles` array, for example
 assignments are included in newly issued access tokens, so the affected user must
 log in again after an administrator updates their roles.
 
-## React client
+## React test client
 
-The separate `G:/test/miniErp/client` project contains a responsive React/Vite
-ERP client. Successful login and company selection open a company-scoped
-workspace with sidebar CRUD screens for Companies, Users, Business Partners,
-Drivers, Stores, Item Units, and Items. Tenant-owned tables display their
-`CompanyId` so the selected-company filter is visible during development.
+The separate `F:/client/client` project is a responsive React/Vite test client
+used to exercise backend contracts. It is not the production frontend.
+Successful login and company selection open a company-scoped workspace with
+CRUD screens and reports.
 
 ```powershell
-cd G:/test/miniErp/client
+cd F:/client/client
 npm install
 npm run dev
 ```
 
 The client targets `https://localhost:7067/api/v1` by default. Override it with `VITE_API_BASE_URL` or edit the API URL on the login screen. Companies and Users require the `Admin` role; non-admin users receive read-only catalog screens.
 
-The living backend-to-frontend handoff is maintained at
-`E:\Shaban Documents\Shaban\miniErp backend\FRONTEND_INTEGRATION_GUIDE.md`.
-It separates implemented contracts from planned work and must be updated and
-checked against generated Swagger after every backend feature step.
+Frontend SignalR handoff documents:
+
+- [`FRONTEND_SIGNALR_QUICK_START_AR.md`](FRONTEND_SIGNALR_QUICK_START_AR.md)
+  is the short Arabic quick-start checklist.
+- [`FRONTEND_SIGNALR_GUIDE_AR.md`](FRONTEND_SIGNALR_GUIDE_AR.md) is the Arabic
+  explanation with a complete React example and resource-to-page routing.
+- [`FRONTEND_SIGNALR_PRACTICAL_STEPS.md`](FRONTEND_SIGNALR_PRACTICAL_STEPS.md)
+  is the short implementation checklist.
+- [`FRONTEND_SIGNALR_INTEGRATION_GUIDE.md`](FRONTEND_SIGNALR_INTEGRATION_GUIDE.md)
+  is the complete contract, client implementation, delivery behavior,
+  filtering guidance, troubleshooting, and acceptance test guide.
 
 ## Swagger
 

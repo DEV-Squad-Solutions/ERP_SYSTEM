@@ -30,6 +30,7 @@ public static class DependencyInjection
         services.AddHttpContextAccessor();
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<AuditableEntityInterceptor>();
+        services.AddScoped<RealtimeChangeInterceptor>();
         services.AddOptions<FrankfurterOptions>()
             .Bind(configuration.GetSection(FrankfurterOptions.SectionName))
             .Validate(options =>
@@ -103,6 +104,18 @@ public static class DependencyInjection
                 };
                 options.Events = new JwtBearerEvents
                 {
+                    OnMessageReceived = context =>
+                    {
+                        var accessToken = context.Request.Query["access_token"];
+                        if (!string.IsNullOrEmpty(accessToken) &&
+                            context.HttpContext.Request.Path.StartsWithSegments(
+                                "/hubs/updates"))
+                        {
+                            context.Token = accessToken;
+                        }
+
+                        return Task.CompletedTask;
+                    },
                     OnTokenValidated = async context =>
                     {
                         var tokenUse = context.Principal?
