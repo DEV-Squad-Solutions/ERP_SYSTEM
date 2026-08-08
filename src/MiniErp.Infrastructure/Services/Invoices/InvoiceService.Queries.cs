@@ -1,7 +1,6 @@
 using Mapster;
 using static MiniErp.Application.Features.Invoices.InvoiceErrors;
 using Microsoft.EntityFrameworkCore;
-using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Invoicing;
@@ -168,133 +167,13 @@ public sealed partial class InvoiceService
         int itemId,
         DateOnly asOfDate,
         int? invoiceId = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (storeId <= 0)
-        {
-            return Result<InvoiceItemBalanceResponse>.Failure(ItemBalanceStoreInvalid());
-        }
-
-        if (itemId <= 0)
-        {
-            return Result<InvoiceItemBalanceResponse>.Failure(ItemBalanceItemInvalid());
-        }
-
-        if (asOfDate == DateOnly.MinValue)
-        {
-            return Result<InvoiceItemBalanceResponse>.Failure(ItemBalanceDateRequired());
-        }
-
-        if (invoiceId is <= 0)
-        {
-            return Result<InvoiceItemBalanceResponse>.Failure(ItemBalanceInvoiceInvalid());
-        }
-
-        var store = await dbContext.Stores
-            .AsNoTracking()
-            .Where(candidate =>
-                candidate.CompanyId == companyId &&
-                candidate.Id == storeId)
-            .Select(candidate => new
-            {
-                candidate.Name,
-                candidate.IsActive,
-                candidate.IsContainerStore
-            })
-            .FirstOrDefaultAsync(cancellationToken);
-        if (store is null)
-        {
-            return Result<InvoiceItemBalanceResponse>.Failure(StoreNotFound(storeId));
-        }
-
-        if (!store.IsActive)
-        {
-            return Result<InvoiceItemBalanceResponse>.Failure(StoreInactive());
-        }
-
-        if (store.IsContainerStore)
-        {
-            return Result<InvoiceItemBalanceResponse>.Failure(ContainerStoreNotAllowed());
-        }
-
-        var item = await dbContext.Items
-            .AsNoTracking()
-            .Where(candidate =>
-                candidate.CompanyId == companyId &&
-                candidate.Id == itemId)
-            .Select(candidate => new
-            {
-                candidate.Name,
-                candidate.ItemUnitId,
-                ItemUnitName = candidate.ItemUnit.Name,
-                candidate.IsActive,
-                ItemUnitIsActive = candidate.ItemUnit.IsActive
-            })
-            .FirstOrDefaultAsync(cancellationToken);
-        if (item is null)
-        {
-            return Result<InvoiceItemBalanceResponse>.Failure(ItemNotFound([itemId]));
-        }
-
-        if (!item.IsActive)
-        {
-            return Result<InvoiceItemBalanceResponse>.Failure(ItemInactive([itemId]));
-        }
-
-        if (!item.ItemUnitIsActive)
-        {
-            return Result<InvoiceItemBalanceResponse>.Failure(ItemUnitInactive([itemId]));
-        }
-
-        string? excludedInvoiceNumber = null;
-        if (invoiceId is int currentInvoiceId)
-        {
-            excludedInvoiceNumber = await dbContext.Invoices
-                .AsNoTracking()
-                .Where(candidate =>
-                    candidate.CompanyId == companyId &&
-                    candidate.Id == currentInvoiceId)
-                .Select(candidate => candidate.InvoiceNumber)
-                .FirstOrDefaultAsync(cancellationToken);
-            if (excludedInvoiceNumber is null)
-            {
-                return Result<InvoiceItemBalanceResponse>.Failure(
-                    NotFound(currentInvoiceId));
-            }
-        }
-
-        var excludedMovement = invoiceId is int excludedInvoiceId
-            ? new InventoryMovementReference(
-                InvoiceItemMovementTypes,
-                excludedInvoiceId,
-                excludedInvoiceNumber!)
-            : null;
-        var balances = await inventoryStockService.GetBalancesAsync(
+        CancellationToken cancellationToken = default) =>
+        await invoiceInventoryService.GetItemBalanceAsync(
             storeId,
-            [itemId],
+            itemId,
             asOfDate,
-            excludedMovement,
+            invoiceId,
             cancellationToken);
-        var costSnapshots = await inventoryCostingService.GetSnapshotsAsync(
-            storeId,
-            [itemId],
-            asOfDate,
-            cancellationToken);
-        var costSnapshot = costSnapshots[itemId];
-
-        return Result<InvoiceItemBalanceResponse>.Success(
-            new InvoiceItemBalanceResponse(
-                StoreId: storeId,
-                StoreName: store.Name,
-                ItemId: itemId,
-                ItemName: item.Name,
-                ItemUnitId: item.ItemUnitId,
-                ItemUnitName: item.ItemUnitName,
-                AsOfDate: asOfDate,
-                Balance: balances[itemId],
-                AverageCost: costSnapshot.AverageCost,
-                InventoryValue: costSnapshot.InventoryValue));
-    }
 
     private IQueryable<InvoiceResponse> ProjectResponseQuery(int id) =>
         dbContext.Invoices

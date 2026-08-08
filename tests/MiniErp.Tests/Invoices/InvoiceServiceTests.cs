@@ -5112,17 +5112,25 @@ public sealed class InvoiceServiceTests
         public InvoiceService CreateService()
         {
             var companyContext = new TestCurrentCompanyContext(1);
+            var inventoryStockService = new InventoryStockService(
+                Context,
+                companyContext);
+            var inventoryCostingService = new InventoryCostingService(
+                Context,
+                companyContext,
+                TimeProvider.System);
+            var invoiceInventoryService = new InvoiceInventoryService(
+                Context,
+                companyContext,
+                inventoryStockService,
+                inventoryCostingService);
 
             return new InvoiceService(
                 Context,
                 new PaginationService(),
                 companyContext,
                 new MiniErp.Tests.TestExchangeRateResolver(),
-                new InventoryStockService(Context, companyContext),
-                new InventoryCostingService(
-                    Context,
-                    companyContext,
-                    TimeProvider.System),
+                invoiceInventoryService,
                 TimeProvider.System);
         }
 

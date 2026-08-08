@@ -18,8 +18,7 @@ public sealed partial class InvoiceService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     IExchangeRateResolver exchangeRateResolver,
-    IInventoryStockService inventoryStockService,
-    IInventoryCostingService inventoryCostingService,
+    IInvoiceInventoryService invoiceInventoryService,
     TimeProvider timeProvider)
     : IInvoiceService, IScopedService
 {
@@ -109,7 +108,7 @@ public sealed partial class InvoiceService(
                 IsolationLevel.Serializable,
                 cancellationToken);
 
-        await inventoryCostingService.LockAsync(
+        await invoiceInventoryService.LockCostingAsync(
             request.Lines
                 .Where(line => line.ItemId.HasValue)
                 .Select(line => new InventoryCostingKey(
@@ -186,7 +185,7 @@ public sealed partial class InvoiceService(
             paymentPreparation.Value,
             cancellationToken);
 
-        var costingError = await inventoryCostingService.RecalculateAsync(
+        var costingError = await invoiceInventoryService.RecalculateCostingAsync(
             GetCostingKeys(invoice),
             cancellationToken);
         if (costingError is not null)
@@ -256,7 +255,7 @@ public sealed partial class InvoiceService(
             id,
             cancellationToken);
         var oldCostingKeys = GetCostingKeys(oldItemMovements);
-        await inventoryCostingService.LockAsync(
+        await invoiceInventoryService.LockCostingAsync(
             oldCostingKeys
                 .Concat(request.Lines
                     .Where(line => line.ItemId.HasValue)
@@ -347,7 +346,7 @@ public sealed partial class InvoiceService(
                 paymentPreparation.Value,
                 cancellationToken);
 
-            var costingError = await inventoryCostingService.RecalculateAsync(
+            var costingError = await invoiceInventoryService.RecalculateCostingAsync(
                 oldCostingKeys
                     .Concat(GetCostingKeys(invoice))
                     .Distinct()
@@ -422,7 +421,7 @@ public sealed partial class InvoiceService(
             id,
             cancellationToken);
         var costingKeys = GetCostingKeys(oldItemMovements);
-        await inventoryCostingService.LockAsync(
+        await invoiceInventoryService.LockCostingAsync(
             costingKeys,
             cancellationToken);
 
@@ -461,7 +460,7 @@ public sealed partial class InvoiceService(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            var costingError = await inventoryCostingService.RecalculateAsync(
+            var costingError = await invoiceInventoryService.RecalculateCostingAsync(
                 costingKeys,
                 cancellationToken);
             if (costingError is not null)

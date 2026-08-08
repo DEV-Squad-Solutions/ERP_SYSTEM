@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using static MiniErp.Application.Features.Invoices.InvoiceErrors;
-using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Inventory;
 using MiniErp.Application.Features.Invoices;
@@ -17,31 +16,8 @@ public sealed partial class InvoiceService
     private static bool TryGetEffectiveLineValues(
         InvoiceLineRequest request,
         out int count,
-        out decimal weight)
-    {
-        if (request.Count.GetValueOrDefault() <= 0 &&
-            request.Weight.GetValueOrDefault() <= 0m &&
-            request.Quantity.HasValue)
-        {
-            count = 1;
-            weight = request.Quantity.Value;
-            return weight > 0m &&
-                InvoiceAmountRules.IsValidQuantity(weight);
-        }
-
-        if (!request.Count.HasValue || !request.Weight.HasValue)
-        {
-            count = 0;
-            weight = 0m;
-            return false;
-        }
-
-        count = request.Count.Value;
-        weight = request.Weight.Value;
-        return count > 0 &&
-            weight > 0m &&
-            InvoiceAmountRules.IsValidQuantity(weight);
-    }
+        out decimal weight) =>
+        InvoiceLineValues.TryGetEffective(request, out count, out weight);
 
     private static Error? ValidateFilters(InvoiceFilterRequest filters)
     {
@@ -1025,65 +1001,15 @@ public sealed partial class InvoiceService
         IReadOnlyList<InvoiceLineRequest> lines,
         int? currentInvoiceId,
         string? currentInvoiceNumber,
-        CancellationToken cancellationToken)
-    {
-        var hasCurrentInvoiceId = currentInvoiceId.HasValue;
-        var hasCurrentInvoiceNumber =
-            !string.IsNullOrWhiteSpace(currentInvoiceNumber);
-        if (hasCurrentInvoiceId != hasCurrentInvoiceNumber)
-        {
-            return InvalidCurrentInvoiceReference();
-        }
-
-        var stockLines = new List<InventoryStockLine>(lines.Count);
-        foreach (var line in lines)
-        {
-            if (!line.ItemId.HasValue)
-            {
-                continue;
-            }
-
-            if (!TryGetEffectiveLineValues(
-                    line,
-                    out var count,
-                    out var weight))
-            {
-                return InvalidCalculatedAmounts(InvoiceCalculationErrorKind.Quantity);
-            }
-
-            if (!InvoiceAmountRules.TryCalculate(
-                    count,
-                    weight,
-                    0m,
-                    out var quantity,
-                    out _))
-            {
-                return InvalidCalculatedAmounts(InvoiceCalculationErrorKind.Quantity);
-            }
-
-            stockLines.Add(new InventoryStockLine(line.ItemId.Value, quantity));
-        }
-
-        var replacedMovement = currentInvoiceId is int invoiceId
-            ? new InventoryMovementReference(
-                InvoiceItemMovementTypes,
-                invoiceId,
-                currentInvoiceNumber!)
-            : null;
-
-        return await inventoryStockService.ValidateTimelineAsync(
-            new InventoryStockProposal(
-                invoice.StoreId,
-                invoice.InvoiceDate,
-                InvoiceMovementRules.IsInbound(invoice.InvoiceType),
-                stockLines,
-                replacedMovement,
-                currentInvoiceId.HasValue
-                    ? $"تعديل الفاتورة {currentInvoiceNumber}"
-                    : "إضافة الفاتورة",
-                nameof(InvoiceRequest.Lines)),
-            cancellationToken);
-    }
+        CancellationToken cancellationToken) =>
+        await invoiceInventoryService.ValidateStockAsync(
+            storeId: invoice.StoreId,
+            invoiceDate: invoice.InvoiceDate,
+            invoiceType: invoice.InvoiceType,
+            lines: lines,
+            currentInvoiceId: currentInvoiceId,
+            currentInvoiceNumber: currentInvoiceNumber,
+            cancellationToken: cancellationToken);
 
     private static void NormalizeDriverValues(Invoice invoice)
     {
