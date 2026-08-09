@@ -14,6 +14,14 @@ public sealed record CashboxStatementItemResponse(
     decimal Balance,
     string? ReferenceNumber)
 {
+    public CurrencyCode Currency { get; init; }
+
+    public CurrencyCode BaseCurrency { get; init; }
+
+    public decimal ExchangeRate { get; init; }
+
+    public bool IsBaseCurrency { get; init; }
+
     public decimal BaseReceiptAmount { get; init; }
 
     public decimal BasePaymentAmount { get; init; }
@@ -48,6 +56,12 @@ public sealed record CashboxStatementResponse(
     CashboxStatementSummaryResponse Summary)
 {
     public CurrencyCode BaseCurrency { get; init; }
+
+    public DateOnly OpeningBalanceDate { get; init; }
+
+    public decimal OpeningExchangeRate { get; init; }
+
+    public bool IsBaseCurrency { get; init; }
 }
 
 public sealed record PartnerStatementItemResponse(
@@ -111,7 +125,12 @@ public sealed record DriverStatementItemResponse(
     decimal BalanceAmount,
     string BalanceDescription,
     string? CashboxName,
-    string? ReferenceNumber);
+    string? ReferenceNumber)
+{
+    public int? BusinessPartnerId { get; init; }
+
+    public string? BusinessPartnerName { get; init; }
+}
 
 public sealed record DriverStatementSummaryResponse(
     decimal OpeningBalanceAmount,

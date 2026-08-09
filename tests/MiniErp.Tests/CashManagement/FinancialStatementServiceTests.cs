@@ -77,6 +77,57 @@ public sealed class FinancialStatementServiceTests
     }
 
     [Fact]
+    public async Task ForeignCurrencyCashboxStatementReturnsAllCurrencyDetails()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE Cashboxes
+            SET OpeningBalanceDate = '2026-07-01',
+                OpeningExchangeRate = 48,
+                BaseOpeningBalance = 4800
+            WHERE Id = 5;
+
+            INSERT INTO CashVouchers (
+                CompanyId, VoucherNumber, VoucherDate, Direction,
+                CashboxId, CashMovementTypeId, PartyType, Amount,
+                Currency, ExchangeRate, BaseAmount, LastModifiedAt,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                1, 'USD-RECEIPT', '2026-07-10', 1,
+                5, 3, 1, 10,
+                2, 50, 500, '2026-07-10',
+                'test', '2026-07-10', 'test', 0);
+            """);
+
+        var result = await database.CreateStatementService(1)
+            .GetCashboxStatementAsync(
+                Page(),
+                new CashboxStatementFilterRequest(CashboxId: 5));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CurrencyCode.USD, result.Value.Currency);
+        Assert.Equal(CurrencyCode.EGP, result.Value.BaseCurrency);
+        Assert.False(result.Value.IsBaseCurrency);
+        Assert.Equal(
+            new DateOnly(2026, 7, 1),
+            result.Value.OpeningBalanceDate);
+        Assert.Equal(48m, result.Value.OpeningExchangeRate);
+        Assert.Equal(4800m, result.Value.Summary.BaseOpeningBalance);
+
+        var item = Assert.Single(result.Value.Items);
+        Assert.Equal(CurrencyCode.USD, item.Currency);
+        Assert.Equal(CurrencyCode.EGP, item.BaseCurrency);
+        Assert.Equal(50m, item.ExchangeRate);
+        Assert.False(item.IsBaseCurrency);
+        Assert.Equal(10m, item.ReceiptAmount);
+        Assert.Equal(500m, item.BaseReceiptAmount);
+        Assert.Equal(110m, item.Balance);
+        Assert.Equal(5300m, item.BaseBalance);
+    }
+
+    [Fact]
     public async Task PartnerStatementCombinesOpeningInvoiceAndVoucherOnce()
     {
         await using var database =
@@ -247,6 +298,21 @@ public sealed class FinancialStatementServiceTests
         Assert.Equal(
             "مبلغ مطلوب دفعه للسائق",
             tripSpecific.Value.Summary.ClosingBalanceDescription);
+
+        var generalVoucher = Assert.Single(
+            overall.Value.Items,
+            item => item.Description == "CV-DRIVER-GENERAL");
+        Assert.Null(generalVoucher.BusinessPartnerId);
+        Assert.Null(generalVoucher.BusinessPartnerName);
+        Assert.All(
+            tripSpecific.Value.Items,
+            item =>
+            {
+                Assert.Equal(1, item.BusinessPartnerId);
+                Assert.Equal(
+                    "Customer One",
+                    item.BusinessPartnerName);
+            });
         Assert.Contains(
             overall.Value.Items,
             item =>

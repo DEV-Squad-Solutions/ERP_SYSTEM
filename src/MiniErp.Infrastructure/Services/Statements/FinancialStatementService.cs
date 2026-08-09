@@ -39,6 +39,8 @@ public sealed class FinancialStatementService(
                 entity.Name,
                 entity.Currency,
                 entity.OpeningBalance,
+                entity.OpeningBalanceDate,
+                entity.OpeningExchangeRate,
                 entity.BaseOpeningBalance,
                 BaseCurrency = entity.Company.Settings == null
                     ? CurrencyCode.EGP
@@ -222,6 +224,8 @@ public sealed class FinancialStatementService(
                         : voucher.Driver != null
                             ? voucher.Driver.Name
                             : voucher.ExternalPartyName,
+                    Currency = voucher.Currency,
+                    ExchangeRate = voucher.ExchangeRate,
                     ReceiptAmount =
                         voucher.Direction == CashDirection.Receipt
                             ? voucher.Amount
@@ -262,6 +266,10 @@ public sealed class FinancialStatementService(
                 Balance: runningBalance,
                 ReferenceNumber: row.ReferenceNumber)
             {
+                Currency = row.Currency,
+                BaseCurrency = cashbox.BaseCurrency,
+                ExchangeRate = row.ExchangeRate,
+                IsBaseCurrency = row.Currency == cashbox.BaseCurrency,
                 BaseReceiptAmount = row.BaseReceiptAmount,
                 BasePaymentAmount = row.BasePaymentAmount,
                 BaseBalance = runningBaseBalance
@@ -293,7 +301,10 @@ public sealed class FinancialStatementService(
                         totalBasePayments
                 })
             {
-                BaseCurrency = cashbox.BaseCurrency
+                BaseCurrency = cashbox.BaseCurrency,
+                OpeningBalanceDate = cashbox.OpeningBalanceDate,
+                OpeningExchangeRate = cashbox.OpeningExchangeRate,
+                IsBaseCurrency = cashbox.Currency == cashbox.BaseCurrency
             });
     }
 
@@ -620,7 +631,11 @@ public sealed class FinancialStatementService(
                 BalanceAmount: Math.Abs(runningBalance),
                 BalanceDescription: DriverBalanceDescription(runningBalance),
                 CashboxName: row.CashboxName,
-                ReferenceNumber: row.ReferenceNumber);
+                ReferenceNumber: row.ReferenceNumber)
+            {
+                BusinessPartnerId = row.BusinessPartnerId,
+                BusinessPartnerName = row.BusinessPartnerName
+            };
         }).ToList();
 
         var closingBalance =
@@ -739,6 +754,12 @@ public sealed class FinancialStatementService(
                     ? voucher.DriverTrip!.InvoiceNumber
                     : null,
                 DriverTripId = voucher.DriverTripId,
+                BusinessPartnerId = voucher.DriverTripId.HasValue
+                    ? voucher.DriverTrip!.BusinessPartnerId
+                    : null,
+                BusinessPartnerName = voucher.DriverTripId.HasValue
+                    ? voucher.DriverTrip!.BusinessPartner.Name
+                    : null,
                 MovementTypeName = voucher.CashMovementType!.Name,
                 Description = voucher.Description,
                 CashPaid = voucher.Direction == CashDirection.Payment
@@ -768,6 +789,8 @@ public sealed class FinancialStatementService(
                 SourceNumber = "TR-" + trip.Id,
                 InvoiceNumber = trip.InvoiceNumber,
                 DriverTripId = (int?)trip.Id,
+                BusinessPartnerId = trip.BusinessPartnerId,
+                BusinessPartnerName = trip.BusinessPartner.Name,
                 MovementTypeName = null,
                 Description = trip.CostNotes,
                 CashPaid = 0m,
@@ -844,6 +867,8 @@ public sealed class FinancialStatementService(
         public string MovementName { get; init; } = string.Empty;
         public string? Description { get; init; }
         public string? PartyName { get; init; }
+        public CurrencyCode Currency { get; init; }
+        public decimal ExchangeRate { get; init; }
         public decimal ReceiptAmount { get; init; }
         public decimal PaymentAmount { get; init; }
         public decimal BaseReceiptAmount { get; init; }
@@ -881,6 +906,8 @@ public sealed class FinancialStatementService(
         public string SourceNumber { get; init; } = string.Empty;
         public string? InvoiceNumber { get; init; }
         public int? DriverTripId { get; init; }
+        public int? BusinessPartnerId { get; init; }
+        public string? BusinessPartnerName { get; init; }
         public string? MovementTypeName { get; init; }
         public string? Description { get; init; }
         public decimal CashPaid { get; init; }
