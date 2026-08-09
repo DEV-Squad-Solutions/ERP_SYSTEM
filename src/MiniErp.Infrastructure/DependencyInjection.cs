@@ -30,7 +30,6 @@ public static class DependencyInjection
         services.AddHttpContextAccessor();
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<AuditableEntityInterceptor>();
-        services.AddScoped<RealtimeChangeInterceptor>();
         services.AddOptions<FrankfurterOptions>()
             .Bind(configuration.GetSection(FrankfurterOptions.SectionName))
             .Validate(options =>

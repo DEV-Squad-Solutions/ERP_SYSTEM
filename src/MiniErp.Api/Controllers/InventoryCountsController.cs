@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.InventoryCounts.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.InventoryCounts;
 
@@ -55,6 +56,14 @@ public sealed class InventoryCountsController(
             request,
             cancellationToken);
 
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<InventoryCountsRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
+
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -77,6 +86,13 @@ public sealed class InventoryCountsController(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<InventoryCountsRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 
@@ -94,6 +110,13 @@ public sealed class InventoryCountsController(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<InventoryCountsRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 
@@ -111,6 +134,13 @@ public sealed class InventoryCountsController(
             id,
             rowVersion,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<InventoryCountsRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 using FluentValidation;
+using Hangfire;
+using Hangfire.SqlServer;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Errors;
@@ -53,7 +55,23 @@ builder.Services.AddCors(options =>
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddSignalR();
-builder.Services.AddHostedService<RealtimeOutboxDispatcher>();
+var hangfireConnectionString = builder.Configuration
+    .GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException(
+        "Connection string 'DefaultConnection' was not found.");
+builder.Services.AddHangfire(configuration => configuration
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UseSqlServerStorage(
+        hangfireConnectionString,
+        new SqlServerStorageOptions
+        {
+            PrepareSchemaIfNecessary = true,
+            QueuePollInterval = TimeSpan.FromSeconds(15),
+            UseRecommendedIsolationLevel = true
+        }));
+builder.Services.AddHangfireServer();
 builder.Services.Configure<ApiBehaviorOptions>(options =>
 {
     options.SuppressMapClientErrors = true;

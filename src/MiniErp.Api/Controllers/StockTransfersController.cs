@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.StockTransfers.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.StockTransfers;
 
@@ -53,6 +54,13 @@ public sealed class StockTransfersController(
         var result = await stockTransferService.AddAsync(
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<StockTransfersRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -75,6 +83,13 @@ public sealed class StockTransfersController(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<StockTransfersRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 
@@ -90,6 +105,13 @@ public sealed class StockTransfersController(
         var result = await stockTransferService.DeleteAsync(
             id,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<StockTransfersRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

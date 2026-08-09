@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.ItemsCategories.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.ItemsCategories;
 
@@ -65,6 +66,13 @@ public sealed class ItemsCategoriesController(
         var result = await itemsCategoryService.AddAsync(
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<ItemsCategoriesRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -88,6 +96,13 @@ public sealed class ItemsCategoriesController(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<ItemsCategoriesRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 
@@ -103,6 +118,13 @@ public sealed class ItemsCategoriesController(
         var result = await itemsCategoryService.DeleteAsync(
             id,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<ItemsCategoriesRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

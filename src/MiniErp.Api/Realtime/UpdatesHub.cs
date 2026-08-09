@@ -20,6 +20,21 @@ public sealed class UpdatesHub : Hub
         await Groups.AddToGroupAsync(
             Context.ConnectionId,
             RealtimeHubGroups.Company(companyId));
+
+        foreach (var role in new[]
+                 {
+                     ApplicationRoles.Admin,
+                     ApplicationRoles.User
+                 })
+        {
+            if (Context.User?.IsInRole(role) == true)
+            {
+                await Groups.AddToGroupAsync(
+                    Context.ConnectionId,
+                    RealtimeHubGroups.CompanyRole(companyId, role));
+            }
+        }
+
         await base.OnConnectedAsync();
     }
 }

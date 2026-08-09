@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.BusinessPartners.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.BusinessPartners;
 using MiniErp.Application.Features.PartnerItemReports;
@@ -90,6 +91,14 @@ public sealed class BusinessPartnersController(
             request,
             cancellationToken);
 
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<BusinessPartnersRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
+
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -112,6 +121,13 @@ public sealed class BusinessPartnersController(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<BusinessPartnersRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 
@@ -127,6 +143,13 @@ public sealed class BusinessPartnersController(
         var result = await businessPartnerService.DeleteAsync(
             id,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<BusinessPartnersRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

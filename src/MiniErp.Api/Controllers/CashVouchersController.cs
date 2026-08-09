@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.CashVouchers.Jobs;
+using MiniErp.Api.Features.ExchangeRates.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.CashVouchers;
 
@@ -54,6 +56,13 @@ public sealed class CashVouchersController(
         var result = await cashVoucherService.AddAsync(
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<CashVouchersRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -76,6 +85,23 @@ public sealed class CashVouchersController(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            TryEnqueueRealtime<CashVouchersRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+            if (request.ExchangeRate.HasValue)
+            {
+                TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
+                    "Updated",
+                    $"{result.Value.Currency}:{result.Value.VoucherDate}",
+                    realtime => job => job.ExecuteAsync(realtime),
+                    operationId: operationId);
+            }
+        }
         return this.ToActionResult(result);
     }
 
@@ -91,6 +117,13 @@ public sealed class CashVouchersController(
         var result = await cashVoucherService.DeleteAsync(
             id,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<CashVouchersRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

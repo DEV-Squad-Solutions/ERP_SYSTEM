@@ -3739,45 +3739,6 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.ToTable("UserCompanies", (string)null);
                 });
 
-            modelBuilder.Entity("MiniErp.Infrastructure.Persistence.Realtime.RealtimeOutboxMessage", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("AttemptCount")
-                        .HasColumnType("int");
-
-                    b.Property<int>("CompanyId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("DispatchedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("LastError")
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
-
-                    b.Property<DateTime?>("NextAttemptAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("OccurredAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Payload")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CompanyId", "OccurredAtUtc");
-
-                    b.HasIndex("DispatchedAtUtc", "NextAttemptAtUtc", "OccurredAtUtc")
-                        .HasDatabaseName("IX_RealtimeOutboxMessages_Dispatch");
-
-                    b.ToTable("RealtimeOutboxMessages", (string)null);
-                });
-
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
                 {
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", null)

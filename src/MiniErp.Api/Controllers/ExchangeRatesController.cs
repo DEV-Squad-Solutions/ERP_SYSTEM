@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.ExchangeRates.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Domain.Enums;
@@ -91,6 +92,14 @@ public sealed class ExchangeRatesController(
         var result = await exchangeRateService.ImportAsync(
             request,
             cancellationToken);
+        if (result.IsSuccess &&
+            result.Value.ImportedCount + result.Value.UpdatedCount > 0)
+        {
+            TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
+                "Updated",
+                request.RateDate,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 
@@ -106,6 +115,14 @@ public sealed class ExchangeRatesController(
         var result = await exchangeRateService.AddAsync(
             request,
             cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
 
         return result.IsFailure
             ? this.ToProblem(result.Error)
@@ -129,6 +146,13 @@ public sealed class ExchangeRatesController(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 
@@ -144,6 +168,13 @@ public sealed class ExchangeRatesController(
         var result = await exchangeRateService.DeleteAsync(
             id,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

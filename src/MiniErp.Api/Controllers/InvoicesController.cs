@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.Invoices.Jobs;
+using MiniErp.Api.Features.ExchangeRates.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.Invoices;
 
@@ -101,6 +103,25 @@ public sealed class InvoicesController(
             request,
             cancellationToken);
 
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            TryEnqueueRealtime<InvoicesRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+            if (request.ExchangeRate.HasValue ||
+                request.CashboxExchangeRate.HasValue)
+            {
+                TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
+                    "Updated",
+                    $"{result.Value.Currency}:{result.Value.InvoiceDate}",
+                    realtime => job => job.ExecuteAsync(realtime),
+                    operationId: operationId);
+            }
+        }
+
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -123,6 +144,24 @@ public sealed class InvoicesController(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            TryEnqueueRealtime<InvoicesRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+            if (request.ExchangeRate.HasValue ||
+                request.CashboxExchangeRate.HasValue)
+            {
+                TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
+                    "Updated",
+                    $"{result.Value.Currency}:{result.Value.InvoiceDate}",
+                    realtime => job => job.ExecuteAsync(realtime),
+                    operationId: operationId);
+            }
+        }
         return this.ToActionResult(result);
     }
 
@@ -140,6 +179,13 @@ public sealed class InvoicesController(
             id,
             rowVersion,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<InvoicesRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

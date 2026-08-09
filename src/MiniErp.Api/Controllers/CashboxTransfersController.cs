@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.CashboxTransfers.Jobs;
+using MiniErp.Api.Features.ExchangeRates.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.CashboxTransfers;
 
@@ -54,6 +56,23 @@ public sealed class CashboxTransfersController(
         var result = await cashboxTransferService.AddAsync(
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            TryEnqueueRealtime<CashboxTransfersRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+            if (request.ExchangeRate.HasValue)
+            {
+                TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
+                    "Updated",
+                    $"{result.Value.Currency}:{result.Value.TransferDate}",
+                    realtime => job => job.ExecuteAsync(realtime),
+                    operationId: operationId);
+            }
+        }
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -76,6 +95,23 @@ public sealed class CashboxTransfersController(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            TryEnqueueRealtime<CashboxTransfersRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+            if (request.ExchangeRate.HasValue)
+            {
+                TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
+                    "Updated",
+                    $"{result.Value.Currency}:{result.Value.TransferDate}",
+                    realtime => job => job.ExecuteAsync(realtime),
+                    operationId: operationId);
+            }
+        }
         return this.ToActionResult(result);
     }
 
@@ -91,6 +127,13 @@ public sealed class CashboxTransfersController(
         var result = await cashboxTransferService.DeleteAsync(
             id,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<CashboxTransfersRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

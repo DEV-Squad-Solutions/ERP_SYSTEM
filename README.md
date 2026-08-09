@@ -83,17 +83,27 @@ npm run dev
 
 The client targets `https://localhost:7067/api/v1` by default. Override it with `VITE_API_BASE_URL` or edit the API URL on the login screen. Companies and Users require the `Admin` role; non-admin users receive read-only catalog screens.
 
-Frontend SignalR handoff documents:
+## Realtime updates
 
-- [`FRONTEND_SIGNALR_QUICK_START_AR.md`](FRONTEND_SIGNALR_QUICK_START_AR.md)
-  is the short Arabic quick-start checklist.
-- [`FRONTEND_SIGNALR_GUIDE_AR.md`](FRONTEND_SIGNALR_GUIDE_AR.md) is the Arabic
-  explanation with a complete React example and resource-to-page routing.
-- [`FRONTEND_SIGNALR_PRACTICAL_STEPS.md`](FRONTEND_SIGNALR_PRACTICAL_STEPS.md)
-  is the short implementation checklist.
-- [`FRONTEND_SIGNALR_INTEGRATION_GUIDE.md`](FRONTEND_SIGNALR_INTEGRATION_GUIDE.md)
-  is the complete contract, client implementation, delivery behavior,
-  filtering guidance, troubleshooting, and acceptance test guide.
+Successful mutation endpoints enqueue a feature-owned Hangfire job only after
+the feature service has saved and committed its database work. Enqueue and job
+failures are non-critical: they are logged/retried and never change the result
+of an already committed CRUD operation.
+
+Jobs send `ReceiveEntityChanged` to the authenticated `company:{companyId}`
+SignalR group with only `eventId`, `resource`, `action`, `entityId`, and
+`occurredAtUtc`. The prior `entityChanged` event is also sent temporarily for
+existing clients. No realtime path broadcasts with `Clients.All`.
+
+Company and user administration events use the narrower company/Admin role
+group. Features that can persist a requested exchange rate as part of their
+own transaction also enqueue an ExchangeRates invalidation after that parent
+operation commits.
+
+Hangfire uses the default SQL Server connection. Each realtime job retries five
+times and then remains failed for operational inspection. The old custom
+realtime Outbox is removed by a forward migration that refuses to drop its
+table while any undispatched row remains.
 
 ## Swagger
 

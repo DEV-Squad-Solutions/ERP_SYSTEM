@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.Containers.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.Containers;
 
@@ -55,6 +56,14 @@ public sealed class ContainersController(IContainerService containerService)
     {
         var result = await containerService.AddAsync(request, cancellationToken);
 
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<ContainersRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
+
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -77,6 +86,13 @@ public sealed class ContainersController(IContainerService containerService)
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<ContainersRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 
@@ -90,6 +106,13 @@ public sealed class ContainersController(IContainerService containerService)
         CancellationToken cancellationToken)
     {
         var result = await containerService.DeleteAsync(id, cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<ContainersRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }
