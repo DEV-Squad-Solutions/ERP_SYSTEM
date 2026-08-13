@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -8,10 +7,10 @@ namespace MiniErp.Infrastructure.Persistence;
 public static class DatabaseMigrationExtensions
 {
     public static async Task ApplyPendingMigrationsAsync(
-        this WebApplication app,
+        this IServiceProvider services,
         CancellationToken cancellationToken = default)
     {
-        await using var scope = app.Services.CreateAsyncScope();
+        await using var scope = services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var logger = scope.ServiceProvider
             .GetRequiredService<ILoggerFactory>()
