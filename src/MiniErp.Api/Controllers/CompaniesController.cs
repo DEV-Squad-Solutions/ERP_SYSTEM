@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.Companies.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.Companies;
 
@@ -63,6 +64,15 @@ public sealed class CompaniesController(ICompanyService companyService)
     {
         var result = await companyService.AddAsync(request, cancellationToken);
 
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<CompaniesRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime),
+                companyId: result.Value.Id);
+        }
+
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -80,13 +90,22 @@ public sealed class CompaniesController(ICompanyService companyService)
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Update(
         int id,
-        CompanyRequest request,
+        CompanyUpdateRequest request,
         CancellationToken cancellationToken)
     {
         var result = await companyService.UpdateAsync(
             id,
             request,
             cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<CompaniesRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime),
+                companyId: id);
+        }
 
         return this.ToActionResult(result);
     }
@@ -103,6 +122,14 @@ public sealed class CompaniesController(ICompanyService companyService)
         CancellationToken cancellationToken)
     {
         var result = await companyService.DeleteAsync(id, cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<CompaniesRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime),
+                companyId: id);
+        }
         return this.ToActionResult(result);
     }
 }

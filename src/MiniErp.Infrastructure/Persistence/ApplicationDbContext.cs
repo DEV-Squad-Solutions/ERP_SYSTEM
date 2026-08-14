@@ -14,11 +14,20 @@ using MiniErp.Infrastructure.Identity;
 
 namespace MiniErp.Infrastructure.Persistence;
 
-public sealed class ApplicationDbContext(
-    DbContextOptions<ApplicationDbContext> options)
-    : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>(options)
+public sealed class ApplicationDbContext
+    : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>
 {
+    public ApplicationDbContext(
+        DbContextOptions<ApplicationDbContext> options)
+        : base(options)
+    {
+    }
+
     public DbSet<Company> Companies => Set<Company>();
+
+    public DbSet<CompanySettings> CompanySettings => Set<CompanySettings>();
+
+    public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
 
     public DbSet<BusinessPartner> BusinessPartners => Set<BusinessPartner>();
 
@@ -29,6 +38,9 @@ public sealed class ApplicationDbContext(
 
     public DbSet<CashVoucher> CashVouchers => Set<CashVoucher>();
 
+    public DbSet<CashboxTransfer> CashboxTransfers =>
+        Set<CashboxTransfer>();
+
     public DbSet<PartnerOpeningBalance> PartnerOpeningBalances =>
         Set<PartnerOpeningBalance>();
 
@@ -37,6 +49,8 @@ public sealed class ApplicationDbContext(
     public DbSet<Item> Items => Set<Item>();
 
     public DbSet<ItemUnit> ItemUnits => Set<ItemUnit>();
+
+    public DbSet<ItemsCategory> ItemsCategories => Set<ItemsCategory>();
 
     public DbSet<Store> Stores => Set<Store>();
 
@@ -52,6 +66,23 @@ public sealed class ApplicationDbContext(
     public DbSet<StockOpeningBalanceLine> StockOpeningBalanceLines =>
         Set<StockOpeningBalanceLine>();
 
+    public DbSet<StockAdjustment> StockAdjustments =>
+        Set<StockAdjustment>();
+
+    public DbSet<StockAdjustmentLine> StockAdjustmentLines =>
+        Set<StockAdjustmentLine>();
+
+    public DbSet<StockTransfer> StockTransfers => Set<StockTransfer>();
+
+    public DbSet<StockTransferLine> StockTransferLines =>
+        Set<StockTransferLine>();
+
+    public DbSet<InventoryCount> InventoryCounts =>
+        Set<InventoryCount>();
+
+    public DbSet<InventoryCountLine> InventoryCountLines =>
+        Set<InventoryCountLine>();
+
     public DbSet<Invoice> Invoices => Set<Invoice>();
 
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
@@ -59,7 +90,15 @@ public sealed class ApplicationDbContext(
     public DbSet<InvoiceContainerLine> InvoiceContainerLines =>
         Set<InvoiceContainerLine>();
 
+    public DbSet<InvoicePayment> InvoicePayments => Set<InvoicePayment>();
+
     public DbSet<ItemMovement> ItemMovements => Set<ItemMovement>();
+
+    public DbSet<InventoryCostAllocation> InventoryCostAllocations =>
+        Set<InventoryCostAllocation>();
+
+    public DbSet<ItemStoreBalance> ItemStoreBalances =>
+        Set<ItemStoreBalance>();
 
     public DbSet<ContainerMovement> ContainerMovements =>
         Set<ContainerMovement>();
@@ -72,6 +111,9 @@ public sealed class ApplicationDbContext(
     public DbSet<UserCompany> UserCompanies => Set<UserCompany>();
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+
+    public DbSet<EntityIdentifierSequence> EntityIdentifierSequences =>
+        Set<EntityIdentifierSequence>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

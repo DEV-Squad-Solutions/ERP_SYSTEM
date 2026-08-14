@@ -1,9 +1,12 @@
+using System.Data;
+using static MiniErp.Application.Features.CashVouchers.CashVoucherErrors;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.CashVouchers;
+using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Logistics;
@@ -16,6 +19,7 @@ public sealed class CashVoucherService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
+    IExchangeRateResolver exchangeRateResolver,
     TimeProvider timeProvider)
     : ICashVoucherService, IScopedService
 {
@@ -36,9 +40,11 @@ public sealed class CashVoucherService(
             .Where(voucher =>
                 string.IsNullOrEmpty(search) ||
                 voucher.VoucherNumber.Contains(search) ||
-                voucher.Cashbox.Code.Contains(search) ||
-                voucher.Cashbox.Name.Contains(search) ||
-                voucher.CashMovementType.Name.Contains(search) ||
+                (voucher.Cashbox != null &&
+                 (voucher.Cashbox.Code.Contains(search) ||
+                  voucher.Cashbox.Name.Contains(search))) ||
+                (voucher.CashMovementType != null &&
+                 voucher.CashMovementType.Name.Contains(search)) ||
                 (voucher.BusinessPartner != null &&
                  (voucher.BusinessPartner.Code.Contains(search) ||
                   voucher.BusinessPartner.Name.Contains(search))) ||
@@ -47,6 +53,10 @@ public sealed class CashVoucherService(
                   voucher.Driver.Name.Contains(search))) ||
                 (voucher.DriverTrip != null &&
                  voucher.DriverTrip.InvoiceNumber.Contains(search)) ||
+                (voucher.Invoice != null &&
+                 (voucher.Invoice.InvoiceNumber.Contains(search) ||
+                  (voucher.Invoice.PartnerInvoiceNo != null &&
+                   voucher.Invoice.PartnerInvoiceNo.Contains(search)))) ||
                 (voucher.ExternalPartyName != null &&
                  voucher.ExternalPartyName.Contains(search)) ||
                 (voucher.ReferenceNumber != null &&
@@ -79,6 +89,12 @@ public sealed class CashVoucherService(
             .Where(voucher =>
                 !filters.DriverTripId.HasValue ||
                 voucher.DriverTripId == filters.DriverTripId.Value)
+            .Where(voucher =>
+                !filters.IsDraft.HasValue ||
+                filters.IsDraft.Value ==
+                (!voucher.CashboxId.HasValue ||
+                 (!voucher.CashMovementTypeId.HasValue &&
+                  !voucher.CashboxTransferId.HasValue)))
             .Where(voucher =>
                 !filters.FromDate.HasValue ||
                 voucher.VoucherDate >= filters.FromDate.Value)
@@ -118,31 +134,50 @@ public sealed class CashVoucherService(
         CashVoucherRequest request,
         CancellationToken cancellationToken = default)
     {
-        await using var transaction =
-            await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
-        var preparation = await PrepareAsync(
-            request,
-            currentVoucher: null,
-            cancellationToken);
-        if (preparation.IsFailure)
+        var cashbox = await dbContext.Cashboxes
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                entity =>
+                    entity.CompanyId == companyId &&
+                    entity.Id == request.CashboxId,
+                cancellationToken);
+        if (cashbox is null)
         {
             await transaction.RollbackAsync(cancellationToken);
-            return Result<CashVoucherResponse>.Failure(preparation.Error);
+            return Result<CashVoucherResponse>.Failure(
+                CashboxNotFound(request.CashboxId));
+        }
+
+        if (!cashbox.IsActive)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return Result<CashVoucherResponse>.Failure(CashboxInactive());
         }
 
         var voucher = request.Adapt<CashVoucher>();
         voucher.CompanyId = companyId;
-        voucher.Currency = preparation.Value.Cashbox.Currency;
+        var prefix = request.Direction == CashDirection.Receipt
+            ? "RCV"
+            : "PAY";
+        voucher.VoucherNumber = await EntityIdentifierGenerator
+            .GenerateUniqueAsync(
+                dbContext,
+                prefix,
+                companyId,
+                dbContext.CashVouchers
+                    .IgnoreQueryFilters()
+                    .Where(entity => entity.CompanyId == companyId)
+                    .Select(entity => entity.VoucherNumber),
+                cancellationToken);
+        voucher.CashMovementTypeId = null;
+        voucher.PartyType = CashPartyType.None;
+        voucher.InitializeDraft(cashbox.Currency);
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
 
         dbContext.CashVouchers.Add(voucher);
-        if (preparation.Value.BusinessPartner is not null)
-        {
-            dbContext.BusinessPartnerMovements.Add(
-                CreatePartnerMovement(voucher));
-        }
-
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var response = await ProjectResponseQuery(voucher.Id)
@@ -169,8 +204,8 @@ public sealed class CashVoucherService(
                 RowVersionRequired());
         }
 
-        await using var transaction =
-            await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
         var voucher = await dbContext.CashVouchers.FirstOrDefaultAsync(
             entity =>
@@ -185,6 +220,18 @@ public sealed class CashVoucherService(
         if (!voucher.RowVersion.SequenceEqual(request.RowVersion))
         {
             return Result<CashVoucherResponse>.Failure(Concurrency());
+        }
+
+        if (voucher.InvoiceId.HasValue)
+        {
+            return Result<CashVoucherResponse>.Failure(
+                InvoiceGeneratedReadOnly());
+        }
+
+        if (voucher.CashboxTransferId.HasValue)
+        {
+            return Result<CashVoucherResponse>.Failure(
+                TransferGeneratedReadOnly());
         }
 
         var preparation = await PrepareAsync(
@@ -202,7 +249,11 @@ public sealed class CashVoucherService(
             request.RowVersion;
 
         request.Adapt(voucher);
-        voucher.Currency = preparation.Value.Cashbox.Currency;
+        voucher.PartyType = request.PartyType ?? CashPartyType.None;
+        await ApplyPreparationAsync(
+            voucher,
+            preparation.Value,
+            cancellationToken);
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
         entry.Property(entity => entity.LastModifiedAt).IsModified = true;
 
@@ -238,8 +289,8 @@ public sealed class CashVoucherService(
             return Result.Failure(InvalidId());
         }
 
-        await using var transaction =
-            await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
         var voucher = await dbContext.CashVouchers.FirstOrDefaultAsync(
             entity =>
@@ -249,6 +300,16 @@ public sealed class CashVoucherService(
         if (voucher is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        if (voucher.InvoiceId.HasValue)
+        {
+            return Result.Failure(InvoiceGeneratedReadOnly());
+        }
+
+        if (voucher.CashboxTransferId.HasValue)
+        {
+            return Result.Failure(TransferGeneratedReadOnly());
         }
 
         var balanceError = await ValidateFinalBalancesAsync(
@@ -285,20 +346,31 @@ public sealed class CashVoucherService(
     }
 
     private async Task<Result<VoucherPreparation>> PrepareAsync(
-        CashVoucherRequest request,
-        CashVoucher? currentVoucher,
+        CashVoucherUpdateRequest request,
+        CashVoucher currentVoucher,
         CancellationToken cancellationToken)
     {
+        if (!request.CashboxId.HasValue ||
+            !request.CashMovementTypeId.HasValue)
+        {
+            return Result<VoucherPreparation>.Failure(
+                PostingReferencesMustBeTogether());
+        }
+
+        var cashboxId = request.CashboxId.Value;
+        var cashMovementTypeId = request.CashMovementTypeId.Value;
+        var partyType = request.PartyType ?? CashPartyType.None;
+
         var cashbox = await dbContext.Cashboxes
             .FirstOrDefaultAsync(
                 entity =>
                     entity.CompanyId == companyId &&
-                    entity.Id == request.CashboxId,
+                    entity.Id == cashboxId,
                 cancellationToken);
         if (cashbox is null)
         {
             return Result<VoucherPreparation>.Failure(
-                CashboxNotFound(request.CashboxId));
+                CashboxNotFound(cashboxId));
         }
 
         if (!cashbox.IsActive &&
@@ -308,16 +380,27 @@ public sealed class CashVoucherService(
             return Result<VoucherPreparation>.Failure(CashboxInactive());
         }
 
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            cashbox.Currency,
+            request.VoucherDate,
+            request.ExchangeRate,
+            cancellationToken);
+        if (exchangeRateResult.IsFailure)
+        {
+            return Result<VoucherPreparation>.Failure(
+                exchangeRateResult.Error);
+        }
+
         var movementType = await dbContext.CashMovementTypes
             .FirstOrDefaultAsync(
                 entity =>
                     entity.CompanyId == companyId &&
-                    entity.Id == request.CashMovementTypeId,
+                    entity.Id == cashMovementTypeId,
                 cancellationToken);
         if (movementType is null)
         {
             return Result<VoucherPreparation>.Failure(
-                MovementTypeNotFound(request.CashMovementTypeId));
+                MovementTypeNotFound(cashMovementTypeId));
         }
 
         if (!movementType.IsActive &&
@@ -335,7 +418,7 @@ public sealed class CashVoucherService(
         }
 
         BusinessPartner? partner = null;
-        if (request.PartyType == CashPartyType.Partner)
+        if (partyType == CashPartyType.Partner)
         {
             if (movementType.PartnerEffect == PartnerAccountEffect.None)
             {
@@ -370,7 +453,7 @@ public sealed class CashVoucherService(
         }
 
         Driver? driver = null;
-        if (request.PartyType == CashPartyType.Driver)
+        if (partyType == CashPartyType.Driver)
         {
             driver = await dbContext.Drivers
                 .AsNoTracking()
@@ -406,7 +489,7 @@ public sealed class CashVoucherService(
 
         var balanceError = await ValidateFinalBalancesAsync(
             currentVoucher,
-            request.CashboxId,
+            cashboxId,
             request.Direction,
             request.Amount,
             cancellationToken);
@@ -419,34 +502,8 @@ public sealed class CashVoucherService(
             new VoucherPreparation(
                 cashbox,
                 partner,
-                driver));
-    }
-
-    private async Task<Result<VoucherPreparation>> PrepareAsync(
-        CashVoucherUpdateRequest request,
-        CashVoucher currentVoucher,
-        CancellationToken cancellationToken)
-    {
-        var createShape = new CashVoucherRequest(
-            request.VoucherNumber,
-            request.VoucherDate,
-            request.Direction,
-            request.CashboxId,
-            request.CashMovementTypeId,
-            request.PartyType,
-            request.BusinessPartnerId,
-            request.DriverId,
-            request.DriverTripId,
-            request.ExternalPartyName,
-            request.Amount,
-            request.ReferenceNumber,
-            request.Description,
-            request.Notes);
-
-        return await PrepareAsync(
-            createShape,
-            currentVoucher,
-            cancellationToken);
+                driver,
+                exchangeRateResult.Value));
     }
 
     private async Task<Error?> ValidateFinalBalancesAsync(
@@ -457,9 +514,9 @@ public sealed class CashVoucherService(
         CancellationToken cancellationToken)
     {
         var affectedCashboxIds = new HashSet<int>();
-        if (currentVoucher is not null)
+        if (currentVoucher?.CashboxId is int currentCashboxId)
         {
-            affectedCashboxIds.Add(currentVoucher.CashboxId);
+            affectedCashboxIds.Add(currentCashboxId);
         }
 
         if (proposedCashboxId.HasValue)
@@ -479,8 +536,10 @@ public sealed class CashVoucherService(
                     cashbox.OpeningBalance +
                     (cashbox.Vouchers
                         .Where(voucher =>
-                            !excludedVoucherId.HasValue ||
-                            voucher.Id != excludedVoucherId.Value)
+                            (voucher.CashMovementTypeId.HasValue ||
+                             voucher.CashboxTransferId.HasValue) &&
+                            (!excludedVoucherId.HasValue ||
+                             voucher.Id != excludedVoucherId.Value))
                         .Sum(voucher =>
                             (decimal?)(voucher.Direction ==
                                 CashDirection.Receipt
@@ -516,7 +575,7 @@ public sealed class CashVoucherService(
             ? voucher.Amount
             : 0m;
 
-        return new BusinessPartnerMovement
+        var movement = new BusinessPartnerMovement
         {
             CompanyId = companyId,
             BusinessPartnerId = voucher.BusinessPartnerId!.Value,
@@ -532,6 +591,8 @@ public sealed class CashVoucherService(
             Description = voucher.Description ??
                 $"Cash voucher {voucher.VoucherNumber}"
         };
+        movement.ApplyExchangeRate(voucher.ExchangeRate);
+        return movement;
     }
 
     private async Task SynchronizePartnerMovementAsync(
@@ -576,6 +637,7 @@ public sealed class CashVoucherService(
         existing.Credit = voucher.Direction == CashDirection.Receipt
             ? voucher.Amount
             : 0m;
+        existing.ApplyExchangeRate(voucher.ExchangeRate);
         existing.Description = voucher.Description ??
             $"Cash voucher {voucher.VoucherNumber}";
     }
@@ -587,100 +649,41 @@ public sealed class CashVoucherService(
                 voucher.Id == id)
             .ProjectToType<CashVoucherResponse>();
 
+    private async Task ApplyPreparationAsync(
+        CashVoucher voucher,
+        VoucherPreparation preparation,
+        CancellationToken cancellationToken)
+    {
+        if (preparation.Cashbox is not null &&
+            preparation.ExchangeRate is not null)
+        {
+            voucher.Currency = preparation.Cashbox.Currency;
+            voucher.ApplyExchangeRate(
+                preparation.ExchangeRate.ExchangeRateId,
+                preparation.ExchangeRate.Rate);
+            return;
+        }
+
+        voucher.CashboxId = null;
+        voucher.CashMovementTypeId = null;
+        voucher.PartyType = CashPartyType.None;
+        voucher.BusinessPartnerId = null;
+        voucher.DriverId = null;
+        voucher.DriverTripId = null;
+        voucher.ExternalPartyName = null;
+
+        voucher.Currency = await dbContext.CompanySettings
+            .AsNoTracking()
+            .Where(settings => settings.CompanyId == companyId)
+            .Select(settings => (CurrencyCode?)settings.BaseCurrency)
+            .SingleOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
+        voucher.ApplyExchangeRate(exchangeRateId: null, exchangeRate: 1m);
+    }
+
     private sealed record VoucherPreparation(
-        Cashbox Cashbox,
+        Cashbox? Cashbox,
         BusinessPartner? BusinessPartner,
-        Driver? Driver);
+        Driver? Driver,
+        ResolvedExchangeRate? ExchangeRate);
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "CashVouchers.InvalidId",
-            "يجب أن يكون رقم سند النقدية أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "CashVouchers.NotFound",
-            $"لم يتم العثور على سند النقدية رقم {id}.");
-
-    private static Error RowVersionRequired() =>
-        Error.Validation(
-            "CashVouchers.RowVersionRequired",
-            "يجب إرسال إصدار سند النقدية الحالي للتعديل.",
-            nameof(CashVoucherUpdateRequest.RowVersion));
-
-    private static Error Concurrency() =>
-        Error.Conflict(
-            "CashVouchers.Concurrency",
-            "تم تعديل سند النقدية بواسطة مستخدم آخر. أعد تحميل السند ثم حاول مرة أخرى.");
-
-    private static Error CashboxNotFound(int id) =>
-        Error.NotFound(
-            "CashVouchers.CashboxNotFound",
-            $"لم يتم العثور على صندوق النقدية رقم {id}.",
-            nameof(CashVoucherRequest.CashboxId));
-
-    private static Error CashboxInactive() =>
-        Error.Conflict(
-            "CashVouchers.CashboxInactive",
-            "لا يمكن استخدام صندوق نقدية غير نشط في سند جديد.",
-            nameof(CashVoucherRequest.CashboxId));
-
-    private static Error MovementTypeNotFound(int id) =>
-        Error.NotFound(
-            "CashVouchers.MovementTypeNotFound",
-            $"لم يتم العثور على نوع الحركة النقدية رقم {id}.",
-            nameof(CashVoucherRequest.CashMovementTypeId));
-
-    private static Error MovementTypeInactive() =>
-        Error.Conflict(
-            "CashVouchers.MovementTypeInactive",
-            "لا يمكن استخدام نوع حركة نقدية غير نشط في سند جديد.",
-            nameof(CashVoucherRequest.CashMovementTypeId));
-
-    private static Error MovementTypeDirectionMismatch() =>
-        Error.Conflict(
-            "CashVouchers.MovementTypeDirectionMismatch",
-            "اتجاه نوع الحركة النقدية لا يطابق اتجاه السند.",
-            nameof(CashVoucherRequest.CashMovementTypeId));
-
-    private static Error MovementTypeNotForPartner() =>
-        Error.Conflict(
-            "CashVouchers.MovementTypeNotForPartner",
-            "نوع الحركة النقدية المختار غير مخصص لحسابات العملاء أو الموردين.",
-            nameof(CashVoucherRequest.CashMovementTypeId));
-
-    private static Error MovementTypeForPartnerOnly() =>
-        Error.Conflict(
-            "CashVouchers.MovementTypeForPartnerOnly",
-            "نوع الحركة النقدية المختار مخصص للعملاء أو الموردين فقط.",
-            nameof(CashVoucherRequest.PartyType));
-
-    private static Error PartnerNotFound(int? id) =>
-        Error.NotFound(
-            "CashVouchers.PartnerNotFound",
-            $"لم يتم العثور على العميل أو المورد رقم {id}.",
-            nameof(CashVoucherRequest.BusinessPartnerId));
-
-    private static Error PartnerCurrencyMismatch() =>
-        Error.Conflict(
-            "CashVouchers.PartnerCurrencyMismatch",
-            "عملة صندوق النقدية لا تطابق عملة العميل أو المورد.",
-            nameof(CashVoucherRequest.BusinessPartnerId));
-
-    private static Error DriverNotFound(int? id) =>
-        Error.NotFound(
-            "CashVouchers.DriverNotFound",
-            $"لم يتم العثور على السائق رقم {id}.",
-            nameof(CashVoucherRequest.DriverId));
-
-    private static Error DriverTripNotFound(int id) =>
-        Error.NotFound(
-            "CashVouchers.DriverTripNotFound",
-            $"لم يتم العثور على رحلة رقم {id} تخص السائق المحدد.",
-            nameof(CashVoucherRequest.DriverTripId));
-
-    private static Error InsufficientCashboxBalance(int cashboxId) =>
-        Error.Conflict(
-            "CashVouchers.InsufficientCashboxBalance",
-            $"الرصيد المتاح في صندوق النقدية رقم {cashboxId} لا يسمح بهذه العملية.");
 }

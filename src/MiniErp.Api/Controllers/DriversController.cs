@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.Drivers.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.Drivers;
 
@@ -55,6 +56,14 @@ public sealed class DriversController(IDriverService driverService)
     {
         var result = await driverService.AddAsync(request, cancellationToken);
 
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<DriversRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
+
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -77,6 +86,13 @@ public sealed class DriversController(IDriverService driverService)
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<DriversRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 
@@ -90,6 +106,13 @@ public sealed class DriversController(IDriverService driverService)
         CancellationToken cancellationToken)
     {
         var result = await driverService.DeleteAsync(id, cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<DriversRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using static MiniErp.Application.Features.Authentication.AuthenticationErrors;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 
@@ -15,9 +16,6 @@ public sealed class CurrentUserService(IHttpContextAccessor httpContextAccessor)
 
         return Guid.TryParse(userIdValue, out var userId) && userId != Guid.Empty
             ? Result<Guid>.Success(userId)
-            : Result<Guid>.Failure(
-                Error.Unauthorized(
-                    "Authentication.InvalidUserContext",
-                    "رقم المستخدم المسجل دخوله غير موجود أو غير صالح."));
+            : Result<Guid>.Failure(InvalidUserContext());
     }
 }

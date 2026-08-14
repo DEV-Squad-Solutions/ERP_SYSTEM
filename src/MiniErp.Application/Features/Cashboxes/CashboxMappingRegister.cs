@@ -9,33 +9,56 @@ public sealed class CashboxMappingRegister : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.ForType<CashboxRequest, Cashbox>()
-            .Map(cashbox => cashbox.Code, request => request.Code.Trim())
+            .Ignore(cashbox => cashbox.Code)
+            .Ignore(cashbox => cashbox.OpeningBalanceDate)
+            .Ignore(cashbox => cashbox.OpeningExchangeRateId)
+            .Ignore(cashbox => cashbox.OpeningExchangeRateRecord)
+            .Ignore(cashbox => cashbox.OpeningExchangeRate)
+            .Ignore(cashbox => cashbox.BaseOpeningBalance)
             .Map(cashbox => cashbox.Name, request => request.Name.Trim())
             .Map(cashbox => cashbox.Notes, request => Normalize(request.Notes));
 
         config.ForType<CashboxUpdateRequest, Cashbox>()
+            .Ignore(cashbox => cashbox.Code)
             .Ignore(cashbox => cashbox.RowVersion)
-            .Map(cashbox => cashbox.Code, request => request.Code.Trim())
+            .Ignore(cashbox => cashbox.OpeningBalanceDate)
+            .Ignore(cashbox => cashbox.OpeningExchangeRateId)
+            .Ignore(cashbox => cashbox.OpeningExchangeRateRecord)
+            .Ignore(cashbox => cashbox.OpeningExchangeRate)
+            .Ignore(cashbox => cashbox.BaseOpeningBalance)
             .Map(cashbox => cashbox.Name, request => request.Name.Trim())
             .Map(cashbox => cashbox.Notes, request => Normalize(request.Notes));
 
         config.ForType<Cashbox, CashboxResponse>()
             .Map(
+                response => response.BaseCurrency,
+                cashbox => cashbox.Company.Settings == null
+                    ? CurrencyCode.EGP
+                    : cashbox.Company.Settings.BaseCurrency)
+            .Map(
                 response => response.CurrentBalance,
                 cashbox => cashbox.OpeningBalance +
-                    cashbox.Vouchers.Sum(voucher =>
-                        voucher.Direction == CashDirection.Receipt
-                            ? voucher.Amount
-                            : -voucher.Amount));
+                    cashbox.Vouchers
+                        .Where(voucher =>
+                            voucher.CashMovementTypeId.HasValue ||
+                            voucher.CashboxTransferId.HasValue)
+                        .Sum(voucher =>
+                            voucher.Direction == CashDirection.Receipt
+                                ? voucher.Amount
+                                : -voucher.Amount));
 
         config.ForType<Cashbox, CashboxSelectResponse>()
             .Map(
                 response => response.CurrentBalance,
                 cashbox => cashbox.OpeningBalance +
-                    cashbox.Vouchers.Sum(voucher =>
-                        voucher.Direction == CashDirection.Receipt
-                            ? voucher.Amount
-                            : -voucher.Amount));
+                    cashbox.Vouchers
+                        .Where(voucher =>
+                            voucher.CashMovementTypeId.HasValue ||
+                            voucher.CashboxTransferId.HasValue)
+                        .Sum(voucher =>
+                            voucher.Direction == CashDirection.Receipt
+                                ? voucher.Amount
+                                : -voucher.Amount));
     }
 
     private static string? Normalize(string? value) =>

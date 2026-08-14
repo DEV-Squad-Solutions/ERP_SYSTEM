@@ -1,4 +1,5 @@
 using Mapster;
+using static MiniErp.Application.Features.Users.UserErrors;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -26,7 +27,7 @@ public sealed class UserService(
         if (pagination.PageNumber <= 0 ||
             pagination.PageSize is <= 0 or > PaginationRequest.MaxPageSize)
         {
-            return Result<PagedResponse<UserResponse>>.Failure(InvalidPagination());
+            return Result<PagedResponse<UserResponse>>.Failure(PaginationErrors.Invalid());
         }
 
         filters ??= new UserFilterRequest();
@@ -299,10 +300,7 @@ public sealed class UserService(
 
         if (currentUserResult.Value == id)
         {
-            return Result.Failure(
-                Error.Conflict(
-                    "Users.CannotDeleteCurrentUser",
-                    "لا يمكن للمستخدم الحالي حذف حسابه بنفسه."));
+            return Result.Failure(CannotDeleteCurrentUser());
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -362,18 +360,12 @@ public sealed class UserService(
         var userWithName = await userManager.FindByNameAsync(userName);
         if (userWithName is not null && userWithName.Id != excludedId)
         {
-            return Error.Conflict(
-                "Users.UserNameExists",
-                $"اسم المستخدم '{userName}' مستخدم بالفعل.",
-                nameof(UserCreateRequest.UserName));
+            return UserNameExists(userName);
         }
 
         var userWithEmail = await userManager.FindByEmailAsync(email);
         return userWithEmail is not null && userWithEmail.Id != excludedId
-            ? Error.Conflict(
-                "Users.EmailExists",
-                $"البريد الإلكتروني '{email}' مستخدم بالفعل.",
-                nameof(UserCreateRequest.Email))
+            ? EmailExists(email)
             : null;
     }
 
@@ -405,10 +397,7 @@ public sealed class UserService(
         var missingRoles = normalizedRoles.Except(
             resolvedRoles,
             StringComparer.OrdinalIgnoreCase);
-        return Result<List<string>>.Failure(
-            Error.NotFound(
-                "Users.RolesNotFound",
-                $"لم يتم العثور على الأدوار التالية: {string.Join(", ", missingRoles)}."));
+        return Result<List<string>>.Failure(RolesNotFound(missingRoles));
     }
 
     private async Task<Result<List<UserCompanyResponse>>> GetCompaniesAsync(
@@ -431,10 +420,7 @@ public sealed class UserService(
 
         var foundIds = companies.Select(company => company.Id).ToHashSet();
         var missingIds = companyIds.Where(id => !foundIds.Contains(id));
-        return Result<List<UserCompanyResponse>>.Failure(
-            Error.NotFound(
-                "Users.CompaniesNotFound",
-                $"الشركات التالية غير موجودة أو محذوفة: {string.Join(", ", missingIds)}."));
+        return Result<List<UserCompanyResponse>>.Failure(CompaniesNotFound(missingIds));
     }
 
     private async Task SyncCompaniesAsync(
@@ -551,39 +537,14 @@ public sealed class UserService(
             error.Code == nameof(IdentityErrorDescriber.DuplicateUserName));
         if (duplicateUserName is not null)
         {
-            return Error.Conflict(
-                "Users.UserNameExists",
-                duplicateUserName.Description,
-                nameof(UserCreateRequest.UserName));
+            return UserNameExistsFromIdentity(duplicateUserName.Description);
         }
 
         var duplicateEmail = errors.FirstOrDefault(error =>
             error.Code == nameof(IdentityErrorDescriber.DuplicateEmail));
         return duplicateEmail is not null
-            ? Error.Conflict(
-                "Users.EmailExists",
-                duplicateEmail.Description,
-                nameof(UserCreateRequest.Email))
-            : Error.Validation(
-                "Users.IdentityValidation",
-                string.Join(
-                    "; ",
-                    errors.Select(error => error.Description)));
+            ? EmailExistsFromIdentity(duplicateEmail.Description)
+            : IdentityValidation(errors.Select(error => error.Description));
     }
 
-    private static Error InvalidId() =>
-        Error.Validation("Users.InvalidId", "رقم المستخدم مطلوب.");
-
-    private static Error NotFound(Guid id) =>
-        Error.NotFound("Users.NotFound", $"لم يتم العثور على المستخدم رقم {id}.");
-
-    private static Error InvalidPagination() =>
-        Error.Validation(
-            "Pagination.Invalid",
-            $"يجب أن يكون رقم الصفحة أكبر من صفر، وأن يكون حجم الصفحة بين 1 و{PaginationRequest.MaxPageSize}.");
-
-    private static Error LastAdminError() =>
-        Error.Conflict(
-            "Users.LastAdmin",
-            "لا يمكن حذف آخر مستخدم مسؤول أو إزالة دور المسؤول من حسابه.");
 }

@@ -1,5 +1,7 @@
 using MiniErp.Domain.Common.Entities;
 using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.CashManagement;
+using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Logistics;
@@ -20,7 +22,12 @@ public sealed class Invoice : AuditableEntity
 
     public string? ExportInvoiceCode { get; set; }
 
+    public string? PartnerInvoiceNo { get; set; }
+
     public InvoiceType InvoiceType { get; set; }
+
+    public InvoiceContentType ContentType { get; set; } =
+        InvoiceContentType.Items;
 
     public PaymentTerm PaymentTerm { get; set; } = PaymentTerm.Cash;
 
@@ -44,7 +51,17 @@ public sealed class Invoice : AuditableEntity
 
     public Country? Country { get; set; }
 
+    public int? ItemsCategoryId { get; set; }
+
+    public ItemsCategory? ItemsCategory { get; set; }
+
     public CurrencyCode Currency { get; set; } = CurrencyCode.EGP;
+
+    public int? ExchangeRateId { get; private set; }
+
+    public ExchangeRate? ExchangeRateRecord { get; private set; }
+
+    public decimal ExchangeRate { get; private set; } = 1m;
 
     public int? DriverId { get; set; }
     public Driver? Driver { get; set; }
@@ -58,15 +75,38 @@ public sealed class Invoice : AuditableEntity
 
     public decimal DiscountAmount { get; set; }
 
+    public decimal WBWeight { get; set; }
+
+    public decimal WBScaleDifference { get; set; }
+
+    public decimal WBDiscount { get; set; }
+
+    public decimal WBTotal { get; private set; }
+
     public decimal PaidAmount { get; set; }
 
     public decimal Total { get; private set; }
+
+    public decimal BaseSubtotal { get; private set; }
+
+    public decimal BaseDiscountAmount { get; private set; }
+
+    public decimal BaseTotal { get; private set; }
+
+    public decimal BasePaidAmountAtInvoiceRate { get; private set; }
 
     public decimal Subtotal =>
         Lines.Sum(line => line.Total);
 
     public decimal RemainingAmount =>
         Total - PaidAmount;
+
+    public PaymentStatus PaymentStatus =>
+        PaidAmount <= 0m && Total > 0m
+            ? PaymentStatus.Unpaid
+            : RemainingAmount <= 0m
+                ? PaymentStatus.Paid
+                : PaymentStatus.PartiallyPaid;
 
     public string? Notes { get; set; }
 
@@ -77,6 +117,10 @@ public sealed class Invoice : AuditableEntity
     public ICollection<InvoiceLine> Lines { get; set; } = [];
 
     public ICollection<InvoiceContainerLine> ContainerLines { get; set; } = [];
+
+    public ICollection<CashVoucher> PaymentVouchers { get; set; } = [];
+
+    public ICollection<InvoicePayment> Payments { get; set; } = [];
 
     public void CalculateTotal()
     {
@@ -89,6 +133,11 @@ public sealed class Invoice : AuditableEntity
             Subtotal - DiscountAmount,
             InvoiceAmountRules.MoneyScale,
             MidpointRounding.AwayFromZero);
+
+        WBTotal = decimal.Round(
+            WBWeight - WBScaleDifference - WBDiscount,
+            InvoiceAmountRules.QuantityScale,
+            MidpointRounding.AwayFromZero);
     }
 
     public void Touch(DateTime utcNow)
@@ -96,8 +145,38 @@ public sealed class Invoice : AuditableEntity
         LastModifiedAt = utcNow;
     }
 
-    public PaymentStatus GetPaymentStatus() =>
-        RemainingAmount <= 0m
-            ? PaymentStatus.Paid
-            : PaymentStatus.Unpaid;
+    public PaymentStatus GetPaymentStatus() => PaymentStatus;
+
+    public void ApplyExchangeRate(
+        int? exchangeRateId,
+        decimal exchangeRate)
+    {
+        if (!ExchangeRateRules.IsValidRate(exchangeRate))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(exchangeRate),
+                "Exchange rate must be greater than zero.");
+        }
+
+        ExchangeRateId = exchangeRateId;
+        ExchangeRate = ExchangeRateRules.RoundRate(exchangeRate);
+
+        foreach (var line in Lines)
+        {
+            line.ApplyExchangeRate(ExchangeRate);
+        }
+
+        BaseSubtotal = ExchangeRateRules.ConvertToBase(
+            Subtotal,
+            ExchangeRate);
+        BaseDiscountAmount = ExchangeRateRules.ConvertToBase(
+            DiscountAmount,
+            ExchangeRate);
+        BaseTotal = ExchangeRateRules.ConvertToBase(
+            Total,
+            ExchangeRate);
+        BasePaidAmountAtInvoiceRate = ExchangeRateRules.ConvertToBase(
+            PaidAmount,
+            ExchangeRate);
+    }
 }

@@ -44,7 +44,7 @@ public sealed class PartnerOpeningBalanceServiceTests
         Assert.Equal(1, item.CompanyId);
         Assert.Equal(1, item.BusinessPartnerId);
         Assert.Equal("Company A Partner", item.BusinessPartnerName);
-        Assert.Equal("OPEN-001", item.DocumentNumber);
+        Assert.Equal(createResult.Value.DocumentNumber, item.DocumentNumber);
         Assert.Equal(new DateOnly(2026, 1, 1), item.DocumentDate);
         Assert.Equal(CurrencyCode.EGP, item.Currency);
         Assert.Equal(PartnerBalanceType.Receivable, item.BalanceType);
@@ -63,7 +63,6 @@ public sealed class PartnerOpeningBalanceServiceTests
             CreateRequest(businessPartnerId: 3));
         var currencyMismatchResult = await service.AddAsync(
             CreateRequest(
-                documentNumber: "OPEN-002",
                 currency: CurrencyCode.USD));
 
         Assert.Equal(
@@ -78,7 +77,7 @@ public sealed class PartnerOpeningBalanceServiceTests
     }
 
     [Fact]
-    public async Task Add_RejectsInactivePartnerAndDuplicateNormalizedDocumentNumber()
+    public async Task Add_RejectsInactivePartnerAndGeneratesUniqueDocumentNumbers()
     {
         await using var database = await PartnerOpeningBalanceTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
@@ -86,22 +85,21 @@ public sealed class PartnerOpeningBalanceServiceTests
 
         var inactiveResult = await service.AddAsync(
             CreateRequest(
-                businessPartnerId: 4,
-                documentNumber: "OPEN-002"));
-        var duplicateResult = await service.AddAsync(
-            CreateRequest(documentNumber: "  OPEN-001  "));
+                businessPartnerId: 4));
+        var secondResult = await service.AddAsync(CreateRequest());
 
         Assert.True(createResult.IsSuccess);
         Assert.Equal(
             "PartnerOpeningBalances.BusinessPartnerInactive",
             inactiveResult.Error.Code);
-        Assert.Equal(
-            "PartnerOpeningBalances.DocumentNumberExists",
-            duplicateResult.Error.Code);
+        Assert.True(secondResult.IsSuccess);
+        Assert.NotEqual(
+            createResult.Value.DocumentNumber,
+            secondResult.Value.DocumentNumber);
     }
 
     [Fact]
-    public async Task Add_NormalizesDocumentNumberAndBlankNotes()
+    public async Task Add_GeneratesDocumentNumberAndNormalizesBlankNotes()
     {
         await using var database = await PartnerOpeningBalanceTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
@@ -109,7 +107,6 @@ public sealed class PartnerOpeningBalanceServiceTests
         var result = await service.AddAsync(
             new PartnerOpeningBalanceRequest(
                 1,
-                "  OPEN-TRIMMED  ",
                 new DateOnly(2026, 1, 1),
                 CurrencyCode.EGP,
                 PartnerBalanceType.Receivable,
@@ -117,7 +114,9 @@ public sealed class PartnerOpeningBalanceServiceTests
                 "   "));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("OPEN-TRIMMED", result.Value.DocumentNumber);
+        Assert.Matches(
+            "^POB-[0-9]{4,}$",
+            result.Value.DocumentNumber);
         Assert.Null(result.Value.Notes);
     }
 
@@ -135,7 +134,6 @@ public sealed class PartnerOpeningBalanceServiceTests
             openingBalance.Id,
             new PartnerOpeningBalanceUpdateRequest(
                 openingBalance.BusinessPartnerId,
-                openingBalance.DocumentNumber,
                 openingBalance.DocumentDate,
                 openingBalance.Currency,
                 openingBalance.BalanceType,
@@ -152,7 +150,7 @@ public sealed class PartnerOpeningBalanceServiceTests
     }
 
     [Fact]
-    public async Task Update_AllowsOwnNormalizedDocumentNumber()
+    public async Task Update_PreservesDocumentNumberAndNormalizesNotes()
     {
         await using var database = await PartnerOpeningBalanceTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
@@ -163,7 +161,6 @@ public sealed class PartnerOpeningBalanceServiceTests
             openingBalance.Id,
             new PartnerOpeningBalanceUpdateRequest(
                 openingBalance.BusinessPartnerId,
-                $"  {openingBalance.DocumentNumber}  ",
                 openingBalance.DocumentDate,
                 openingBalance.Currency,
                 openingBalance.BalanceType,
@@ -172,7 +169,7 @@ public sealed class PartnerOpeningBalanceServiceTests
                 openingBalance.RowVersion));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("OPEN-001", result.Value.DocumentNumber);
+        Assert.Equal(openingBalance.DocumentNumber, result.Value.DocumentNumber);
         Assert.Equal("Updated notes", result.Value.Notes);
     }
 
@@ -188,7 +185,6 @@ public sealed class PartnerOpeningBalanceServiceTests
             openingBalance.Id,
             new PartnerOpeningBalanceUpdateRequest(
                 openingBalance.BusinessPartnerId,
-                openingBalance.DocumentNumber,
                 openingBalance.DocumentDate,
                 openingBalance.Currency,
                 openingBalance.BalanceType,
@@ -205,8 +201,6 @@ public sealed class PartnerOpeningBalanceServiceTests
     [Fact]
     public async Task RequestValidators_AcceptNormalizedMaximumLengths()
     {
-        var documentNumber =
-            $"  {new string('D', PartnerOpeningBalanceRequest.DocumentNumberMaximumLength)}  ";
         var notes =
             $"  {new string('N', PartnerOpeningBalanceRequest.NotesMaximumLength)}  ";
         var createValidator = new PartnerOpeningBalanceRequestValidator();
@@ -215,7 +209,6 @@ public sealed class PartnerOpeningBalanceServiceTests
         var createResult = await createValidator.ValidateAsync(
             new PartnerOpeningBalanceRequest(
                 1,
-                documentNumber,
                 new DateOnly(2026, 1, 1),
                 CurrencyCode.EGP,
                 PartnerBalanceType.Receivable,
@@ -224,7 +217,6 @@ public sealed class PartnerOpeningBalanceServiceTests
         var updateResult = await updateValidator.ValidateAsync(
             new PartnerOpeningBalanceUpdateRequest(
                 1,
-                documentNumber,
                 new DateOnly(2026, 1, 1),
                 CurrencyCode.EGP,
                 PartnerBalanceType.Receivable,
@@ -234,38 +226,6 @@ public sealed class PartnerOpeningBalanceServiceTests
 
         Assert.True(createResult.IsValid);
         Assert.True(updateResult.IsValid);
-    }
-
-    [Fact]
-    public async Task RequestValidators_ReturnOneRequiredErrorForWhitespaceDocumentNumber()
-    {
-        var createValidator = new PartnerOpeningBalanceRequestValidator();
-        var updateValidator = new PartnerOpeningBalanceUpdateRequestValidator();
-
-        var createResult = await createValidator.ValidateAsync(
-            new PartnerOpeningBalanceRequest(
-                1,
-                "   ",
-                new DateOnly(2026, 1, 1),
-                CurrencyCode.EGP,
-                PartnerBalanceType.Receivable,
-                1m,
-                null));
-        var updateResult = await updateValidator.ValidateAsync(
-            new PartnerOpeningBalanceUpdateRequest(
-                1,
-                "   ",
-                new DateOnly(2026, 1, 1),
-                CurrencyCode.EGP,
-                PartnerBalanceType.Receivable,
-                1m,
-                null,
-                new byte[8]));
-
-        var createError = Assert.Single(createResult.Errors);
-        var updateError = Assert.Single(updateResult.Errors);
-        Assert.Equal("NotEmptyValidator", createError.ErrorCode);
-        Assert.Equal("NotEmptyValidator", updateError.ErrorCode);
     }
 
     [Fact]
@@ -280,7 +240,6 @@ public sealed class PartnerOpeningBalanceServiceTests
             original.Id,
             new PartnerOpeningBalanceUpdateRequest(
                 original.BusinessPartnerId,
-                "OPEN-UPDATED",
                 original.DocumentDate,
                 original.Currency,
                 PartnerBalanceType.Payable,
@@ -292,7 +251,6 @@ public sealed class PartnerOpeningBalanceServiceTests
             original.Id,
             new PartnerOpeningBalanceUpdateRequest(
                 original.BusinessPartnerId,
-                "OPEN-STALE",
                 original.DocumentDate,
                 original.Currency,
                 original.BalanceType,
@@ -310,7 +268,7 @@ public sealed class PartnerOpeningBalanceServiceTests
             staleResult.Error.Code);
 
         var persisted = await service.GetByIdAsync(original.Id);
-        Assert.Equal("OPEN-UPDATED", persisted.Value.DocumentNumber);
+        Assert.Equal(original.DocumentNumber, persisted.Value.DocumentNumber);
         Assert.Equal(250.75m, persisted.Value.Amount);
     }
 
@@ -329,7 +287,6 @@ public sealed class PartnerOpeningBalanceServiceTests
             original.Id,
             new PartnerOpeningBalanceUpdateRequest(
                 original.BusinessPartnerId,
-                original.DocumentNumber,
                 original.DocumentDate,
                 original.Currency,
                 original.BalanceType,
@@ -411,13 +368,11 @@ public sealed class PartnerOpeningBalanceServiceTests
 
     private static PartnerOpeningBalanceRequest CreateRequest(
         int businessPartnerId = 1,
-        string documentNumber = "OPEN-001",
         CurrencyCode currency = CurrencyCode.EGP,
         PartnerBalanceType balanceType = PartnerBalanceType.Receivable,
         decimal amount = 125.50m) =>
         new(
             businessPartnerId,
-            documentNumber,
             new DateOnly(2026, 1, 1),
             currency,
             balanceType,
@@ -476,7 +431,8 @@ public sealed class PartnerOpeningBalanceServiceTests
             new(
                 Context,
                 new PaginationService(),
-                new TestCurrentCompanyContext(companyId));
+                new TestCurrentCompanyContext(companyId),
+                new MiniErp.Tests.TestExchangeRateResolver());
 
         public async ValueTask DisposeAsync()
         {
@@ -505,6 +461,13 @@ public sealed class PartnerOpeningBalanceServiceTests
                     DeletedOn TEXT NULL,
                     DeletedByPc TEXT NULL,
                     IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE CompanySettings (
+                    CompanyId INTEGER NOT NULL PRIMARY KEY,
+                    BaseCurrency INTEGER NOT NULL DEFAULT 1,
+                    StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
+                    FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE BusinessPartners (
@@ -538,8 +501,11 @@ public sealed class PartnerOpeningBalanceServiceTests
                     DocumentNumber TEXT NOT NULL,
                     DocumentDate TEXT NOT NULL,
                     Currency INTEGER NOT NULL,
+                    ExchangeRateId INTEGER NULL,
+                    ExchangeRate NUMERIC NOT NULL DEFAULT 1,
                     BalanceType INTEGER NOT NULL,
                     Amount NUMERIC NOT NULL CHECK (Amount > 0),
+                    BaseAmount NUMERIC NOT NULL DEFAULT 0,
                     Notes TEXT NULL,
                     RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
                     CreatedById TEXT NOT NULL,

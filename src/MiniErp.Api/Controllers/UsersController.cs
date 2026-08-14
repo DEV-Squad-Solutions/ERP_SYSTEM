@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.Users.Jobs;
 using MiniErp.Application.Common.Authentication;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.Users;
@@ -56,6 +57,20 @@ public sealed class UsersController(IUserService userService) : ApiControllerBas
     {
         var result = await userService.AddAsync(request, cancellationToken);
 
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            foreach (var companyId in request.CompanyIds.Distinct())
+            {
+                TryEnqueueRealtime<UsersRealtimeJob>(
+                    "Added",
+                    result.Value.Id,
+                    realtime => job => job.ExecuteAsync(realtime),
+                    companyId,
+                    operationId);
+            }
+        }
+
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -73,10 +88,29 @@ public sealed class UsersController(IUserService userService) : ApiControllerBas
         UserUpdateRequest request,
         CancellationToken cancellationToken)
     {
+        var previous = await userService.GetByIdAsync(id, cancellationToken);
         var result = await userService.UpdateAsync(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            var companyIds = request.CompanyIds
+                .Concat(previous.IsSuccess
+                    ? previous.Value.Companies.Select(company => company.Id)
+                    : [])
+                .Distinct();
+            foreach (var companyId in companyIds)
+            {
+                TryEnqueueRealtime<UsersRealtimeJob>(
+                    "Updated",
+                    id,
+                    realtime => job => job.ExecuteAsync(realtime),
+                    companyId,
+                    operationId);
+            }
+        }
         return this.ToActionResult(result);
     }
 
@@ -88,10 +122,29 @@ public sealed class UsersController(IUserService userService) : ApiControllerBas
         UserCompaniesRequest request,
         CancellationToken cancellationToken)
     {
+        var previous = await userService.GetByIdAsync(id, cancellationToken);
         var result = await userService.AssignCompaniesAsync(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            var companyIds = request.CompanyIds
+                .Concat(previous.IsSuccess
+                    ? previous.Value.Companies.Select(company => company.Id)
+                    : [])
+                .Distinct();
+            foreach (var companyId in companyIds)
+            {
+                TryEnqueueRealtime<UsersRealtimeJob>(
+                    "Updated",
+                    id,
+                    realtime => job => job.ExecuteAsync(realtime),
+                    companyId,
+                    operationId);
+            }
+        }
         return this.ToActionResult(result);
     }
 
@@ -103,7 +156,24 @@ public sealed class UsersController(IUserService userService) : ApiControllerBas
         Guid id,
         CancellationToken cancellationToken)
     {
+        var previous = await userService.GetByIdAsync(id, cancellationToken);
         var result = await userService.DeleteAsync(id, cancellationToken);
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            var companyIds = previous.IsSuccess
+                ? previous.Value.Companies.Select(company => company.Id)
+                : [];
+            foreach (var companyId in companyIds.Distinct())
+            {
+                TryEnqueueRealtime<UsersRealtimeJob>(
+                    "Deleted",
+                    id,
+                    realtime => job => job.ExecuteAsync(realtime),
+                    companyId,
+                    operationId);
+            }
+        }
         return this.ToActionResult(result);
     }
 }

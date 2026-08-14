@@ -1,9 +1,12 @@
+using System.Data;
+using static MiniErp.Application.Features.PartnerOpeningBalances.PartnerOpeningBalanceErrors;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.PartnerOpeningBalances;
+using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -13,7 +16,8 @@ namespace MiniErp.Infrastructure.Services.PartnerOpeningBalances;
 public sealed class PartnerOpeningBalanceService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    IExchangeRateResolver exchangeRateResolver)
     : IPartnerOpeningBalanceService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -78,6 +82,11 @@ public sealed class PartnerOpeningBalanceService(
         PartnerOpeningBalanceRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
         var normalized = request.Adapt<PartnerOpeningBalance>();
 
         var partnerError = await ValidateBusinessPartnerAsync(
@@ -89,24 +98,39 @@ public sealed class PartnerOpeningBalanceService(
             return Result<PartnerOpeningBalanceResponse>.Failure(partnerError);
         }
 
-        var documentNumberExists = await dbContext.PartnerOpeningBalances.AnyAsync(
-            balance =>
-                balance.CompanyId == companyId &&
-                balance.DocumentNumber == normalized.DocumentNumber,
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            normalized.Currency,
+            normalized.DocumentDate,
+            request.ExchangeRate,
             cancellationToken);
-        if (documentNumberExists)
+        if (exchangeRateResult.IsFailure)
         {
             return Result<PartnerOpeningBalanceResponse>.Failure(
-                DocumentNumberExists(normalized.DocumentNumber));
+                exchangeRateResult.Error);
         }
 
         normalized.CompanyId = companyId;
+        normalized.DocumentNumber = await EntityIdentifierGenerator
+            .GenerateUniqueAsync(
+                dbContext,
+                prefix: "POB",
+                companyId: companyId,
+                existingIdentifiers: dbContext.PartnerOpeningBalances
+                    .IgnoreQueryFilters()
+                    .Where(entity => entity.CompanyId == companyId)
+                    .Select(entity => entity.DocumentNumber),
+                cancellationToken);
+        normalized.ApplyExchangeRate(
+            exchangeRateResult.Value.ExchangeRateId,
+            exchangeRateResult.Value.Rate);
         dbContext.PartnerOpeningBalances.Add(normalized);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var response = await ProjectResponseQuery(normalized.Id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
 
         return Result<PartnerOpeningBalanceResponse>.Success(response);
     }
@@ -123,12 +147,13 @@ public sealed class PartnerOpeningBalanceService(
 
         if (request.RowVersion is not { Length: > 0 })
         {
-            return Result<PartnerOpeningBalanceResponse>.Failure(
-                Error.Validation(
-                    "PartnerOpeningBalances.RowVersionRequired",
-                    "يجب إرسال إصدار السجل الحالي للتعديل.",
-                    nameof(PartnerOpeningBalanceUpdateRequest.RowVersion)));
+            return Result<PartnerOpeningBalanceResponse>.Failure(RowVersionRequired());
         }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var normalized = request.Adapt<PartnerOpeningBalance>();
 
@@ -157,25 +182,26 @@ public sealed class PartnerOpeningBalanceService(
             return Result<PartnerOpeningBalanceResponse>.Failure(partnerError);
         }
 
-        var documentNumberExists = await dbContext.PartnerOpeningBalances.AnyAsync(
-            balance =>
-                balance.CompanyId == companyId &&
-                balance.Id != id &&
-                balance.DocumentNumber == normalized.DocumentNumber,
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            normalized.Currency,
+            normalized.DocumentDate,
+            request.ExchangeRate,
             cancellationToken);
-        if (documentNumberExists)
+        if (exchangeRateResult.IsFailure)
         {
             return Result<PartnerOpeningBalanceResponse>.Failure(
-                DocumentNumberExists(normalized.DocumentNumber));
+                exchangeRateResult.Error);
         }
 
         openingBalance.BusinessPartnerId = normalized.BusinessPartnerId;
-        openingBalance.DocumentNumber = normalized.DocumentNumber;
         openingBalance.DocumentDate = normalized.DocumentDate;
         openingBalance.Currency = normalized.Currency;
         openingBalance.BalanceType = normalized.BalanceType;
         openingBalance.Amount = normalized.Amount;
         openingBalance.Notes = normalized.Notes;
+        openingBalance.ApplyExchangeRate(
+            exchangeRateResult.Value.ExchangeRateId,
+            exchangeRateResult.Value.Rate);
 
         var entry = dbContext.Entry(openingBalance);
         entry.State = EntityState.Modified;
@@ -195,6 +221,8 @@ public sealed class PartnerOpeningBalanceService(
         var response = await ProjectResponseQuery(id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
 
         return Result<PartnerOpeningBalanceResponse>.Success(response);
     }
@@ -260,46 +288,17 @@ public sealed class PartnerOpeningBalanceService(
 
         if (partner is null)
         {
-            return Error.NotFound(
-                "PartnerOpeningBalances.BusinessPartnerNotFound",
-                $"لم يتم العثور على العميل أو المورد رقم {businessPartnerId}.",
-                nameof(PartnerOpeningBalanceRequest.BusinessPartnerId));
+            return BusinessPartnerNotFound(businessPartnerId);
         }
 
         if (!partner.IsActive)
         {
-            return Error.Conflict(
-                "PartnerOpeningBalances.BusinessPartnerInactive",
-                "لا يمكن استخدام عميل أو مورد غير نشط.",
-                nameof(PartnerOpeningBalanceRequest.BusinessPartnerId));
+            return BusinessPartnerInactive();
         }
 
         return partner.Currency == currency
             ? null
-            : Error.Conflict(
-                "PartnerOpeningBalances.CurrencyMismatch",
-                "يجب أن تطابق عملة رصيد الشريك عملة العميل أو المورد.",
-                nameof(PartnerOpeningBalanceRequest.Currency));
+            : CurrencyMismatch();
     }
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "PartnerOpeningBalances.InvalidId",
-            "يجب أن يكون رقم رصيد الشريك أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "PartnerOpeningBalances.NotFound",
-            $"لم يتم العثور على رصيد الشريك رقم {id}.");
-
-    private static Error DocumentNumberExists(string number) =>
-        Error.Conflict(
-            "PartnerOpeningBalances.DocumentNumberExists",
-            $"رقم المستند '{number}' مستخدم بالفعل.",
-            nameof(PartnerOpeningBalanceRequest.DocumentNumber));
-
-    private static Error Concurrency() =>
-        Error.Conflict(
-            "PartnerOpeningBalances.Concurrency",
-            "تم تعديل رصيد الشريك بواسطة عملية أخرى. أعد تحميل المستند ثم حاول مرة أخرى.");
 }

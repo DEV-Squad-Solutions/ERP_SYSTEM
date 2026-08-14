@@ -71,7 +71,6 @@ public sealed class StockOpeningBalanceRequestValidatorTests
             StockOpeningBalanceRequest.NotesMaximumLength + 1);
         var request = new StockOpeningBalanceRequest(
             1,
-            "OPEN-001",
             new DateOnly(2026, 1, 1),
             [new StockOpeningBalanceLineRequest(1, 1, 1m, 1m, oversizedNotes)],
             oversizedNotes);
@@ -94,7 +93,6 @@ public sealed class StockOpeningBalanceRequestValidatorTests
     {
         var request = new StockOpeningBalanceRequest(
             1,
-            "OPEN-001",
             new DateOnly(2026, 1, 1),
             [null!],
             null);
@@ -114,7 +112,6 @@ public sealed class StockOpeningBalanceRequestValidatorTests
         decimal price = 1m) =>
         new(
             1,
-            "OPEN-001",
             new DateOnly(2026, 1, 1),
             [
                 new StockOpeningBalanceLineRequest(

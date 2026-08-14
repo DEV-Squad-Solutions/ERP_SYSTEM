@@ -20,6 +20,8 @@ public static class ApiErrorResponseFactory
             ErrorType.Forbidden => StatusCodes.Status403Forbidden,
             ErrorType.NotFound => StatusCodes.Status404NotFound,
             ErrorType.Conflict => StatusCodes.Status409Conflict,
+            ErrorType.BadGateway => StatusCodes.Status502BadGateway,
+            ErrorType.GatewayTimeout => StatusCodes.Status504GatewayTimeout,
             _ => StatusCodes.Status500InternalServerError
         };
 
@@ -30,6 +32,8 @@ public static class ApiErrorResponseFactory
             ErrorType.Forbidden => "غير مسموح بتنفيذ هذا الإجراء.",
             ErrorType.NotFound => "العنصر المطلوب غير موجود.",
             ErrorType.Conflict => "يوجد تعارض في البيانات.",
+            ErrorType.BadGateway => "مزود الخدمة الخارجي غير متاح.",
+            ErrorType.GatewayTimeout => "انتهت مهلة مزود الخدمة الخارجي.",
             _ => "حدث خطأ أثناء معالجة الطلب."
         };
 
@@ -89,6 +93,15 @@ public static class ApiErrorResponseFactory
             "حدث خطأ غير متوقع.",
             "حدث خطأ غير متوقع أثناء معالجة الطلب.",
             "Server.UnexpectedError",
+            ErrorType.Failure.ToString());
+
+    public static ApiErrorResponse DatabaseUnavailable(HttpContext httpContext) =>
+        Create(
+            httpContext,
+            StatusCodes.Status503ServiceUnavailable,
+            "الخدمة غير جاهزة مؤقتاً.",
+            "الاتصال بقاعدة البيانات غير متاح حالياً. يرجى المحاولة مرة أخرى.",
+            "Database.Unavailable",
             ErrorType.Failure.ToString());
 
     public static ApiErrorResponse FromStatusCode(
@@ -230,8 +243,14 @@ public static class ApiErrorResponseFactory
                 "https://tools.ietf.org/html/rfc9110#section-15.5.10",
             StatusCodes.Status415UnsupportedMediaType =>
                 "https://tools.ietf.org/html/rfc9110#section-15.5.16",
+            StatusCodes.Status502BadGateway =>
+                "https://tools.ietf.org/html/rfc9110#section-15.6.3",
+            StatusCodes.Status504GatewayTimeout =>
+                "https://tools.ietf.org/html/rfc9110#section-15.6.5",
             StatusCodes.Status500InternalServerError =>
                 "https://tools.ietf.org/html/rfc9110#section-15.6.1",
+            StatusCodes.Status503ServiceUnavailable =>
+                "https://tools.ietf.org/html/rfc9110#section-15.6.4",
             _ => "about:blank"
         };
 }

@@ -1,4 +1,5 @@
 using Mapster;
+using static MiniErp.Application.Features.StoreContainers.StoreContainerErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
@@ -132,9 +133,9 @@ public sealed class StoreContainerService(
 
         return Result<StoreContainerWorkspaceResponse>.Success(
             new StoreContainerWorkspaceResponse(
-                store,
-                businessPartner,
-                containers));
+                ContainerStore: store,
+                BusinessPartner: businessPartner,
+                Containers: containers));
     }
 
     private async Task<IReadOnlyList<StoreContainerWorkspaceContainerResponse>>
@@ -173,14 +174,14 @@ public sealed class StoreContainerService(
 
         return rows
             .Select(container => new StoreContainerWorkspaceContainerResponse(
-                container.Id,
-                container.CompanyId,
-                container.Code,
-                container.Name,
-                container.Description,
-                container.IsActive,
-                container.StoreContainerId.HasValue,
-                container.StoreContainerId))
+                Id: container.Id,
+                CompanyId: container.CompanyId,
+                Code: container.Code,
+                Name: container.Name,
+                Description: container.Description,
+                IsActive: container.IsActive,
+                IsAssigned: container.StoreContainerId.HasValue,
+                StoreContainerId: container.StoreContainerId))
             .ToList();
     }
 
@@ -365,11 +366,7 @@ public sealed class StoreContainerService(
             .ToArray();
         if (missingIds.Length > 0)
         {
-            return Error.NotFound(
-                "StoreContainers.ContainerNotFound",
-                $"لم يتم العثور على العبوات ذات الأرقام: " +
-                $"{string.Join(", ", missingIds)}.",
-                nameof(StoreContainerUpsertRequest.ContainerIds));
+            return ContainerNotFound(missingIds);
         }
 
         var inactiveIds = containerIds
@@ -378,11 +375,7 @@ public sealed class StoreContainerService(
 
         return inactiveIds.Length == 0
             ? null
-            : Error.Conflict(
-                "StoreContainers.ContainerInactive",
-                $"يجب اختيار عبوات نشطة. العبوات غير النشطة: " +
-                $"{string.Join(", ", inactiveIds)}.",
-                nameof(StoreContainerUpsertRequest.ContainerIds));
+            : ContainerInactive(inactiveIds);
     }
 
     private void SoftDelete(StoreContainer assignment)
@@ -412,18 +405,12 @@ public sealed class StoreContainerService(
 
         if (store is null)
         {
-            return Error.NotFound(
-                "StoreContainers.StoreNotFound",
-                $"لم يتم العثور على المخزن رقم {storeId}.",
-                nameof(StoreContainerUpsertRequest.StoreId));
+            return StoreNotFound(storeId);
         }
 
         if (!store.IsContainerStore)
         {
-            return Error.Conflict(
-                "StoreContainers.StoreNotContainerStore",
-                "يجب اختيار مخزن عبوات وليس مخزن منتجات.",
-                nameof(StoreContainerUpsertRequest.StoreId));
+            return StoreNotContainerStore();
         }
 
         if (!requireUsable)
@@ -433,58 +420,12 @@ public sealed class StoreContainerService(
 
         if (!store.IsActive)
         {
-            return Error.Conflict(
-                "StoreContainers.StoreInactive",
-                "يجب اختيار مخزن عبوات نشط.",
-                nameof(StoreContainerUpsertRequest.StoreId));
+            return StoreInactive();
         }
 
         return store.BusinessPartnerIsActive
             ? null
-            : Error.Conflict(
-                "StoreContainers.StoreBusinessPartnerInactive",
-                "يجب أن يكون العميل أو المورد المرتبط بمخزن العبوات نشطًا.",
-                nameof(StoreContainerUpsertRequest.StoreId));
+            : StoreBusinessPartnerInactive();
     }
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "StoreContainers.InvalidId",
-            "يجب أن يكون رقم ربط العبوة بالمخزن أكبر من صفر.");
-
-    private static Error InvalidStoreId() =>
-        Error.Validation(
-            "StoreContainers.InvalidStoreId",
-            "يجب أن يكون رقم المخزن أكبر من صفر.",
-            nameof(StoreContainerUpsertRequest.StoreId));
-
-    private static Error ContainerIdsRequired() =>
-        Error.Validation(
-            "StoreContainers.ContainerIdsRequired",
-            "حقل العبوات مطلوب.",
-            nameof(StoreContainerUpsertRequest.ContainerIds));
-
-    private static Error TooManyContainers() =>
-        Error.Validation(
-            "StoreContainers.TooManyContainers",
-            $"يجب ألا يزيد عدد العبوات عن " +
-            $"{StoreContainerUpsertRequest.MaximumContainerCount}.",
-            nameof(StoreContainerUpsertRequest.ContainerIds));
-
-    private static Error InvalidContainerId() =>
-        Error.Validation(
-            "StoreContainers.InvalidContainerId",
-            "يجب أن تكون جميع أرقام العبوات أكبر من صفر.",
-            nameof(StoreContainerUpsertRequest.ContainerIds));
-
-    private static Error DuplicateContainerIds() =>
-        Error.Validation(
-            "StoreContainers.DuplicateContainerIds",
-            "يجب عدم تكرار رقم العبوة في القائمة.",
-            nameof(StoreContainerUpsertRequest.ContainerIds));
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "StoreContainers.NotFound",
-            $"لم يتم العثور على ربط العبوة بالمخزن رقم {id}.");
 }

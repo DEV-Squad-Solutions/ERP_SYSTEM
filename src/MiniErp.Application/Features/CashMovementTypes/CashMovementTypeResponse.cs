@@ -9,10 +9,18 @@ public sealed record CashMovementTypeResponse(
     CashDirection Direction,
     bool ForPartner,
     bool IsActive,
+    bool IsDefaultForSales,
+    bool IsDefaultForPurchase,
+    bool IsDefaultForSalesReturn,
+    bool IsDefaultForPurchaseReturn,
     string? Notes,
     byte[] RowVersion);
 
 public sealed record CashMovementTypeSelectResponse(
     int Id,
     string Name,
-    CashDirection Direction);
+    CashDirection Direction,
+    bool IsDefaultForSales,
+    bool IsDefaultForPurchase,
+    bool IsDefaultForSalesReturn,
+    bool IsDefaultForPurchaseReturn);

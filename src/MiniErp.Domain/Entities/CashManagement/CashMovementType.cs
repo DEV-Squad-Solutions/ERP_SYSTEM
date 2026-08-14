@@ -20,6 +20,14 @@ public sealed class CashMovementType : AuditableEntity
 
     public bool IsActive { get; set; } = true;
 
+    public bool IsDefaultForSales { get; set; }
+
+    public bool IsDefaultForPurchase { get; set; }
+
+    public bool IsDefaultForSalesReturn { get; set; }
+
+    public bool IsDefaultForPurchaseReturn { get; set; }
+
     public string? Notes { get; set; }
 
     public byte[] RowVersion { get; private set; } = [];

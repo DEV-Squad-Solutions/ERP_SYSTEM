@@ -60,57 +60,56 @@ public sealed class CountryServiceTests
 
         var result = await service.AddAsync(
             new CountryRequest(
-                "  NEW  ",
                 "  New Country  ",
                 "  دولة جديدة  "));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("NEW", result.Value.Code);
+        Assert.Matches(
+            "^CTR-[0-9]{4,}$",
+            result.Value.Code);
         Assert.Equal("New Country", result.Value.Name);
         Assert.Equal("دولة جديدة", result.Value.ArabicName);
     }
 
     [Fact]
-    public async Task Add_RejectsDuplicateActiveCode()
+    public async Task Add_GeneratesAUniqueGlobalCode()
     {
         await using var database = await CountryTestDatabase.CreateAsync();
         var service = database.CreateService();
 
         var result = await service.AddAsync(
             new CountryRequest(
-                "  EG  ",
                 "Another Country",
                 "دولة أخرى"));
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("Countries.CodeExists", result.Error.Code);
+        Assert.True(result.IsSuccess);
+        Assert.NotEqual("EG", result.Value.Code);
     }
 
     [Fact]
-    public async Task InactiveDuplicateCanBeCreatedButCannotBeReactivated()
+    public async Task Update_ReactivatesAndPreservesTheGeneratedCode()
     {
         await using var database = await CountryTestDatabase.CreateAsync();
         var service = database.CreateService();
 
         var addResult = await service.AddAsync(
             new CountryRequest(
-                "EG",
                 "Inactive Duplicate",
                 "دولة غير نشطة",
                 IsActive: false));
 
         Assert.True(addResult.IsSuccess);
+        var generatedCode = addResult.Value.Code;
 
         var updateResult = await service.UpdateAsync(
             addResult.Value.Id,
             new CountryRequest(
-                "EG",
                 "Inactive Duplicate",
                 "دولة غير نشطة",
                 IsActive: true));
 
-        Assert.True(updateResult.IsFailure);
-        Assert.Equal("Countries.CodeExists", updateResult.Error.Code);
+        Assert.True(updateResult.IsSuccess);
+        Assert.Equal(generatedCode, updateResult.Value.Code);
     }
 
     [Theory]
@@ -149,45 +148,12 @@ public sealed class CountryServiceTests
     {
         var validator = new CountryRequestValidator();
         var request = new CountryRequest(
-            $"  {new string('C', 50)}  ",
             $"  {new string('N', 200)}  ",
             $"  {new string('ع', 200)}  ");
 
         var result = await validator.ValidateAsync(request);
 
         Assert.True(result.IsValid);
-    }
-
-    [Fact]
-    public async Task Validator_UsesSharedMaximumLengthRuleForTrimmedValue()
-    {
-        var validator = new CountryRequestValidator();
-        var request = new CountryRequest(
-            $"  {new string('C', 51)}  ",
-            "Country",
-            "دولة");
-
-        var result = await validator.ValidateAsync(request);
-
-        var error = Assert.Single(result.Errors);
-        Assert.Equal(nameof(CountryRequest.Code), error.PropertyName);
-        Assert.Equal("MaximumLengthValidator", error.ErrorCode);
-    }
-
-    [Fact]
-    public async Task Validator_ReturnsOneRequiredErrorForWhitespaceCode()
-    {
-        var validator = new CountryRequestValidator();
-        var request = new CountryRequest(
-            "   ",
-            "Country",
-            "دولة");
-
-        var result = await validator.ValidateAsync(request);
-
-        var error = Assert.Single(result.Errors);
-        Assert.Equal(nameof(CountryRequest.Code), error.PropertyName);
-        Assert.Equal("NotEmptyValidator", error.ErrorCode);
     }
 
     private sealed class CountryTestDatabase : IAsyncDisposable
@@ -279,6 +245,7 @@ public sealed class CountryServiceTests
 
                 CREATE TABLE Invoices (
                     Id INTEGER PRIMARY KEY,
+                    ContentType INTEGER NOT NULL DEFAULT 1,
                     CountryId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );

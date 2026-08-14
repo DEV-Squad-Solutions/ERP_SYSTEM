@@ -11,6 +11,9 @@ public static class ArabicValidationConfiguration
         {
             ["DocumentDate"] = "تاريخ المستند",
             ["DocumentNumber"] = "رقم المستند",
+            ["TransferDate"] = "تاريخ التحويل",
+            ["SourceStoreId"] = "مخزن المصدر",
+            ["DestinationStoreId"] = "مخزن الوجهة",
             ["ItemId"] = "الصنف",
             ["InvoiceNumber"] = "رقم الفاتورة",
             ["Lines"] = "سطور المستند",
@@ -54,6 +57,8 @@ public static class ArabicValidationConfiguration
             ["ForPartner"] = "مخصص للعميل أو المورد",
             ["PartyType"] = "نوع الطرف",
             ["PaymentTerm"] = "شرط السداد",
+            ["PartnerInvoiceNo"] = "رقم الفاتورة لدى الشريك",
+            ["ItemsCategoryId"] = "تصنيف الأصناف",
             ["DiscountAmount"] = "قيمة الخصم",
             ["PaidAmount"] = "المبلغ المدفوع",
             ["Password"] = "كلمة المرور",
@@ -69,7 +74,10 @@ public static class ArabicValidationConfiguration
             ["ExternalPartyName"] = "اسم الطرف الخارجي",
             ["ReferenceNumber"] = "الرقم المرجعي",
             ["Cost"] = "تكلفة الرحلة",
-            ["Items"] = "العناصر"
+            ["Items"] = "العناصر",
+            ["CountDate"] = "تاريخ الجرد",
+            ["PhysicalQuantity"] = "الكمية الفعلية",
+            ["Reason"] = "السبب"
         };
 
     public static void Configure()

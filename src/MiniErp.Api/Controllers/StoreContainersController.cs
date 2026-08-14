@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.StoreContainers.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.StoreContainers;
 
@@ -83,6 +84,13 @@ public sealed class StoreContainersController(
         var result = await storeContainerService.UpsertAsync(
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<StoreContainersRealtimeJob>(
+                "Updated",
+                request.StoreId,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

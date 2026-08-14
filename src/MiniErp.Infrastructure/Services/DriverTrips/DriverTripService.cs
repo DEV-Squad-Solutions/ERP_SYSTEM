@@ -1,4 +1,5 @@
 using Mapster;
+using static MiniErp.Application.Features.DriverTrips.DriverTripErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
@@ -189,24 +190,4 @@ public sealed class DriverTripService(
             : null;
     }
 
-    private static Error InvalidItems() =>
-        Error.Validation(
-            "DriverTrips.InvalidCostItems",
-            "بيانات تكاليف رحلات السائقين غير صالحة.");
-
-    private static Error DuplicateIds() =>
-        Error.Validation(
-            "DriverTrips.DuplicateIds",
-            "لا يجوز تكرار رقم رحلة السائق داخل الطلب.",
-            nameof(DriverTripBulkCostUpdateRequest.Items));
-
-    private static Error TripsNotFound() =>
-        Error.NotFound(
-            "DriverTrips.NotFound",
-            "تعذر العثور على رحلة أو أكثر داخل الشركة الحالية.");
-
-    private static Error Concurrency(int driverTripId) =>
-        Error.Conflict(
-            "DriverTrips.Concurrency",
-            $"تم تعديل رحلة السائق رقم {driverTripId} بواسطة مستخدم آخر. أعد تحميل البيانات ثم حاول مرة أخرى.");
 }

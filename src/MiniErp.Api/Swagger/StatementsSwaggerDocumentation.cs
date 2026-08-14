@@ -46,7 +46,12 @@ public sealed class StatementsSwaggerDocumentation : IOperationFilter
                 - `creditAmount`: يعرض في عمود له.
                 - `balanceAmount`: قيمة الرصيد بدون إشارة سالبة.
                 - `balanceDescription`: يعيد عليه، أو له، أو مسدد.
+                - `currency`: عملة حساب العميل، وتُستخدم في `debitAmount` و`creditAmount` و`balanceAmount`.
+                - `baseCurrency`: عملة الشركة الأساسية، وتكون EGP عندما تكون العملة الأساسية هي الجنيه المصري.
+                - `exchangeRate`: سعر الصرف التاريخي المحفوظ مع الحركة، وليس سعر اليوم.
+                - `baseDebitAmount` و`baseCreditAmount` و`baseBalanceAmount`: نفس قيم الحركة والرصيد بعملة الشركة الأساسية.
                 - `summary`: رصيد أول المدة ورصيد آخر المدة مع وصف عربي واضح لكل منهما.
+                - `baseOpeningBalanceAmount` و`baseClosingBalanceAmount`: أرصدة الملخص بعملة الشركة الأساسية.
 
                 **الفلاتر:** `businessPartnerId` مطلوب. ويمكن التصفية بالبحث والتاريخ ومصدر الحركة ونوع الحركة.
 

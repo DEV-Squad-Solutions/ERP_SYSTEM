@@ -43,4 +43,16 @@ public sealed record Error(
         string description,
         string? fieldName = null) =>
         new(code, description, ErrorType.Forbidden, fieldName);
+
+    public static Error BadGateway(
+        string code,
+        string description,
+        string? fieldName = null) =>
+        new(code, description, ErrorType.BadGateway, fieldName);
+
+    public static Error GatewayTimeout(
+        string code,
+        string description,
+        string? fieldName = null) =>
+        new(code, description, ErrorType.GatewayTimeout, fieldName);
 }

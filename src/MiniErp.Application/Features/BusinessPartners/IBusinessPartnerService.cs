@@ -3,6 +3,7 @@ using MiniErp.Application.Common.Results;
 
 namespace MiniErp.Application.Features.BusinessPartners;
 
+
 public interface IBusinessPartnerService
 {
     Task<Result<PagedResponse<BusinessPartnerResponse>>> GetAllAsync(
@@ -10,7 +11,7 @@ public interface IBusinessPartnerService
         BusinessPartnerFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
 
-    Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
+    Task<Result<IReadOnlyList<BusinessPartnerSelectResponse>>> GetSelectAsync(
         CancellationToken cancellationToken = default);
 
     Task<Result<BusinessPartnerResponse>> GetByIdAsync(

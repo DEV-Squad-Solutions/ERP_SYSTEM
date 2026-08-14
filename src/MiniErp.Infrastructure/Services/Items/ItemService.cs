@@ -1,9 +1,11 @@
 using Mapster;
+using static MiniErp.Application.Features.Items.ItemErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Items;
+using MiniErp.Application.Features.ItemUnits;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Infrastructure.Persistence;
 
@@ -96,20 +98,15 @@ public sealed class ItemService(
     {
         var item = request.Adapt<Item>();
         item.CompanyId = companyId;
-        var codeExists = await dbContext.Items.AnyAsync(
-            entity =>
-                entity.CompanyId == companyId &&
-                entity.Code == item.Code,
+        item.Code = await EntityIdentifierGenerator.GenerateUniqueAsync(
+            dbContext,
+            prefix: "ITM",
+            companyId: companyId,
+            existingIdentifiers: dbContext.Items
+                .IgnoreQueryFilters()
+                .Where(entity => entity.CompanyId == companyId)
+                .Select(entity => entity.Code),
             cancellationToken);
-
-        if (codeExists)
-        {
-            return Result<ItemResponse>.Failure(
-                Error.Conflict(
-                    "Items.CodeExists",
-                    $"كود الصنف '{item.Code}' مستخدم بالفعل.",
-                    nameof(ItemRequest.Code)));
-        }
 
         var itemUnitResult = await GetActiveItemUnitAsync(
             request.ItemUnitId,
@@ -146,23 +143,6 @@ public sealed class ItemService(
             return Result<ItemResponse>.Failure(NotFound(id));
         }
 
-        var normalizedItem = request.Adapt<Item>();
-        var codeExists = await dbContext.Items.AnyAsync(
-            entity =>
-                entity.CompanyId == companyId &&
-                entity.Code == normalizedItem.Code &&
-                entity.Id != id,
-            cancellationToken);
-
-        if (codeExists)
-        {
-            return Result<ItemResponse>.Failure(
-                Error.Conflict(
-                    "Items.CodeExists",
-                    $"كود الصنف '{normalizedItem.Code}' مستخدم بالفعل.",
-                    nameof(ItemRequest.Code)));
-        }
-
         var itemUnitResult = await GetActiveItemUnitAsync(
             request.ItemUnitId,
             companyId,
@@ -172,7 +152,9 @@ public sealed class ItemService(
             return Result<ItemResponse>.Failure(itemUnitResult.Error);
         }
 
+        var code = item.Code;
         request.Adapt(item);
+        item.Code = code;
         item.ItemUnit = itemUnitResult.Value;
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -211,6 +193,27 @@ public sealed class ItemService(
                         line.CompanyId == companyId &&
                         line.ItemId == id,
                     cancellationToken) ||
+            await dbContext.StockAdjustmentLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.ItemId == id,
+                    cancellationToken) ||
+            await dbContext.StockTransferLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.ItemId == id,
+                    cancellationToken) ||
+            await dbContext.InventoryCountLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.ItemId == id,
+                    cancellationToken) ||
             await dbContext.ItemMovements
                 .IgnoreQueryFilters()
                 .AnyAsync(
@@ -230,17 +233,6 @@ public sealed class ItemService(
         return Result.Success();
     }
 
-    private static Error InvalidId() =>
-        Error.Validation("Items.InvalidId", "يجب أن يكون رقم الصنف أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound("Items.NotFound", $"لم يتم العثور على الصنف رقم {id}.");
-
-    private static Error InUse() =>
-        Error.Conflict(
-            "Items.InUse",
-            "لا يمكن حذف الصنف لارتباطه بمستندات أو حركات حالية أو تاريخية.");
-
     private async Task<Result<ItemUnit>> GetActiveItemUnitAsync(
         int itemUnitId,
         int companyId,
@@ -254,17 +246,11 @@ public sealed class ItemService(
 
         if (itemUnit is null)
         {
-            return Result<ItemUnit>.Failure(
-                Error.NotFound(
-                    "ItemUnits.NotFound",
-                    $"لم يتم العثور على وحدة الصنف رقم {itemUnitId}."));
+            return Result<ItemUnit>.Failure(ItemUnitErrors.NotFound(itemUnitId));
         }
 
         return !itemUnit.IsActive
-            ? Result<ItemUnit>.Failure(
-                Error.Conflict(
-                    "ItemUnits.Inactive",
-                    $"وحدة الصنف رقم {itemUnitId} غير نشطة."))
+            ? Result<ItemUnit>.Failure(ItemUnitErrors.Inactive(itemUnitId))
             : Result<ItemUnit>.Success(itemUnit);
     }
 }

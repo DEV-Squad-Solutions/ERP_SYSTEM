@@ -24,7 +24,18 @@ public sealed class StockAdjustment : AuditableEntity
 
     public string? Reason { get; set; }
 
-    public byte[] RowVersion { get; set; } = [];
+    public int? SourceInventoryCountId { get; set; }
+
+    public InventoryCount? SourceInventoryCount { get; set; }
+
+    public DateTime LastModifiedAt { get; private set; }
+
+    public byte[] RowVersion { get; private set; } = [];
 
     public ICollection<StockAdjustmentLine> Lines { get; set; } = [];
+
+    public void Touch(DateTime utcNow)
+    {
+        LastModifiedAt = utcNow;
+    }
 }

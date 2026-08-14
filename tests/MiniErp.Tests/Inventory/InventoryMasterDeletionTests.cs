@@ -37,6 +37,14 @@ public sealed class InventoryMasterDeletionTests
             { "InvoiceContainerStore", true, "Stores.HasDependencies" },
             { "StockOpeningBalance", false, "Stores.HasDependencies" },
             { "StockOpeningBalance", true, "Stores.HasDependencies" },
+            { "StockAdjustment", false, "Stores.HasDependencies" },
+            { "StockAdjustment", true, "Stores.HasDependencies" },
+            { "StockTransferSource", false, "Stores.HasDependencies" },
+            { "StockTransferSource", true, "Stores.HasDependencies" },
+            { "StockTransferDestination", false, "Stores.HasDependencies" },
+            { "StockTransferDestination", true, "Stores.HasDependencies" },
+            { "InventoryCount", false, "Stores.HasDependencies" },
+            { "InventoryCount", true, "Stores.HasDependencies" },
             { "ItemMovement", false, "Stores.HasDependencies" },
             { "ItemMovement", true, "Stores.HasDependencies" },
             { "ContainerMovement", false, "Stores.HasDependencies" },
@@ -50,6 +58,12 @@ public sealed class InventoryMasterDeletionTests
             { "InvoiceLine", true },
             { "StockOpeningBalanceLine", false },
             { "StockOpeningBalanceLine", true },
+            { "StockAdjustmentLine", false },
+            { "StockAdjustmentLine", true },
+            { "StockTransferLine", false },
+            { "StockTransferLine", true },
+            { "InventoryCountLine", false },
+            { "InventoryCountLine", true },
             { "ItemMovement", false },
             { "ItemMovement", true }
         };
@@ -63,6 +77,12 @@ public sealed class InventoryMasterDeletionTests
             { "InvoiceLine", true },
             { "StockOpeningBalanceLine", false },
             { "StockOpeningBalanceLine", true },
+            { "StockAdjustmentLine", false },
+            { "StockAdjustmentLine", true },
+            { "StockTransferLine", false },
+            { "StockTransferLine", true },
+            { "InventoryCountLine", false },
+            { "InventoryCountLine", true },
             { "ItemMovement", false },
             { "ItemMovement", true }
         };
@@ -117,19 +137,20 @@ public sealed class InventoryMasterDeletionTests
         var result = await service.AddAsync(
             new ItemRequest(
                 1,
-                "  NEW  ",
                 "  New Item  ",
                 "   "));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value.CompanyId);
-        Assert.Equal("NEW", result.Value.Code);
+        Assert.Matches(
+            "^ITM-[0-9]{4,}$",
+            result.Value.Code);
         Assert.Equal("New Item", result.Value.Name);
         Assert.Null(result.Value.Description);
     }
 
     [Fact]
-    public async Task AddItem_RejectsNormalizedDuplicateCode()
+    public async Task AddItem_GeneratesAUniqueCode()
     {
         await using var database = await InventoryDeletionDatabase.CreateAsync();
         var service = database.CreateItemService(companyId: 1);
@@ -137,12 +158,11 @@ public sealed class InventoryMasterDeletionTests
         var result = await service.AddAsync(
             new ItemRequest(
                 1,
-                "  ITEM-1  ",
                 "Another Item",
                 null));
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("Items.CodeExists", result.Error.Code);
+        Assert.True(result.IsSuccess);
+        Assert.NotEqual("ITEM-1", result.Value.Code);
     }
 
     [Fact]
@@ -154,7 +174,6 @@ public sealed class InventoryMasterDeletionTests
         var result = await service.AddAsync(
             new ItemRequest(
                 5,
-                "NEW",
                 "New Item",
                 null));
 
@@ -172,7 +191,6 @@ public sealed class InventoryMasterDeletionTests
             1,
             new ItemRequest(
                 2,
-                "  ITEM-1  ",
                 "  Updated Item  ",
                 "  Updated description  "));
 
@@ -189,7 +207,6 @@ public sealed class InventoryMasterDeletionTests
         var validator = new ItemRequestValidator();
         var request = new ItemRequest(
             1,
-            $"  {new string('C', 50)}  ",
             $"  {new string('N', 200)}  ",
             $"  {new string('D', 1_000)}  ");
 
@@ -199,41 +216,21 @@ public sealed class InventoryMasterDeletionTests
     }
 
     [Fact]
-    public async Task ItemValidator_UsesSharedMaximumLengthRuleForTrimmedValue()
-    {
-        var validator = new ItemRequestValidator();
-        var request = new ItemRequest(
-            1,
-            $"  {new string('C', 51)}  ",
-            "Item",
-            null);
-
-        var result = await validator.ValidateAsync(request);
-
-        var error = Assert.Single(result.Errors);
-        Assert.Equal(nameof(ItemRequest.Code), error.PropertyName);
-        Assert.Equal("MaximumLengthValidator", error.ErrorCode);
-    }
-
-    [Fact]
     public async Task ItemValidator_ReturnsOneRequiredErrorPerWhitespaceValue()
     {
         var validator = new ItemRequestValidator();
         var request = new ItemRequest(
             1,
             "   ",
-            "   ",
             null);
 
         var result = await validator.ValidateAsync(request);
 
-        Assert.Equal(2, result.Errors.Count);
+        var error = Assert.Single(result.Errors);
         Assert.All(
             result.Errors,
             error => Assert.Equal("NotEmptyValidator", error.ErrorCode));
-        Assert.Equal(
-            [nameof(ItemRequest.Code), nameof(ItemRequest.Name)],
-            result.Errors.Select(error => error.PropertyName));
+        Assert.Equal(nameof(ItemRequest.Name), error.PropertyName);
     }
 
     [Fact]
@@ -577,6 +574,36 @@ public sealed class InventoryMasterDeletionTests
                              Id, CompanyId, StoreId, IsDeleted)
                          VALUES (100, 1, 1, {isDeleted})
                          """),
+                "StockAdjustment" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockAdjustments (
+                             Id, CompanyId, StoreId, IsDeleted)
+                         VALUES (100, 1, 1, {isDeleted})
+                         """),
+                "StockTransferSource" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockTransfers (
+                             Id, CompanyId, SourceStoreId,
+                             DestinationStoreId, IsDeleted)
+                         VALUES (100, 1, 1, 2, {isDeleted})
+                         """),
+                "StockTransferDestination" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockTransfers (
+                             Id, CompanyId, SourceStoreId,
+                             DestinationStoreId, IsDeleted)
+                         VALUES (100, 1, 2, 1, {isDeleted})
+                         """),
+                "InventoryCount" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO InventoryCounts (
+                             Id, CompanyId, StoreId, IsDeleted)
+                         VALUES (100, 1, 1, {isDeleted})
+                         """),
                 "ItemMovement" => Context.Database.ExecuteSqlInterpolatedAsync(
                     $"""
                      INSERT INTO ItemMovements (
@@ -611,6 +638,27 @@ public sealed class InventoryMasterDeletionTests
                     Context.Database.ExecuteSqlInterpolatedAsync(
                         $"""
                          INSERT INTO StockOpeningBalanceLines (
+                             Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
+                         VALUES (100, 1, 1, 1, {isDeleted})
+                         """),
+                "StockAdjustmentLine" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockAdjustmentLines (
+                             Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
+                         VALUES (100, 1, 1, 1, {isDeleted})
+                         """),
+                "StockTransferLine" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockTransferLines (
+                             Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
+                         VALUES (100, 1, 1, 1, {isDeleted})
+                         """),
+                "InventoryCountLine" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO InventoryCountLines (
                              Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
                          VALUES (100, 1, 1, 1, {isDeleted})
                          """),
@@ -650,6 +698,27 @@ public sealed class InventoryMasterDeletionTests
                     Context.Database.ExecuteSqlInterpolatedAsync(
                         $"""
                          INSERT INTO StockOpeningBalanceLines (
+                             Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
+                         VALUES (100, 1, 1, 2, {isDeleted})
+                         """),
+                "StockAdjustmentLine" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockAdjustmentLines (
+                             Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
+                         VALUES (100, 1, 1, 2, {isDeleted})
+                         """),
+                "StockTransferLine" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockTransferLines (
+                             Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
+                         VALUES (100, 1, 1, 2, {isDeleted})
+                         """),
+                "InventoryCountLine" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO InventoryCountLines (
                              Id, CompanyId, ItemId, ItemUnitId, IsDeleted)
                          VALUES (100, 1, 1, 2, {isDeleted})
                          """),
@@ -775,12 +844,35 @@ public sealed class InventoryMasterDeletionTests
                 CREATE TABLE Invoices (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    ContentType INTEGER NOT NULL DEFAULT 1,
                     StoreId INTEGER NOT NULL,
                     ContainerStoreId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );
 
                 CREATE TABLE StockOpeningBalances (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE StockAdjustments (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE StockTransfers (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    SourceStoreId INTEGER NOT NULL,
+                    DestinationStoreId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE InventoryCounts (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
                     StoreId INTEGER NOT NULL,
@@ -816,6 +908,30 @@ public sealed class InventoryMasterDeletionTests
                     CompanyId INTEGER NOT NULL,
                     ItemId INTEGER NOT NULL,
                     ItemUnitId INTEGER NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE StockAdjustmentLines (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    ItemUnitId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE StockTransferLines (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    ItemUnitId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE InventoryCountLines (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    ItemUnitId INTEGER NOT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
                 """);

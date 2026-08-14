@@ -1,5 +1,6 @@
 using FluentValidation;
 using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.Companies;
 
 namespace MiniErp.Application.Features.PartnerOpeningBalances;
 
@@ -8,18 +9,14 @@ public sealed class PartnerOpeningBalanceRequestValidator
 {
     public PartnerOpeningBalanceRequestValidator()
     {
+        RuleFor(request => request.ExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر الصرف أكبر من صفر.");
+
         RuleFor(request => request.BusinessPartnerId)
             .GreaterThan(0);
-
-        RuleFor(request => request.DocumentNumber)
-            .NotEmpty();
-
-        RuleFor(request => request.DocumentNumber)
-            .MaximumLength(PartnerOpeningBalanceRequest.DocumentNumberMaximumLength)
-            .When(request =>
-                request.DocumentNumber is not null &&
-                request.DocumentNumber.Trim().Length >
-                PartnerOpeningBalanceRequest.DocumentNumberMaximumLength);
 
         RuleFor(request => request.DocumentDate)
             .Must(date => date != default)
@@ -54,18 +51,14 @@ public sealed class PartnerOpeningBalanceUpdateRequestValidator
 {
     public PartnerOpeningBalanceUpdateRequestValidator()
     {
+        RuleFor(request => request.ExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر الصرف أكبر من صفر.");
+
         RuleFor(request => request.BusinessPartnerId)
             .GreaterThan(0);
-
-        RuleFor(request => request.DocumentNumber)
-            .NotEmpty();
-
-        RuleFor(request => request.DocumentNumber)
-            .MaximumLength(PartnerOpeningBalanceRequest.DocumentNumberMaximumLength)
-            .When(request =>
-                request.DocumentNumber is not null &&
-                request.DocumentNumber.Trim().Length >
-                PartnerOpeningBalanceRequest.DocumentNumberMaximumLength);
 
         RuleFor(request => request.DocumentDate)
             .Must(date => date != default)

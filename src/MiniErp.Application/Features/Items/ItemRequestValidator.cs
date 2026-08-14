@@ -9,15 +9,6 @@ public sealed class ItemRequestValidator : AbstractValidator<ItemRequest>
         RuleFor(request => request.ItemUnitId)
             .GreaterThan(0);
 
-        RuleFor(request => request.Code)
-            .NotEmpty();
-
-        RuleFor(request => request.Code)
-            .MaximumLength(50)
-            .When(request =>
-                request.Code is not null &&
-                request.Code.Trim().Length > 50);
-
         RuleFor(request => request.Name)
             .NotEmpty();
 

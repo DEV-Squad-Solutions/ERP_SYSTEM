@@ -1,4 +1,6 @@
+using System.Data;
 using Mapster;
+using static MiniErp.Application.Features.CashMovementTypes.CashMovementTypeErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
@@ -120,6 +122,11 @@ public sealed class CashMovementTypeService(
         CashMovementTypeRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
         var movementType = request.Adapt<CashMovementType>();
         movementType.CompanyId = companyId;
 
@@ -132,10 +139,19 @@ public sealed class CashMovementTypeService(
             return Result<CashMovementTypeResponse>.Failure(duplicateError);
         }
 
+        foreach (var invoiceType in GetDefaultInvoiceTypes(movementType))
+        {
+            await ClearExistingDefaultAsync(
+                invoiceType,
+                excludedId: null,
+                cancellationToken);
+        }
+
         dbContext.CashMovementTypes.Add(movementType);
         await dbContext.SaveChangesAsync(cancellationToken);
         var response = await ProjectResponseQuery(movementType.Id)
             .FirstAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Result<CashMovementTypeResponse>.Success(response);
     }
 
@@ -154,6 +170,11 @@ public sealed class CashMovementTypeService(
             return Result<CashMovementTypeResponse>.Failure(
                 RowVersionRequired());
         }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var movementType = await dbContext.CashMovementTypes
             .FirstOrDefaultAsync(
@@ -195,18 +216,28 @@ public sealed class CashMovementTypeService(
             request.RowVersion;
         request.Adapt(movementType);
 
+        foreach (var invoiceType in GetDefaultInvoiceTypes(movementType))
+        {
+            await ClearExistingDefaultAsync(
+                invoiceType,
+                excludedId: id,
+                cancellationToken);
+        }
+
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
+            await transaction.RollbackAsync(cancellationToken);
             dbContext.ChangeTracker.Clear();
             return Result<CashMovementTypeResponse>.Failure(Concurrency());
         }
 
         var response = await ProjectResponseQuery(id)
             .FirstAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Result<CashMovementTypeResponse>.Success(response);
     }
 
@@ -259,10 +290,7 @@ public sealed class CashMovementTypeService(
                 cancellationToken);
 
         return exists
-            ? Error.Conflict(
-                "CashMovementTypes.NameExists",
-                $"نوع الحركة النقدية '{movementType.Name}' موجود بالفعل في نفس الاتجاه.",
-                nameof(CashMovementTypeRequest.Name))
+            ? NameExists(movementType.Name)
             : null;
     }
 
@@ -286,34 +314,73 @@ public sealed class CashMovementTypeService(
                     voucher.CashMovementTypeId == cashMovementTypeId,
                 cancellationToken);
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "CashMovementTypes.InvalidId",
-            "يجب أن يكون رقم نوع الحركة النقدية أكبر من صفر.");
+    private async Task ClearExistingDefaultAsync(
+        InvoiceType invoiceType,
+        int? excludedId,
+        CancellationToken cancellationToken)
+    {
+        var query = dbContext.CashMovementTypes.Where(entity =>
+            entity.CompanyId == companyId &&
+            (!excludedId.HasValue || entity.Id != excludedId.Value));
 
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "CashMovementTypes.NotFound",
-            $"لم يتم العثور على نوع الحركة النقدية رقم {id}.");
+        _ = invoiceType switch
+        {
+            InvoiceType.Sales => await query
+                .Where(entity => entity.IsDefaultForSales)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(
+                        entity => entity.IsDefaultForSales,
+                        false),
+                    cancellationToken),
+            InvoiceType.Purchase => await query
+                .Where(entity => entity.IsDefaultForPurchase)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(
+                        entity => entity.IsDefaultForPurchase,
+                        false),
+                    cancellationToken),
+            InvoiceType.SalesReturn => await query
+                .Where(entity => entity.IsDefaultForSalesReturn)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(
+                        entity => entity.IsDefaultForSalesReturn,
+                        false),
+                    cancellationToken),
+            InvoiceType.PurchaseReturn => await query
+                .Where(entity => entity.IsDefaultForPurchaseReturn)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(
+                        entity => entity.IsDefaultForPurchaseReturn,
+                        false),
+                    cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(invoiceType),
+                invoiceType,
+                "Unsupported invoice type.")
+        };
+    }
 
-    private static Error RowVersionRequired() =>
-        Error.Validation(
-            "CashMovementTypes.RowVersionRequired",
-            "يجب إرسال إصدار نوع الحركة النقدية الحالي للتعديل.",
-            nameof(CashMovementTypeUpdateRequest.RowVersion));
+    private static IEnumerable<InvoiceType> GetDefaultInvoiceTypes(
+        CashMovementType movementType)
+    {
+        if (movementType.IsDefaultForSales)
+        {
+            yield return InvoiceType.Sales;
+        }
 
-    private static Error Concurrency() =>
-        Error.Conflict(
-            "CashMovementTypes.Concurrency",
-            "تم تعديل نوع الحركة النقدية بواسطة مستخدم آخر. أعد تحميل البيانات ثم حاول مرة أخرى.");
+        if (movementType.IsDefaultForPurchase)
+        {
+            yield return InvoiceType.Purchase;
+        }
 
-    private static Error HasVouchers() =>
-        Error.Conflict(
-            "CashMovementTypes.HasVouchers",
-            "لا يمكن حذف نوع الحركة النقدية لارتباطه بسندات حالية أو تاريخية. يمكن إلغاء تنشيطه بدلاً من ذلك.");
+        if (movementType.IsDefaultForSalesReturn)
+        {
+            yield return InvoiceType.SalesReturn;
+        }
 
-    private static Error UsedSemanticsChangeNotAllowed() =>
-        Error.Conflict(
-            "CashMovementTypes.UsedSemanticsChangeNotAllowed",
-            "لا يمكن تغيير اتجاه أو أثر نوع الحركة بعد استخدامه في سند نقدية.");
+        if (movementType.IsDefaultForPurchaseReturn)
+        {
+            yield return InvoiceType.PurchaseReturn;
+        }
+    }
 }

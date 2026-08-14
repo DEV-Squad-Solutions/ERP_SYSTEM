@@ -8,7 +8,7 @@ public sealed class BusinessPartnerMappingRegister : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.ForType<BusinessPartnerRequest, BusinessPartner>()
-            .Map(partner => partner.Code, request => request.Code.Trim())
+            .Ignore(partner => partner.Code)
             .Map(partner => partner.Name, request => request.Name.Trim())
             .Map(
                 partner => partner.PhoneNumber,

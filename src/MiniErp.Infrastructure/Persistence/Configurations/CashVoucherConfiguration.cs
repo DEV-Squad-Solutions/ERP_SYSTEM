@@ -37,6 +37,15 @@ public sealed class CashVoucherConfiguration
                     "([PartyType] = 4 AND [BusinessPartnerId] IS NULL AND " +
                     "[DriverId] IS NULL AND [DriverTripId] IS NULL AND " +
                     "[ExternalPartyName] IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_CashVouchers_PostingReferencesTogether",
+                    "[CashMovementTypeId] IS NULL OR [CashboxId] IS NOT NULL");
+                table.HasCheckConstraint(
+                    "CK_CashVouchers_TransferShape",
+                    "[CashboxTransferId] IS NULL OR " +
+                    "([CashboxId] IS NOT NULL AND " +
+                    "[CashMovementTypeId] IS NULL AND " +
+                    "[InvoiceId] IS NULL AND [PartyType] = 1)");
             });
 
         builder.HasKey(voucher => voucher.Id);
@@ -46,6 +55,10 @@ public sealed class CashVoucherConfiguration
 
         builder.Property(voucher => voucher.CompanyId)
             .IsRequired();
+
+        builder.Property(voucher => voucher.InvoiceId);
+
+        builder.Property(voucher => voucher.CashboxTransferId);
 
         builder.HasAlternateKey(voucher => new
         {
@@ -63,6 +76,23 @@ public sealed class CashVoucherConfiguration
             voucher.VoucherNumber
         })
             .HasFilter("[IsDeleted] = 0");
+
+        builder.HasIndex(voucher => new
+        {
+            voucher.CompanyId,
+            voucher.InvoiceId
+        })
+            .HasFilter("[InvoiceId] IS NOT NULL AND [IsDeleted] = 0");
+
+        builder.HasIndex(voucher => new
+        {
+            voucher.CompanyId,
+            voucher.CashboxTransferId,
+            voucher.Direction
+        })
+            .IsUnique()
+            .HasFilter(
+                "[CashboxTransferId] IS NOT NULL AND [IsDeleted] = 0");
 
         builder.Property(voucher => voucher.VoucherDate)
             .HasColumnType("date")
@@ -85,6 +115,22 @@ public sealed class CashVoucherConfiguration
 
         builder.Property(voucher => voucher.Currency)
             .HasConversion<int>()
+            .IsRequired();
+
+        builder.Property(voucher => voucher.ExchangeRateId);
+
+        builder.Property(voucher => voucher.ExchangeRate)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.RatePrecision,
+                Domain.Entities.Companies.ExchangeRateRules.RateScale)
+            .HasDefaultValue(1m)
+            .IsRequired();
+
+        builder.Property(voucher => voucher.BaseAmount)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountPrecision,
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountScale)
+            .HasDefaultValue(0m)
             .IsRequired();
 
         builder.Property(voucher => voucher.ReferenceNumber)
@@ -149,6 +195,42 @@ public sealed class CashVoucherConfiguration
             .HasForeignKey(voucher => voucher.CompanyId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasOne(voucher => voucher.ExchangeRateRecord)
+            .WithMany()
+            .HasForeignKey(voucher => new
+            {
+                voucher.CompanyId,
+                voucher.ExchangeRateId
+            })
+            .HasPrincipalKey(rate => new
+            {
+                rate.CompanyId,
+                rate.Id
+            })
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(voucher => new
+        {
+            voucher.CompanyId,
+            voucher.ExchangeRateId
+        });
+
+        builder.HasOne(voucher => voucher.Invoice)
+            .WithMany(invoice => invoice.PaymentVouchers)
+            .HasForeignKey(voucher => new
+            {
+                voucher.CompanyId,
+                voucher.InvoiceId
+            })
+            .HasPrincipalKey(invoice => new
+            {
+                invoice.CompanyId,
+                invoice.Id
+            })
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.HasOne(voucher => voucher.Cashbox)
             .WithMany(cashbox => cashbox.Vouchers)
             .HasForeignKey(voucher => new
@@ -161,6 +243,7 @@ public sealed class CashVoucherConfiguration
                 cashbox.CompanyId,
                 cashbox.Id
             })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(voucher => voucher.CashMovementType)
@@ -175,6 +258,7 @@ public sealed class CashVoucherConfiguration
                 movementType.CompanyId,
                 movementType.Id
             })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(voucher => voucher.BusinessPartner)

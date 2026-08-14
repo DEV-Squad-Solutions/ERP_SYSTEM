@@ -8,7 +8,7 @@ public sealed class ItemMappingRegister : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.ForType<ItemRequest, Item>()
-            .Map(item => item.Code, request => request.Code.Trim())
+            .Ignore(item => item.Code)
             .Map(item => item.Name, request => request.Name.Trim())
             .Map(
                 item => item.Description,

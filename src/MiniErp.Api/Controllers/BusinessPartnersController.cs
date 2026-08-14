@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.BusinessPartners.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.BusinessPartners;
+using MiniErp.Application.Features.PartnerItemReports;
 
 namespace MiniErp.Api.Controllers;
 
@@ -10,7 +12,8 @@ namespace MiniErp.Api.Controllers;
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
 public sealed class BusinessPartnersController(
-    IBusinessPartnerService businessPartnerService)
+    IBusinessPartnerService businessPartnerService,
+    IPartnerItemReportService partnerItemReportService)
     : ApiControllerBase
 {
     [HttpGet]
@@ -29,7 +32,7 @@ public sealed class BusinessPartnersController(
     }
 
     [HttpGet("select")]
-    [ProducesResponseType<IReadOnlyList<SelectResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<IReadOnlyList<BusinessPartnerSelectResponse>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetSelect(CancellationToken cancellationToken)
     {
         var result = await businessPartnerService.GetSelectAsync(cancellationToken);
@@ -63,6 +66,19 @@ public sealed class BusinessPartnersController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("item-report")]
+    [ProducesResponseType<PartnerItemReportResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetItemReport(
+        [FromQuery] PartnerItemReportFilterRequest filters,
+        CancellationToken cancellationToken)
+    {
+        var result = await partnerItemReportService.GetAsync(
+            filters,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<BusinessPartnerResponse>(StatusCodes.Status201Created)]
@@ -74,6 +90,14 @@ public sealed class BusinessPartnersController(
         var result = await businessPartnerService.AddAsync(
             request,
             cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<BusinessPartnersRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
 
         return result.IsFailure
             ? this.ToProblem(result.Error)
@@ -97,6 +121,13 @@ public sealed class BusinessPartnersController(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<BusinessPartnersRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 
@@ -112,6 +143,13 @@ public sealed class BusinessPartnersController(
         var result = await businessPartnerService.DeleteAsync(
             id,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<BusinessPartnersRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

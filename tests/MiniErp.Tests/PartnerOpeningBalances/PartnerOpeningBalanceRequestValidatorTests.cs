@@ -54,16 +54,12 @@ public sealed class PartnerOpeningBalanceRequestValidatorTests
     }
 
     [Fact]
-    public void Validate_RejectsWhitespaceDocumentNumberAndOversizedNotes()
+    public void Validate_RejectsOversizedNotes()
     {
         var result = validator.Validate(
             CreateRequest(
-                documentNumber: "   ",
                 notes: new string('x', PartnerOpeningBalanceRequest.NotesMaximumLength + 1)));
 
-        Assert.Contains(
-            result.Errors,
-            failure => failure.PropertyName == nameof(PartnerOpeningBalanceRequest.DocumentNumber));
         Assert.Contains(
             result.Errors,
             failure => failure.PropertyName == nameof(PartnerOpeningBalanceRequest.Notes));
@@ -75,7 +71,6 @@ public sealed class PartnerOpeningBalanceRequestValidatorTests
         var validator = new PartnerOpeningBalanceUpdateRequestValidator();
         var request = new PartnerOpeningBalanceUpdateRequest(
             1,
-            "OPEN-001",
             new DateOnly(2026, 1, 1),
             CurrencyCode.EGP,
             PartnerBalanceType.Receivable,
@@ -91,14 +86,12 @@ public sealed class PartnerOpeningBalanceRequestValidatorTests
     }
 
     private static PartnerOpeningBalanceRequest CreateRequest(
-        string documentNumber = "OPEN-001",
         CurrencyCode currency = CurrencyCode.EGP,
         PartnerBalanceType balanceType = PartnerBalanceType.Receivable,
         decimal amount = 125.50m,
         string? notes = null) =>
         new(
             1,
-            documentNumber,
             new DateOnly(2026, 1, 1),
             currency,
             balanceType,

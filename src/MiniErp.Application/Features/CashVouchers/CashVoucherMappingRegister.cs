@@ -8,25 +8,22 @@ public sealed class CashVoucherMappingRegister : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.ForType<CashVoucherRequest, CashVoucher>()
-            .Map(
-                voucher => voucher.VoucherNumber,
-                request => request.VoucherNumber.Trim())
-            .Map(
-                voucher => voucher.ExternalPartyName,
-                request => Normalize(request.ExternalPartyName))
-            .Map(
-                voucher => voucher.ReferenceNumber,
-                request => Normalize(request.ReferenceNumber))
+            .Ignore(voucher => voucher.ExchangeRateRecord)
+            .Ignore(voucher => voucher.ExchangeRateId)
+            .Ignore(voucher => voucher.ExchangeRate)
+            .Ignore(voucher => voucher.BaseAmount)
+            .Ignore(voucher => voucher.InvoicePayment)
             .Map(
                 voucher => voucher.Description,
-                request => Normalize(request.Description))
-            .Map(voucher => voucher.Notes, request => Normalize(request.Notes));
+                request => Normalize(request.Description));
 
         config.ForType<CashVoucherUpdateRequest, CashVoucher>()
             .Ignore(voucher => voucher.RowVersion)
-            .Map(
-                voucher => voucher.VoucherNumber,
-                request => request.VoucherNumber.Trim())
+            .Ignore(voucher => voucher.ExchangeRateRecord)
+            .Ignore(voucher => voucher.ExchangeRateId)
+            .Ignore(voucher => voucher.ExchangeRate)
+            .Ignore(voucher => voucher.BaseAmount)
+            .Ignore(voucher => voucher.InvoicePayment)
             .Map(
                 voucher => voucher.ExternalPartyName,
                 request => Normalize(request.ExternalPartyName))
@@ -40,11 +37,45 @@ public sealed class CashVoucherMappingRegister : IRegister
 
         config.ForType<CashVoucher, CashVoucherResponse>()
             .Map(
+                response => response.BaseCurrency,
+                voucher => voucher.Company.Settings == null
+                    ? Domain.Enums.CurrencyCode.EGP
+                    : voucher.Company.Settings.BaseCurrency)
+            .Map(
+                response => response.ExchangeRate,
+                voucher => (voucher.CashMovementTypeId.HasValue ||
+                    voucher.CashboxTransferId.HasValue) &&
+                    voucher.Currency ==
+                        (voucher.Company.Settings == null
+                            ? Domain.Enums.CurrencyCode.EGP
+                            : voucher.Company.Settings.BaseCurrency)
+                        ? 1m
+                        : voucher.ExchangeRate)
+            .Map(
+                response => response.BaseAmount,
+                voucher => (voucher.CashMovementTypeId.HasValue ||
+                    voucher.CashboxTransferId.HasValue) &&
+                    voucher.Currency ==
+                        (voucher.Company.Settings == null
+                            ? Domain.Enums.CurrencyCode.EGP
+                            : voucher.Company.Settings.BaseCurrency)
+                        ? voucher.Amount
+                        : voucher.BaseAmount)
+            .Map(
                 response => response.CashboxName,
-                voucher => voucher.Cashbox.Name)
+                voucher => voucher.Cashbox == null
+                    ? null
+                    : voucher.Cashbox.Name)
             .Map(
                 response => response.CashMovementTypeName,
-                voucher => voucher.CashMovementType.Name)
+                voucher => voucher.CashMovementType == null
+                    ? null
+                    : voucher.CashMovementType.Name)
+            .Map(
+                response => response.IsDraft,
+                voucher => !voucher.CashboxId.HasValue ||
+                    (!voucher.CashMovementTypeId.HasValue &&
+                     !voucher.CashboxTransferId.HasValue))
             .Map(
                 response => response.BusinessPartnerName,
                 voucher => voucher.BusinessPartner == null
@@ -59,7 +90,34 @@ public sealed class CashVoucherMappingRegister : IRegister
                 response => response.DriverTripInvoiceNumber,
                 voucher => voucher.DriverTrip == null
                     ? null
-                    : voucher.DriverTrip.InvoiceNumber);
+                    : voucher.DriverTrip.InvoiceNumber)
+            .Map(
+                response => response.InvoiceNumber,
+                voucher => voucher.Invoice == null
+                    ? null
+                    : voucher.Invoice.InvoiceNumber)
+            .Map(
+                response => response.AppliedInvoiceAmount,
+                voucher => voucher.InvoicePayment == null
+                    ? null
+                    : (decimal?)voucher.InvoicePayment.AppliedAmount)
+            .Map(
+                response => response.AppliedInvoiceCurrency,
+                voucher => voucher.InvoicePayment == null
+                    ? null
+                    : (Domain.Enums.CurrencyCode?)
+                        voucher.InvoicePayment.InvoiceCurrency)
+            .Map(
+                response => response.AppliedBaseAmount,
+                voucher => voucher.InvoicePayment == null
+                    ? null
+                    : (decimal?)voucher.InvoicePayment.AppliedBaseAmount)
+            .Map(
+                response => response.RealizedExchangeDifference,
+                voucher => voucher.InvoicePayment == null
+                    ? null
+                    : (decimal?)
+                        voucher.InvoicePayment.RealizedExchangeDifference);
     }
 
     private static string? Normalize(string? value) =>

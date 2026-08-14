@@ -6,6 +6,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
+using MiniErp.Application.Features.PartnerItemReports;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Containers;
@@ -17,8 +18,10 @@ using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
+using MiniErp.Infrastructure.Services.Inventory;
 using MiniErp.Infrastructure.Services.Invoices;
 using MiniErp.Infrastructure.Services.Pagination;
+using MiniErp.Infrastructure.Services.PartnerItemReports;
 
 namespace MiniErp.Tests.Invoices;
 
@@ -100,6 +103,37 @@ public sealed class InvoiceServiceTests
         Assert.Equal(
             1,
             await database.Context.InvoiceContainerLines.CountAsync());
+    }
+
+    [Fact]
+    public async Task Add_ContainerContentTypeCreatesContainerOnlyInvoice()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var request = CreateRequest(
+            InvoiceType.Sales,
+            storeId: 3,
+            containerStoreId: 3,
+            containerLines:
+            [
+                new InvoiceContainerLineRequest(1, 1, 0)
+            ]) with
+        {
+            ContentType = InvoiceContentType.Containers,
+            Lines = [],
+            WBWeight = 0m,
+            PaidAmount = 0m,
+            CashboxId = null
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsSuccess, result.IsFailure ? result.Error.Description : null);
+        Assert.Equal(InvoiceContentType.Containers, result.Value.ContentType);
+        Assert.Empty(result.Value.Lines);
+        Assert.Single(result.Value.ContainerLines);
+        Assert.Empty(await database.Context.ItemMovements.ToListAsync());
+        Assert.Single(await database.Context.ContainerMovements.ToListAsync());
     }
 
     [Fact]
@@ -238,6 +272,695 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public async Task PurchaseReturn_UsesCurrentAverageNotEnteredPurchasePrice()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 4, 1m, 99m, null)]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var line = Assert.Single(result.Value.Lines);
+        Assert.Equal(12m, line.UnitCost);
+        Assert.Equal(48m, line.InventoryTotalCost);
+        Assert.Equal(6m, line.QuantityAfter);
+        Assert.Equal(12m, line.AverageCostAfter);
+        Assert.Equal(72m, line.InventoryValueAfter);
+    }
+
+    [Fact]
+    public async Task LinkedPurchaseReturn_UsesOriginalPriceWithoutDiscountAndCurrentAverageCost()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 10,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 10),
+                storeId: 2,
+                discountAmount: 10m))).Value;
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 10,
+                        Weight: 1m,
+                        Price: 20m,
+                        Notes: null)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 11),
+                storeId: 2));
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 4,
+                        Weight: 1m,
+                        Price: 99m,
+                        Notes: null,
+                        SourceInvoiceLineId: source.Lines.Single().Id)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 20),
+                storeId: 2));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var line = Assert.Single(result.Value.Lines);
+        Assert.Equal(source.Lines.Single().Id, line.SourceInvoiceLineId);
+        Assert.Equal(10m, line.Price);
+        Assert.Equal(40m, line.Total);
+        Assert.Equal(0m, result.Value.DiscountAmount);
+        Assert.Equal(40m, result.Value.Total);
+        Assert.Equal(15m, line.UnitCost);
+        Assert.Equal(15m, line.AverageCostAfter);
+    }
+
+    [Theory]
+    [InlineData(InvoiceType.Purchase, InvoiceType.PurchaseReturn)]
+    [InlineData(InvoiceType.Sales, InvoiceType.SalesReturn)]
+    public async Task LinkedReturn_FullOriginalInvoiceAppliesOriginalDiscount(
+        InvoiceType sourceType,
+        InvoiceType returnType)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        if (sourceType == InvoiceType.Sales)
+        {
+            var stockResult = await service.AddAsync(
+                CreateRequest(
+                    InvoiceType.Purchase,
+                    PaymentTerm.Credit,
+                    lines:
+                    [
+                        new InvoiceLineRequest(
+                            ItemId: 1,
+                            Count: 10,
+                            Weight: 1m,
+                            Price: 12m,
+                            Notes: null),
+                        new InvoiceLineRequest(
+                            ItemId: 2,
+                            Count: 10,
+                            Weight: 1m,
+                            Price: 12m,
+                            Notes: null)
+                    ],
+                    storeId: 2));
+            Assert.True(stockResult.IsSuccess, stockResult.Error.Description);
+        }
+
+        var sourceResult = await service.AddAsync(
+            CreateRequest(
+                sourceType,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 2,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null),
+                    new InvoiceLineRequest(
+                        ItemId: 2,
+                        Count: 3,
+                        Weight: 1m,
+                        Price: 20m,
+                        Notes: null)
+                ],
+                storeId: 2,
+                discountAmount: 8m));
+        Assert.True(sourceResult.IsSuccess, sourceResult.Error.Description);
+        var source = sourceResult.Value;
+        var sourceLinesByItem = source.Lines.ToDictionary(
+            line => line.ItemId);
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                returnType,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 2,
+                        Weight: 1m,
+                        Price: 99m,
+                        Notes: null,
+                        SourceInvoiceLineId: sourceLinesByItem[1].Id),
+                    new InvoiceLineRequest(
+                        ItemId: 2,
+                        Count: 3,
+                        Weight: 1m,
+                        Price: 99m,
+                        Notes: null,
+                        SourceInvoiceLineId: sourceLinesByItem[2].Id)
+                ],
+                storeId: 2));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(80m, result.Value.Subtotal);
+        Assert.Equal(8m, result.Value.DiscountAmount);
+        Assert.Equal(72m, result.Value.Total);
+        var firstLine = result.Value.Lines.Single(line => line.ItemId == 1);
+        Assert.Equal(2, firstLine.Count);
+        Assert.Equal(1m, firstLine.Weight);
+        Assert.Equal(2m, firstLine.Quantity);
+        Assert.Equal(10m, firstLine.Price);
+        Assert.Equal(20m, firstLine.Total);
+        var secondLine = result.Value.Lines.Single(line => line.ItemId == 2);
+        Assert.Equal(3, secondLine.Count);
+        Assert.Equal(1m, secondLine.Weight);
+        Assert.Equal(3m, secondLine.Quantity);
+        Assert.Equal(20m, secondLine.Price);
+        Assert.Equal(60m, secondLine.Total);
+    }
+
+    [Fact]
+    public async Task LinkedReturn_LaterRemainderAfterPartialReturnGetsNoDiscount()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var queryService = database.CreateQueryService();
+        var sourceResult = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 10,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null)
+                ],
+                storeId: 2,
+                discountAmount: 10m));
+        Assert.True(sourceResult.IsSuccess, sourceResult.Error.Description);
+        var source = sourceResult.Value;
+        var sourceLine = Assert.Single(source.Lines);
+
+        var partialResult = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 4,
+                        Weight: 1m,
+                        Price: 99m,
+                        Notes: null,
+                        SourceInvoiceLineId: sourceLine.Id)
+                ],
+                storeId: 2));
+        Assert.True(
+            partialResult.IsSuccess,
+            partialResult.Error.Description);
+        Assert.Equal(0m, partialResult.Value.DiscountAmount);
+
+        var previewResult = await queryService.GetReturnSourcesAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new InvoiceReturnSourceFilterRequest(
+                BusinessPartnerId: 1,
+                StoreId: 2,
+                ReturnType: InvoiceReturnType.PurchaseReturn,
+                AsOfDate: new DateOnly(2026, 7, 30)));
+        Assert.True(
+            previewResult.IsSuccess,
+            previewResult.Error.Description);
+        var preview = Assert.Single(previewResult.Value.Items);
+        Assert.Equal(10m, preview.OriginalDiscountAmount);
+        var previewLine = Assert.Single(preview.Lines);
+        Assert.Equal(10m, previewLine.OriginalQuantity);
+        Assert.Equal(4m, previewLine.ReturnedQuantity);
+        Assert.Equal(6m, previewLine.AvailableQuantity);
+
+        var remainderResult = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 6,
+                        Weight: 1m,
+                        Price: 99m,
+                        Notes: null,
+                        SourceInvoiceLineId: sourceLine.Id)
+                ],
+                storeId: 2));
+
+        Assert.True(
+            remainderResult.IsSuccess,
+            remainderResult.Error.Description);
+        Assert.Equal(60m, remainderResult.Value.Subtotal);
+        Assert.Equal(0m, remainderResult.Value.DiscountAmount);
+        Assert.Equal(60m, remainderResult.Value.Total);
+        Assert.Equal(10m, Assert.Single(remainderResult.Value.Lines).Price);
+    }
+
+    [Fact]
+    public void InvoiceReturnType_ExposesOnlySalesAndPurchaseReturns()
+    {
+        Assert.Equal(
+            [InvoiceReturnType.SalesReturn, InvoiceReturnType.PurchaseReturn],
+            Enum.GetValues<InvoiceReturnType>());
+        Assert.Equal(3, (int)InvoiceReturnType.SalesReturn);
+        Assert.Equal(4, (int)InvoiceReturnType.PurchaseReturn);
+    }
+
+    [Fact]
+    public async Task GetReturnSources_ReturnsOnlyRemainingQuantityForPartnerStoreAndDate()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var queryService = database.CreateQueryService();
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 10,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 10),
+                storeId: 2,
+                discountAmount: 20m))).Value;
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 3,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null,
+                        SourceInvoiceLineId: source.Lines.Single().Id)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 15),
+                storeId: 2));
+
+        var result = await queryService.GetReturnSourcesAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new InvoiceReturnSourceFilterRequest(
+                BusinessPartnerId: 1,
+                StoreId: 2,
+                ReturnType: InvoiceReturnType.PurchaseReturn,
+                AsOfDate: new DateOnly(2026, 7, 20)));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var invoice = Assert.Single(result.Value.Items);
+        Assert.Equal(source.Id, invoice.InvoiceId);
+        Assert.Equal(100m, invoice.OriginalSubtotal);
+        Assert.Equal(20m, invoice.OriginalDiscountAmount);
+        Assert.Equal(80m, invoice.OriginalTotal);
+        var line = Assert.Single(invoice.Lines);
+        Assert.Equal(source.Lines.Single().Id, line.SourceInvoiceLineId);
+        Assert.Equal(10m, line.OriginalQuantity);
+        Assert.Equal(3m, line.ReturnedQuantity);
+        Assert.Equal(7m, line.AvailableQuantity);
+        Assert.Equal(10m, line.UnitPrice);
+    }
+
+    [Fact]
+    public async Task GetReturnSources_IncludesFullyReturnedLinesWhenInvoiceStillHasAvailableItems()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var queryService = database.CreateQueryService();
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 3,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null),
+                    new InvoiceLineRequest(
+                        ItemId: 2,
+                        Count: 5,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 10),
+                storeId: 2))).Value;
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 3,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null,
+                        SourceInvoiceLineId: source.Lines.Single(
+                            line => line.ItemId == 1).Id)
+                ],
+                invoiceDate: new DateOnly(2026, 7, 15),
+                storeId: 2));
+
+        var result = await queryService.GetReturnSourcesAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new InvoiceReturnSourceFilterRequest(
+                BusinessPartnerId: 1,
+                StoreId: 2,
+                ReturnType: InvoiceReturnType.PurchaseReturn,
+                AsOfDate: new DateOnly(2026, 7, 20)));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var invoice = Assert.Single(result.Value.Items);
+        Assert.Equal(2, invoice.Lines.Count);
+        Assert.Equal(
+            0m,
+            invoice.Lines.Single(line => line.ItemId == 1)
+                .AvailableQuantity);
+        Assert.Equal(
+            5m,
+            invoice.Lines.Single(line => line.ItemId == 2)
+                .AvailableQuantity);
+    }
+
+    [Fact]
+    public async Task LinkedReturn_RejectsQuantityAboveRemainingSourceQuantity()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 2,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null)
+                ],
+                storeId: 2))).Value;
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 3,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null,
+                        SourceInvoiceLineId: source.Lines.Single().Id)
+                ],
+                storeId: 2));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.ReturnQuantityExceedsAvailable",
+            result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Delete_BlocksPurchaseReferencedByActivePurchaseReturn()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 5,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null)
+                ],
+                storeId: 2))).Value;
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 1,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null,
+                        SourceInvoiceLineId: source.Lines.Single().Id)
+                ],
+                storeId: 2));
+
+        var result = await service.DeleteAsync(source.Id, source.RowVersion);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.LinkedSalesReturnsExist", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task LinkedSalesReturn_PartialReturnUsesNoDiscountAndFullyCostedSourceSaleCost()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+        var sale = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 2,
+                        Weight: 1m,
+                        Price: 30m,
+                        Notes: null)
+                ],
+                discountAmount: 6m))).Value;
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 1,
+                        Weight: 1m,
+                        Price: 99m,
+                        Notes: null,
+                        SourceInvoiceLineId: sale.Lines.Single().Id)
+                ]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var line = Assert.Single(result.Value.Lines);
+        Assert.Equal(sale.Lines.Single().Id, line.SourceInvoiceLineId);
+        Assert.Equal(30m, line.Price);
+        Assert.Equal(0m, result.Value.DiscountAmount);
+        Assert.Equal(30m, result.Value.Total);
+        Assert.Equal(12m, line.UnitCost);
+        Assert.Equal(12m, line.AverageCostAfter);
+    }
+
+    [Fact]
+    public async Task Delete_BlocksSaleReferencedByActiveSalesReturn()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+        var sale = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 30m, null)]))).Value;
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        1,
+                        1,
+                        1m,
+                        30m,
+                        null,
+                        sale.Lines.Single().Id)
+                ]));
+
+        var result = await service.DeleteAsync(sale.Id, sale.RowVersion);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.LinkedSalesReturnsExist", result.Error.Code);
+        Assert.Equal(
+            3,
+            await database.Context.Invoices.CountAsync());
+    }
+
+    [Fact]
+    public async Task LinkedSalesReturn_RejectsPendingSourceSale()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            $"INSERT INTO CompanySettings (CompanyId, StockBalanceCheckMode) VALUES (1, {(int)StockBalanceCheckMode.None});");
+        var service = database.CreateService();
+        var sale = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 30m, null)]))).Value;
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        1,
+                        1,
+                        1m,
+                        30m,
+                        null,
+                        sale.Lines.Single().Id)
+                ]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Inventory.SalesReturnSourceCostPending",
+            result.Error.Code);
+        Assert.Equal(
+            "لا يمكن احتساب تكلفة مرتجع البيع لأن حركة البيع الأصلية لم تكتمل تكلفتها بعد.",
+            result.Error.Description);
+        Assert.Equal(1, await database.Context.Invoices.CountAsync());
+    }
+
+    [Fact]
+    public async Task UnlinkedSalesReturn_UsesPositiveAverageBeforeFallbackCost()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        1,
+                        1,
+                        1m,
+                        30m,
+                        null,
+                        null,
+                        99m)
+                ]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(12m, Assert.Single(result.Value.Lines).UnitCost);
+    }
+
+    [Fact]
+    public async Task UnlinkedSalesReturn_RequiresCostWithoutPositiveAverage()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            storeId: 2) with
+        {
+            Lines = [new InvoiceLineRequest(1, 1, 1m, 10m, null)],
+            PaidAmount = 10m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Inventory.ReturnUnitCostRequired", result.Error.Code);
+        Assert.Equal(0, await database.Context.Invoices.CountAsync());
+    }
+
+    [Fact]
     public async Task Add_BlocksPurchaseReturnWhenStockIsInsufficient()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
@@ -354,13 +1077,19 @@ public sealed class InvoiceServiceTests
                 Description = "Adjustment in"
             });
         await database.Context.SaveChangesAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO StockAdjustmentLines (
+                CompanyId, StockAdjustmentId, ItemId, UnitCost, IsDeleted)
+            VALUES (1, 900, 1, 0, 0);
+            """);
 
         var result = await database.CreateService().AddAsync(
             CreateRequest(
                 InvoiceType.PurchaseReturn,
                 lines: [new InvoiceLineRequest(1, 12, 1m, 10m, null)]));
 
-        Assert.True(result.IsSuccess);
+        Assert.True(result.IsSuccess, result.Error.Description);
     }
 
     [Fact]
@@ -407,6 +1136,89 @@ public sealed class InvoiceServiceTests
             result.Error.Description);
         Assert.Contains("Item 1", result.Error.Description);
         Assert.DoesNotContain("تعديل الفاتورة", result.Error.Description);
+    }
+
+    [Fact]
+    public async Task ValidateStockAsync_FinalCheckUsesTheResultingBalanceOnly()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO CompanySettings (CompanyId, StockBalanceCheckMode) VALUES (1, {(int)StockBalanceCheckMode.FinalCheck});");
+        database.Context.ItemMovements.AddRange(
+            new ItemMovement
+            {
+                CompanyId = 1,
+                StoreId = 1,
+                ItemId = 1,
+                ItemUnitId = 1,
+                MovementType = ItemMovementType.Sales,
+                ReferenceId = 911,
+                ReferenceNumber = "SALE-911",
+                MovementDate = new DateOnly(2026, 1, 3),
+                QuantityOut = 12m
+            },
+            CostedMovement(new ItemMovement
+            {
+                CompanyId = 1,
+                StoreId = 1,
+                ItemId = 1,
+                ItemUnitId = 1,
+                MovementType = ItemMovementType.Purchase,
+                ReferenceId = 912,
+                ReferenceNumber = "PURCHASE-912",
+                MovementDate = new DateOnly(2026, 1, 4),
+                QuantityIn = 10m
+            }));
+        await database.Context.SaveChangesAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                invoiceDate: new DateOnly(2026, 1, 2),
+                lines: [new InvoiceLineRequest(1, 1, 1m, 10m, null)]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+    }
+
+    [Fact]
+    public async Task Add_InboundInvoiceAllowsExistingHistoricalShortageBecauseItAddsStock()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        database.Context.ItemMovements.AddRange(
+            new ItemMovement
+            {
+                CompanyId = 1,
+                StoreId = 1,
+                ItemId = 1,
+                ItemUnitId = 1,
+                MovementType = ItemMovementType.Sales,
+                ReferenceId = 904,
+                ReferenceNumber = "SALE-904",
+                MovementDate = new DateOnly(2026, 1, 3),
+                QuantityOut = 12m
+            },
+            CostedMovement(new ItemMovement
+            {
+                CompanyId = 1,
+                StoreId = 1,
+                ItemId = 1,
+                ItemUnitId = 1,
+                MovementType = ItemMovementType.Purchase,
+                ReferenceId = 905,
+                ReferenceNumber = "PURCHASE-905",
+                MovementDate = new DateOnly(2026, 1, 4),
+                QuantityIn = 10m
+            }));
+        await database.Context.SaveChangesAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                invoiceDate: new DateOnly(2026, 1, 5),
+                lines: [new InvoiceLineRequest(1, 1, 1m, 10m, null)]));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(3, await database.Context.ItemMovements.CountAsync());
     }
 
     [Fact]
@@ -480,7 +1292,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         database.Context.ItemMovements.Add(
-            new ItemMovement
+            CostedMovement(new ItemMovement
             {
                 CompanyId = 1,
                 StoreId = 2,
@@ -491,7 +1303,7 @@ public sealed class InvoiceServiceTests
                 ReferenceNumber = "PURCHASE-910",
                 MovementDate = new DateOnly(2026, 7, 24),
                 QuantityIn = 5m
-            });
+            }));
         await database.Context.SaveChangesAsync();
 
         var service = database.CreateService();
@@ -1161,7 +1973,7 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task Update_CreditToCashRemovesPartnerMovement()
+    public async Task Update_CreditToCashCreatesFullAndPaymentMovements()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -1179,8 +1991,9 @@ public sealed class InvoiceServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(
-            0,
+            2,
             await database.Context.BusinessPartnerMovements.CountAsync());
+        Assert.Single(await database.Context.CashVouchers.ToListAsync());
     }
 
     [Fact]
@@ -1222,7 +2035,7 @@ public sealed class InvoiceServiceTests
                 containerStoreId: 3,
                 driverId: 1))).Value;
 
-        var result = await service.DeleteAsync(created.Id);
+        var result = await service.DeleteAsync(created.Id, created.RowVersion);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(0, await database.Context.Invoices.CountAsync());
@@ -1251,7 +2064,7 @@ public sealed class InvoiceServiceTests
         var created = (await service.AddAsync(
             CreateRequest(InvoiceType.SalesReturn))).Value;
 
-        var result = await service.DeleteAsync(created.Id);
+        var result = await service.DeleteAsync(created.Id, created.RowVersion);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(0, await database.Context.Invoices.CountAsync());
@@ -1279,7 +2092,7 @@ public sealed class InvoiceServiceTests
             movementDate: new DateOnly(2026, 7, 26),
             quantityOut: 11m);
 
-        var result = await service.DeleteAsync(created.Id);
+        var result = await service.DeleteAsync(created.Id, created.RowVersion);
 
         Assert.True(result.IsFailure);
         Assert.Equal("Inventory.HistoricalStockConflict", result.Error.Code);
@@ -1377,8 +2190,8 @@ public sealed class InvoiceServiceTests
                 paidAmount: 2m))).Value;
         await database.Context.Database.ExecuteSqlRawAsync(
             """
-            CREATE TRIGGER AbortReplacementItemMovementInsert
-            BEFORE INSERT ON ItemMovements
+            CREATE TRIGGER AbortReplacementItemMovementUpdate
+            BEFORE UPDATE ON ItemMovements
             BEGIN
                 SELECT RAISE(ABORT, 'forced replacement side-effect failure');
             END;
@@ -1416,7 +2229,7 @@ public sealed class InvoiceServiceTests
             .SingleAsync();
         var partnerMovement = await database.Context.BusinessPartnerMovements
             .AsNoTracking()
-            .SingleAsync();
+            .SingleAsync(movement => movement.InvoiceId.HasValue);
         var driverTrip = await database.Context.DriverTrips
             .AsNoTracking()
             .SingleAsync();
@@ -1435,7 +2248,7 @@ public sealed class InvoiceServiceTests
         Assert.Equal(1, containerMovement.OutgoingUnits);
         Assert.Equal(0, containerMovement.IncomingUnits);
         Assert.Equal(1, partnerMovement.BusinessPartnerId);
-        Assert.Equal(17m, partnerMovement.Credit);
+        Assert.Equal(19m, partnerMovement.Credit);
         Assert.Equal(1, driverTrip.DriverId);
     }
 
@@ -1464,7 +2277,7 @@ public sealed class InvoiceServiceTests
             END;
             """);
 
-        var result = await service.DeleteAsync(created.Id);
+        var result = await service.DeleteAsync(created.Id, created.RowVersion);
 
         Assert.True(result.IsFailure);
         Assert.Equal("Invoices.Concurrency", result.Error.Code);
@@ -1507,7 +2320,7 @@ public sealed class InvoiceServiceTests
             """);
 
         await Assert.ThrowsAsync<DbUpdateException>(
-            () => service.DeleteAsync(created.Id));
+            () => service.DeleteAsync(created.Id, created.RowVersion));
 
         database.Context.ChangeTracker.Clear();
         Assert.Equal(1, await database.Context.Invoices.CountAsync());
@@ -1549,7 +2362,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         database.Context.ItemMovements.Add(
-            new ItemMovement
+            CostedMovement(new ItemMovement
             {
                 CompanyId = 1,
                 StoreId = 1,
@@ -1560,7 +2373,7 @@ public sealed class InvoiceServiceTests
                 ReferenceNumber = "SALE-913",
                 MovementDate = new DateOnly(2026, 7, 26),
                 QuantityOut = 8m
-            });
+            }));
         await database.Context.SaveChangesAsync();
 
         var service = database.CreateService();
@@ -1650,7 +2463,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         database.Context.ItemMovements.Add(
-            new ItemMovement
+            CostedMovement(new ItemMovement
             {
                 CompanyId = 1,
                 StoreId = 2,
@@ -1661,7 +2474,7 @@ public sealed class InvoiceServiceTests
                 ReferenceNumber = "PURCHASE-915",
                 MovementDate = new DateOnly(2026, 7, 25),
                 QuantityIn = 2m
-            });
+            }));
         await database.Context.SaveChangesAsync();
 
         var result = await database.CreateService().AddAsync(
@@ -1956,7 +2769,7 @@ public sealed class InvoiceServiceTests
     [Theory]
     [InlineData(InvoiceType.SalesReturn)]
     [InlineData(InvoiceType.PurchaseReturn)]
-    public async Task Add_CashReturnCreatesNoOutstandingPartnerMovement(
+    public async Task Add_CashReturnCreatesSettledPartnerMovements(
         InvoiceType invoiceType)
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
@@ -1965,9 +2778,13 @@ public sealed class InvoiceServiceTests
         var result = await service.AddAsync(CreateRequest(invoiceType));
 
         Assert.True(result.IsSuccess);
+        var movements = await database.Context.BusinessPartnerMovements
+            .ToListAsync();
+        Assert.Equal(2, movements.Count);
         Assert.Equal(
-            0,
-            await database.Context.BusinessPartnerMovements.CountAsync());
+            0m,
+            movements.Sum(movement =>
+                movement.Credit - movement.Debit));
     }
 
     [Theory]
@@ -1999,6 +2816,247 @@ public sealed class InvoiceServiceTests
 
         Assert.Equal(expectedTotal, invoice.Total);
         Assert.Equal(expectedRemaining, invoice.RemainingAmount);
+    }
+
+    [Fact]
+    public async Task Add_CalculatesAndPersistsWeighbridgeTotal()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit,
+            lines:
+            [
+                new InvoiceLineRequest(
+                    ItemId: 1,
+                    Count: 1,
+                    Weight: 122m,
+                    Price: 10m,
+                    Notes: null)
+            ]) with
+        {
+            WBWeight = 125.750000m,
+            WBScaleDifference = 2.250000m,
+            WBDiscount = 1.500000m,
+            WBTotal = 122.000000m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(125.750000m, result.Value.WBWeight);
+        Assert.Equal(2.250000m, result.Value.WBScaleDifference);
+        Assert.Equal(1.500000m, result.Value.WBDiscount);
+        Assert.Equal(122.000000m, request.WBTotal);
+        Assert.Equal(122.000000m, result.Value.WBTotal);
+
+        database.Context.ChangeTracker.Clear();
+        var persisted = await database.Context.Invoices.SingleAsync();
+        Assert.Equal(122.000000m, persisted.WBTotal);
+    }
+
+    [Fact]
+    public async Task Add_RejectsWeighbridgeTotalThatDoesNotMatchItemWeight()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit,
+            lines:
+            [
+                new InvoiceLineRequest(
+                    ItemId: 1,
+                    Count: 2,
+                    Weight: 5m,
+                    Price: 10m,
+                    Notes: null)
+            ]) with
+        {
+            WBWeight = 10m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m,
+            WBTotal = 10m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.WBTotalDoesNotMatchItemWeight",
+            result.Error.Code);
+        Assert.Equal(nameof(InvoiceRequest.WBTotal), result.Error.FieldName);
+        Assert.Empty(database.Context.Invoices);
+    }
+
+    [Fact]
+    public async Task Add_RejectsRequestedWeighbridgeTotalThatDoesNotMatchCalculatedTotal()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit,
+            lines:
+            [
+                new InvoiceLineRequest(
+                    ItemId: 1,
+                    Count: 2,
+                    Weight: 5m,
+                    Price: 10m,
+                    Notes: null)
+            ]) with
+        {
+            WBWeight = 10m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m,
+            WBTotal = 5m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.WBTotalDoesNotMatchCalculatedTotal",
+            result.Error.Code);
+        Assert.Equal(nameof(InvoiceRequest.WBTotal), result.Error.FieldName);
+        Assert.Empty(database.Context.Invoices);
+    }
+
+    [Fact]
+    public async Task Add_SkipsWeighbridgeMatchWhenRequestedTotalIsZero()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit,
+            lines:
+            [
+                new InvoiceLineRequest(
+                    ItemId: 1,
+                    Count: 2,
+                    Weight: 5m,
+                    Price: 10m,
+                    Notes: null)
+            ]) with
+        {
+            WBWeight = 0m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m,
+            WBTotal = 0m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(0m, result.Value.WBTotal);
+
+        database.Context.ChangeTracker.Clear();
+        var persisted = await database.Context.Invoices
+            .Include(invoice => invoice.Lines)
+            .SingleAsync();
+        Assert.Equal(0m, persisted.WBTotal);
+        Assert.Equal(5m, persisted.Lines.Single().Weight);
+    }
+
+    [Fact]
+    public async Task Add_SkipsWeighbridgeMatchWhenRequestedTotalIsOmitted()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit,
+            lines:
+            [
+                new InvoiceLineRequest(
+                    ItemId: 1,
+                    Count: 2,
+                    Weight: 5m,
+                    Price: 10m,
+                    Notes: null)
+            ]) with
+        {
+            WBWeight = 0m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m,
+            WBTotal = null
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Null(request.WBTotal);
+        Assert.Equal(0m, result.Value.WBTotal);
+    }
+
+    [Fact]
+    public async Task Add_RejectsNegativeRequestedWeighbridgeTotal()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit) with
+        {
+            WBTotal = -1m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.InvalidWBTotal", result.Error.Code);
+        Assert.Equal(nameof(InvoiceRequest.WBTotal), result.Error.FieldName);
+        Assert.Empty(database.Context.Invoices);
+    }
+
+    [Fact]
+    public async Task Update_RejectsZeroWeighbridgeTotalForItemInvoice()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var created = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit))).Value;
+        var request = CreateUpdateRequest(
+            created,
+            [new InvoiceLineRequest(1, 3, 2m, 10m, null)]) with
+        {
+            WBWeight = 0m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m
+        };
+
+        var result = await service.UpdateAsync(created.Id, request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.WBTotalDoesNotMatchItemWeight",
+            result.Error.Code);
+
+        database.Context.ChangeTracker.Clear();
+        var persisted = await database.Context.Invoices
+            .Include(invoice => invoice.Lines)
+            .SingleAsync(invoice => invoice.Id == created.Id);
+        Assert.Equal(created.WBTotal, persisted.WBTotal);
+        Assert.Equal(created.Lines.Single().Weight, persisted.Lines.Single().Weight);
+    }
+
+    [Fact]
+    public async Task Add_RejectsWeighbridgeDeductionsAboveWeight()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit) with
+        {
+            WBWeight = 10m,
+            WBScaleDifference = 8m,
+            WBDiscount = 3m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.InvalidWBTotal", result.Error.Code);
+        Assert.Empty(database.Context.Invoices);
     }
 
     [Theory]
@@ -2050,9 +3108,19 @@ public sealed class InvoiceServiceTests
         Assert.Equal(18m, result.Value.Total);
         Assert.Equal(18m, result.Value.PaidAmount);
         Assert.Equal(0m, result.Value.RemainingAmount);
+        Assert.Equal(PaymentStatus.Paid, result.Value.PaymentStatus);
         Assert.Equal(
-            0,
+            2,
             await database.Context.BusinessPartnerMovements.CountAsync());
+        var voucher = await database.Context.CashVouchers.SingleAsync();
+        Assert.Equal(result.Value.Id, voucher.InvoiceId);
+        Assert.Equal(voucher.Id, result.Value.PaymentVoucherId);
+        Assert.Equal(voucher.CashboxId, result.Value.CashboxId);
+        Assert.Equal(
+            voucher.CashMovementTypeId,
+            result.Value.CashMovementTypeId);
+        Assert.Equal(18m, voucher.Amount);
+        Assert.Equal(CashDirection.Payment, voucher.Direction);
 
         database.Context.ChangeTracker.Clear();
         var persisted = await database.Context.Invoices.SingleAsync();
@@ -2062,11 +3130,178 @@ public sealed class InvoiceServiceTests
     }
 
     [Theory]
-    [InlineData(0, 20)]
-    [InlineData(7, 13)]
-    public async Task Add_CashInvoiceAllowsOutstandingPaidAmount(
-        decimal paidAmount,
-        decimal expectedRemaining)
+    [InlineData(InvoiceType.Sales, 1, CashDirection.Receipt)]
+    [InlineData(InvoiceType.PurchaseReturn, 4, CashDirection.Receipt)]
+    [InlineData(InvoiceType.Purchase, 2, CashDirection.Payment)]
+    [InlineData(InvoiceType.SalesReturn, 3, CashDirection.Payment)]
+    public async Task Add_PaymentUsesDefaultMovementTypeForInvoiceType(
+        InvoiceType invoiceType,
+        int expectedMovementTypeId,
+        CashDirection expectedDirection)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(invoiceType, PaymentTerm.Cash));
+        var voucher = await database.Context.CashVouchers.SingleAsync();
+
+        Assert.True(
+            result.IsSuccess,
+            result.IsFailure ? result.Error.Description : null);
+        Assert.Equal(expectedMovementTypeId, voucher.CashMovementTypeId);
+        Assert.Equal(expectedDirection, voucher.Direction);
+        Assert.Equal(
+            expectedDirection == CashDirection.Receipt
+                ? "RCV-0001"
+                : "PAY-0001",
+            voucher.VoucherNumber);
+    }
+
+    [Fact]
+    public async Task Add_PaymentRequiresConfiguredDefaultMovementType()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.CashMovementTypes
+            .ExecuteUpdateAsync(setters => setters.SetProperty(
+                movementType => movementType.IsDefaultForSales,
+                false));
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(InvoiceType.Sales, PaymentTerm.Cash));
+
+        Assert.Equal(
+            "Invoices.DefaultCashMovementTypeNotFound",
+            result.Error.Code);
+        Assert.Empty(await database.Context.Invoices.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Add_PersistsNormalizedPartnerInvoiceNumberInContracts()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var queryService = database.CreateQueryService();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit) with
+        {
+            PartnerInvoiceNo = "  PARTNER-INV-42  "
+        };
+
+        var created = await service.AddAsync(request);
+        var details = await queryService.GetByIdAsync(created.Value.Id);
+        var list = await queryService.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest());
+
+        Assert.True(created.IsSuccess);
+        Assert.Equal("PARTNER-INV-42", created.Value.PartnerInvoiceNo);
+        Assert.Equal("PARTNER-INV-42", details.Value.PartnerInvoiceNo);
+        Assert.Equal(
+            "PARTNER-INV-42",
+            Assert.Single(list.Value.Items).PartnerInvoiceNo);
+
+        database.Context.ChangeTracker.Clear();
+        Assert.Equal(
+            "PARTNER-INV-42",
+            await database.Context.Invoices
+                .Select(invoice => invoice.PartnerInvoiceNo)
+                .SingleAsync());
+    }
+
+    [Fact]
+    public async Task Add_PersistsCompanyItemCategoryInAllContracts()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var queryService = database.CreateQueryService();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit) with
+        {
+            ItemsCategoryId = 1
+        };
+
+        var created = await service.AddAsync(request);
+        var details = await queryService.GetByIdAsync(created.Value.Id);
+        var list = await queryService.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest());
+
+        Assert.True(created.IsSuccess);
+        Assert.Equal(1, created.Value.ItemsCategoryId);
+        Assert.Equal("General Items", created.Value.ItemsCategoryName);
+        Assert.Equal(1, details.Value.ItemsCategoryId);
+        Assert.Equal("General Items", details.Value.ItemsCategoryName);
+        Assert.Equal(
+            "General Items",
+            Assert.Single(list.Value.Items).ItemsCategoryName);
+    }
+
+    [Theory]
+    [InlineData(2, "Invoices.ItemsCategoryInactive")]
+    [InlineData(3, "Invoices.ItemsCategoryNotFound")]
+    public async Task Add_RejectsInactiveOrOtherCompanyItemCategory(
+        int categoryId,
+        string expectedCode)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit) with
+            {
+                ItemsCategoryId = categoryId
+            });
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(expectedCode, result.Error.Code);
+        Assert.Empty(await database.Context.Invoices.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Update_CanRetainCategoryDeactivatedAfterInvoiceCreation()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var queryService = database.CreateQueryService();
+        var created = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit) with
+            {
+                ItemsCategoryId = 1
+            });
+        Assert.True(created.IsSuccess);
+
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE ItemsCategories SET IsActive = 0 WHERE Id = 1;");
+        database.Context.ChangeTracker.Clear();
+        var current = await queryService.GetByIdAsync(created.Value.Id);
+        var lines = current.Value.Lines
+            .Select(line => new InvoiceLineRequest(
+                line.ItemId,
+                line.Count,
+                line.Weight,
+                line.Price,
+                line.Notes,
+                line.SourceInvoiceLineId,
+                line.ReturnUnitCost))
+            .ToArray();
+
+        var updated = await service.UpdateAsync(
+            current.Value.Id,
+            CreateUpdateRequest(current.Value, lines));
+
+        Assert.True(updated.IsSuccess);
+        Assert.Equal(1, updated.Value.ItemsCategoryId);
+        Assert.Equal("General Items", updated.Value.ItemsCategoryName);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(7)]
+    public async Task Add_CashInvoiceRejectsOutstandingPaidAmount(
+        decimal paidAmount)
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
 
@@ -2076,13 +3311,12 @@ public sealed class InvoiceServiceTests
                 PaymentTerm.Cash,
                 paidAmount: paidAmount));
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal(paidAmount, result.Value.PaidAmount);
-        Assert.Equal(expectedRemaining, result.Value.RemainingAmount);
-        var movement =
-            await database.Context.BusinessPartnerMovements.SingleAsync();
-        Assert.Equal(0m, movement.Debit);
-        Assert.Equal(expectedRemaining, movement.Credit);
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.CashInvoiceMustBeFullyPaid",
+            result.Error.Code);
+        Assert.Empty(await database.Context.Invoices.ToListAsync());
+        Assert.Empty(await database.Context.CashVouchers.ToListAsync());
     }
 
     [Fact]
@@ -2108,9 +3342,8 @@ public sealed class InvoiceServiceTests
 
     [Theory]
     [InlineData(0, 20, 1)]
-    [InlineData(7, 13, 1)]
-    [InlineData(20, 0, 0)]
-    public async Task Add_CreditInvoiceUsesOnlyRemainingAmountForPartnerMovement(
+    [InlineData(7, 13, 2)]
+    public async Task Add_CreditInvoiceUsesFullAndPaymentPartnerMovements(
         decimal paidAmount,
         decimal expectedRemaining,
         int expectedMovementCount)
@@ -2128,19 +3361,40 @@ public sealed class InvoiceServiceTests
         var movements = await database.Context.BusinessPartnerMovements
             .ToListAsync();
         Assert.Equal(expectedMovementCount, movements.Count);
-        if (expectedMovementCount == 1)
-        {
-            var movement = Assert.Single(movements);
-            Assert.Equal(0m, movement.Debit);
-            Assert.Equal(expectedRemaining, movement.Credit);
-        }
+        var netCredit = movements.Sum(movement =>
+            movement.Credit - movement.Debit);
+        Assert.Equal(expectedRemaining, netCredit);
+        var invoiceMovement = Assert.Single(
+            movements,
+            movement => movement.InvoiceId.HasValue);
+        Assert.Equal(20m, invoiceMovement.Credit);
+        Assert.Equal(
+            paidAmount > 0m ? 1 : 0,
+            await database.Context.CashVouchers.CountAsync());
+    }
+
+    [Fact]
+    public async Task Add_FullyPaidCreditInvoiceIsRejected()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                paidAmount: 20m));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.CreditInvoiceCannotBeFullyPaid",
+            result.Error.Code);
     }
 
     [Theory]
-    [InlineData(InvoiceType.Sales, 13, 0)]
-    [InlineData(InvoiceType.SalesReturn, 0, 13)]
-    [InlineData(InvoiceType.Purchase, 0, 13)]
-    [InlineData(InvoiceType.PurchaseReturn, 13, 0)]
+    [InlineData(InvoiceType.Sales, 18, 0)]
+    [InlineData(InvoiceType.SalesReturn, 0, 18)]
+    [InlineData(InvoiceType.Purchase, 0, 18)]
+    [InlineData(InvoiceType.PurchaseReturn, 18, 0)]
     public async Task Add_PartiallySettledCreditInvoiceKeepsPartnerDirection(
         InvoiceType invoiceType,
         decimal expectedDebit,
@@ -2159,10 +3413,31 @@ public sealed class InvoiceServiceTests
             result.IsSuccess,
             result.IsFailure ? result.Error.Description : null);
         Assert.Equal(13m, result.Value.RemainingAmount);
-        var movement =
-            await database.Context.BusinessPartnerMovements.SingleAsync();
+        Assert.Equal(PaymentStatus.PartiallyPaid, result.Value.PaymentStatus);
+        var movement = await database.Context.BusinessPartnerMovements
+            .SingleAsync(candidate => candidate.InvoiceId.HasValue);
         Assert.Equal(expectedDebit, movement.Debit);
         Assert.Equal(expectedCredit, movement.Credit);
+        var paymentMovement = await database.Context.BusinessPartnerMovements
+            .SingleAsync(candidate => candidate.CashVoucherId.HasValue);
+        var voucher = await database.Context.CashVouchers.SingleAsync();
+        var expectedPaymentDirection = invoiceType is
+            InvoiceType.Sales or InvoiceType.PurchaseReturn
+                ? CashDirection.Receipt
+                : CashDirection.Payment;
+        Assert.Equal(expectedPaymentDirection, voucher.Direction);
+        Assert.Equal(result.Value.PaymentVoucherId, voucher.Id);
+        Assert.Equal(
+            expectedPaymentDirection == CashDirection.Payment ? 5m : 0m,
+            paymentMovement.Debit);
+        Assert.Equal(
+            expectedPaymentDirection == CashDirection.Receipt ? 5m : 0m,
+            paymentMovement.Credit);
+        Assert.Equal(
+            13m,
+            Math.Abs(
+                (movement.Credit - movement.Debit) +
+                (paymentMovement.Credit - paymentMovement.Debit)));
     }
 
     [Theory]
@@ -2197,13 +3472,20 @@ public sealed class InvoiceServiceTests
         Assert.Equal(updatedDiscount, result.Value.DiscountAmount);
         Assert.Equal(updatedPaid, result.Value.PaidAmount);
         Assert.Equal(expectedRemaining, result.Value.RemainingAmount);
-        var movement =
-            await database.Context.BusinessPartnerMovements.SingleAsync();
-        Assert.Equal(expectedRemaining, movement.Credit);
+        var movements = await database.Context.BusinessPartnerMovements
+            .ToListAsync();
+        Assert.Equal(
+            expectedRemaining,
+            movements.Sum(movement =>
+                movement.Credit - movement.Debit));
+        var invoiceMovement = Assert.Single(
+            movements,
+            movement => movement.InvoiceId.HasValue);
+        Assert.Equal(result.Value.Total, invoiceMovement.Credit);
     }
 
     [Fact]
-    public async Task Update_PartialCreditToFullyPaidRemovesPartnerMovement()
+    public async Task Update_PartialCreditToFullyPaidIsRejected()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -2220,15 +3502,17 @@ public sealed class InvoiceServiceTests
                 [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
                 paidAmount: 20m));
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal(0m, result.Value.RemainingAmount);
+        Assert.True(result.IsFailure);
         Assert.Equal(
-            0,
+            "Invoices.CreditInvoiceCannotBeFullyPaid",
+            result.Error.Code);
+        Assert.Equal(
+            2,
             await database.Context.BusinessPartnerMovements.CountAsync());
     }
 
     [Fact]
-    public async Task Update_FullyPaidCreditToPartialCreatesPartnerMovement()
+    public async Task Update_PartialPaymentPreservesVoucherIdentityAndZeroRemovesIt()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -2236,7 +3520,57 @@ public sealed class InvoiceServiceTests
             CreateRequest(
                 InvoiceType.SalesReturn,
                 PaymentTerm.Credit,
-                paidAmount: 20m))).Value;
+                paidAmount: 5m))).Value;
+        var originalVoucher = await database.Context.CashVouchers
+            .AsNoTracking()
+            .SingleAsync();
+
+        var increased = await service.UpdateAsync(
+            created.Id,
+            CreateUpdateRequest(
+                created,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
+                paidAmount: 8m));
+
+        Assert.True(increased.IsSuccess);
+        database.Context.ChangeTracker.Clear();
+        var updatedVoucher = await database.Context.CashVouchers
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal(originalVoucher.Id, updatedVoucher.Id);
+        Assert.Equal(originalVoucher.CreatedOn, updatedVoucher.CreatedOn);
+        Assert.Equal(8m, updatedVoucher.Amount);
+        Assert.Equal(updatedVoucher.Id, increased.Value.PaymentVoucherId);
+
+        var removed = await service.UpdateAsync(
+            created.Id,
+            CreateUpdateRequest(
+                increased.Value,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
+                paidAmount: 0m));
+
+        Assert.True(removed.IsSuccess);
+        Assert.Equal(PaymentStatus.Unpaid, removed.Value.PaymentStatus);
+        Assert.Null(removed.Value.PaymentVoucherId);
+        Assert.Empty(await database.Context.CashVouchers.ToListAsync());
+        Assert.True(
+            await database.Context.CashVouchers
+                .IgnoreQueryFilters()
+                .Where(voucher => voucher.Id == originalVoucher.Id)
+                .Select(voucher => voucher.IsDeleted)
+                .SingleAsync());
+    }
+
+    [Fact]
+    public async Task Update_UnpaidCreditToPartialCreatesPaymentVoucher()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var created = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                paidAmount: 0m))).Value;
 
         var result = await service.UpdateAsync(
             created.Id,
@@ -2247,9 +3581,14 @@ public sealed class InvoiceServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(12m, result.Value.RemainingAmount);
-        var movement =
-            await database.Context.BusinessPartnerMovements.SingleAsync();
-        Assert.Equal(12m, movement.Credit);
+        var movements = await database.Context.BusinessPartnerMovements
+            .ToListAsync();
+        Assert.Equal(2, movements.Count);
+        Assert.Equal(
+            12m,
+            movements.Sum(movement =>
+                movement.Credit - movement.Debit));
+        Assert.Single(await database.Context.CashVouchers.ToListAsync());
     }
 
     [Fact]
@@ -2319,12 +3658,13 @@ public sealed class InvoiceServiceTests
         Assert.Equal(17m, result.Value.PaidAmount);
         Assert.Equal(0m, result.Value.RemainingAmount);
         Assert.Equal(
-            0,
+            2,
             await database.Context.BusinessPartnerMovements.CountAsync());
+        Assert.Single(await database.Context.CashVouchers.ToListAsync());
     }
 
     [Fact]
-    public async Task Update_ChangedCashTotalAllowsOutstandingBalance()
+    public async Task Update_ChangedCashTotalRequiresFullPayment()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -2342,19 +3682,16 @@ public sealed class InvoiceServiceTests
                 changedLines,
                 paidAmount: 20m));
 
-        Assert.True(partial.IsSuccess);
-        Assert.Equal(30m, partial.Value.Total);
-        Assert.Equal(20m, partial.Value.PaidAmount);
-        Assert.Equal(10m, partial.Value.RemainingAmount);
-        var movement =
-            await database.Context.BusinessPartnerMovements.SingleAsync();
-        Assert.Equal(10m, movement.Credit);
+        Assert.True(partial.IsFailure);
+        Assert.Equal(
+            "Invoices.CashInvoiceMustBeFullyPaid",
+            partial.Error.Code);
 
         database.Context.ChangeTracker.Clear();
         var valid = await service.UpdateAsync(
             created.Id,
             CreateUpdateRequest(
-                partial.Value,
+                created,
                 changedLines,
                 paidAmount: 30m));
 
@@ -2363,7 +3700,7 @@ public sealed class InvoiceServiceTests
         Assert.Equal(30m, valid.Value.PaidAmount);
         Assert.Equal(0m, valid.Value.RemainingAmount);
         Assert.Equal(
-            0,
+            2,
             await database.Context.BusinessPartnerMovements.CountAsync());
     }
 
@@ -2428,9 +3765,13 @@ public sealed class InvoiceServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(14m, result.Value.RemainingAmount);
-        var movement =
-            await database.Context.BusinessPartnerMovements.SingleAsync();
-        Assert.Equal(14m, movement.Credit);
+        var movements = await database.Context.BusinessPartnerMovements
+            .ToListAsync();
+        Assert.Equal(2, movements.Count);
+        Assert.Equal(
+            14m,
+            movements.Sum(movement =>
+                movement.Credit - movement.Debit));
     }
 
     [Fact]
@@ -2438,10 +3779,11 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         await service.AddAsync(CreateRequest(InvoiceType.Purchase));
         await service.AddAsync(CreateRequest(InvoiceType.SalesReturn));
 
-        var result = await service.GetAllAsync(
+        var result = await queryService.GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
             new InvoiceFilterRequest
             {
@@ -2485,7 +3827,22 @@ public sealed class InvoiceServiceTests
             movementDate: new DateOnly(2026, 7, 26),
             quantityOut: 5m);
 
-        var result = await database.CreateService().GetItemBalanceAsync(
+        var selectedDateMovement = await database.Context.ItemMovements
+            .SingleAsync(movement =>
+                movement.MovementType == ItemMovementType.Sales &&
+                movement.ReferenceId == 941);
+        selectedDateMovement.ApplyCostSnapshot(
+            InventoryCostStatus.Final,
+            pendingCostQuantity: 0m,
+            unitCost: 7m,
+            totalCost: 28m,
+            quantityAfter: 9m,
+            averageCostAfter: 7m,
+            inventoryValueAfter: 63m);
+        await database.Context.SaveChangesAsync();
+        database.Context.ChangeTracker.Clear();
+
+        var result = await database.CreateQueryService().GetItemBalanceAsync(
             storeId: 1,
             itemId: 1,
             asOfDate: new DateOnly(2026, 7, 25));
@@ -2495,6 +3852,26 @@ public sealed class InvoiceServiceTests
         Assert.Equal("Item 1", result.Value.ItemName);
         Assert.Equal("Unit", result.Value.ItemUnitName);
         Assert.Equal(9m, result.Value.Balance);
+        Assert.Equal(9m, result.Value.CurrentQuantity);
+        Assert.Equal(7m, result.Value.AverageCost);
+        Assert.Equal(63m, result.Value.InventoryValue);
+    }
+
+    [Fact]
+    public async Task GetItemBalance_ReturnsZeroQuantityAndCostWhenStoreHasNoStock()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateQueryService().GetItemBalanceAsync(
+            storeId: 2,
+            itemId: 1,
+            asOfDate: new DateOnly(2026, 7, 25));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(0m, result.Value.Balance);
+        Assert.Equal(0m, result.Value.CurrentQuantity);
+        Assert.Equal(0m, result.Value.AverageCost);
+        Assert.Equal(0m, result.Value.InventoryValue);
     }
 
     [Fact]
@@ -2502,16 +3879,17 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         var invoice = (await service.AddAsync(
             CreateRequest(
                 InvoiceType.Sales,
                 lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)]))).Value;
 
-        var currentBalance = await service.GetItemBalanceAsync(
+        var currentBalance = await queryService.GetItemBalanceAsync(
             storeId: 1,
             itemId: 1,
             asOfDate: invoice.InvoiceDate);
-        var availableForReplacement = await service.GetItemBalanceAsync(
+        var availableForReplacement = await queryService.GetItemBalanceAsync(
             storeId: 1,
             itemId: 1,
             asOfDate: invoice.InvoiceDate,
@@ -2538,7 +3916,7 @@ public sealed class InvoiceServiceTests
             """);
         database.Context.ChangeTracker.Clear();
 
-        var result = await database.CreateService().GetItemBalanceAsync(
+        var result = await database.CreateQueryService().GetItemBalanceAsync(
             storeId: 20,
             itemId: 1,
             asOfDate: new DateOnly(2026, 7, 25));
@@ -2553,7 +3931,7 @@ public sealed class InvoiceServiceTests
         await using var database = await InvoiceTestDatabase.CreateAsync();
         await SeedInvoiceFilterDataAsync(database);
 
-        var result = await database.CreateService().GetAllAsync(
+        var result = await database.CreateQueryService().GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
             new InvoiceFilterRequest
             {
@@ -2570,6 +3948,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
 
         await service.AddAsync(
             CreateRequest(
@@ -2588,7 +3967,7 @@ public sealed class InvoiceServiceTests
                 InvoiceType.Purchase,
                 PaymentTerm.Cash));
 
-        var result = await service.GetAllAsync(
+        var result = await queryService.GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest
             {
                 PageSize = 1
@@ -2613,9 +3992,10 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         await service.AddAsync(CreateRequest(InvoiceType.Purchase));
 
-        var result = await service.GetAllAsync(
+        var result = await queryService.GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
             new InvoiceFilterRequest
             {
@@ -2637,7 +4017,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
 
-        var result = await database.CreateService().GetAllAsync(
+        var result = await database.CreateQueryService().GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
             new InvoiceFilterRequest
             {
@@ -2654,7 +4034,7 @@ public sealed class InvoiceServiceTests
         await using var database = await InvoiceTestDatabase.CreateAsync();
         await SeedInvoiceFilterDataAsync(database);
 
-        var result = await database.CreateService().GetAllAsync(
+        var result = await database.CreateQueryService().GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
             new InvoiceFilterRequest
             {
@@ -2687,7 +4067,7 @@ public sealed class InvoiceServiceTests
         await using var database = await InvoiceTestDatabase.CreateAsync();
         await SeedInvoiceFilterDataAsync(database);
 
-        var result = await database.CreateService().GetAllAsync(
+        var result = await database.CreateQueryService().GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest(),
             new InvoiceFilterRequest
             {
@@ -2703,7 +4083,7 @@ public sealed class InvoiceServiceTests
     public async Task GetAll_RejectsInvalidFiltersExplicitly()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
-        var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         var invalidFilters = new[]
         {
             new InvoiceFilterRequest
@@ -2745,7 +4125,7 @@ public sealed class InvoiceServiceTests
 
         foreach (var filters in invalidFilters)
         {
-            var result = await service.GetAllAsync(
+            var result = await queryService.GetAllAsync(
                 new MiniErp.Application.Common.Models.PaginationRequest(),
                 filters);
 
@@ -2758,6 +4138,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
+        var queryService = database.CreateQueryService();
         var created = (await service.AddAsync(
             CreateRequest(
                 InvoiceType.SalesReturn,
@@ -2766,8 +4147,8 @@ public sealed class InvoiceServiceTests
                 paidAmount: 4m))).Value;
 
         database.Context.ChangeTracker.Clear();
-        var details = await service.GetByIdAsync(created.Id);
-        var list = await service.GetAllAsync(
+        var details = await queryService.GetByIdAsync(created.Id);
+        var list = await queryService.GetAllAsync(
             new MiniErp.Application.Common.Models.PaginationRequest());
 
         Assert.True(details.IsSuccess);
@@ -2776,6 +4157,7 @@ public sealed class InvoiceServiceTests
         Assert.Equal(17m, details.Value.Total);
         Assert.Equal(4m, details.Value.PaidAmount);
         Assert.Equal(13m, details.Value.RemainingAmount);
+        Assert.Equal(2, Assert.Single(details.Value.Lines).Count);
 
         Assert.True(list.IsSuccess);
         var item = Assert.Single(list.Value.Items);
@@ -2786,6 +4168,39 @@ public sealed class InvoiceServiceTests
         Assert.Equal(13m, item.RemainingAmount);
         Assert.Equal(1, item.LineCount);
         Assert.Equal(0, item.ContainerLineCount);
+    }
+
+    [Fact]
+    public async Task PartnerItemReportUsesPersistedInvoiceLineAmounts()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var created = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines: [new InvoiceLineRequest(1, 3, 4m, 10m, null)]));
+
+        Assert.True(created.IsSuccess);
+        database.Context.ChangeTracker.Clear();
+
+        var report = await database.CreatePartnerItemReportService()
+            .GetAsync(
+                new PartnerItemReportFilterRequest(
+                    BusinessPartnerId: 1,
+                    ItemId: 1));
+
+        Assert.True(report.IsSuccess);
+        var movement = Assert.Single(report.Value.Movements);
+        Assert.Equal(3, movement.Count);
+        Assert.Equal(4m, movement.Weight);
+        Assert.Equal(12m, movement.Quantity);
+        Assert.Equal(10m, movement.UnitPrice);
+        Assert.Equal(120m, movement.TotalAmount);
+        Assert.Equal(created.Value.Id, movement.InvoiceId);
+        Assert.Equal(12m, report.Value.Summary.TotalPurchaseQuantity);
+        Assert.Equal(4m, report.Value.Summary.TotalPurchaseWeight);
+        Assert.Equal(0m, report.Value.Summary.TotalSalesQuantity);
+        Assert.Equal(0m, report.Value.Summary.TotalSalesWeight);
     }
 
     [Fact]
@@ -3439,6 +4854,133 @@ public sealed class InvoiceServiceTests
             error => error.PropertyName == nameof(InvoiceRequest.ContainerLines));
     }
 
+    [Fact]
+    public void CreateValidator_SkipsWeighbridgeMatchForOmittedTotal()
+    {
+        var request = CreateRequest(InvoiceType.SalesReturn) with
+        {
+            WBWeight = 0m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m,
+            WBTotal = null
+        };
+
+        var result = new InvoiceRequestValidator().Validate(request);
+
+        Assert.DoesNotContain(
+            result.Errors,
+            error =>
+                error.PropertyName == nameof(InvoiceRequest.WBTotal));
+    }
+
+    [Fact]
+    public void CreateValidator_SkipsWeighbridgeMatchForZeroTotal()
+    {
+        var request = CreateRequest(InvoiceType.SalesReturn) with
+        {
+            WBWeight = 0m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m,
+            WBTotal = 0m
+        };
+
+        var result = new InvoiceRequestValidator().Validate(request);
+
+        Assert.DoesNotContain(
+            result.Errors,
+            error =>
+                error.PropertyName == nameof(InvoiceRequest.WBTotal));
+    }
+
+    [Fact]
+    public void CreateValidator_AcceptsMatchingPositiveWeighbridgeTotal()
+    {
+        var request = CreateRequest(InvoiceType.SalesReturn) with
+        {
+            WBTotal = 1m
+        };
+
+        var result = new InvoiceRequestValidator().Validate(request);
+
+        Assert.DoesNotContain(
+            result.Errors,
+            error =>
+                error.PropertyName == nameof(InvoiceRequest.WBTotal));
+    }
+
+    [Fact]
+    public void CreateValidator_RejectsMismatchedPositiveWeighbridgeTotal()
+    {
+        var request = CreateRequest(InvoiceType.SalesReturn) with
+        {
+            WBTotal = 2m
+        };
+
+        var result = new InvoiceRequestValidator().Validate(request);
+
+        var error = Assert.Single(
+            result.Errors,
+            error =>
+                error.PropertyName == nameof(InvoiceRequest.WBTotal));
+        Assert.Equal(
+            "Invoices.WBTotalDoesNotMatchCalculatedTotal",
+            error.ErrorCode);
+    }
+
+    [Fact]
+    public void CreateValidator_RejectsNegativeWeighbridgeTotal()
+    {
+        var request = CreateRequest(InvoiceType.SalesReturn) with
+        {
+            WBTotal = -1m
+        };
+
+        var result = new InvoiceRequestValidator().Validate(request);
+
+        var error = Assert.Single(
+            result.Errors,
+            error =>
+                error.PropertyName == nameof(InvoiceRequest.WBTotal));
+        Assert.Equal("Invoices.InvalidWBTotal", error.ErrorCode);
+    }
+
+    [Fact]
+    public void UpdateValidator_RejectsZeroWeighbridgeTotalForItemInvoice()
+    {
+        var request = new InvoiceUpdateRequest(
+            InvoiceType: InvoiceType.SalesReturn,
+            PaymentTerm: PaymentTerm.Credit,
+            InvoiceDate: new DateOnly(2026, 7, 25),
+            DueDate: null,
+            BusinessPartnerId: 1,
+            StoreId: 1,
+            ContainerStoreId: null,
+            CountryId: null,
+            DriverId: null,
+            ActualDriverId: null,
+            UsesExternalDriver: false,
+            ExternalDriverName: null,
+            VehicleNumber: null,
+            ExportInvoiceCode: null,
+            DiscountAmount: 0m,
+            PaidAmount: 0m,
+            Notes: null,
+            Lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
+            ContainerLines: [],
+            RowVersion: new byte[8],
+            WBWeight: 0m,
+            WBScaleDifference: 0m,
+            WBDiscount: 0m);
+
+        var result = new InvoiceUpdateRequestValidator().Validate(request);
+
+        Assert.Contains(
+            result.Errors,
+            error =>
+                error.ErrorCode ==
+                "Invoices.WBTotalDoesNotMatchItemWeight");
+    }
+
     private static InvoiceRequest CreateRequest(
         InvoiceType invoiceType,
         PaymentTerm paymentTerm = PaymentTerm.Cash,
@@ -3454,32 +4996,55 @@ public sealed class InvoiceServiceTests
     {
         var requestedLines =
             lines ?? [new InvoiceLineRequest(1, 2, 1m, 10m, null)];
+        if (invoiceType == InvoiceType.SalesReturn)
+        {
+            requestedLines = requestedLines
+                .Select(line =>
+                    line.SourceInvoiceLineId.HasValue ||
+                    line.ReturnUnitCost.HasValue
+                        ? line
+                        : line with
+                        {
+                            ReturnUnitCost = line.Price
+                        })
+                .ToArray();
+        }
+
         var requestedPaidAmount = paidAmount ??
             (paymentTerm == PaymentTerm.Cash
                 ? CalculateRequestTotal(requestedLines, discountAmount)
                 : 0m);
 
         return new InvoiceRequest(
-            invoiceNumber ?? $"INV-{Guid.NewGuid():N}",
-            invoiceType,
-            paymentTerm,
-            invoiceDate ?? new DateOnly(2026, 7, 25),
-            null,
-            1,
-            storeId,
-            containerStoreId,
-            null,
-            driverId,
-            null,
-            false,
-            null,
-            null,
-            null,
-            discountAmount,
-            requestedPaidAmount,
-            null,
-            requestedLines,
-            containerLines ?? []);
+            InvoiceNumber: invoiceNumber ?? $"INV-{Guid.NewGuid():N}",
+            InvoiceType: invoiceType,
+            ItemsCategoryId: null,
+            ContentType: InvoiceContentType.Items,
+            PaymentTerm: paymentTerm,
+            InvoiceDate: invoiceDate ?? new DateOnly(2026, 7, 25),
+            DueDate: null,
+            StoreId: storeId,
+            BusinessPartnerId: 1,
+            PartnerInvoiceNo: null,
+            CashboxId: requestedPaidAmount > 0m ? 1 : null,
+            ExchangeRate: null,
+            CashboxExchangeRate: null,
+            WBWeight: CalculateRequestWeight(requestedLines),
+            WBScaleDifference: 0m,
+            WBDiscount: 0m,
+            ContainerStoreId: containerStoreId,
+            CountryId: null,
+            DriverId: driverId,
+            ActualDriverId: null,
+            UsesExternalDriver: false,
+            ExternalDriverName: null,
+            VehicleNumber: null,
+            ExportInvoiceCode: null,
+            DiscountAmount: discountAmount,
+            PaidAmount: requestedPaidAmount,
+            Notes: null,
+            Lines: requestedLines,
+            ContainerLines: containerLines ?? []);
     }
 
     private static async Task SeedInvoiceFilterDataAsync(
@@ -3543,16 +5108,37 @@ public sealed class InvoiceServiceTests
         decimal? discountAmount = null,
         decimal? paidAmount = null)
     {
+        var requestedInvoiceType = invoiceType ?? invoice.InvoiceType;
+        if (requestedInvoiceType == InvoiceType.SalesReturn)
+        {
+            lines = lines
+                .Select(line =>
+                    line.SourceInvoiceLineId.HasValue ||
+                    line.ReturnUnitCost.HasValue
+                        ? line
+                        : line with
+                        {
+                            ReturnUnitCost = line.Price
+                        })
+                .ToArray();
+        }
+
         var requestedPaymentTerm = paymentTerm ?? invoice.PaymentTerm;
         var requestedDiscountAmount =
             discountAmount ?? invoice.DiscountAmount;
+        var requestedTotal = CalculateRequestTotal(
+            lines,
+            requestedDiscountAmount);
         var requestedPaidAmount = paidAmount ??
             (requestedPaymentTerm == PaymentTerm.Cash
-                ? CalculateRequestTotal(lines, requestedDiscountAmount)
-                : invoice.PaidAmount);
+                ? requestedTotal
+                : invoice.PaymentTerm == PaymentTerm.Credit &&
+                  invoice.PaidAmount < requestedTotal
+                    ? invoice.PaidAmount
+                    : 0m);
 
         return new InvoiceUpdateRequest(
-            invoiceType ?? invoice.InvoiceType,
+            requestedInvoiceType,
             requestedPaymentTerm,
             invoiceDate ?? invoice.InvoiceDate,
             invoice.DueDate,
@@ -3571,8 +5157,31 @@ public sealed class InvoiceServiceTests
             invoice.Notes,
             lines,
             containerLines ?? [],
-            invoice.RowVersion);
+            invoice.RowVersion,
+            PartnerInvoiceNo: invoice.PartnerInvoiceNo,
+            CashboxId: requestedPaidAmount > 0m ? 1 : null,
+            ContentType: invoice.ContentType,
+            WBWeight: invoice.ContentType == InvoiceContentType.Items
+                ? CalculateRequestWeight(lines) +
+                  invoice.WBScaleDifference +
+                  invoice.WBDiscount
+                : invoice.WBWeight,
+            WBScaleDifference: invoice.WBScaleDifference,
+            WBDiscount: invoice.WBDiscount,
+            ItemsCategoryId: invoice.ItemsCategoryId);
     }
+
+    private static decimal CalculateRequestWeight(
+        IReadOnlyList<InvoiceLineRequest> lines) =>
+        decimal.Round(
+            lines.Sum(line =>
+                line.Count.GetValueOrDefault() <= 0 &&
+                line.Weight.GetValueOrDefault() <= 0m &&
+                line.Quantity.HasValue
+                    ? line.Quantity.Value
+                    : line.Weight.GetValueOrDefault()),
+            InvoiceAmountRules.QuantityScale,
+            MidpointRounding.AwayFromZero);
 
     private static decimal CalculateRequestTotal(
         IReadOnlyList<InvoiceLineRequest> lines,
@@ -3614,22 +5223,42 @@ public sealed class InvoiceServiceTests
         decimal quantityOut = 0m,
         int companyId = 1)
     {
-        database.Context.ItemMovements.Add(
-            new ItemMovement
-            {
-                CompanyId = companyId,
-                StoreId = storeId,
-                ItemId = itemId,
-                ItemUnitId = 1,
-                MovementType = movementType,
-                ReferenceId = referenceId,
-                ReferenceNumber = referenceNumber,
-                MovementDate = movementDate,
-                QuantityIn = quantityIn,
-                QuantityOut = quantityOut
-            });
+        var movement = new ItemMovement
+        {
+            CompanyId = companyId,
+            StoreId = storeId,
+            ItemId = itemId,
+            ItemUnitId = 1,
+            MovementType = movementType,
+            ReferenceId = referenceId,
+            ReferenceNumber = referenceNumber,
+            MovementDate = movementDate,
+            QuantityIn = quantityIn,
+            QuantityOut = quantityOut
+        };
+        if (quantityIn > 0m)
+        {
+            CostedMovement(movement);
+        }
+
+        database.Context.ItemMovements.Add(movement);
         await database.Context.SaveChangesAsync();
         database.Context.ChangeTracker.Clear();
+    }
+
+    private static ItemMovement CostedMovement(
+        ItemMovement movement,
+        decimal unitCost = 10m)
+    {
+        movement.ApplyCostSnapshot(
+            InventoryCostStatus.Final,
+            0m,
+            unitCost,
+            movement.QuantityIn * unitCost,
+            movement.QuantityIn,
+            unitCost,
+            movement.QuantityIn * unitCost);
+        return movement;
     }
 
     private static async Task<Error?> InvokeValidateStockAsync(
@@ -3693,12 +5322,49 @@ public sealed class InvoiceServiceTests
             return new InvoiceTestDatabase(connection, context);
         }
 
-        public InvoiceService CreateService() =>
-            new(
+        public InvoiceService CreateService()
+        {
+            var companyContext = new TestCurrentCompanyContext(1);
+            var invoiceInventoryService = CreateInvoiceInventoryService(
+                companyContext);
+            var invoiceQueryService = new InvoiceQueryService(
                 Context,
                 new PaginationService(),
-                new TestCurrentCompanyContext(1),
+                companyContext,
+                invoiceInventoryService);
+
+            return new InvoiceService(
+                Context,
+                companyContext,
+                invoiceQueryService,
+                new MiniErp.Tests.TestExchangeRateResolver(),
+                invoiceInventoryService,
                 TimeProvider.System);
+        }
+
+        public InvoiceQueryService CreateQueryService()
+        {
+            var companyContext = new TestCurrentCompanyContext(1);
+            return new InvoiceQueryService(
+                Context,
+                new PaginationService(),
+                companyContext,
+                CreateInvoiceInventoryService(companyContext));
+        }
+
+        private InvoiceInventoryService CreateInvoiceInventoryService(
+            ICurrentCompanyContext companyContext) =>
+            new(
+                Context,
+                companyContext,
+                new InventoryStockService(Context, companyContext),
+                new InventoryCostingService(
+                    Context,
+                    companyContext,
+                    TimeProvider.System));
+
+        public PartnerItemReportService CreatePartnerItemReportService() =>
+            new(Context, new TestCurrentCompanyContext(1));
 
         public async ValueTask DisposeAsync()
         {
@@ -3719,6 +5385,13 @@ public sealed class InvoiceServiceTests
                     TaxNumber TEXT NOT NULL,
                     ManagerName TEXT NOT NULL,
                     IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE CompanySettings (
+                    CompanyId INTEGER NOT NULL PRIMARY KEY,
+                    BaseCurrency INTEGER NOT NULL DEFAULT 1,
+                    StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
+                    FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE BusinessPartners (
@@ -3781,6 +5454,25 @@ public sealed class InvoiceServiceTests
                     IsDeleted INTEGER NOT NULL
                 );
 
+                CREATE TABLE ItemsCategories (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    Name TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL,
+                    Notes TEXT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
                 CREATE TABLE Drivers (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
@@ -3827,6 +5519,7 @@ public sealed class InvoiceServiceTests
                     StockOpeningBalanceId INTEGER NOT NULL,
                     ItemId INTEGER NOT NULL,
                     Quantity NUMERIC NOT NULL,
+                    Price NUMERIC NOT NULL DEFAULT 0,
                     IsDeleted INTEGER NOT NULL
                 );
 
@@ -3835,7 +5528,9 @@ public sealed class InvoiceServiceTests
                     CompanyId INTEGER NOT NULL,
                     InvoiceNumber TEXT NOT NULL,
                     ExportInvoiceCode TEXT NULL,
+                    PartnerInvoiceNo TEXT NULL,
                     InvoiceType INTEGER NOT NULL,
+                    ContentType INTEGER NOT NULL DEFAULT 1,
                     PaymentTerm INTEGER NOT NULL DEFAULT 1,
                     InvoiceDate TEXT NOT NULL,
                     DueDate TEXT NULL,
@@ -3843,7 +5538,10 @@ public sealed class InvoiceServiceTests
                     StoreId INTEGER NOT NULL,
                     ContainerStoreId INTEGER NULL,
                     CountryId INTEGER NULL,
+                    ItemsCategoryId INTEGER NULL,
                     Currency INTEGER NOT NULL,
+                    ExchangeRateId INTEGER NULL,
+                    ExchangeRate NUMERIC NOT NULL DEFAULT 1,
                     DriverId INTEGER NULL,
                     ActualDriverId INTEGER NULL,
                     UsesExternalDriver INTEGER NOT NULL DEFAULT 0,
@@ -3851,7 +5549,15 @@ public sealed class InvoiceServiceTests
                     VehicleNumber TEXT NULL,
                     Total NUMERIC NOT NULL,
                     DiscountAmount NUMERIC NOT NULL DEFAULT 0,
+                    WBWeight NUMERIC NOT NULL DEFAULT 0,
+                    WBScaleDifference NUMERIC NOT NULL DEFAULT 0,
+                    WBDiscount NUMERIC NOT NULL DEFAULT 0,
+                    WBTotal NUMERIC NOT NULL DEFAULT 0,
                     PaidAmount NUMERIC NOT NULL DEFAULT 0,
+                    BaseSubtotal NUMERIC NOT NULL DEFAULT 0,
+                    BaseDiscountAmount NUMERIC NOT NULL DEFAULT 0,
+                    BaseTotal NUMERIC NOT NULL DEFAULT 0,
+                    BasePaidAmountAtInvoiceRate NUMERIC NOT NULL DEFAULT 0,
                     Notes TEXT NULL,
                     LastModifiedAt TEXT NOT NULL,
                     RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
@@ -3871,13 +5577,18 @@ public sealed class InvoiceServiceTests
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
                     InvoiceId INTEGER NOT NULL,
-                    ItemId INTEGER NOT NULL,
+                    ItemId INTEGER NULL,
+                    ItemName TEXT NULL,
                     ItemUnitId INTEGER NOT NULL,
+                    SourceInvoiceLineId INTEGER NULL,
+                    ReturnUnitCost NUMERIC NULL,
                     Count INTEGER NOT NULL,
                     Weight NUMERIC NOT NULL,
                     Quantity NUMERIC NOT NULL,
                     Price NUMERIC NOT NULL,
                     Total NUMERIC NOT NULL,
+                    BaseUnitPrice NUMERIC NOT NULL DEFAULT 0,
+                    BaseTotal NUMERIC NOT NULL DEFAULT 0,
                     Notes TEXT NULL,
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
@@ -3922,6 +5633,13 @@ public sealed class InvoiceServiceTests
                     MovementDate TEXT NOT NULL,
                     QuantityIn NUMERIC NOT NULL,
                     QuantityOut NUMERIC NOT NULL,
+                    CostStatus INTEGER NOT NULL DEFAULT 1,
+                    PendingCostQuantity NUMERIC NOT NULL DEFAULT 0,
+                    UnitCost NUMERIC NULL,
+                    TotalCost NUMERIC NOT NULL DEFAULT 0,
+                    QuantityAfter NUMERIC NOT NULL DEFAULT 0,
+                    AverageCostAfter NUMERIC NOT NULL DEFAULT 0,
+                    InventoryValueAfter NUMERIC NOT NULL DEFAULT 0,
                     Description TEXT NULL,
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
@@ -3933,6 +5651,58 @@ public sealed class InvoiceServiceTests
                     DeletedOn TEXT NULL,
                     DeletedByPc TEXT NULL,
                     IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE StockAdjustmentLines (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    StockAdjustmentId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    UnitCost NUMERIC NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE UNIQUE INDEX UX_ItemMovements_Company_Id
+                ON ItemMovements (CompanyId, Id);
+
+                CREATE TABLE InventoryCostAllocations (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    OutboundMovementId INTEGER NOT NULL,
+                    InboundMovementId INTEGER NOT NULL,
+                    Quantity NUMERIC NOT NULL,
+                    UnitCost NUMERIC NOT NULL,
+                    TotalCost NUMERIC NOT NULL,
+                    CreatedOn TEXT NOT NULL
+                );
+
+                CREATE UNIQUE INDEX UX_InventoryCostAllocations_Pair
+                ON InventoryCostAllocations (
+                    CompanyId,
+                    OutboundMovementId,
+                    InboundMovementId);
+
+                CREATE TABLE ItemStoreBalances (
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    Quantity NUMERIC NOT NULL DEFAULT 0,
+                    AverageCost NUMERIC NOT NULL DEFAULT 0,
+                    InventoryValue NUMERIC NOT NULL DEFAULT 0,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL,
+                    PRIMARY KEY (CompanyId, StoreId, ItemId)
                 );
 
                 CREATE TABLE ContainerMovements (
@@ -3970,6 +5740,9 @@ public sealed class InvoiceServiceTests
                     Currency INTEGER NOT NULL,
                     Debit NUMERIC NOT NULL,
                     Credit NUMERIC NOT NULL,
+                    ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                    BaseDebit NUMERIC NOT NULL DEFAULT 0,
+                    BaseCredit NUMERIC NOT NULL DEFAULT 0,
                     Description TEXT NULL,
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
@@ -4009,10 +5782,146 @@ public sealed class InvoiceServiceTests
                     IsDeleted INTEGER NOT NULL
                 );
 
+                CREATE TABLE Cashboxes (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    Code TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    Currency INTEGER NOT NULL,
+                    OpeningBalance NUMERIC NOT NULL,
+                    OpeningBalanceDate TEXT NOT NULL DEFAULT '2026-01-01',
+                    OpeningExchangeRateId INTEGER NULL,
+                    OpeningExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                    BaseOpeningBalance NUMERIC NOT NULL DEFAULT 0,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    Notes TEXT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE CashMovementTypes (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    Name TEXT NOT NULL,
+                    Direction INTEGER NOT NULL,
+                    PartnerEffect INTEGER NOT NULL,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    IsDefaultForSales INTEGER NOT NULL DEFAULT 0,
+                    IsDefaultForPurchase INTEGER NOT NULL DEFAULT 0,
+                    IsDefaultForSalesReturn INTEGER NOT NULL DEFAULT 0,
+                    IsDefaultForPurchaseReturn INTEGER NOT NULL DEFAULT 0,
+                    Notes TEXT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL,
+                    CONSTRAINT CK_CashMovementTypes_InvoiceDefaults
+                        CHECK (
+                            ((IsDefaultForSales = 0 AND
+                              IsDefaultForPurchaseReturn = 0) OR
+                             (IsActive = 1 AND Direction = 1 AND PartnerEffect = 2))
+                            AND
+                            ((IsDefaultForPurchase = 0 AND
+                              IsDefaultForSalesReturn = 0) OR
+                             (IsActive = 1 AND Direction = 2 AND PartnerEffect = 1)))
+                );
+
+                CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForSales
+                ON CashMovementTypes (CompanyId, IsDefaultForSales)
+                WHERE IsDeleted = 0 AND IsDefaultForSales = 1;
+
+                CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForPurchase
+                ON CashMovementTypes (CompanyId, IsDefaultForPurchase)
+                WHERE IsDeleted = 0 AND IsDefaultForPurchase = 1;
+
+                CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForSalesReturn
+                ON CashMovementTypes (CompanyId, IsDefaultForSalesReturn)
+                WHERE IsDeleted = 0 AND IsDefaultForSalesReturn = 1;
+
+                CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForPurchaseReturn
+                ON CashMovementTypes (CompanyId, IsDefaultForPurchaseReturn)
+                WHERE IsDeleted = 0 AND IsDefaultForPurchaseReturn = 1;
+
                 CREATE TABLE CashVouchers (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    InvoiceId INTEGER NULL,
+                    CashboxTransferId INTEGER NULL,
+                    VoucherNumber TEXT NOT NULL,
+                    VoucherDate TEXT NOT NULL,
+                    Direction INTEGER NOT NULL,
+                    CashboxId INTEGER NOT NULL,
+                    CashMovementTypeId INTEGER NOT NULL,
+                    PartyType INTEGER NOT NULL,
+                    BusinessPartnerId INTEGER NULL,
+                    DriverId INTEGER NULL,
                     DriverTripId INTEGER NULL,
+                    ExternalPartyName TEXT NULL,
+                    Amount NUMERIC NOT NULL,
+                    Currency INTEGER NOT NULL,
+                    ExchangeRateId INTEGER NULL,
+                    ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                    BaseAmount NUMERIC NOT NULL DEFAULT 0,
+                    ReferenceNumber TEXT NULL,
+                    Description TEXT NULL,
+                    Notes TEXT NULL,
+                    LastModifiedAt TEXT NOT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE UNIQUE INDEX UX_CashVouchers_Invoice
+                ON CashVouchers (CompanyId, InvoiceId)
+                WHERE InvoiceId IS NOT NULL AND IsDeleted = 0;
+
+                CREATE TABLE InvoicePayments (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    InvoiceId INTEGER NOT NULL,
+                    CashVoucherId INTEGER NOT NULL,
+                    InvoiceCurrency INTEGER NOT NULL,
+                    AppliedAmount NUMERIC NOT NULL,
+                    CashboxCurrency INTEGER NOT NULL,
+                    CashboxAmount NUMERIC NOT NULL,
+                    InvoiceToBaseRate NUMERIC NOT NULL,
+                    CashboxToBaseRate NUMERIC NOT NULL,
+                    AppliedBaseAmount NUMERIC NOT NULL,
+                    CashboxBaseAmount NUMERIC NOT NULL,
+                    RealizedExchangeDifference NUMERIC NOT NULL,
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
 
@@ -4028,6 +5937,14 @@ public sealed class InvoiceServiceTests
                 AFTER UPDATE ON DriverTrips
                 BEGIN
                     UPDATE DriverTrips
+                    SET RowVersion = randomblob(8)
+                    WHERE Id = NEW.Id;
+                END;
+
+                CREATE TRIGGER AdvanceCashVoucherRowVersion
+                AFTER UPDATE ON CashVouchers
+                BEGIN
+                    UPDATE CashVouchers
                     SET RowVersion = randomblob(8)
                     WHERE Id = NEW.Id;
                 END;
@@ -4069,6 +5986,17 @@ public sealed class InvoiceServiceTests
                     (1, 1, 1, 'ITEM-1', 'Item 1', NULL, 1, 0),
                     (2, 1, 1, 'ITEM-2', 'Item 2', NULL, 1, 0);
 
+                INSERT INTO ItemsCategories (
+                    Id, CompanyId, Name, IsActive, Notes, RowVersion,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES
+                    (1, 1, 'General Items', 1, NULL, randomblob(8),
+                     'test', '2026-01-01', 'test', 0),
+                    (2, 1, 'Inactive Items', 0, NULL, randomblob(8),
+                     'test', '2026-01-01', 'test', 0),
+                    (3, 2, 'Other Company Items', 1, NULL, randomblob(8),
+                     'test', '2026-01-01', 'test', 0);
+
                 INSERT INTO Containers (
                     Id, CompanyId, Code, Name, Description, IsActive, IsDeleted)
                 VALUES (1, 1, 'CONT-1', 'Container 1', NULL, 1, 0);
@@ -4085,6 +6013,28 @@ public sealed class InvoiceServiceTests
                     (2, 1, 'DRV-2', 'Driver 2', NULL, NULL, 'LIC-2', NULL, 1, 0),
                     (3, 1, 'DRV-3', 'Inactive Driver', NULL, NULL, 'LIC-3', NULL, 0, 0),
                     (4, 2, 'DRV-4', 'Other Company Driver', NULL, NULL, 'LIC-4', NULL, 1, 0);
+
+                INSERT INTO Cashboxes (
+                    Id, CompanyId, Code, Name, Currency, OpeningBalance,
+                    IsActive, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES
+                    (1, 1, 'MAIN', 'Main Cashbox', 1, 10000, 1,
+                     'test', '2026-01-01', 'test', 0);
+
+                INSERT INTO CashMovementTypes (
+                    Id, CompanyId, Name, Direction, PartnerEffect, IsActive,
+                    IsDefaultForSales, IsDefaultForPurchase,
+                    IsDefaultForSalesReturn, IsDefaultForPurchaseReturn,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES
+                    (1, 1, 'Customer Collection', 1, 2, 1, 1, 0, 0, 0,
+                     'test', '2026-01-01', 'test', 0),
+                    (2, 1, 'Supplier Payment', 2, 1, 1, 0, 1, 0, 0,
+                     'test', '2026-01-01', 'test', 0),
+                    (3, 1, 'Customer Refund', 2, 1, 1, 0, 0, 1, 0,
+                     'test', '2026-01-01', 'test', 0),
+                    (4, 1, 'Supplier Refund', 1, 2, 1, 0, 0, 0, 1,
+                     'test', '2026-01-01', 'test', 0);
 
                 INSERT INTO StockOpeningBalances (
                     Id, CompanyId, StoreId, DocumentDate, IsDeleted)

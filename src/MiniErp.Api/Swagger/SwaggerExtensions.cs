@@ -34,9 +34,11 @@ public static class SwaggerExtensions
 
             options.SchemaFilter<EnumSchemaDocumentationFilter>();
             options.OperationFilter<AllowAnonymousOperationFilter>();
-            options.OperationFilter<AuthenticationSwaggerDocumentation>();
+            options.OperationFilter<AuthenticationSwaggerDocumentation>(
+                configuration);
             options.OperationFilter<BusinessPartnersSwaggerDocumentation>();
             options.OperationFilter<CashboxesSwaggerDocumentation>();
+            options.OperationFilter<CashboxTransfersSwaggerDocumentation>();
             options.OperationFilter<CashMovementTypesSwaggerDocumentation>();
             options.OperationFilter<CashVouchersSwaggerDocumentation>();
             options.OperationFilter<CompaniesSwaggerDocumentation>();
@@ -44,11 +46,17 @@ public static class SwaggerExtensions
             options.OperationFilter<CountriesSwaggerDocumentation>();
             options.OperationFilter<DriversSwaggerDocumentation>();
             options.OperationFilter<DriverTripsSwaggerDocumentation>();
+            options.OperationFilter<ExchangeRatesSwaggerDocumentation>();
             options.OperationFilter<ItemsSwaggerDocumentation>();
+            options.OperationFilter<ItemsCategoriesSwaggerDocumentation>();
             options.OperationFilter<ItemUnitsSwaggerDocumentation>();
             options.OperationFilter<StoresSwaggerDocumentation>();
             options.OperationFilter<StoreContainersSwaggerDocumentation>();
             options.OperationFilter<StockOpeningBalancesSwaggerDocumentation>();
+            options.OperationFilter<StockAdjustmentsSwaggerDocumentation>();
+            options.OperationFilter<StockTransfersSwaggerDocumentation>();
+            options.OperationFilter<InventoryCountsSwaggerDocumentation>();
+            options.OperationFilter<InventoryCostReportsSwaggerDocumentation>();
             options.OperationFilter<StatementsSwaggerDocumentation>();
             options.OperationFilter<PartnerOpeningBalancesSwaggerDocumentation>();
             options.OperationFilter<InvoicesSwaggerDocumentation>();

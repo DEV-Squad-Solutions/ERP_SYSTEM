@@ -23,7 +23,7 @@ public interface ICompanyService
 
     Task<Result<CompanyResponse>> UpdateAsync(
         int id,
-        CompanyRequest request,
+        CompanyUpdateRequest request,
         CancellationToken cancellationToken = default);
 
     Task<Result> DeleteAsync(

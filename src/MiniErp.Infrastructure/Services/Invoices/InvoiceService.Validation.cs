@@ -1,6 +1,10 @@
 using Microsoft.EntityFrameworkCore;
+using static MiniErp.Application.Features.Invoices.InvoiceErrors;
 using MiniErp.Application.Common.Results;
+using MiniErp.Application.Features.Inventory;
 using MiniErp.Application.Features.Invoices;
+using MiniErp.Domain.Entities.CashManagement;
+using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
@@ -9,92 +13,11 @@ namespace MiniErp.Infrastructure.Services.Invoices;
 
 public sealed partial class InvoiceService
 {
-    private static Error? ValidateFilters(InvoiceFilterRequest filters)
-    {
-        if (filters.InvoiceNumber?.Trim().Length >
-            InvoiceRequest.InvoiceNumberMaximumLength)
-        {
-            return Error.Validation(
-                "Invoices.InvoiceNumberFilterInvalid",
-                "رقم الفاتورة في البحث يجب ألا يتجاوز 100 حرف.",
-                nameof(InvoiceFilterRequest.InvoiceNumber));
-        }
-
-        if (filters.InvoiceType.HasValue &&
-            !Enum.IsDefined(
-                typeof(InvoiceType),
-                filters.InvoiceType.Value))
-        {
-            return Error.Validation(
-                "Invoices.InvoiceTypeInvalid",
-                "نوع الفاتورة غير مدعوم.",
-                nameof(InvoiceFilterRequest.InvoiceType));
-        }
-
-        if (filters.PaymentTerm.HasValue &&
-            !Enum.IsDefined(
-                typeof(PaymentTerm),
-                filters.PaymentTerm.Value))
-        {
-            return Error.Validation(
-                "Invoices.PaymentTermInvalid",
-                "شرط السداد غير مدعوم.",
-                nameof(InvoiceFilterRequest.PaymentTerm));
-        }
-
-        if (filters.PriceStatus.HasValue &&
-            !Enum.IsDefined(
-                typeof(InvoicePriceStatus),
-                filters.PriceStatus.Value))
-        {
-            return InvalidFilter(
-                nameof(InvoiceFilterRequest.PriceStatus),
-                "حالة تسعير الأصناف غير مدعومة.");
-        }
-
-        if (filters.BusinessPartnerId is <= 0)
-        {
-            return InvalidFilter(
-                nameof(InvoiceFilterRequest.BusinessPartnerId),
-                "رقم الطرف يجب أن يكون أكبر من صفر.");
-        }
-
-        if (filters.CountryId is <= 0)
-        {
-            return InvalidFilter(
-                nameof(InvoiceFilterRequest.CountryId),
-                "رقم الدولة يجب أن يكون أكبر من صفر.");
-        }
-
-        if (filters.StoreId is <= 0)
-        {
-            return InvalidFilter(
-                nameof(InvoiceFilterRequest.StoreId),
-                "رقم المخزن يجب أن يكون أكبر من صفر.");
-        }
-
-        if (filters.DriverId is <= 0)
-        {
-            return InvalidFilter(
-                nameof(InvoiceFilterRequest.DriverId),
-                "رقم السائق يجب أن يكون أكبر من صفر.");
-        }
-
-        if (filters.FromDate > filters.ToDate)
-        {
-            return InvalidFilter(
-                nameof(InvoiceFilterRequest.ToDate),
-                "تاريخ النهاية يجب ألا يسبق تاريخ البداية.");
-        }
-
-        return null;
-    }
-
-    private static Error InvalidFilter(string target, string description) =>
-        Error.Validation(
-            "Invoices.InvalidFilter",
-            description,
-            target);
+    private static bool TryGetEffectiveLineValues(
+        InvoiceLineRequest request,
+        out int count,
+        out decimal weight) =>
+        InvoiceLineValues.TryGetEffective(request, out count, out weight);
 
     private async Task<Result<PreparedInvoice>> PrepareAsync(
         Invoice invoice,
@@ -114,38 +37,93 @@ public sealed partial class InvoiceService
                 InvoiceRequest.InvoiceNumberMaximumLength)
             {
                 return Failure(
-                    Error.Validation(
-                        "Invoices.InvoiceNumberInvalid",
-                        "رقم الفاتورة مطلوب ويجب ألا يتجاوز 100 حرف.",
-                        nameof(InvoiceRequest.InvoiceNumber)));
+                    InvoiceNumberInvalid());
             }
         }
 
         if (!Enum.IsDefined(typeof(InvoiceType), invoice.InvoiceType))
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.InvoiceTypeInvalid",
-                    "نوع الفاتورة غير مدعوم.",
-                    nameof(InvoiceRequest.InvoiceType)));
+                InvoiceTypeInvalid(nameof(InvoiceRequest.InvoiceType)));
         }
+
+        if (!Enum.IsDefined(
+                typeof(InvoiceContentType),
+                invoice.ContentType))
+        {
+            return Failure(
+                ContentTypeInvalid());
+        }
+
+        if (invoice.ContentType == InvoiceContentType.Containers &&
+            lines.Count > 0)
+        {
+            return Failure(
+                ItemLinesNotAllowedForContainerInvoice());
+        }
+
+        if (invoice.ContentType == InvoiceContentType.Containers &&
+            containerLines.Count == 0)
+        {
+            return Failure(
+                ContainerLinesRequired());
+        }
+
+        if (invoice.ContentType == InvoiceContentType.Items &&
+            lines.Count == 0)
+        {
+            return Failure(
+                ItemLinesRequired());
+        }
+
+        if (invoice.InvoiceType is not
+            (InvoiceType.SalesReturn or InvoiceType.PurchaseReturn) &&
+            lines.Any(line =>
+                line.SourceInvoiceLineId.HasValue ||
+                line.ReturnUnitCost.HasValue))
+        {
+            return Failure(
+                ReturnCostFieldsNotAllowed());
+        }
+
+        if (invoice.InvoiceType == InvoiceType.PurchaseReturn &&
+            lines.Any(line => line.ReturnUnitCost.HasValue))
+        {
+            return Failure(
+                ReturnCostFieldsNotAllowed());
+        }
+
+        if (lines.Any(line => line.ReturnUnitCost < 0m))
+        {
+            return Failure(
+                ReturnUnitCostInvalid());
+        }
+
+        var preparedReturnSourcesResult =
+            await PrepareReturnSourcesAsync(
+                invoice,
+                lines,
+                currentInvoiceId,
+                cancellationToken);
+        if (preparedReturnSourcesResult.IsFailure)
+        {
+            return Failure(preparedReturnSourcesResult.Error);
+        }
+
+        var preparedReturnSources = preparedReturnSourcesResult.Value;
 
         if (!Enum.IsDefined(typeof(PaymentTerm), invoice.PaymentTerm))
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.PaymentTermInvalid",
-                    "طريقة الدفع غير مدعومة.",
-                    nameof(InvoiceRequest.PaymentTerm)));
+                PaymentTermInvalid(nameof(InvoiceRequest.PaymentTerm)));
         }
 
-        if (lines.GroupBy(line => line.ItemId).Any(group => group.Count() > 1))
+        if (lines.Where(line => line.ItemId.HasValue)
+            .GroupBy(line => line.ItemId)
+            .Any(group => group.Count() > 1))
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.DuplicateItemIds",
-                    "لا يجوز تكرار الصنف في سطور الفاتورة.",
-                    nameof(InvoiceRequest.Lines)));
+                DuplicateItemIds());
         }
 
         if (containerLines
@@ -153,26 +131,29 @@ public sealed partial class InvoiceService
             .Any(group => group.Count() > 1))
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.DuplicateContainerIds",
-                    "لا يجوز تكرار العبوة في سطور الفاتورة.",
-                    nameof(InvoiceRequest.ContainerLines)));
+                DuplicateContainerIds());
         }
 
         foreach (var line in lines)
         {
+            if (!TryGetEffectiveLineValues(
+                    line,
+                    out var count,
+                    out var weight))
+            {
+                return Failure(
+                    InvalidCalculatedAmounts(InvoiceCalculationErrorKind.LineQuantityOrTotal));
+            }
+
             if (!InvoiceAmountRules.TryCalculate(
-                    line.Count,
-                    line.Weight,
+                    count,
+                    weight,
                     line.Price,
                     out _,
                     out _))
             {
                 return Failure(
-                    Error.Validation(
-                        "Invoices.InvalidCalculatedAmounts",
-                        "نتيجة الكمية أو الإجمالي تتجاوز الدقة الرقمية المسموحة.",
-                        nameof(InvoiceRequest.Lines)));
+                    InvalidCalculatedAmounts(InvoiceCalculationErrorKind.LineQuantityOrTotal));
             }
         }
 
@@ -191,19 +172,13 @@ public sealed partial class InvoiceService
         if (partner is null)
         {
             return Failure(
-                Error.NotFound(
-                    "Invoices.BusinessPartnerNotFound",
-                    "لم يتم العثور على العميل أو المورد المحدد.",
-                    nameof(InvoiceRequest.BusinessPartnerId)));
+                BusinessPartnerNotFound(invoice.BusinessPartnerId));
         }
 
         if (!partner.IsActive)
         {
             return Failure(
-                Error.Conflict(
-                    "Invoices.BusinessPartnerInactive",
-                    "لا يمكن استخدام عميل أو مورد غير نشط.",
-                    nameof(InvoiceRequest.BusinessPartnerId)));
+                BusinessPartnerInactive());
         }
 
         var store = await dbContext.Stores
@@ -220,28 +195,33 @@ public sealed partial class InvoiceService
         if (store is null)
         {
             return Failure(
-                Error.NotFound(
-                    "Invoices.StoreNotFound",
-                    "لم يتم العثور على مخزن المنتجات المحدد.",
-                    nameof(InvoiceRequest.StoreId)));
+                StoreNotFound(invoice.StoreId));
         }
 
         if (!store.IsActive)
         {
             return Failure(
-                Error.Conflict(
-                    "Invoices.StoreInactive",
-                    "لا يمكن استخدام مخزن منتجات غير نشط.",
-                    nameof(InvoiceRequest.StoreId)));
+                StoreInactive());
         }
 
-        if (store.IsContainerStore)
+        if (invoice.ContentType == InvoiceContentType.Items &&
+            store.IsContainerStore)
         {
             return Failure(
-                Error.Conflict(
-                    "Invoices.ContainerStoreNotAllowed",
-                    "يجب اختيار مخزن منتجات وليس مخزن عبوات.",
-                    nameof(InvoiceRequest.StoreId)));
+                ContainerStoreNotAllowed());
+        }
+
+        if (invoice.ContentType == InvoiceContentType.Containers &&
+            !store.IsContainerStore)
+        {
+            return Failure(
+                ContainerStoreRequired(InvoiceContainerStoreRequirement.ContainerInvoice));
+        }
+
+        if (invoice.ContentType == InvoiceContentType.Containers &&
+            !invoice.ContainerStoreId.HasValue)
+        {
+            invoice.ContainerStoreId = invoice.StoreId;
         }
 
         Store? containerStore = null;
@@ -256,29 +236,20 @@ public sealed partial class InvoiceService
             if (containerStore is null)
             {
                 return Failure(
-                    Error.NotFound(
-                        "Invoices.ContainerStoreNotFound",
-                        "لم يتم العثور على مخزن العبوات المحدد.",
-                        nameof(InvoiceRequest.ContainerStoreId)));
+                    ContainerStoreNotFound(containerStoreId));
             }
 
             if (!containerStore.IsActive)
             {
                 return Failure(
-                    Error.Conflict(
-                        "Invoices.ContainerStoreInactive",
-                        "لا يمكن استخدام مخزن عبوات غير نشط.",
-                        nameof(InvoiceRequest.ContainerStoreId)));
+                    ContainerStoreInactive());
             }
 
             if (!containerStore.IsContainerStore ||
                 containerStore.BusinessPartnerId != partner.Id)
             {
                 return Failure(
-                    Error.Conflict(
-                        "Invoices.ContainerStorePartnerMismatch",
-                        "مخزن العبوات يجب أن يكون مخزن العبوات النشط للعميل أو المورد المحدد.",
-                        nameof(InvoiceRequest.ContainerStoreId)));
+                    ContainerStorePartnerMismatch());
             }
         }
 
@@ -294,10 +265,46 @@ public sealed partial class InvoiceService
             if (!countryExists)
             {
                 return Failure(
-                    Error.NotFound(
-                        "Invoices.CountryNotFound",
-                        "لم يتم العثور على الدولة المحددة أو أنها غير نشطة.",
-                        nameof(InvoiceRequest.CountryId)));
+                    CountryNotFound(countryId));
+            }
+        }
+
+        if (invoice.ItemsCategoryId is int itemsCategoryId)
+        {
+            var category = await dbContext.ItemsCategories
+                .AsNoTracking()
+                .Where(candidate =>
+                    candidate.CompanyId == companyId &&
+                    candidate.Id == itemsCategoryId)
+                .Select(candidate => new
+                {
+                    candidate.IsActive
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (category is null)
+            {
+                return Failure(
+                    ItemsCategoryNotFound(itemsCategoryId));
+            }
+
+            if (!category.IsActive)
+            {
+                var isExistingSelection =
+                    currentInvoiceId.HasValue &&
+                    await dbContext.Invoices
+                        .AsNoTracking()
+                        .AnyAsync(
+                            candidate =>
+                                candidate.CompanyId == companyId &&
+                                candidate.Id == currentInvoiceId.Value &&
+                                candidate.ItemsCategoryId ==
+                                itemsCategoryId,
+                            cancellationToken);
+                if (!isExistingSelection)
+                {
+                    return Failure(
+                        ItemsCategoryInactive());
+                }
             }
         }
 
@@ -307,20 +314,14 @@ public sealed partial class InvoiceService
             !invoice.DriverId.HasValue)
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.MainDriverRequired",
-                    "يجب تحديد السائق الرئيسي قبل تحديد السائق الفعلي.",
-                    nameof(InvoiceRequest.DriverId)));
+                MainDriverRequired());
         }
 
         if (invoice.UsesExternalDriver &&
             invoice.ActualDriverId.HasValue)
         {
             return Failure(
-                Error.Validation(
-                    "Invoices.ExternalDriverWithActualDriver",
-                    "لا يجوز اختيار سائق فعلي داخلي مع السائق الخارجي.",
-                    nameof(InvoiceRequest.ActualDriverId)));
+                ExternalDriverWithActualDriver());
         }
 
         if (invoice.UsesExternalDriver)
@@ -328,10 +329,7 @@ public sealed partial class InvoiceService
             if (string.IsNullOrWhiteSpace(invoice.ExternalDriverName))
             {
                 return Failure(
-                    Error.Validation(
-                        "Invoices.ExternalDriverNameRequired",
-                        "اسم السائق الخارجي مطلوب.",
-                        nameof(InvoiceRequest.ExternalDriverName)));
+                    ExternalDriverNameRequired());
             }
         }
 
@@ -350,19 +348,13 @@ public sealed partial class InvoiceService
             if (driver is null)
             {
                 return Failure(
-                    Error.NotFound(
-                        "Invoices.DriverNotFound",
-                        "لم يتم العثور على السائق الرئيسي المحدد.",
-                        nameof(InvoiceRequest.DriverId)));
+                    DriverNotFound(driverId));
             }
 
             if (!driver.IsActive)
             {
                 return Failure(
-                    Error.Conflict(
-                        "Invoices.DriverInactive",
-                        "لا يمكن استخدام سائق رئيسي غير نشط.",
-                        nameof(InvoiceRequest.DriverId)));
+                    DriverInactive());
             }
         }
 
@@ -381,39 +373,36 @@ public sealed partial class InvoiceService
             if (actualDriver is null)
             {
                 return Failure(
-                    Error.NotFound(
-                        "Invoices.ActualDriverNotFound",
-                        "لم يتم العثور على السائق الفعلي المحدد.",
-                        nameof(InvoiceRequest.ActualDriverId)));
+                    ActualDriverNotFound(actualDriverId));
             }
 
             if (!actualDriver.IsActive)
             {
                 return Failure(
-                    Error.Conflict(
-                        "Invoices.ActualDriverInactive",
-                        "لا يمكن استخدام سائق فعلي غير نشط.",
-                        nameof(InvoiceRequest.ActualDriverId)));
+                    ActualDriverInactive());
             }
         }
 
         var itemIds = lines
-            .Select(line => line.ItemId)
+            .Where(line => line.ItemId.HasValue)
+            .Select(line => line.ItemId!.Value)
             .Distinct()
             .ToArray();
-        var items = await dbContext.Items
-            .AsNoTracking()
-            .Where(item =>
-                item.CompanyId == companyId &&
-                itemIds.Contains(item.Id))
-            .Select(item => new
-            {
-                item.Id,
-                item.ItemUnitId,
-                item.IsActive,
-                ItemUnitIsActive = item.ItemUnit.IsActive
-            })
-            .ToListAsync(cancellationToken);
+        var items = itemIds.Length > 0
+            ? await dbContext.Items
+                .AsNoTracking()
+                .Where(item =>
+                    item.CompanyId == companyId &&
+                    itemIds.Contains(item.Id))
+                .Select(item => new
+                {
+                    item.Id,
+                    item.ItemUnitId,
+                    item.IsActive,
+                    ItemUnitIsActive = item.ItemUnit.IsActive
+                })
+                .ToListAsync(cancellationToken)
+            : [];
         var itemsById = items.ToDictionary(item => item.Id);
         var missingItemIds = itemIds
             .Except(itemsById.Keys)
@@ -421,10 +410,7 @@ public sealed partial class InvoiceService
         if (missingItemIds.Length > 0)
         {
             return Failure(
-                Error.NotFound(
-                    "Invoices.ItemNotFound",
-                    $"لم يتم العثور على الأصناف: {string.Join(", ", missingItemIds)}.",
-                    nameof(InvoiceLineRequest.ItemId)));
+                ItemNotFound(missingItemIds));
         }
 
         var inactiveItemIds = items
@@ -434,10 +420,7 @@ public sealed partial class InvoiceService
         if (inactiveItemIds.Length > 0)
         {
             return Failure(
-                Error.Conflict(
-                    "Invoices.ItemInactive",
-                    $"لا يمكن استخدام الأصناف غير النشطة: {string.Join(", ", inactiveItemIds)}.",
-                    nameof(InvoiceLineRequest.ItemId)));
+                ItemInactive(inactiveItemIds));
         }
 
         var inactiveUnitItemIds = items
@@ -447,10 +430,7 @@ public sealed partial class InvoiceService
         if (inactiveUnitItemIds.Length > 0)
         {
             return Failure(
-                Error.Conflict(
-                    "Invoices.ItemUnitInactive",
-                    $"وحدات الأصناف غير النشطة: {string.Join(", ", inactiveUnitItemIds)}.",
-                    nameof(InvoiceLineRequest.ItemId)));
+                ItemUnitInactive(inactiveUnitItemIds));
         }
 
         if (containerLines.Count > 0)
@@ -459,19 +439,13 @@ public sealed partial class InvoiceService
                 InvoiceType.SalesReturn))
             {
                 return Failure(
-                    Error.Conflict(
-                        "Invoices.ContainerLinesNotAllowed",
-                        "لا يسمح بسطر العبوة إلا في فواتير البيع ومرتجع البيع.",
-                        nameof(InvoiceRequest.ContainerLines)));
+                    ContainerLinesNotAllowed());
             }
 
             if (containerStore is null)
             {
                 return Failure(
-                    Error.Validation(
-                        "Invoices.ContainerStoreRequired",
-                        "مخزن العبوات مطلوب عند إضافة سطور العبوات.",
-                        nameof(InvoiceRequest.ContainerStoreId)));
+                    ContainerStoreRequired(InvoiceContainerStoreRequirement.ContainerLines));
             }
 
             var containerIds = containerLines
@@ -494,10 +468,7 @@ public sealed partial class InvoiceService
             if (missingContainerIds.Length > 0)
             {
                 return Failure(
-                    Error.NotFound(
-                        "Invoices.ContainerNotAssigned",
-                        $"العبوات غير النشطة أو غير المرتبطة بمخزن العميل: {string.Join(", ", missingContainerIds)}.",
-                        nameof(InvoiceContainerLineRequest.ContainerId)));
+                    ContainerNotAssigned(missingContainerIds));
             }
         }
 
@@ -514,44 +485,480 @@ public sealed partial class InvoiceService
 
         return Result<PreparedInvoice>.Success(
             new PreparedInvoice(
-                partner.Currency,
-                items.ToDictionary(
+                Currency: partner.Currency,
+                ItemUnitIds: items.ToDictionary(
                     item => item.Id,
-                    item => item.ItemUnitId)));
+                    item => item.ItemUnitId),
+                ReturnSourceLines: preparedReturnSources.Lines,
+                ReturnDiscountAmount:
+                    preparedReturnSources.DiscountAmount));
     }
 
-    private static Error? ValidateAmounts(Invoice invoice)
+    private async Task<Result<PreparedReturnSources>>
+        PrepareReturnSourcesAsync(
+            Invoice invoice,
+            IReadOnlyList<InvoiceLineRequest> lines,
+            int? currentInvoiceId,
+            CancellationToken cancellationToken)
     {
+        if (invoice.InvoiceType is not
+            (InvoiceType.SalesReturn or InvoiceType.PurchaseReturn))
+        {
+            return Result<PreparedReturnSources>.Success(
+                PreparedReturnSources.Empty);
+        }
+
+        var linkedLines = lines
+            .Where(line => line.SourceInvoiceLineId.HasValue)
+            .ToArray();
+        if (linkedLines.Length == 0)
+        {
+            return Result<PreparedReturnSources>.Success(
+                PreparedReturnSources.Empty);
+        }
+
+        if (linkedLines.Length != lines.Count ||
+            linkedLines.Any(line => !line.ItemId.HasValue))
+        {
+            return Result<PreparedReturnSources>.Failure(
+                ReturnLinesMustUseOneSourceInvoice());
+        }
+
+        var linkedLineIds = linkedLines
+            .Select(line => line.SourceInvoiceLineId!.Value)
+            .Distinct()
+            .ToArray();
+        var sourceType = invoice.InvoiceType == InvoiceType.SalesReturn
+            ? InvoiceType.Sales
+            : InvoiceType.Purchase;
+        var returnType = invoice.InvoiceType;
+        var sourceLines = await dbContext.InvoiceLines
+            .AsNoTracking()
+            .Where(source =>
+                source.CompanyId == companyId &&
+                linkedLineIds.Contains(source.Id) &&
+                source.ItemId.HasValue &&
+                source.Invoice.CompanyId == companyId &&
+                source.Invoice.InvoiceType == sourceType &&
+                source.Invoice.ContentType == InvoiceContentType.Items &&
+                source.Invoice.BusinessPartnerId ==
+                    invoice.BusinessPartnerId &&
+                source.Invoice.StoreId == invoice.StoreId &&
+                source.Invoice.InvoiceDate <= invoice.InvoiceDate)
+            .Select(source => new
+            {
+                source.Id,
+                source.InvoiceId,
+                ItemId = source.ItemId!.Value,
+                SourceQuantity = source.Quantity,
+                UnitPrice = source.Price,
+                SourceInvoiceDiscount = source.Invoice.DiscountAmount,
+                ReturnedQuantity = dbContext.InvoiceLines
+                    .Where(returnLine =>
+                        returnLine.CompanyId == companyId &&
+                        returnLine.SourceInvoiceLineId == source.Id &&
+                        returnLine.Invoice.InvoiceType == returnType &&
+                        (!currentInvoiceId.HasValue ||
+                         returnLine.InvoiceId != currentInvoiceId.Value))
+                    .Sum(returnLine =>
+                        (decimal?)returnLine.Quantity) ?? 0m
+            })
+            .ToListAsync(cancellationToken);
+
+        if (sourceLines.Count != linkedLineIds.Length ||
+            sourceLines.Select(source => source.InvoiceId)
+                .Distinct()
+                .Count() != 1)
+        {
+            return Result<PreparedReturnSources>.Failure(
+                InvalidReturnSource());
+        }
+
+        var sourceById = sourceLines.ToDictionary(source => source.Id);
+        var requestedQuantities = new Dictionary<int, decimal>();
+        foreach (var line in linkedLines)
+        {
+            if (!sourceById.TryGetValue(
+                    line.SourceInvoiceLineId!.Value,
+                    out var source) ||
+                source.ItemId != line.ItemId)
+            {
+                return Result<PreparedReturnSources>.Failure(
+                    InvalidReturnSource());
+            }
+
+            if (!TryGetEffectiveLineValues(
+                    line,
+                    out var count,
+                    out var weight) ||
+                !InvoiceAmountRules.TryCalculate(
+                    count,
+                    weight,
+                    source.UnitPrice,
+                    out var requestedQuantity,
+                    out _))
+            {
+                return Result<PreparedReturnSources>.Failure(
+                    InvalidCalculatedAmounts(
+                        InvoiceCalculationErrorKind.LineQuantityOrTotal));
+            }
+
+            var availableQuantity =
+                source.SourceQuantity - source.ReturnedQuantity;
+            if (requestedQuantity > availableQuantity)
+            {
+                return Result<PreparedReturnSources>.Failure(
+                    ReturnQuantityExceedsAvailable(
+                        source.Id,
+                        availableQuantity));
+            }
+
+            requestedQuantities[source.Id] = requestedQuantity;
+        }
+
+        var sourceInvoiceId = sourceLines[0].InvoiceId;
+        var sourceDiscount = sourceLines[0].SourceInvoiceDiscount;
+        var sourceInvoiceLineCount = await dbContext.InvoiceLines
+            .AsNoTracking()
+            .CountAsync(
+                sourceLine =>
+                    sourceLine.CompanyId == companyId &&
+                    sourceLine.InvoiceId == sourceInvoiceId,
+                cancellationToken);
+        var isFullOriginalInvoiceReturn =
+            linkedLineIds.Length == sourceInvoiceLineCount &&
+            sourceLines.All(source =>
+                source.ReturnedQuantity == 0m &&
+                requestedQuantities.TryGetValue(
+                    source.Id,
+                    out var requestedQuantity) &&
+                requestedQuantity == source.SourceQuantity);
+        var discountAmount = isFullOriginalInvoiceReturn
+            ? sourceDiscount
+            : 0m;
+        var preparedLines = sourceLines.ToDictionary(
+            source => source.Id,
+            source => new PreparedReturnSourceLine(
+                SourceInvoiceLineId: source.Id,
+                SourceInvoiceId: source.InvoiceId,
+                UnitPrice: source.UnitPrice));
+
+        return Result<PreparedReturnSources>.Success(
+            new PreparedReturnSources(
+                Lines: preparedLines,
+                DiscountAmount: discountAmount));
+    }
+
+    private static Error? ValidateAmounts(
+        Invoice invoice,
+        decimal? requestedWBTotal,
+        bool requireCalculatedWBTotalMatch)
+    {
+        if (!InvoiceAmountRules.IsValidQuantity(invoice.WBWeight) ||
+            !InvoiceAmountRules.IsValidQuantity(
+                invoice.WBScaleDifference) ||
+            !InvoiceAmountRules.IsValidQuantity(invoice.WBDiscount) ||
+            !InvoiceAmountRules.IsValidQuantity(invoice.WBTotal))
+        {
+            return InvalidWBTotal();
+        }
+
+        if (requestedWBTotal.HasValue &&
+            !InvoiceAmountRules.IsValidQuantity(requestedWBTotal.Value))
+        {
+            return InvalidWBTotal(
+                fieldName: nameof(InvoiceRequest.WBTotal));
+        }
+
+        var requestedPositiveWBTotal = requestedWBTotal is > 0m;
+        if (requestedPositiveWBTotal &&
+            requestedWBTotal!.Value != invoice.WBTotal)
+        {
+            return WBTotalDoesNotMatchCalculatedTotal(
+                requestedWBTotal.Value,
+                invoice.WBTotal);
+        }
+
+        if (invoice.ContentType == InvoiceContentType.Items)
+        {
+            var totalItemWeight = decimal.Round(
+                invoice.Lines.Sum(line => line.Weight),
+                InvoiceAmountRules.QuantityScale,
+                MidpointRounding.AwayFromZero);
+            if ((requireCalculatedWBTotalMatch ||
+                 requestedPositiveWBTotal) &&
+                invoice.WBTotal != totalItemWeight)
+            {
+                return WBTotalDoesNotMatchItemWeight(
+                    invoice.WBTotal,
+                    totalItemWeight,
+                    fieldName: requestedPositiveWBTotal
+                        ? nameof(InvoiceRequest.WBTotal)
+                        : nameof(InvoiceRequest.WBWeight));
+            }
+        }
+
         if (invoice.DiscountAmount < 0m ||
             !InvoiceAmountRules.IsValidMoney(invoice.DiscountAmount) ||
             invoice.DiscountAmount > invoice.Subtotal)
         {
-            return Error.Validation(
-                "Invoices.InvalidDiscountAmount",
-                "قيمة الخصم يجب ألا تكون سالبة ولا يمكن أن تتجاوز إجمالي سطور الفاتورة.",
-                nameof(InvoiceRequest.DiscountAmount));
+            return InvalidDiscountAmount();
         }
 
         if (!InvoiceAmountRules.IsValidMoney(invoice.Subtotal) ||
             !InvoiceAmountRules.IsValidMoney(invoice.Total))
         {
-            return Error.Validation(
-                "Invoices.InvalidCalculatedAmounts",
-                "نتيجة المبالغ تتجاوز الدقة الرقمية المسموحة.",
-                nameof(InvoiceRequest.Lines));
+            return InvalidCalculatedAmounts(InvoiceCalculationErrorKind.Totals);
         }
 
         if (invoice.PaidAmount < 0m ||
             !InvoiceAmountRules.IsValidMoney(invoice.PaidAmount) ||
             invoice.PaidAmount > invoice.Total)
         {
-            return Error.Validation(
-                "Invoices.InvalidPaidAmount",
-                "المبلغ المدفوع يجب ألا يكون سالبًا ولا يمكن أن يتجاوز صافي الفاتورة.",
-                nameof(InvoiceRequest.PaidAmount));
+            return InvalidPaidAmount();
         }
 
         return null;
+    }
+
+    private async Task<Result<PaymentPreparation?>> PreparePaymentAsync(
+        Invoice invoice,
+        int? cashboxId,
+        decimal? requestedCashboxExchangeRate,
+        int? currentInvoiceId,
+        CancellationToken cancellationToken)
+    {
+        var currentVoucher = currentInvoiceId is int invoiceId
+            ? await dbContext.CashVouchers
+                .FirstOrDefaultAsync(voucher =>
+                    voucher.CompanyId == companyId &&
+                    voucher.InvoiceId == invoiceId,
+                    cancellationToken)
+            : null;
+
+        if (invoice.PaymentTerm == PaymentTerm.Cash &&
+            invoice.PaidAmount != invoice.Total)
+        {
+            return Result<PaymentPreparation?>.Failure(
+                CashInvoiceMustBeFullyPaid());
+        }
+
+        if (invoice.PaymentTerm == PaymentTerm.Credit &&
+            invoice.Total > 0m &&
+            invoice.PaidAmount >= invoice.Total)
+        {
+            return Result<PaymentPreparation?>.Failure(
+                CreditInvoiceCannotBeFullyPaid());
+        }
+
+        if (invoice.PaidAmount <= 0m)
+        {
+            if (cashboxId.HasValue)
+            {
+                return Result<PaymentPreparation?>.Failure(
+                    PaymentReferencesNotAllowed());
+            }
+
+            var balanceError = await ValidateFinalCashboxBalanceAsync(
+                currentVoucher,
+                proposedCashboxId: null,
+                proposedDirection: null,
+                proposedAmount: null,
+                cancellationToken);
+            return balanceError is null
+                ? Result<PaymentPreparation?>.Success(null)
+                : Result<PaymentPreparation?>.Failure(balanceError);
+        }
+
+        if (!cashboxId.HasValue)
+        {
+            return Result<PaymentPreparation?>.Failure(
+                CashboxRequiredForPayment());
+        }
+
+        var cashbox = await dbContext.Cashboxes
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate =>
+                candidate.CompanyId == companyId &&
+                candidate.Id == cashboxId.Value,
+                cancellationToken);
+        if (cashbox is null)
+        {
+            return Result<PaymentPreparation?>.Failure(
+                CashboxNotFound(cashboxId.Value));
+        }
+
+        if (!cashbox.IsActive &&
+            (currentVoucher is null ||
+             currentVoucher.CashboxId != cashbox.Id))
+        {
+            return Result<PaymentPreparation?>.Failure(
+                CashboxInactive());
+        }
+
+        var expectedDirection = InvoiceMovementRules.GetPaymentDirection(
+            invoice.InvoiceType);
+        var expectedEffect = InvoiceMovementRules.GetPaymentPartnerEffect(
+            invoice.InvoiceType);
+
+        var movementType = currentVoucher?.CashMovementTypeId is int currentTypeId
+            ? await dbContext.CashMovementTypes
+                .AsNoTracking()
+                .FirstOrDefaultAsync(candidate =>
+                    candidate.CompanyId == companyId &&
+                    candidate.Id == currentTypeId &&
+                    candidate.Direction == expectedDirection &&
+                    candidate.PartnerEffect == expectedEffect,
+                    cancellationToken)
+            : null;
+
+        var defaultMovementTypes = dbContext.CashMovementTypes
+            .AsNoTracking()
+            .Where(candidate =>
+                candidate.CompanyId == companyId &&
+                candidate.Direction == expectedDirection &&
+                candidate.PartnerEffect == expectedEffect &&
+                candidate.IsActive);
+
+        defaultMovementTypes = invoice.InvoiceType switch
+        {
+            InvoiceType.Sales => defaultMovementTypes.Where(
+                candidate => candidate.IsDefaultForSales),
+            InvoiceType.Purchase => defaultMovementTypes.Where(
+                candidate => candidate.IsDefaultForPurchase),
+            InvoiceType.SalesReturn => defaultMovementTypes.Where(
+                candidate => candidate.IsDefaultForSalesReturn),
+            InvoiceType.PurchaseReturn => defaultMovementTypes.Where(
+                candidate => candidate.IsDefaultForPurchaseReturn),
+            _ => defaultMovementTypes.Where(candidate => false)
+        };
+
+        movementType ??= await defaultMovementTypes
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (movementType is null)
+        {
+            return Result<PaymentPreparation?>.Failure(
+                DefaultCashMovementTypeNotFound(invoice.InvoiceType));
+        }
+
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            cashbox.Currency,
+            invoice.InvoiceDate,
+            requestedCashboxExchangeRate,
+            cancellationToken);
+        if (exchangeRateResult.IsFailure)
+        {
+            return Result<PaymentPreparation?>.Failure(
+                exchangeRateResult.Error);
+        }
+
+        var cashboxAmount = ExchangeRateRules.ConvertFromBase(
+            invoice.BasePaidAmountAtInvoiceRate,
+            exchangeRateResult.Value.Rate);
+        if (cashboxAmount <= 0m)
+        {
+            return Result<PaymentPreparation?>.Failure(
+                CashboxAmountTooSmall());
+        }
+
+        var finalBalanceError = await ValidateFinalCashboxBalanceAsync(
+            currentVoucher,
+            cashbox.Id,
+            expectedDirection,
+            cashboxAmount,
+            cancellationToken);
+        if (finalBalanceError is not null)
+        {
+            return Result<PaymentPreparation?>.Failure(
+                finalBalanceError);
+        }
+
+        return Result<PaymentPreparation?>.Success(
+            new PaymentPreparation(
+                cashbox.Id,
+                movementType.Id,
+                cashbox.Currency,
+                exchangeRateResult.Value.ExchangeRateId,
+                exchangeRateResult.Value.Rate,
+                cashboxAmount));
+    }
+
+    private async Task<Error?> ValidateFinalCashboxBalanceAsync(
+        CashVoucher? currentVoucher,
+        int? proposedCashboxId,
+        CashDirection? proposedDirection,
+        decimal? proposedAmount,
+        CancellationToken cancellationToken)
+    {
+        var affectedCashboxIds = new HashSet<int>();
+        if (currentVoucher?.CashboxId is int currentCashboxId)
+        {
+            affectedCashboxIds.Add(currentCashboxId);
+        }
+
+        if (proposedCashboxId.HasValue)
+        {
+            affectedCashboxIds.Add(proposedCashboxId.Value);
+        }
+
+        foreach (var cashboxId in affectedCashboxIds)
+        {
+            var excludedVoucherId = currentVoucher?.Id;
+            var balance = await dbContext.Cashboxes
+                .AsNoTracking()
+                .Where(cashbox =>
+                    cashbox.CompanyId == companyId &&
+                    cashbox.Id == cashboxId)
+                .Select(cashbox =>
+                    cashbox.OpeningBalance +
+                    (cashbox.Vouchers
+                        .Where(voucher =>
+                            (voucher.CashMovementTypeId.HasValue ||
+                             voucher.CashboxTransferId.HasValue) &&
+                            (!excludedVoucherId.HasValue ||
+                             voucher.Id != excludedVoucherId.Value))
+                        .Sum(voucher =>
+                            (decimal?)(voucher.Direction ==
+                                CashDirection.Receipt
+                                ? voucher.Amount
+                                : -voucher.Amount)) ?? 0m))
+                .SingleAsync(cancellationToken);
+
+            if (proposedCashboxId == cashboxId &&
+                proposedDirection.HasValue &&
+                proposedAmount.HasValue)
+            {
+                balance += proposedDirection == CashDirection.Receipt
+                    ? proposedAmount.Value
+                    : -proposedAmount.Value;
+            }
+
+            if (balance < 0m)
+            {
+                return InsufficientCashboxBalance(cashboxId);
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<Error?> ValidatePaymentRemovalAsync(
+        int invoiceId,
+        CancellationToken cancellationToken)
+    {
+        var currentVoucher = await dbContext.CashVouchers
+            .FirstOrDefaultAsync(voucher =>
+                voucher.CompanyId == companyId &&
+                voucher.InvoiceId == invoiceId,
+                cancellationToken);
+
+        return await ValidateFinalCashboxBalanceAsync(
+            currentVoucher,
+            proposedCashboxId: null,
+            proposedDirection: null,
+            proposedAmount: null,
+            cancellationToken);
     }
 
     private async Task<Error?> ValidateStockAsync(
@@ -559,289 +966,15 @@ public sealed partial class InvoiceService
         IReadOnlyList<InvoiceLineRequest> lines,
         int? currentInvoiceId,
         string? currentInvoiceNumber,
-        CancellationToken cancellationToken)
-    {
-        // 1. Add operations have no current invoice reference. Updates must have
-        // both reference values so their existing movements can be identified.
-        var hasCurrentInvoiceId = currentInvoiceId.HasValue;
-        var hasCurrentInvoiceNumber =
-            !string.IsNullOrWhiteSpace(currentInvoiceNumber);
-        if (hasCurrentInvoiceId != hasCurrentInvoiceNumber)
-        {
-            return Error.Validation(
-                "Invoices.InvalidCurrentInvoiceReference",
-                "يجب توفير رقم تعريف الفاتورة ورقمها معًا عند التعديل.");
-        }
-
-        var isUpdate = hasCurrentInvoiceId;
-        var currentReferenceNumber = currentInvoiceNumber ?? string.Empty;
-
-        // 2. Calculate and aggregate the requested quantity for each item.
-        var isInbound = InvoiceMovementRules.IsInbound(invoice.InvoiceType);
-        var requestedByItem = new Dictionary<int, decimal>();
-        foreach (var line in lines)
-        {
-            if (!InvoiceAmountRules.TryCalculate(
-                    line.Count,
-                    line.Weight,
-                    0m,
-                    out var quantity,
-                    out _))
-            {
-                return Error.Validation(
-                    "Invoices.InvalidCalculatedAmounts",
-                    "نتيجة الكمية تتجاوز الدقة الرقمية المسموحة.",
-                    nameof(InvoiceRequest.Lines));
-            }
-
-            requestedByItem[line.ItemId] =
-                requestedByItem.GetValueOrDefault(line.ItemId) + quantity;
-        }
-
-        // 3. A valid new inbound invoice only adds stock, so it cannot
-        // create a shortage. Updates must still validate the resulting state.
-        if (isInbound &&
-            currentInvoiceId is null)
-        {
-            return null;
-        }
-
-        // 4. Load the current invoice movement locations without filtering by
-        // the requested store, because an update may move the invoice.
-        var currentMovements = new List<(int StoreId, int ItemId)>();
-        if (currentInvoiceId is int invoiceId)
-        {
-            var currentMovementRows = await dbContext.ItemMovements
-                .AsNoTracking()
-                .Where(movement =>
-                    movement.CompanyId == companyId &&
-                    movement.ReferenceId == invoiceId &&
-                    movement.ReferenceNumber == currentReferenceNumber)
-                .Select(movement => new
-                {
-                    movement.StoreId,
-                    movement.ItemId
-                })
-                .ToListAsync(cancellationToken);
-
-            currentMovements = currentMovementRows
-                .Select(movement => (movement.StoreId, movement.ItemId))
-                .ToList();
-        }
-
-        // 5. Validate only exact old and requested store/item combinations.
-        var affectedStockKeys = currentMovements.ToHashSet();
-        foreach (var itemId in requestedByItem.Keys)
-        {
-            affectedStockKeys.Add((invoice.StoreId, itemId));
-        }
-
-        // 6. Load all movements that contribute to the affected stock timelines.
-        var storeIdArray = affectedStockKeys
-            .Select(key => key.StoreId)
-            .Distinct()
-            .ToArray();
-        var itemIdArray = affectedStockKeys
-            .Select(key => key.ItemId)
-            .Distinct()
-            .ToArray();
-        var itemNames = await dbContext.Items
-            .AsNoTracking()
-            .Where(item =>
-                item.CompanyId == companyId &&
-                itemIdArray.Contains(item.Id))
-            .Select(item => new
-            {
-                item.Id,
-                item.Name
-            })
-            .ToDictionaryAsync(
-                item => item.Id,
-                item => item.Name,
-                cancellationToken);
-        var movementQuery = dbContext.ItemMovements
-            .AsNoTracking()
-            .Where(movement =>
-                movement.CompanyId == companyId &&
-                storeIdArray.Contains(movement.StoreId) &&
-                itemIdArray.Contains(movement.ItemId));
-
-        // 7. Remove the current invoice movements from the stored state.
-        // The proposed invoice values will be added back below.
-        if (currentInvoiceId is int excludedInvoiceId)
-        {
-            movementQuery = movementQuery.Where(movement =>
-                movement.ReferenceId != excludedInvoiceId ||
-                movement.ReferenceNumber != currentReferenceNumber);
-        }
-
-        var movements = await movementQuery
-            .Select(movement => new
-            {
-                movement.Id,
-                movement.StoreId,
-                movement.ItemId,
-                movement.MovementDate,
-                movement.QuantityIn,
-                movement.QuantityOut
-            })
-            .ToListAsync(cancellationToken);
-
-        // 8. Load the opening balances for every affected store and item.
-        var openingBalances = await dbContext.StockOpeningBalanceLines
-            .AsNoTracking()
-            .Where(line =>
-                line.CompanyId == companyId &&
-                line.StockOpeningBalance.CompanyId == companyId &&
-                storeIdArray.Contains(line.StockOpeningBalance.StoreId) &&
-                itemIdArray.Contains(line.ItemId))
-            .Select(group => new
-            {
-                group.Id,
-                StoreId = group.StockOpeningBalance.StoreId,
-                group.ItemId,
-                Date = group.StockOpeningBalance.DocumentDate,
-                Quantity = group.Quantity
-            })
-            .ToListAsync(cancellationToken);
-
-        var operationDescription = isUpdate
-            ? $"تعديل الفاتورة {currentReferenceNumber}"
-            : "إضافة الفاتورة";
-
-        // 9. Build and validate only the exact affected store/item timelines.
-        foreach (var (storeId, itemId) in affectedStockKeys)
-        {
-            var itemName = itemNames.GetValueOrDefault(itemId) ??
-                itemId.ToString();
-
-            // The proposed movement belongs only to the requested store.
-            // Removed items and items in the old store have quantity zero.
-            var requestedQuantity =
-                storeId == invoice.StoreId
-                    ? requestedByItem.GetValueOrDefault(itemId)
-                    : 0m;
-            var events = new List<(
-                DateOnly Date,
-                int Priority,
-                int Id,
-                decimal QuantityIn,
-                decimal QuantityOut,
-                bool IsCurrentInvoice)>();
-
-            // Opening balances are processed first on their document date.
-            events.AddRange(
-                openingBalances
-                    .Where(line =>
-                        line.StoreId == storeId &&
-                        line.ItemId == itemId)
-                    .Select(line =>
-                        (
-                            line.Date,
-                            Priority: 0,
-                            line.Id,
-                            QuantityIn: line.Quantity,
-                            QuantityOut: 0m,
-                            IsCurrentInvoice: false)));
-
-            // Existing inbound movements precede existing outbound movements
-            // when they share the same date.
-            foreach (var movement in movements.Where(
-                         movement =>
-                             movement.StoreId == storeId &&
-                             movement.ItemId == itemId))
-            {
-                if (movement.QuantityIn > 0m)
-                {
-                    events.Add(
-                        (
-                            movement.MovementDate,
-                            Priority: 1,
-                            movement.Id,
-                            QuantityIn: movement.QuantityIn,
-                            QuantityOut: 0m,
-                            IsCurrentInvoice: false));
-                }
-
-                if (movement.QuantityOut > 0m)
-                {
-                    events.Add(
-                        (
-                            movement.MovementDate,
-                            Priority: 2,
-                            movement.Id,
-                            QuantityIn: 0m,
-                            QuantityOut: movement.QuantityOut,
-                            IsCurrentInvoice: false));
-                }
-            }
-
-            // Add the non-zero proposed movement only to the requested store.
-            // int.MaxValue places it after stored movements of the same direction.
-            if (storeId == invoice.StoreId &&
-                requestedQuantity > 0m)
-            {
-                events.Add(
-                    (
-                        invoice.InvoiceDate,
-                        Priority: isInbound ? 1 : 2,
-                        Id: int.MaxValue,
-                        QuantityIn: isInbound
-                            ? requestedQuantity
-                            : 0m,
-                        QuantityOut: isInbound
-                            ? 0m
-                            : requestedQuantity,
-                        IsCurrentInvoice: true));
-            }
-
-            // 10. Process the complete timeline chronologically:
-            // opening balance, inbound movements, then outbound movements.
-            var balance = 0m;
-            foreach (var stockEvent in events
-                         .OrderBy(stockEvent => stockEvent.Date)
-                         .ThenBy(stockEvent => stockEvent.Priority)
-                         .ThenBy(stockEvent => stockEvent.Id))
-            {
-                var availableBeforeMovement = balance;
-                balance +=
-                    stockEvent.QuantityIn -
-                    stockEvent.QuantityOut;
-                if (balance >= 0m)
-                {
-                    continue;
-                }
-
-                // The proposed outbound movement itself exceeds available stock.
-                if (stockEvent.IsCurrentInvoice &&
-                    stockEvent.QuantityOut > 0m)
-                {
-                    return Error.Conflict(
-                        "Inventory.InsufficientStock",
-                        $"الكمية المتاحة للصنف {itemName} (رقم {itemId}) في المخزن " +
-                        $"{storeId} بتاريخ " +
-                        $"{stockEvent.Date:yyyy-MM-dd} هي " +
-                        $"{availableBeforeMovement}، ولا يمكن صرف " +
-                        $"{stockEvent.QuantityOut}.",
-                        nameof(InvoiceRequest.Lines));
-                }
-
-                // Removing, moving, reducing, or re-dating the old invoice
-                // causes a later stored movement to make the balance negative.
-                return Error.Conflict(
-                    "Inventory.HistoricalStockConflict",
-                    $"{operationDescription} بتاريخ " +
-                    $"{invoice.InvoiceDate:yyyy-MM-dd} سيؤدي إلى " +
-                    $"عجز في رصيد الصنف {itemName} (رقم {itemId}) في المخزن {storeId} " +
-                    $"بتاريخ {stockEvent.Date:yyyy-MM-dd}. الرصيد قبل " +
-                    $"حركة الصرف هو {availableBeforeMovement}، وكمية " +
-                    $"الحركة هي {stockEvent.QuantityOut}.",
-                    nameof(InvoiceRequest.Lines));
-            }
-        }
-
-        return null;
-    }
+        CancellationToken cancellationToken) =>
+        await invoiceInventoryService.ValidateStockAsync(
+            storeId: invoice.StoreId,
+            invoiceDate: invoice.InvoiceDate,
+            invoiceType: invoice.InvoiceType,
+            lines: lines,
+            currentInvoiceId: currentInvoiceId,
+            currentInvoiceNumber: currentInvoiceNumber,
+            cancellationToken: cancellationToken);
 
     private static void NormalizeDriverValues(Invoice invoice)
     {
