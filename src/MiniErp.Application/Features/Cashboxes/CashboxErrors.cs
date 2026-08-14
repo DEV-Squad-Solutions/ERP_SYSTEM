@@ -8,7 +8,7 @@ public static class CashboxErrors
         Error.Conflict(
             "Cashboxes.CodeExists",
             $"كود صندوق النقدية '{code}' مستخدم بالفعل.",
-            nameof(CashboxRequest.Code));
+            "Code");
 
     public static Error NameExists(string name) =>
         Error.Conflict(

@@ -7,4 +7,7 @@ public sealed record StockAdjustmentFilterRequest(
     int? StoreId = null,
     StockAdjustmentDirection? Direction = null,
     DateOnly? FromDate = null,
-    DateOnly? ToDate = null);
+    DateOnly? ToDate = null)
+{
+    public const int DocumentNumberMaximumLength = 50;
+}

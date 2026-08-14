@@ -203,11 +203,24 @@ public sealed partial class InvoiceService
             invoice.InvoiceType);
         if (voucher is null)
         {
+            var voucherPrefix = direction == CashDirection.Receipt
+                ? "RCV"
+                : "PAY";
+            var voucherNumber = await EntityIdentifierGenerator
+                .GenerateUniqueAsync(
+                    dbContext,
+                    voucherPrefix,
+                    companyId,
+                    dbContext.CashVouchers
+                        .IgnoreQueryFilters()
+                        .Where(entity => entity.CompanyId == companyId)
+                        .Select(entity => entity.VoucherNumber),
+                    cancellationToken);
             voucher = new CashVoucher
             {
                 CompanyId = companyId,
                 InvoiceId = invoice.Id,
-                VoucherNumber = $"INV-PAY-{invoice.Id}",
+                VoucherNumber = voucherNumber,
                 VoucherDate = invoice.InvoiceDate,
                 Direction = direction,
                 CashboxId = preparation.CashboxId,

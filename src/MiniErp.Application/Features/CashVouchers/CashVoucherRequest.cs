@@ -9,8 +9,6 @@ public sealed record CashVoucherRequest(
     decimal Amount,
     string? Description)
 {
-    public const int VoucherNumberMaximumLength = 100;
-
     public const int ExternalPartyNameMaximumLength = 200;
 
     public const int ReferenceNumberMaximumLength = 100;

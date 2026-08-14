@@ -12,13 +12,13 @@ public sealed class StockOpeningBalanceMappingRegister : IRegister
 
         config.ForType<StockOpeningBalanceRequest, StockOpeningBalance>()
             .Ignore(balance => balance.Lines)
-            .Map(balance => balance.DocumentNumber, request => request.DocumentNumber.Trim())
+            .Ignore(balance => balance.DocumentNumber)
             .Map(balance => balance.Notes, request => Normalize(request.Notes));
 
         config.ForType<StockOpeningBalanceUpdateRequest, StockOpeningBalance>()
             .Ignore(balance => balance.Lines)
             .Ignore(balance => balance.RowVersion)
-            .Map(balance => balance.DocumentNumber, request => request.DocumentNumber.Trim())
+            .Ignore(balance => balance.DocumentNumber)
             .Map(balance => balance.Notes, request => Normalize(request.Notes));
 
         config.ForType<StockOpeningBalanceLine, StockOpeningBalanceLineResponse>()

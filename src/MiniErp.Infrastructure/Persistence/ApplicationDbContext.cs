@@ -112,6 +112,9 @@ public sealed class ApplicationDbContext
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
+    public DbSet<EntityIdentifierSequence> EntityIdentifierSequences =>
+        Set<EntityIdentifierSequence>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);

@@ -2,12 +2,9 @@ namespace MiniErp.Application.Features.InventoryCounts;
 
 public sealed record InventoryCountRequest(
     int StoreId,
-    string DocumentNumber,
     DateOnly CountDate,
     string? Notes)
 {
-    public const int DocumentNumberMaximumLength = 50;
-
     public const int NotesMaximumLength = 1_000;
 }
 

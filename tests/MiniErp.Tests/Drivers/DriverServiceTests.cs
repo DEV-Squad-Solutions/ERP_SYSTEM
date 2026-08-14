@@ -76,7 +76,6 @@ public sealed class DriverServiceTests
 
         var result = await service.AddAsync(
             new DriverRequest(
-                "  NEW  ",
                 "  New Driver  ",
                 "  01000000000  ",
                 "   ",
@@ -85,7 +84,7 @@ public sealed class DriverServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value.CompanyId);
-        Assert.Equal("NEW", result.Value.Code);
+        Assert.Equal("DRV-0001", result.Value.Code);
         Assert.Equal("New Driver", result.Value.Name);
         Assert.Equal("01000000000", result.Value.PhoneNumber);
         Assert.Null(result.Value.NationalId);
@@ -95,31 +94,21 @@ public sealed class DriverServiceTests
     [Theory]
     [InlineData(
         "Drivers.NameExists",
-        "NEW",
         "active driver",
         "LIC-NEW",
         "NAT-NEW")]
     [InlineData(
-        "Drivers.CodeExists",
-        "drv-1",
-        "New Driver",
-        "LIC-NEW",
-        "NAT-NEW")]
-    [InlineData(
         "Drivers.LicenseNumberExists",
-        "NEW",
         "New Driver",
         "lic-1",
         "NAT-NEW")]
     [InlineData(
         "Drivers.NationalIdExists",
-        "NEW",
         "New Driver",
         "LIC-NEW",
         "nat-1")]
     public async Task Add_RejectsNormalizedCompanyDuplicates(
         string expectedCode,
-        string code,
         string name,
         string licenseNumber,
         string nationalId)
@@ -129,7 +118,6 @@ public sealed class DriverServiceTests
 
         var result = await service.AddAsync(
             new DriverRequest(
-                code,
                 name,
                 null,
                 nationalId,
@@ -149,7 +137,6 @@ public sealed class DriverServiceTests
         var result = await service.UpdateAsync(
             1,
             new DriverRequest(
-                "  DRV-1  ",
                 "  Active Driver  ",
                 "  01000000001  ",
                 "  NAT-1  ",
@@ -170,7 +157,6 @@ public sealed class DriverServiceTests
         var result = await service.UpdateAsync(
             4,
             new DriverRequest(
-                "CHANGED",
                 "Changed Driver",
                 null,
                 null,
@@ -288,7 +274,6 @@ public sealed class DriverServiceTests
     {
         var validator = new DriverRequestValidator();
         var request = new DriverRequest(
-            $"  {new string('C', 50)}  ",
             $"  {new string('N', 200)}  ",
             $"  {new string('P', 50)}  ",
             new string(' ', 100),
@@ -301,31 +286,11 @@ public sealed class DriverServiceTests
     }
 
     [Fact]
-    public async Task Validator_UsesSharedMaximumLengthRuleForTrimmedValue()
-    {
-        var validator = new DriverRequestValidator();
-        var request = new DriverRequest(
-            $"  {new string('C', 51)}  ",
-            "Driver",
-            null,
-            null,
-            "LIC-NEW",
-            null);
-
-        var result = await validator.ValidateAsync(request);
-
-        var error = Assert.Single(result.Errors);
-        Assert.Equal(nameof(DriverRequest.Code), error.PropertyName);
-        Assert.Equal("MaximumLengthValidator", error.ErrorCode);
-    }
-
-    [Fact]
     public async Task Validator_ReturnsOneRequiredErrorForEachWhitespaceValue()
     {
         var validator = new DriverRequestValidator();
         var request = new DriverRequest(
             "   ",
-            "   ",
             null,
             null,
             "   ",
@@ -333,7 +298,7 @@ public sealed class DriverServiceTests
 
         var result = await validator.ValidateAsync(request);
 
-        Assert.Equal(3, result.Errors.Count);
+        Assert.Equal(2, result.Errors.Count);
         Assert.All(
             result.Errors,
             error => Assert.Equal("NotEmptyValidator", error.ErrorCode));

@@ -88,14 +88,14 @@ public sealed class CountryService(
         CancellationToken cancellationToken = default)
     {
         var country = request.Adapt<Country>();
-
-        if (await ActiveCodeExistsAsync(
-                country,
-                excludedId: null,
-                cancellationToken))
-        {
-            return Result<CountryResponse>.Failure(CodeExists(country.Code));
-        }
+        country.Code = await EntityIdentifierGenerator.GenerateUniqueAsync(
+            dbContext,
+            prefix: "CTR",
+            companyId: null,
+            existingIdentifiers: dbContext.Countries
+                .IgnoreQueryFilters()
+                .Select(entity => entity.Code),
+            cancellationToken);
 
         dbContext.Countries.Add(country);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -121,17 +121,9 @@ public sealed class CountryService(
             return Result<CountryResponse>.Failure(NotFound(id));
         }
 
-        var normalizedCountry = request.Adapt<Country>();
-        if (await ActiveCodeExistsAsync(
-                normalizedCountry,
-                id,
-                cancellationToken))
-        {
-            return Result<CountryResponse>.Failure(
-                CodeExists(normalizedCountry.Code));
-        }
-
+        var code = country.Code;
         request.Adapt(country);
+        country.Code = code;
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<CountryResponse>.Success(country.Adapt<CountryResponse>());
@@ -172,18 +164,5 @@ public sealed class CountryService(
 
         return Result.Success();
     }
-
-    private Task<bool> ActiveCodeExistsAsync(
-        Country country,
-        int? excludedId,
-        CancellationToken cancellationToken) =>
-        country.IsActive
-            ? dbContext.Countries.AsNoTracking().AnyAsync(
-                entity =>
-                    entity.IsActive &&
-                    entity.Code == country.Code &&
-                    (!excludedId.HasValue || entity.Id != excludedId.Value),
-                cancellationToken)
-            : Task.FromResult(false);
 
 }

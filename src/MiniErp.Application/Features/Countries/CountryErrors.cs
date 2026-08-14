@@ -18,7 +18,7 @@ public static class CountryErrors
         Error.Conflict(
             "Countries.CodeExists",
             $"كود الدولة '{code}' مستخدم بالفعل في دولة نشطة.",
-            nameof(CountryRequest.Code));
+            "Code");
 
     public static Error HasInvoices() =>
         Error.Conflict(

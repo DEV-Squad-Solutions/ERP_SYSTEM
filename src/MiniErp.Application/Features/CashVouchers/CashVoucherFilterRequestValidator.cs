@@ -9,7 +9,7 @@ public sealed class CashVoucherFilterRequestValidator
     {
         RuleFor(filter => filter.Search).MaximumLength(256);
         RuleFor(filter => filter.VoucherNumber)
-            .MaximumLength(CashVoucherRequest.VoucherNumberMaximumLength);
+            .MaximumLength(CashVoucherFilterRequest.VoucherNumberMaximumLength);
         RuleFor(filter => filter.Direction)
             .IsInEnum()
             .When(filter => filter.Direction.HasValue);

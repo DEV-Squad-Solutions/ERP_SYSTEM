@@ -6,6 +6,8 @@ public sealed record DriverTripCostResponse(
     DateOnly TripDate,
     int InvoiceId,
     string InvoiceNumber,
+    int BusinessPartnerId,
+    string BusinessPartnerName,
     int DriverId,
     string DriverName,
     decimal? Cost,

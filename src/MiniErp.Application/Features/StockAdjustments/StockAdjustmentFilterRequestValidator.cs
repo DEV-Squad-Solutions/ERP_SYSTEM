@@ -9,7 +9,7 @@ public sealed class StockAdjustmentFilterRequestValidator
     {
         RuleFor(request => request.DocumentNumber)
             .MaximumLength(
-                StockAdjustmentRequest.DocumentNumberMaximumLength);
+                StockAdjustmentFilterRequest.DocumentNumberMaximumLength);
 
         RuleFor(request => request.StoreId)
             .GreaterThan(0)

@@ -131,14 +131,16 @@ public sealed class StockAdjustmentService(
             return Result<StockAdjustmentResponse>.Failure(preparation.Error);
         }
 
-        if (await DocumentNumberExistsAsync(
-                requested.DocumentNumber,
-                excludedId: null,
-                cancellationToken))
-        {
-            return Result<StockAdjustmentResponse>.Failure(
-                DocumentNumberExists(requested.DocumentNumber));
-        }
+        requested.DocumentNumber = await EntityIdentifierGenerator
+            .GenerateUniqueAsync(
+                dbContext,
+                prefix: "ADJ",
+                companyId: companyId,
+                existingIdentifiers: dbContext.StockAdjustments
+                    .IgnoreQueryFilters()
+                    .Where(entity => entity.CompanyId == companyId)
+                    .Select(entity => entity.DocumentNumber),
+                cancellationToken);
 
         await inventoryCostingService.LockAsync(
             request.Lines
@@ -252,15 +254,6 @@ public sealed class StockAdjustmentService(
             return Result<StockAdjustmentResponse>.Failure(preparation.Error);
         }
 
-        if (await DocumentNumberExistsAsync(
-                requested.DocumentNumber,
-                id,
-                cancellationToken))
-        {
-            return Result<StockAdjustmentResponse>.Failure(
-                DocumentNumberExists(requested.DocumentNumber));
-        }
-
         var replacedMovement = MovementReference(
             adjustment.Id,
             adjustment.DocumentNumber);
@@ -333,7 +326,7 @@ public sealed class StockAdjustmentService(
             await transaction.RollbackAsync(cancellationToken);
             dbContext.ChangeTracker.Clear();
             return Result<StockAdjustmentResponse>.Failure(
-                DocumentNumberExists(requested.DocumentNumber));
+                DocumentNumberExists(adjustment.DocumentNumber));
         }
 
         var response = await ProjectResponseQuery(id)

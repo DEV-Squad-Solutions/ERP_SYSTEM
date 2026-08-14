@@ -8,7 +8,7 @@ public static class ItemErrors
         Error.Conflict(
             "Items.CodeExists",
             $"كود الصنف '{code}' مستخدم بالفعل.",
-            nameof(ItemRequest.Code));
+            "Code");
 
     public static Error InvalidId() =>
         Error.Validation("Items.InvalidId", "يجب أن يكون رقم الصنف أكبر من صفر.");

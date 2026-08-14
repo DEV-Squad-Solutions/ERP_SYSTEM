@@ -140,20 +140,33 @@ public sealed class InvoicePaymentTermTests
     }
 
     [Fact]
-    public void RequestContracts_DoNotExposeServerCalculatedWBTotal()
+    public void RequestContracts_ExposeOptionalCreateOnlyWBTotalAssertion()
     {
-        Assert.DoesNotContain(
+        var createWBTotal = Assert.Single(
             typeof(InvoiceRequest).GetProperties(),
-            property => property.Name == "WBTotal");
+            property => property.Name == nameof(InvoiceRequest.WBTotal));
+        Assert.Equal(typeof(decimal?), createWBTotal.PropertyType);
+
+        var createConstructor = Assert.Single(
+            typeof(InvoiceRequest).GetConstructors());
+        var createWBTotalParameter = Assert.Single(
+            createConstructor.GetParameters(),
+            parameter => parameter.Name == nameof(InvoiceRequest.WBTotal));
+        Assert.True(createWBTotalParameter.IsOptional);
+        Assert.Null(createWBTotalParameter.DefaultValue);
+
         Assert.DoesNotContain(
             typeof(InvoiceUpdateRequest).GetProperties(),
             property => property.Name == "WBTotal");
-        Assert.Contains(
+        var detailsWBTotal = Assert.Single(
             typeof(InvoiceResponse).GetProperties(),
             property => property.Name == "WBTotal");
-        Assert.Contains(
+        Assert.Equal(typeof(decimal), detailsWBTotal.PropertyType);
+        var listWBTotal = Assert.Single(
             typeof(InvoiceListResponse).GetProperties(),
             property => property.Name == "WBTotal");
+        Assert.Equal(typeof(decimal), listWBTotal.PropertyType);
+
         Assert.DoesNotContain(
             typeof(InvoiceRequest).GetProperties(),
             property => property.Name == "CashMovementTypeId");

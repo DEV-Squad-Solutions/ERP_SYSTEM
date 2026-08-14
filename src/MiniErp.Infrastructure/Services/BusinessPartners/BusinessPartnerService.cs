@@ -338,6 +338,15 @@ public sealed class BusinessPartnerService(
     {
         var partner = request.Adapt<BusinessPartner>();
         partner.CompanyId = companyId;
+        partner.Code = await EntityIdentifierGenerator.GenerateUniqueAsync(
+            dbContext,
+            prefix: "BPR",
+            companyId: companyId,
+            existingIdentifiers: dbContext.BusinessPartners
+                .IgnoreQueryFilters()
+                .Where(entity => entity.CompanyId == companyId)
+                .Select(entity => entity.Code),
+            cancellationToken);
 
         var duplicateError = await FindDuplicateAsync(
             partner,
@@ -390,7 +399,9 @@ public sealed class BusinessPartnerService(
                 CurrencyChangeNotAllowed());
         }
 
+        var code = partner.Code;
         request.Adapt(partner);
+        partner.Code = code;
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<BusinessPartnerResponse>.Success(
@@ -444,7 +455,6 @@ public sealed class BusinessPartnerService(
         CancellationToken cancellationToken)
     {
         var normalizedName = partner.Name.ToUpperInvariant();
-        var normalizedCode = partner.Code.ToUpperInvariant();
         var normalizedTaxNumber = partner.TaxNumber?.ToUpperInvariant();
 
         var duplicates = await dbContext.BusinessPartners
@@ -453,14 +463,12 @@ public sealed class BusinessPartnerService(
                 entity.CompanyId == companyId &&
                 (!excludedId.HasValue || entity.Id != excludedId.Value) &&
                 (entity.Name.ToUpper() == normalizedName ||
-                 entity.Code.ToUpper() == normalizedCode ||
                  (normalizedTaxNumber != null &&
                   entity.TaxNumber != null &&
                   entity.TaxNumber.ToUpper() == normalizedTaxNumber)))
             .Select(entity => new
             {
                 entity.Name,
-                entity.Code,
                 entity.TaxNumber
             })
             .ToListAsync(cancellationToken);
@@ -471,14 +479,6 @@ public sealed class BusinessPartnerService(
                 StringComparison.OrdinalIgnoreCase)))
         {
             return NameExists(partner.Name);
-        }
-
-        if (duplicates.Any(entity => string.Equals(
-                entity.Code,
-                partner.Code,
-                StringComparison.OrdinalIgnoreCase)))
-        {
-            return CodeExists(partner.Code);
         }
 
         return partner.TaxNumber is not null &&

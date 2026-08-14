@@ -34,7 +34,7 @@ public static class StoreErrors
         Error.Conflict(
             "Stores.CodeExists",
             $"كود المخزن '{code}' مستخدم بالفعل.",
-            nameof(StoreRequest.Code));
+            "Code");
 
     public static Error ActiveContainerStoreExists(int businessPartnerId) =>
         Error.Conflict(

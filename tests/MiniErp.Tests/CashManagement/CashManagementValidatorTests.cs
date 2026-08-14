@@ -14,7 +14,6 @@ public sealed class CashManagementValidatorTests
         var validator = new CashboxRequestValidator();
         var result = validator.Validate(
             new CashboxRequest(
-                "MAIN",
                 "Main",
                 (CurrencyCode)999,
                 -1.001m,
@@ -206,7 +205,6 @@ public sealed class CashManagementValidatorTests
     {
         var cashboxResult = new CashboxUpdateRequestValidator().Validate(
             new CashboxUpdateRequest(
-                "MAIN",
                 "Main",
                 CurrencyCode.EGP,
                 0m,

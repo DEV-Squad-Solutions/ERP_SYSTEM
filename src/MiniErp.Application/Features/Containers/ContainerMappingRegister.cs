@@ -8,7 +8,7 @@ public sealed class ContainerMappingRegister : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.ForType<ContainerRequest, Container>()
-            .Map(container => container.Code, request => request.Code.Trim())
+            .Ignore(container => container.Code)
             .Map(container => container.Name, request => request.Name.Trim())
             .Map(
                 container => container.Description,

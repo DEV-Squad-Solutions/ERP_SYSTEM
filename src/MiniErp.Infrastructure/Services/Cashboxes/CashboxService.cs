@@ -109,6 +109,15 @@ public sealed class CashboxService(
 
         var cashbox = request.Adapt<Cashbox>();
         cashbox.CompanyId = companyId;
+        cashbox.Code = await EntityIdentifierGenerator.GenerateUniqueAsync(
+            dbContext,
+            prefix: "CBX",
+            companyId: companyId,
+            existingIdentifiers: dbContext.Cashboxes
+                .IgnoreQueryFilters()
+                .Where(entity => entity.CompanyId == companyId)
+                .Select(entity => entity.Code),
+            cancellationToken);
 
         var openingDate = request.OpeningBalanceDate ??
             DateOnly.FromDateTime(
@@ -217,7 +226,9 @@ public sealed class CashboxService(
         var entry = dbContext.Entry(cashbox);
         entry.Property(entity => entity.RowVersion).OriginalValue =
             request.RowVersion;
+        var code = cashbox.Code;
         request.Adapt(cashbox);
+        cashbox.Code = code;
         cashbox.ApplyOpeningExchangeRate(
             openingDate,
             exchangeRateResult.Value.ExchangeRateId,
@@ -282,7 +293,6 @@ public sealed class CashboxService(
         int? excludedId,
         CancellationToken cancellationToken)
     {
-        var normalizedCode = cashbox.Code.ToUpperInvariant();
         var normalizedName = cashbox.Name.ToUpperInvariant();
 
         var duplicate = await dbContext.Cashboxes
@@ -290,13 +300,8 @@ public sealed class CashboxService(
             .Where(entity =>
                 entity.CompanyId == companyId &&
                 (!excludedId.HasValue || entity.Id != excludedId.Value) &&
-                (entity.Code.ToUpper() == normalizedCode ||
-                 entity.Name.ToUpper() == normalizedName))
-            .Select(entity => new
-            {
-                entity.Code,
-                entity.Name
-            })
+                entity.Name.ToUpper() == normalizedName)
+            .Select(entity => entity.Name)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (duplicate is null)
@@ -304,12 +309,7 @@ public sealed class CashboxService(
             return null;
         }
 
-        return string.Equals(
-                duplicate.Code,
-                cashbox.Code,
-                StringComparison.OrdinalIgnoreCase)
-            ? CodeExists(cashbox.Code)
-            : NameExists(cashbox.Name);
+        return NameExists(cashbox.Name);
     }
 
     private async Task<bool> HasVouchersAsync(

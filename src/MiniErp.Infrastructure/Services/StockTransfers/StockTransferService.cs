@@ -90,7 +90,6 @@ public sealed class StockTransferService(
         CancellationToken cancellationToken = default)
     {
         var shapeError = ValidateRequestShape(
-            request.DocumentNumber,
             request.TransferDate,
             request.SourceStoreId,
             request.DestinationStoreId,
@@ -113,12 +112,16 @@ public sealed class StockTransferService(
             return Result<StockTransferResponse>.Failure(preparation.Error);
         }
 
-        var documentNumber = request.DocumentNumber.Trim();
-        if (await DocumentNumberExistsAsync(documentNumber, cancellationToken))
-        {
-            return Result<StockTransferResponse>.Failure(
-                DocumentNumberExists(documentNumber));
-        }
+        var documentNumber = await EntityIdentifierGenerator
+            .GenerateUniqueAsync(
+                dbContext,
+                prefix: "STF",
+                companyId: companyId,
+                existingIdentifiers: dbContext.StockTransfers
+                    .IgnoreQueryFilters()
+                    .Where(entity => entity.CompanyId == companyId)
+                    .Select(entity => entity.DocumentNumber),
+                cancellationToken);
 
         var sourceKeys = request.Lines
             .Select(line => new InventoryCostingKey(
@@ -148,6 +151,7 @@ public sealed class StockTransferService(
 
         var transfer = request.Adapt<StockTransfer>();
         transfer.CompanyId = companyId;
+        transfer.DocumentNumber = documentNumber;
         transfer.Touch(timeProvider.GetUtcNow().UtcDateTime);
         AddLines(transfer, request.Lines, preparation.Value);
         dbContext.StockTransfers.Add(transfer);
@@ -485,22 +489,11 @@ public sealed class StockTransferService(
     }
 
     private static Error? ValidateRequestShape(
-        string documentNumber,
         DateOnly transferDate,
         int sourceStoreId,
         int destinationStoreId,
         IReadOnlyCollection<StockTransferLineRequest>? lines)
     {
-        if (string.IsNullOrWhiteSpace(documentNumber) ||
-            documentNumber.Trim().Length >
-            StockTransferRequest.DocumentNumberMaximumLength)
-        {
-            return Error.Validation(
-                "StockTransfers.DocumentNumberInvalid",
-                "رقم تحويل المخزون مطلوب ويجب ألا يتجاوز 50 حرفاً.",
-                nameof(StockTransferRequest.DocumentNumber));
-        }
-
         if (sourceStoreId <= 0 || destinationStoreId <= 0)
         {
             return Error.Validation(
@@ -810,14 +803,6 @@ public sealed class StockTransferService(
                 movement.ReferenceNumber == documentNumber)
             .ToListAsync(cancellationToken);
 
-    private Task<bool> DocumentNumberExistsAsync(
-        string documentNumber,
-        CancellationToken cancellationToken) =>
-        dbContext.StockTransfers.AnyAsync(
-            transfer => transfer.CompanyId == companyId &&
-                transfer.DocumentNumber == documentNumber,
-            cancellationToken);
-
     private static IReadOnlyCollection<InventoryCostingKey> GetCostingKeys(
         IEnumerable<ItemMovement> movements) =>
         movements.Select(movement =>
@@ -834,7 +819,7 @@ public sealed class StockTransferService(
     private static Error? ValidateFilters(StockTransferFilterRequest filters)
     {
         if (filters.Search?.Trim().Length >
-                StockTransferRequest.DocumentNumberMaximumLength ||
+                StockTransferFilterRequest.SearchMaximumLength ||
             filters.SourceStoreId is <= 0 ||
             filters.DestinationStoreId is <= 0 ||
             filters.ItemId is <= 0 ||

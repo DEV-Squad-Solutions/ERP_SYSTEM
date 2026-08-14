@@ -2837,7 +2837,8 @@ public sealed class InvoiceServiceTests
         {
             WBWeight = 125.750000m,
             WBScaleDifference = 2.250000m,
-            WBDiscount = 1.500000m
+            WBDiscount = 1.500000m,
+            WBTotal = 122.000000m
         };
 
         var result = await database.CreateService().AddAsync(request);
@@ -2846,6 +2847,7 @@ public sealed class InvoiceServiceTests
         Assert.Equal(125.750000m, result.Value.WBWeight);
         Assert.Equal(2.250000m, result.Value.WBScaleDifference);
         Assert.Equal(1.500000m, result.Value.WBDiscount);
+        Assert.Equal(122.000000m, request.WBTotal);
         Assert.Equal(122.000000m, result.Value.WBTotal);
 
         database.Context.ChangeTracker.Clear();
@@ -2872,7 +2874,8 @@ public sealed class InvoiceServiceTests
         {
             WBWeight = 10m,
             WBScaleDifference = 0m,
-            WBDiscount = 0m
+            WBDiscount = 0m,
+            WBTotal = 10m
         };
 
         var result = await database.CreateService().AddAsync(request);
@@ -2881,11 +2884,45 @@ public sealed class InvoiceServiceTests
         Assert.Equal(
             "Invoices.WBTotalDoesNotMatchItemWeight",
             result.Error.Code);
+        Assert.Equal(nameof(InvoiceRequest.WBTotal), result.Error.FieldName);
         Assert.Empty(database.Context.Invoices);
     }
 
     [Fact]
-    public async Task Add_RejectsZeroWeighbridgeTotalForItemInvoice()
+    public async Task Add_RejectsRequestedWeighbridgeTotalThatDoesNotMatchCalculatedTotal()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit,
+            lines:
+            [
+                new InvoiceLineRequest(
+                    ItemId: 1,
+                    Count: 2,
+                    Weight: 5m,
+                    Price: 10m,
+                    Notes: null)
+            ]) with
+        {
+            WBWeight = 10m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m,
+            WBTotal = 5m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.WBTotalDoesNotMatchCalculatedTotal",
+            result.Error.Code);
+        Assert.Equal(nameof(InvoiceRequest.WBTotal), result.Error.FieldName);
+        Assert.Empty(database.Context.Invoices);
+    }
+
+    [Fact]
+    public async Task Add_SkipsWeighbridgeMatchWhenRequestedTotalIsZero()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var request = CreateRequest(
@@ -2903,15 +2940,69 @@ public sealed class InvoiceServiceTests
         {
             WBWeight = 0m,
             WBScaleDifference = 0m,
-            WBDiscount = 0m
+            WBDiscount = 0m,
+            WBTotal = 0m
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(0m, result.Value.WBTotal);
+
+        database.Context.ChangeTracker.Clear();
+        var persisted = await database.Context.Invoices
+            .Include(invoice => invoice.Lines)
+            .SingleAsync();
+        Assert.Equal(0m, persisted.WBTotal);
+        Assert.Equal(5m, persisted.Lines.Single().Weight);
+    }
+
+    [Fact]
+    public async Task Add_SkipsWeighbridgeMatchWhenRequestedTotalIsOmitted()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit,
+            lines:
+            [
+                new InvoiceLineRequest(
+                    ItemId: 1,
+                    Count: 2,
+                    Weight: 5m,
+                    Price: 10m,
+                    Notes: null)
+            ]) with
+        {
+            WBWeight = 0m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m,
+            WBTotal = null
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Null(request.WBTotal);
+        Assert.Equal(0m, result.Value.WBTotal);
+    }
+
+    [Fact]
+    public async Task Add_RejectsNegativeRequestedWeighbridgeTotal()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            PaymentTerm.Credit) with
+        {
+            WBTotal = -1m
         };
 
         var result = await database.CreateService().AddAsync(request);
 
         Assert.True(result.IsFailure);
-        Assert.Equal(
-            "Invoices.WBTotalDoesNotMatchItemWeight",
-            result.Error.Code);
+        Assert.Equal("Invoices.InvalidWBTotal", result.Error.Code);
+        Assert.Equal(nameof(InvoiceRequest.WBTotal), result.Error.FieldName);
         Assert.Empty(database.Context.Invoices);
     }
 
@@ -3059,6 +3150,11 @@ public sealed class InvoiceServiceTests
             result.IsFailure ? result.Error.Description : null);
         Assert.Equal(expectedMovementTypeId, voucher.CashMovementTypeId);
         Assert.Equal(expectedDirection, voucher.Direction);
+        Assert.Equal(
+            expectedDirection == CashDirection.Receipt
+                ? "RCV-0001"
+                : "PAY-0001",
+            voucher.VoucherNumber);
     }
 
     [Fact]
@@ -3731,6 +3827,21 @@ public sealed class InvoiceServiceTests
             movementDate: new DateOnly(2026, 7, 26),
             quantityOut: 5m);
 
+        var selectedDateMovement = await database.Context.ItemMovements
+            .SingleAsync(movement =>
+                movement.MovementType == ItemMovementType.Sales &&
+                movement.ReferenceId == 941);
+        selectedDateMovement.ApplyCostSnapshot(
+            InventoryCostStatus.Final,
+            pendingCostQuantity: 0m,
+            unitCost: 7m,
+            totalCost: 28m,
+            quantityAfter: 9m,
+            averageCostAfter: 7m,
+            inventoryValueAfter: 63m);
+        await database.Context.SaveChangesAsync();
+        database.Context.ChangeTracker.Clear();
+
         var result = await database.CreateQueryService().GetItemBalanceAsync(
             storeId: 1,
             itemId: 1,
@@ -3741,6 +3852,26 @@ public sealed class InvoiceServiceTests
         Assert.Equal("Item 1", result.Value.ItemName);
         Assert.Equal("Unit", result.Value.ItemUnitName);
         Assert.Equal(9m, result.Value.Balance);
+        Assert.Equal(9m, result.Value.CurrentQuantity);
+        Assert.Equal(7m, result.Value.AverageCost);
+        Assert.Equal(63m, result.Value.InventoryValue);
+    }
+
+    [Fact]
+    public async Task GetItemBalance_ReturnsZeroQuantityAndCostWhenStoreHasNoStock()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateQueryService().GetItemBalanceAsync(
+            storeId: 2,
+            itemId: 1,
+            asOfDate: new DateOnly(2026, 7, 25));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(0m, result.Value.Balance);
+        Assert.Equal(0m, result.Value.CurrentQuantity);
+        Assert.Equal(0m, result.Value.AverageCost);
+        Assert.Equal(0m, result.Value.InventoryValue);
     }
 
     [Fact]
@@ -4724,22 +4855,93 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public void CreateValidator_RejectsZeroWeighbridgeTotalForItemInvoice()
+    public void CreateValidator_SkipsWeighbridgeMatchForOmittedTotal()
     {
         var request = CreateRequest(InvoiceType.SalesReturn) with
         {
             WBWeight = 0m,
             WBScaleDifference = 0m,
-            WBDiscount = 0m
+            WBDiscount = 0m,
+            WBTotal = null
         };
 
         var result = new InvoiceRequestValidator().Validate(request);
 
-        Assert.Contains(
+        Assert.DoesNotContain(
             result.Errors,
             error =>
-                error.ErrorCode ==
-                "Invoices.WBTotalDoesNotMatchItemWeight");
+                error.PropertyName == nameof(InvoiceRequest.WBTotal));
+    }
+
+    [Fact]
+    public void CreateValidator_SkipsWeighbridgeMatchForZeroTotal()
+    {
+        var request = CreateRequest(InvoiceType.SalesReturn) with
+        {
+            WBWeight = 0m,
+            WBScaleDifference = 0m,
+            WBDiscount = 0m,
+            WBTotal = 0m
+        };
+
+        var result = new InvoiceRequestValidator().Validate(request);
+
+        Assert.DoesNotContain(
+            result.Errors,
+            error =>
+                error.PropertyName == nameof(InvoiceRequest.WBTotal));
+    }
+
+    [Fact]
+    public void CreateValidator_AcceptsMatchingPositiveWeighbridgeTotal()
+    {
+        var request = CreateRequest(InvoiceType.SalesReturn) with
+        {
+            WBTotal = 1m
+        };
+
+        var result = new InvoiceRequestValidator().Validate(request);
+
+        Assert.DoesNotContain(
+            result.Errors,
+            error =>
+                error.PropertyName == nameof(InvoiceRequest.WBTotal));
+    }
+
+    [Fact]
+    public void CreateValidator_RejectsMismatchedPositiveWeighbridgeTotal()
+    {
+        var request = CreateRequest(InvoiceType.SalesReturn) with
+        {
+            WBTotal = 2m
+        };
+
+        var result = new InvoiceRequestValidator().Validate(request);
+
+        var error = Assert.Single(
+            result.Errors,
+            error =>
+                error.PropertyName == nameof(InvoiceRequest.WBTotal));
+        Assert.Equal(
+            "Invoices.WBTotalDoesNotMatchCalculatedTotal",
+            error.ErrorCode);
+    }
+
+    [Fact]
+    public void CreateValidator_RejectsNegativeWeighbridgeTotal()
+    {
+        var request = CreateRequest(InvoiceType.SalesReturn) with
+        {
+            WBTotal = -1m
+        };
+
+        var result = new InvoiceRequestValidator().Validate(request);
+
+        var error = Assert.Single(
+            result.Errors,
+            error =>
+                error.PropertyName == nameof(InvoiceRequest.WBTotal));
+        Assert.Equal("Invoices.InvalidWBTotal", error.ErrorCode);
     }
 
     [Fact]

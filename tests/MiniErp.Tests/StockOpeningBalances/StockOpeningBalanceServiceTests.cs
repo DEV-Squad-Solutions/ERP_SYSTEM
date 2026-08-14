@@ -56,7 +56,7 @@ public sealed class StockOpeningBalanceServiceTests
     }
 
     [Fact]
-    public async Task Add_NormalizesHeaderAndLineNotes()
+    public async Task Add_GeneratesDocumentNumberAndNormalizesNotes()
     {
         await using var database = await StockOpeningBalanceTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
@@ -64,7 +64,6 @@ public sealed class StockOpeningBalanceServiceTests
         var result = await service.AddAsync(
             new StockOpeningBalanceRequest(
                 1,
-                "  OPEN-TRIMMED  ",
                 new DateOnly(2026, 1, 1),
                 [
                     new StockOpeningBalanceLineRequest(
@@ -77,7 +76,9 @@ public sealed class StockOpeningBalanceServiceTests
                 "   "));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("OPEN-TRIMMED", result.Value.DocumentNumber);
+        Assert.Matches(
+            "^SOB-[0-9]{4,}$",
+            result.Value.DocumentNumber);
         Assert.Null(result.Value.Notes);
         Assert.Null(result.Value.Lines.Single().Notes);
     }
@@ -95,7 +96,6 @@ public sealed class StockOpeningBalanceServiceTests
             openingBalance.Id,
             new StockOpeningBalanceUpdateRequest(
                 openingBalance.StoreId,
-                openingBalance.DocumentNumber,
                 openingBalance.DocumentDate,
                 openingBalance.Lines
                     .Select(line => new StockOpeningBalanceLineRequest(
@@ -117,7 +117,7 @@ public sealed class StockOpeningBalanceServiceTests
     }
 
     [Fact]
-    public async Task Update_AllowsOwnNormalizedDocumentNumberAndLineNotes()
+    public async Task Update_PreservesDocumentNumberAndNormalizesLineNotes()
     {
         await using var database = await StockOpeningBalanceTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
@@ -127,7 +127,6 @@ public sealed class StockOpeningBalanceServiceTests
             openingBalance.Id,
             new StockOpeningBalanceUpdateRequest(
                 openingBalance.StoreId,
-                $"  {openingBalance.DocumentNumber}  ",
                 openingBalance.DocumentDate,
                 [
                     new StockOpeningBalanceLineRequest(
@@ -141,7 +140,7 @@ public sealed class StockOpeningBalanceServiceTests
                 openingBalance.RowVersion));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("OPEN-001", result.Value.DocumentNumber);
+        Assert.Equal(openingBalance.DocumentNumber, result.Value.DocumentNumber);
         Assert.Equal("Updated header note", result.Value.Notes);
         Assert.Equal("Updated line note", result.Value.Lines.Single().Notes);
     }
@@ -157,7 +156,6 @@ public sealed class StockOpeningBalanceServiceTests
             openingBalance.Id,
             new StockOpeningBalanceUpdateRequest(
                 openingBalance.StoreId,
-                openingBalance.DocumentNumber,
                 openingBalance.DocumentDate,
                 [
                     new StockOpeningBalanceLineRequest(
@@ -187,7 +185,6 @@ public sealed class StockOpeningBalanceServiceTests
             openingBalance.Id,
             new StockOpeningBalanceUpdateRequest(
                 StoreId: openingBalance.StoreId,
-                DocumentNumber: openingBalance.DocumentNumber,
                 DocumentDate: openingBalance.DocumentDate,
                 Lines:
                 [
@@ -210,8 +207,6 @@ public sealed class StockOpeningBalanceServiceTests
     [Fact]
     public async Task RequestValidators_AcceptNormalizedMaximumLengths()
     {
-        var documentNumber =
-            $"  {new string('D', StockOpeningBalanceRequest.DocumentNumberMaximumLength)}  ";
         var notes =
             $"  {new string('N', StockOpeningBalanceRequest.NotesMaximumLength)}  ";
         var lines = new[]
@@ -229,14 +224,12 @@ public sealed class StockOpeningBalanceServiceTests
         var createResult = await createValidator.ValidateAsync(
             new StockOpeningBalanceRequest(
                 1,
-                documentNumber,
                 new DateOnly(2026, 1, 1),
                 lines,
                 notes));
         var updateResult = await updateValidator.ValidateAsync(
             new StockOpeningBalanceUpdateRequest(
                 1,
-                documentNumber,
                 new DateOnly(2026, 1, 1),
                 lines,
                 notes,
@@ -244,38 +237,6 @@ public sealed class StockOpeningBalanceServiceTests
 
         Assert.True(createResult.IsValid);
         Assert.True(updateResult.IsValid);
-    }
-
-    [Fact]
-    public async Task RequestValidators_ReturnOneRequiredErrorForWhitespaceDocumentNumber()
-    {
-        var lines = new[]
-        {
-            new StockOpeningBalanceLineRequest(1, 1, 1m, 1m, null)
-        };
-        var createValidator = new StockOpeningBalanceRequestValidator();
-        var updateValidator = new StockOpeningBalanceUpdateRequestValidator();
-
-        var createResult = await createValidator.ValidateAsync(
-            new StockOpeningBalanceRequest(
-                1,
-                "   ",
-                new DateOnly(2026, 1, 1),
-                lines,
-                null));
-        var updateResult = await updateValidator.ValidateAsync(
-            new StockOpeningBalanceUpdateRequest(
-                1,
-                "   ",
-                new DateOnly(2026, 1, 1),
-                lines,
-                null,
-                new byte[8]));
-
-        var createError = Assert.Single(createResult.Errors);
-        var updateError = Assert.Single(updateResult.Errors);
-        Assert.Equal("NotEmptyValidator", createError.ErrorCode);
-        Assert.Equal("NotEmptyValidator", updateError.ErrorCode);
     }
 
     [Fact]
@@ -289,7 +250,6 @@ public sealed class StockOpeningBalanceServiceTests
         Assert.Equal(60m, original.Lines.Single().Total);
         var updateRequest = new StockOpeningBalanceUpdateRequest(
             original.StoreId,
-            original.DocumentNumber,
             original.DocumentDate,
             [
                 new StockOpeningBalanceLineRequest(
@@ -350,7 +310,6 @@ public sealed class StockOpeningBalanceServiceTests
             original.Id,
             new StockOpeningBalanceUpdateRequest(
                 original.StoreId,
-                original.DocumentNumber,
                 original.DocumentDate,
                 [
                     new StockOpeningBalanceLineRequest(
@@ -376,7 +335,6 @@ public sealed class StockOpeningBalanceServiceTests
             original.Id,
             new StockOpeningBalanceUpdateRequest(
                 removeResult.Value.StoreId,
-                removeResult.Value.DocumentNumber,
                 removeResult.Value.DocumentDate,
                 [
                     new StockOpeningBalanceLineRequest(
@@ -413,7 +371,6 @@ public sealed class StockOpeningBalanceServiceTests
             original.Id,
             new StockOpeningBalanceUpdateRequest(
                 original.StoreId,
-                original.DocumentNumber,
                 original.DocumentDate,
                 [
                     new StockOpeningBalanceLineRequest(
@@ -583,7 +540,6 @@ public sealed class StockOpeningBalanceServiceTests
         IReadOnlyList<StockOpeningBalanceLineRequest>? lines = null) =>
         new(
             storeId,
-            "OPEN-001",
             new DateOnly(2026, 1, 1),
             lines ??
             [

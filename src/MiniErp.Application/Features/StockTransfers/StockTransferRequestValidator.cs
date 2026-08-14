@@ -25,9 +25,6 @@ public sealed class StockTransferRequestValidator
 {
     public StockTransferRequestValidator()
     {
-        RuleFor(request => request.DocumentNumber)
-            .NotEmpty()
-            .MaximumLength(StockTransferRequest.DocumentNumberMaximumLength);
         AddCommonRules();
         RuleFor(request => request.SourceStoreId).GreaterThan(0);
         RuleFor(request => request.DestinationStoreId)
@@ -94,7 +91,7 @@ public sealed class StockTransferFilterRequestValidator
     public StockTransferFilterRequestValidator()
     {
         RuleFor(filter => filter.Search)
-            .MaximumLength(StockTransferRequest.DocumentNumberMaximumLength);
+            .MaximumLength(StockTransferFilterRequest.SearchMaximumLength);
         RuleFor(filter => filter.SourceStoreId)
             .GreaterThan(0)
             .When(filter => filter.SourceStoreId.HasValue);

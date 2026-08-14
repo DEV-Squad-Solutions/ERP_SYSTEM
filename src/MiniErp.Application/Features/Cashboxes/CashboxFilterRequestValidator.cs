@@ -9,7 +9,7 @@ public sealed class CashboxFilterRequestValidator
     {
         RuleFor(filter => filter.Search).MaximumLength(256);
         RuleFor(filter => filter.Code)
-            .MaximumLength(CashboxRequest.CodeMaximumLength);
+            .MaximumLength(CashboxFilterRequest.CodeMaximumLength);
         RuleFor(filter => filter.Name)
             .MaximumLength(CashboxRequest.NameMaximumLength);
         RuleFor(filter => filter.Currency)

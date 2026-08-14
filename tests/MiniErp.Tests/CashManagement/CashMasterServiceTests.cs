@@ -19,24 +19,30 @@ public sealed class CashMasterServiceTests
     }
 
     [Fact]
-    public async Task Cashbox_DuplicateRulesAreTenantScoped()
+    public async Task Cashbox_GeneratesTenantScopedCodesAndRejectsDuplicateNames()
     {
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
         var companyOne = database.CreateCashboxService(companyId: 1);
         var companyTwo = database.CreateCashboxService(companyId: 2);
 
-        var duplicateCode = await companyOne.AddAsync(
-            CreateCashbox(" main ", "Different"));
+        var generated = await companyOne.AddAsync(
+            CreateCashbox("Different"));
         var duplicateName = await companyOne.AddAsync(
-            CreateCashbox("THIRD", " main cashbox "));
+            CreateCashbox(" main cashbox "));
         var sameCodeInOtherCompany = await companyTwo.AddAsync(
-            CreateCashbox("SECOND", "Second Company Box"));
+            CreateCashbox("Second Company Box"));
 
-        Assert.Equal("Cashboxes.CodeExists", duplicateCode.Error.Code);
+        Assert.True(generated.IsSuccess);
+        Assert.Matches(
+            "^CBX-[0-9]{4,}$",
+            generated.Value.Code);
         Assert.Equal("Cashboxes.NameExists", duplicateName.Error.Code);
         Assert.True(sameCodeInOtherCompany.IsSuccess);
         Assert.Equal(2, sameCodeInOtherCompany.Value.CompanyId);
+        Assert.Matches(
+            "^CBX-[0-9]{4,}$",
+            sameCodeInOtherCompany.Value.Code);
     }
 
     [Fact]
@@ -83,7 +89,6 @@ public sealed class CashMasterServiceTests
         var update = await cashboxes.UpdateAsync(
             1,
             new CashboxUpdateRequest(
-                cashbox.Value.Code,
                 cashbox.Value.Name,
                 cashbox.Value.Currency,
                 1200m,
@@ -278,11 +283,8 @@ public sealed class CashMasterServiceTests
         Assert.Equal(expectedEffect, storedEffect);
     }
 
-    private static CashboxRequest CreateCashbox(
-        string code,
-        string name) =>
+    private static CashboxRequest CreateCashbox(string name) =>
         new(
-            code,
             name,
             CurrencyCode.EGP,
             0m,

@@ -12,10 +12,6 @@ public sealed class CashboxRequestValidator : AbstractValidator<CashboxRequest>
 
     private void AddRules()
     {
-        RuleFor(request => request.Code)
-            .NotEmpty()
-            .MaximumLength(CashboxRequest.CodeMaximumLength);
-
         RuleFor(request => request.Name)
             .NotEmpty()
             .MaximumLength(CashboxRequest.NameMaximumLength);
@@ -42,10 +38,6 @@ public sealed class CashboxUpdateRequestValidator
 {
     public CashboxUpdateRequestValidator()
     {
-        RuleFor(request => request.Code)
-            .NotEmpty()
-            .MaximumLength(CashboxRequest.CodeMaximumLength);
-
         RuleFor(request => request.Name)
             .NotEmpty()
             .MaximumLength(CashboxRequest.NameMaximumLength);

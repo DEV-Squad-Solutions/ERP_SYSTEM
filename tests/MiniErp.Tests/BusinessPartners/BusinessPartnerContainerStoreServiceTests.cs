@@ -130,7 +130,6 @@ public sealed class BusinessPartnerContainerStoreServiceTests
 
         var result = await service.AddAsync(
             new BusinessPartnerRequest(
-                "BP-NEW",
                 "partner one",
                 null,
                 null,
@@ -144,7 +143,7 @@ public sealed class BusinessPartnerContainerStoreServiceTests
     }
 
     [Fact]
-    public async Task Add_RejectsCaseInsensitiveDuplicateCode()
+    public async Task Add_GeneratesAUniqueCompanyScopedCode()
     {
         await using var database =
             await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
@@ -152,7 +151,6 @@ public sealed class BusinessPartnerContainerStoreServiceTests
 
         var result = await service.AddAsync(
             new BusinessPartnerRequest(
-                "bp-1",
                 "Unique Partner Name",
                 null,
                 null,
@@ -161,8 +159,11 @@ public sealed class BusinessPartnerContainerStoreServiceTests
                 CurrencyCode.EGP,
                 0m));
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("BusinessPartners.CodeExists", result.Error.Code);
+        Assert.True(result.IsSuccess);
+        Assert.Matches(
+            "^BPR-[0-9]{4,}$",
+            result.Value.Code);
+        Assert.NotEqual("BP-1", result.Value.Code);
     }
 
     [Fact]
@@ -175,7 +176,6 @@ public sealed class BusinessPartnerContainerStoreServiceTests
 
         var result = await service.AddAsync(
             new BusinessPartnerRequest(
-                "BP-NEW",
                 "Unique Partner Name",
                 null,
                 null,
@@ -198,7 +198,6 @@ public sealed class BusinessPartnerContainerStoreServiceTests
         var result = await service.UpdateAsync(
             2,
             new BusinessPartnerRequest(
-                "BP-2",
                 "partner one",
                 null,
                 null,
@@ -212,7 +211,7 @@ public sealed class BusinessPartnerContainerStoreServiceTests
     }
 
     [Fact]
-    public async Task Update_RejectsAnotherPartnersCaseInsensitiveDuplicateCode()
+    public async Task Update_PreservesTheStoredCode()
     {
         await using var database =
             await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
@@ -221,7 +220,6 @@ public sealed class BusinessPartnerContainerStoreServiceTests
         var result = await service.UpdateAsync(
             2,
             new BusinessPartnerRequest(
-                "bp-1",
                 "Partner Without Store",
                 null,
                 null,
@@ -230,8 +228,8 @@ public sealed class BusinessPartnerContainerStoreServiceTests
                 CurrencyCode.EGP,
                 0m));
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("BusinessPartners.CodeExists", result.Error.Code);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("BP-2", result.Value.Code);
     }
 
     [Fact]
@@ -245,7 +243,6 @@ public sealed class BusinessPartnerContainerStoreServiceTests
         var result = await service.UpdateAsync(
             2,
             new BusinessPartnerRequest(
-                "BP-2",
                 "Partner Without Store",
                 null,
                 null,
@@ -269,7 +266,6 @@ public sealed class BusinessPartnerContainerStoreServiceTests
         var result = await service.UpdateAsync(
             1,
             new BusinessPartnerRequest(
-                "bp-1",
                 "partner one",
                 null,
                 null,
@@ -279,7 +275,7 @@ public sealed class BusinessPartnerContainerStoreServiceTests
                 0m));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("bp-1", result.Value.Code);
+        Assert.Equal("BP-1", result.Value.Code);
         Assert.Equal("partner one", result.Value.Name);
         Assert.Equal("tax-001", result.Value.TaxNumber);
     }

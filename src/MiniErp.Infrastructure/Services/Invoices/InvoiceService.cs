@@ -87,7 +87,10 @@ public sealed partial class InvoiceService(
         invoice.ApplyExchangeRate(
             exchangeRateResult.Value.ExchangeRateId,
             exchangeRateResult.Value.Rate);
-        var amountError = ValidateAmounts(invoice);
+        var amountError = ValidateAmounts(
+            invoice,
+            requestedWBTotal: request.WBTotal,
+            requireCalculatedWBTotalMatch: false);
         if (amountError is not null)
         {
             await transaction.RollbackAsync(cancellationToken);
@@ -246,7 +249,10 @@ public sealed partial class InvoiceService(
         invoice.ApplyExchangeRate(
             exchangeRateResult.Value.ExchangeRateId,
             exchangeRateResult.Value.Rate);
-        var amountError = ValidateAmounts(invoice);
+        var amountError = ValidateAmounts(
+            invoice,
+            requestedWBTotal: null,
+            requireCalculatedWBTotalMatch: true);
         if (amountError is not null)
         {
             await transaction.RollbackAsync(cancellationToken);

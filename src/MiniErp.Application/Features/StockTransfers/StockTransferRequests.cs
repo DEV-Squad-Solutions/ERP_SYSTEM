@@ -6,15 +6,12 @@ public sealed record StockTransferLineRequest(
     string? Notes);
 
 public sealed record StockTransferRequest(
-    string DocumentNumber,
     DateOnly TransferDate,
     int SourceStoreId,
     int DestinationStoreId,
     string? Notes,
     IReadOnlyList<StockTransferLineRequest> Lines)
 {
-    public const int DocumentNumberMaximumLength = 50;
-
     public const int NotesMaximumLength = 1_000;
 
     public const int MaximumLineCount = 100;
@@ -32,4 +29,7 @@ public sealed record StockTransferFilterRequest(
     int? DestinationStoreId = null,
     int? ItemId = null,
     DateOnly? FromDate = null,
-    DateOnly? ToDate = null);
+    DateOnly? ToDate = null)
+{
+    public const int SearchMaximumLength = 50;
+}

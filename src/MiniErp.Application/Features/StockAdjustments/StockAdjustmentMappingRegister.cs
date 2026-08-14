@@ -9,9 +9,7 @@ public sealed class StockAdjustmentMappingRegister : IRegister
     {
         config.ForType<StockAdjustmentRequest, StockAdjustment>()
             .Ignore(adjustment => adjustment.Lines)
-            .Map(
-                adjustment => adjustment.DocumentNumber,
-                request => request.DocumentNumber.Trim())
+            .Ignore(adjustment => adjustment.DocumentNumber)
             .Map(
                 adjustment => adjustment.Reason,
                 request => Normalize(request.Reason));
@@ -19,9 +17,7 @@ public sealed class StockAdjustmentMappingRegister : IRegister
         config.ForType<StockAdjustmentUpdateRequest, StockAdjustment>()
             .Ignore(adjustment => adjustment.Lines)
             .Ignore(adjustment => adjustment.RowVersion)
-            .Map(
-                adjustment => adjustment.DocumentNumber,
-                request => request.DocumentNumber.Trim())
+            .Ignore(adjustment => adjustment.DocumentNumber)
             .Map(
                 adjustment => adjustment.Reason,
                 request => Normalize(request.Reason));

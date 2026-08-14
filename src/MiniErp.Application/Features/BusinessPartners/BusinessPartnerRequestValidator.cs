@@ -7,10 +7,6 @@ public sealed class BusinessPartnerRequestValidator
 {
     public BusinessPartnerRequestValidator()
     {
-        RuleFor(request => request.Code)
-            .NotEmpty()
-            .MaximumLength(50);
-
         RuleFor(request => request.Name)
             .NotEmpty()
             .MaximumLength(200);

@@ -64,7 +64,7 @@ public static class StockAdjustmentErrors
         Error.Conflict(
             "StockAdjustments.DocumentNumberExists",
             $"رقم مستند التسوية '{number}' مستخدم بالفعل.",
-            nameof(StockAdjustmentRequest.DocumentNumber));
+            "DocumentNumber");
 
     public static Error StoreNotFound(int id) =>
         Error.NotFound(

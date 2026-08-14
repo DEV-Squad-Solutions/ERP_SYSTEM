@@ -58,7 +58,7 @@ public static class InventoryCountErrors
         Error.Conflict(
             "InventoryCounts.DocumentNumberExists",
             $"رقم مستند الجرد '{number}' مستخدم بالفعل.",
-            nameof(InventoryCountRequest.DocumentNumber));
+            "DocumentNumber");
 
     public static Error NoEligibleItems() =>
         Error.Conflict(

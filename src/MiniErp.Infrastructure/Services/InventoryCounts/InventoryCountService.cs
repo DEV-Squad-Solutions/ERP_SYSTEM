@@ -105,13 +105,16 @@ public sealed class InventoryCountService(
             return Result<InventoryCountResponse>.Failure(storeError);
         }
 
-        if (await DocumentNumberExistsAsync(
-                requested.DocumentNumber,
-                cancellationToken))
-        {
-            return Result<InventoryCountResponse>.Failure(
-                DocumentNumberExists(requested.DocumentNumber));
-        }
+        requested.DocumentNumber = await EntityIdentifierGenerator
+            .GenerateUniqueAsync(
+                dbContext,
+                prefix: "IC",
+                companyId: companyId,
+                existingIdentifiers: dbContext.InventoryCounts
+                    .IgnoreQueryFilters()
+                    .Where(entity => entity.CompanyId == companyId)
+                    .Select(entity => entity.DocumentNumber),
+                cancellationToken);
 
         var items = await dbContext.Items
             .AsNoTracking()
@@ -374,8 +377,26 @@ public sealed class InventoryCountService(
             }
         }
 
-        var increaseNumber = GeneratedDocumentNumber(count.Id, "IN");
-        var decreaseNumber = GeneratedDocumentNumber(count.Id, "OUT");
+        var adjustmentNumbers = dbContext.StockAdjustments
+            .IgnoreQueryFilters()
+            .Where(entity => entity.CompanyId == companyId)
+            .Select(entity => entity.DocumentNumber);
+        var increaseNumber = increaseItemIds.Count > 0
+            ? await EntityIdentifierGenerator.GenerateUniqueAsync(
+                dbContext,
+                prefix: "ADJ",
+                companyId: companyId,
+                existingIdentifiers: adjustmentNumbers,
+                cancellationToken)
+            : string.Empty;
+        var decreaseNumber = decreaseLines.Length > 0
+            ? await EntityIdentifierGenerator.GenerateUniqueAsync(
+                dbContext,
+                prefix: "ADJ",
+                companyId: companyId,
+                existingIdentifiers: adjustmentNumbers,
+                cancellationToken)
+            : string.Empty;
         var utcNow = timeProvider.GetUtcNow().UtcDateTime;
         var increase = CreateGeneratedAdjustment(
             count,
@@ -707,11 +728,6 @@ public sealed class InventoryCountService(
                 });
         }
     }
-
-    private static string GeneratedDocumentNumber(
-        int countId,
-        string direction) =>
-        $"IC-{countId}-{direction}";
 
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

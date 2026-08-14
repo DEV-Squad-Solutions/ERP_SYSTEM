@@ -51,14 +51,15 @@ public sealed class StoreServiceTests
 
         var result = await service.AddAsync(
             new StoreRequest(
-                " NEW-PRODUCT ",
                 " New Product Store ",
                 " Main Address ",
                 false,
                 null));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("NEW-PRODUCT", result.Value.Code);
+        Assert.Matches(
+            "^STR-[0-9]{4,}$",
+            result.Value.Code);
         Assert.Equal("New Product Store", result.Value.Name);
         Assert.Equal("Main Address", result.Value.Address);
         Assert.False(result.Value.IsContainerStore);
@@ -73,7 +74,6 @@ public sealed class StoreServiceTests
 
         var result = await service.AddAsync(
             new StoreRequest(
-                "CONT-NEW",
                 "New Container Store",
                 null,
                 true,
@@ -93,7 +93,6 @@ public sealed class StoreServiceTests
 
         var result = await service.AddAsync(
             new StoreRequest(
-                "CONT-OTHER",
                 "Other Company Partner Store",
                 null,
                 true,
@@ -111,7 +110,6 @@ public sealed class StoreServiceTests
 
         var result = await service.AddAsync(
             new StoreRequest(
-                "CONT-INACTIVE",
                 "Inactive Partner Store",
                 null,
                 true,
@@ -129,7 +127,6 @@ public sealed class StoreServiceTests
 
         var result = await service.AddAsync(
             new StoreRequest(
-                "CONT-SECOND",
                 "Second Container Store",
                 null,
                 true,
@@ -159,7 +156,7 @@ public sealed class StoreServiceTests
     }
 
     [Fact]
-    public async Task Update_RejectsNormalizedDuplicateCode()
+    public async Task Update_PreservesTheStoredCode()
     {
         await using var database = await StoreTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
@@ -167,14 +164,13 @@ public sealed class StoreServiceTests
         var result = await service.UpdateAsync(
             14,
             new StoreRequest(
-                " PROD-1 ",
                 "Unused Product Store",
                 null,
                 false,
                 null));
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("Stores.CodeExists", result.Error.Code);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("PROD-UNUSED", result.Value.Code);
     }
 
     [Theory]
@@ -198,13 +194,11 @@ public sealed class StoreServiceTests
         var storeId = changesProductStoreRole ? 10 : 11;
         var request = changesProductStoreRole
             ? new StoreRequest(
-                "PROD-1",
                 "Product Store",
                 null,
                 true,
                 2)
             : new StoreRequest(
-                "CONT-1",
                 "Partner One Container Store",
                 null,
                 true,
@@ -230,7 +224,6 @@ public sealed class StoreServiceTests
         var result = await service.UpdateAsync(
             11,
             new StoreRequest(
-                "CONT-1",
                 "Partner One Container Store",
                 null,
                 false,
@@ -254,7 +247,6 @@ public sealed class StoreServiceTests
         var result = await service.UpdateAsync(
             11,
             new StoreRequest(
-                "CONT-1",
                 "Partner One Container Store",
                 null,
                 true,
@@ -273,7 +265,6 @@ public sealed class StoreServiceTests
         var result = await service.UpdateAsync(
             14,
             new StoreRequest(
-                "PROD-UNUSED",
                 "Unused Product Store",
                 null,
                 true,
@@ -293,7 +284,6 @@ public sealed class StoreServiceTests
         var result = await service.UpdateAsync(
             11,
             new StoreRequest(
-                "CONT-1",
                 "Partner One Container Store",
                 null,
                 true,

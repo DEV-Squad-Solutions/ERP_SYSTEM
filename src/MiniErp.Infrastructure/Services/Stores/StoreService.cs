@@ -119,16 +119,15 @@ public sealed class StoreService(
     {
         var store = request.Adapt<Store>();
         store.CompanyId = companyId;
-        var codeExists = await dbContext.Stores.AnyAsync(
-            entity =>
-                entity.CompanyId == companyId &&
-                entity.Code == store.Code,
+        store.Code = await EntityIdentifierGenerator.GenerateUniqueAsync(
+            dbContext,
+            prefix: "STR",
+            companyId: companyId,
+            existingIdentifiers: dbContext.Stores
+                .IgnoreQueryFilters()
+                .Where(entity => entity.CompanyId == companyId)
+                .Select(entity => entity.Code),
             cancellationToken);
-
-        if (codeExists)
-        {
-            return Result<StoreResponse>.Failure(CodeExists(store.Code));
-        }
 
         var businessPartnerError = await ValidateBusinessPartnerAsync(
             store,
@@ -188,18 +187,6 @@ public sealed class StoreService(
                 HistoricalIdentityChangeNotAllowed());
         }
 
-        var codeExists = await dbContext.Stores.AnyAsync(
-            entity =>
-                entity.CompanyId == companyId &&
-                entity.Code == normalizedStore.Code &&
-                entity.Id != id,
-            cancellationToken);
-
-        if (codeExists)
-        {
-            return Result<StoreResponse>.Failure(CodeExists(normalizedStore.Code));
-        }
-
         var businessPartnerError = await ValidateBusinessPartnerAsync(
             normalizedStore,
             id,
@@ -209,7 +196,9 @@ public sealed class StoreService(
             return Result<StoreResponse>.Failure(businessPartnerError);
         }
 
+        var code = store.Code;
         request.Adapt(store);
+        store.Code = code;
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return await GetByIdAsync(store.Id, cancellationToken);

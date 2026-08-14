@@ -9,7 +9,7 @@ public sealed class InventoryCountFilterRequestValidator
     {
         RuleFor(request => request.DocumentNumber)
             .MaximumLength(
-                InventoryCountRequest.DocumentNumberMaximumLength);
+                InventoryCountFilterRequest.DocumentNumberMaximumLength);
 
         RuleFor(request => request.StoreId)
             .GreaterThan(0)

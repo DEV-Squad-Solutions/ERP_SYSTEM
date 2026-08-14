@@ -19,12 +19,15 @@ public sealed class StockTransferServiceTests
     public async Task Create_UsesSourceAverageCostForDestinationAndCreatesPairedMovements()
     {
         await using var database = await InventoryDocumentTestDatabase.CreateAsync();
-        await AddSourceCostAsync(database, "SOURCE-COST", 10m, 20m);
+        await AddSourceCostAsync(database, 10m, 20m);
 
         var result = await database.CreateStockTransferService().AddAsync(
-            Request("TR-1", 4m));
+            Request(4m));
 
         Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Matches(
+            "^STF-[0-9]{4,}$",
+            result.Value.DocumentNumber);
         var line = Assert.Single(result.Value.Lines);
         Assert.Equal(10m, line.SourceUnitCost);
         Assert.Equal(10m, line.DestinationUnitCost);
@@ -37,7 +40,8 @@ public sealed class StockTransferServiceTests
 
         var movements = await database.Context.ItemMovements
             .AsNoTracking()
-            .Where(movement => movement.ReferenceNumber == "TR-1")
+            .Where(movement =>
+                movement.ReferenceNumber == result.Value.DocumentNumber)
             .OrderBy(movement => movement.MovementType)
             .ToListAsync();
         Assert.Equal(2, movements.Count);
@@ -55,7 +59,7 @@ public sealed class StockTransferServiceTests
         await using var database = await InventoryDocumentTestDatabase.CreateAsync();
 
         var result = await database.CreateStockTransferService().AddAsync(
-            Request("TR-TOO-MUCH", 11m));
+            Request(11m));
 
         Assert.True(result.IsFailure);
         Assert.Equal("Inventory.InsufficientStock", result.Error.Code);
@@ -73,7 +77,7 @@ public sealed class StockTransferServiceTests
         await database.SetStockBalanceCheckModeAsync(StockBalanceCheckMode.None);
 
         var result = await database.CreateStockTransferService().AddAsync(
-            Request("TR-NO-COST", 11m));
+            Request(11m));
 
         Assert.True(result.IsFailure);
         Assert.Equal("Inventory.TransferUnitCostRequired", result.Error.Code);
@@ -89,11 +93,10 @@ public sealed class StockTransferServiceTests
     public async Task Create_RecalculatesWeightedAverageInDestination()
     {
         await using var database = await InventoryDocumentTestDatabase.CreateAsync();
-        await AddSourceCostAsync(database, "SOURCE-COST", 10m, 20m);
+        await AddSourceCostAsync(database, 10m, 20m);
         await database.CreateStockAdjustmentService().AddAsync(
             new StockAdjustmentRequest(
                 StoreId: 4,
-                DocumentNumber: "DEST-COST",
                 DocumentDate: new DateOnly(2026, 7, 1),
                 Direction: StockAdjustmentDirection.Increase,
                 Reason: null,
@@ -109,7 +112,7 @@ public sealed class StockTransferServiceTests
                 ]));
 
         var result = await database.CreateStockTransferService().AddAsync(
-            Request("TR-WEIGHTED", 10m));
+            Request(10m));
 
         Assert.True(result.IsSuccess, result.Error.Description);
         var line = Assert.Single(result.Value.Lines);
@@ -122,9 +125,9 @@ public sealed class StockTransferServiceTests
     public async Task Update_PreservesMovementIdsAdvancesVersionAndRejectsStaleVersion()
     {
         await using var database = await InventoryDocumentTestDatabase.CreateAsync();
-        await AddSourceCostAsync(database, "SOURCE-COST", 10m, 20m);
+        await AddSourceCostAsync(database, 10m, 20m);
         var service = database.CreateStockTransferService();
-        var created = (await service.AddAsync(Request("TR-UPDATE", 2m))).Value;
+        var created = (await service.AddAsync(Request(2m))).Value;
         var originalLine = Assert.Single(created.Lines);
 
         var updated = await service.UpdateAsync(
@@ -159,14 +162,13 @@ public sealed class StockTransferServiceTests
     public async Task Delete_IsBlockedWhenDestinationReceiptSupportsLaterOutbound()
     {
         await using var database = await InventoryDocumentTestDatabase.CreateAsync();
-        await AddSourceCostAsync(database, "SOURCE-COST", 10m, 20m);
+        await AddSourceCostAsync(database, 10m, 20m);
         var transferService = database.CreateStockTransferService();
         var transfer = (await transferService.AddAsync(
-            Request("TR-DELETE", 5m))).Value;
+            Request(5m))).Value;
         var outbound = await database.CreateStockAdjustmentService().AddAsync(
             new StockAdjustmentRequest(
                 StoreId: 4,
-                DocumentNumber: "DEST-OUT",
                 DocumentDate: new DateOnly(2026, 7, 5),
                 Direction: StockAdjustmentDirection.Decrease,
                 Reason: null,
@@ -185,16 +187,15 @@ public sealed class StockTransferServiceTests
     public async Task BackdatedSourceCostChange_PropagatesToDestinationTransferCost()
     {
         await using var database = await InventoryDocumentTestDatabase.CreateAsync();
-        await AddSourceCostAsync(database, "SOURCE-COST", 10m, 20m);
+        await AddSourceCostAsync(database, 10m, 20m);
         var transfer = (await database.CreateStockTransferService().AddAsync(
-            Request("TR-PROPAGATE", 5m))).Value;
+            Request(5m))).Value;
         var before = Assert.Single(transfer.Lines);
         Assert.Equal(10m, before.DestinationUnitCost);
 
         var backdated = await database.CreateStockAdjustmentService().AddAsync(
             new StockAdjustmentRequest(
                 StoreId: 1,
-                DocumentNumber: "BACKDATED-COST",
                 DocumentDate: new DateOnly(2026, 7, 1),
                 Direction: StockAdjustmentDirection.Increase,
                 Reason: null,
@@ -220,9 +221,9 @@ public sealed class StockTransferServiceTests
     public async Task GetById_DoesNotExposeAnotherCompanyTransfer()
     {
         await using var database = await InventoryDocumentTestDatabase.CreateAsync();
-        await AddSourceCostAsync(database, "SOURCE-COST", 10m, 20m);
+        await AddSourceCostAsync(database, 10m, 20m);
         var transfer = (await database.CreateStockTransferService().AddAsync(
-            Request("TR-TENANT", 1m))).Value;
+            Request(1m))).Value;
 
         var result = await database.CreateStockTransferService(companyId: 2)
             .GetByIdAsync(transfer.Id);
@@ -231,11 +232,8 @@ public sealed class StockTransferServiceTests
         Assert.Equal("StockTransfers.NotFound", result.Error.Code);
     }
 
-    private static StockTransferRequest Request(
-        string documentNumber,
-        decimal quantity) =>
+    private static StockTransferRequest Request(decimal quantity) =>
         new(
-            DocumentNumber: documentNumber,
             TransferDate: new DateOnly(2026, 7, 2),
             SourceStoreId: 1,
             DestinationStoreId: 4,
@@ -244,14 +242,12 @@ public sealed class StockTransferServiceTests
 
     private static async Task AddSourceCostAsync(
         InventoryDocumentTestDatabase database,
-        string documentNumber,
         decimal quantity,
         decimal unitCost)
     {
         var result = await database.CreateStockAdjustmentService().AddAsync(
             new StockAdjustmentRequest(
                 StoreId: 1,
-                DocumentNumber: documentNumber,
                 DocumentDate: new DateOnly(2026, 7, 1),
                 Direction: StockAdjustmentDirection.Increase,
                 Reason: null,

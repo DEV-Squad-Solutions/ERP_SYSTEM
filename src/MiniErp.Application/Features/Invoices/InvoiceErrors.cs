@@ -319,19 +319,29 @@ public static class InvoiceErrors
             $"العبوات التالية غير نشطة أو ليست في مخزن العميل: {string.Join(", ", ids)}.",
             nameof(InvoiceContainerLineRequest.ContainerId));
 
-    public static Error InvalidWBTotal() =>
+    public static Error InvalidWBTotal(
+        string fieldName = nameof(InvoiceRequest.WBWeight)) =>
         Error.Validation(
             "Invoices.InvalidWBTotal",
             "راجع أوزان الميزان. أدخل قيمًا غير سالبة ولا تتجاوز الوزن الكلي.",
-            nameof(InvoiceRequest.WBWeight));
+            fieldName);
 
     public static Error WBTotalDoesNotMatchItemWeight(
         decimal wbTotal,
-        decimal totalItemWeight) =>
+        decimal totalItemWeight,
+        string fieldName = nameof(InvoiceRequest.WBWeight)) =>
         Error.Validation(
             "Invoices.WBTotalDoesNotMatchItemWeight",
             $"صافي وزن الميزان ({wbTotal}) يجب أن يساوي مجموع أوزان الأصناف ({totalItemWeight}).",
-            nameof(InvoiceRequest.WBWeight));
+            fieldName);
+
+    public static Error WBTotalDoesNotMatchCalculatedTotal(
+        decimal requestedWBTotal,
+        decimal calculatedWBTotal) =>
+        Error.Validation(
+            "Invoices.WBTotalDoesNotMatchCalculatedTotal",
+            $"صافي وزن الميزان المرسل ({requestedWBTotal}) يجب أن يساوي صافي وزن الميزان المحسوب ({calculatedWBTotal}).",
+            nameof(InvoiceRequest.WBTotal));
 
     public static Error InvalidDiscountAmount() =>
         Error.Validation(

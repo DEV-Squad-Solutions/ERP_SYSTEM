@@ -98,16 +98,15 @@ public sealed class ItemService(
     {
         var item = request.Adapt<Item>();
         item.CompanyId = companyId;
-        var codeExists = await dbContext.Items.AnyAsync(
-            entity =>
-                entity.CompanyId == companyId &&
-                entity.Code == item.Code,
+        item.Code = await EntityIdentifierGenerator.GenerateUniqueAsync(
+            dbContext,
+            prefix: "ITM",
+            companyId: companyId,
+            existingIdentifiers: dbContext.Items
+                .IgnoreQueryFilters()
+                .Where(entity => entity.CompanyId == companyId)
+                .Select(entity => entity.Code),
             cancellationToken);
-
-        if (codeExists)
-        {
-            return Result<ItemResponse>.Failure(CodeExists(item.Code));
-        }
 
         var itemUnitResult = await GetActiveItemUnitAsync(
             request.ItemUnitId,
@@ -144,19 +143,6 @@ public sealed class ItemService(
             return Result<ItemResponse>.Failure(NotFound(id));
         }
 
-        var normalizedItem = request.Adapt<Item>();
-        var codeExists = await dbContext.Items.AnyAsync(
-            entity =>
-                entity.CompanyId == companyId &&
-                entity.Code == normalizedItem.Code &&
-                entity.Id != id,
-            cancellationToken);
-
-        if (codeExists)
-        {
-            return Result<ItemResponse>.Failure(CodeExists(normalizedItem.Code));
-        }
-
         var itemUnitResult = await GetActiveItemUnitAsync(
             request.ItemUnitId,
             companyId,
@@ -166,7 +152,9 @@ public sealed class ItemService(
             return Result<ItemResponse>.Failure(itemUnitResult.Error);
         }
 
+        var code = item.Code;
         request.Adapt(item);
+        item.Code = code;
         item.ItemUnit = itemUnitResult.Value;
 
         await dbContext.SaveChangesAsync(cancellationToken);

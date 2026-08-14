@@ -18,16 +18,6 @@ public sealed class PartnerOpeningBalanceRequestValidator
         RuleFor(request => request.BusinessPartnerId)
             .GreaterThan(0);
 
-        RuleFor(request => request.DocumentNumber)
-            .NotEmpty();
-
-        RuleFor(request => request.DocumentNumber)
-            .MaximumLength(PartnerOpeningBalanceRequest.DocumentNumberMaximumLength)
-            .When(request =>
-                request.DocumentNumber is not null &&
-                request.DocumentNumber.Trim().Length >
-                PartnerOpeningBalanceRequest.DocumentNumberMaximumLength);
-
         RuleFor(request => request.DocumentDate)
             .Must(date => date != default)
             .WithMessage("تاريخ المستند مطلوب.");
@@ -69,16 +59,6 @@ public sealed class PartnerOpeningBalanceUpdateRequestValidator
 
         RuleFor(request => request.BusinessPartnerId)
             .GreaterThan(0);
-
-        RuleFor(request => request.DocumentNumber)
-            .NotEmpty();
-
-        RuleFor(request => request.DocumentNumber)
-            .MaximumLength(PartnerOpeningBalanceRequest.DocumentNumberMaximumLength)
-            .When(request =>
-                request.DocumentNumber is not null &&
-                request.DocumentNumber.Trim().Length >
-                PartnerOpeningBalanceRequest.DocumentNumberMaximumLength);
 
         RuleFor(request => request.DocumentDate)
             .Must(date => date != default)

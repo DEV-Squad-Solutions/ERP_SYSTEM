@@ -139,10 +139,31 @@ public sealed class CashboxTransferService(
         }
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
+        var transferNumber = await GenerateIdentifierAsync(
+            prefix: "TRF",
+            dbContext.CashboxTransfers
+                .IgnoreQueryFilters()
+                .Where(entity => entity.CompanyId == companyId)
+                .Select(entity => entity.TransferNumber),
+            cancellationToken);
+        var paymentVoucherNumber = await GenerateIdentifierAsync(
+            prefix: "PAY",
+            dbContext.CashVouchers
+                .IgnoreQueryFilters()
+                .Where(entity => entity.CompanyId == companyId)
+                .Select(entity => entity.VoucherNumber),
+            cancellationToken);
+        var receiptVoucherNumber = await GenerateIdentifierAsync(
+            prefix: "RCV",
+            dbContext.CashVouchers
+                .IgnoreQueryFilters()
+                .Where(entity => entity.CompanyId == companyId)
+                .Select(entity => entity.VoucherNumber),
+            cancellationToken);
         var transfer = new CashboxTransfer
         {
             CompanyId = companyId,
-            TransferNumber = GenerateTransferNumber(request.TransferDate),
+            TransferNumber = transferNumber,
             TransferDate = request.TransferDate,
             SourceCashboxId = request.SourceCashboxId,
             DestinationCashboxId = request.DestinationCashboxId,
@@ -158,6 +179,7 @@ public sealed class CashboxTransferService(
                 transfer,
                 preparation.Value.SourceCashbox,
                 CashDirection.Payment,
+                paymentVoucherNumber,
                 request.Amount,
                 preparation.Value.ExchangeRate,
                 now),
@@ -165,6 +187,7 @@ public sealed class CashboxTransferService(
                 transfer,
                 preparation.Value.DestinationCashbox,
                 CashDirection.Receipt,
+                receiptVoucherNumber,
                 request.Amount,
                 preparation.Value.ExchangeRate,
                 now));
@@ -284,6 +307,7 @@ public sealed class CashboxTransferService(
             transfer,
             preparation.Value.SourceCashbox,
             CashDirection.Payment,
+            paymentVoucher.VoucherNumber,
             request.Amount,
             preparation.Value.ExchangeRate,
             now);
@@ -292,6 +316,7 @@ public sealed class CashboxTransferService(
             transfer,
             preparation.Value.DestinationCashbox,
             CashDirection.Receipt,
+            receiptVoucher.VoucherNumber,
             request.Amount,
             preparation.Value.ExchangeRate,
             now);
@@ -525,6 +550,7 @@ public sealed class CashboxTransferService(
         CashboxTransfer transfer,
         Cashbox cashbox,
         CashDirection direction,
+        string voucherNumber,
         decimal amount,
         ResolvedExchangeRate exchangeRate,
         DateTime now)
@@ -535,6 +561,7 @@ public sealed class CashboxTransferService(
             transfer,
             cashbox,
             direction,
+            voucherNumber,
             amount,
             exchangeRate,
             now);
@@ -546,6 +573,7 @@ public sealed class CashboxTransferService(
         CashboxTransfer transfer,
         Cashbox cashbox,
         CashDirection direction,
+        string voucherNumber,
         decimal amount,
         ResolvedExchangeRate exchangeRate,
         DateTime now)
@@ -554,9 +582,7 @@ public sealed class CashboxTransferService(
         voucher.CashboxTransferId = transfer.Id;
         voucher.CashboxTransfer = transfer;
         voucher.InvoiceId = null;
-        voucher.VoucherNumber = direction == CashDirection.Payment
-            ? $"{transfer.TransferNumber}-OUT"
-            : $"{transfer.TransferNumber}-IN";
+        voucher.VoucherNumber = voucherNumber;
         voucher.VoucherDate = transfer.TransferDate;
         voucher.Direction = direction;
         voucher.CashboxId = cashbox.Id;
@@ -730,13 +756,16 @@ public sealed class CashboxTransferService(
         return null;
     }
 
-    private static string GenerateTransferNumber(DateOnly transferDate)
-    {
-        var suffix = Guid.NewGuid()
-            .ToString("N")[..8]
-            .ToUpperInvariant();
-        return $"TRF-{transferDate:yyyyMMdd}-{suffix}";
-    }
+    private Task<string> GenerateIdentifierAsync(
+        string prefix,
+        IQueryable<string> existingIdentifiers,
+        CancellationToken cancellationToken) =>
+        EntityIdentifierGenerator.GenerateUniqueAsync(
+            dbContext,
+            prefix,
+            companyId,
+            existingIdentifiers,
+            cancellationToken);
 
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

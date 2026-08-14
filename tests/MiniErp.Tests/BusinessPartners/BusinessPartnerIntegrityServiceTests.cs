@@ -157,7 +157,6 @@ public sealed class BusinessPartnerIntegrityServiceTests
         CurrencyCode currency,
         string name = "Partner One") =>
         new(
-            "BP-1",
             name,
             null,
             null,

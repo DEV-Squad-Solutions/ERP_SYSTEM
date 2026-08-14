@@ -60,7 +60,7 @@ public static class StockOpeningBalanceErrors
         Error.Conflict(
             "StockOpeningBalances.DocumentNumberExists",
             $"رقم المستند '{number}' مستخدم بالفعل.",
-            nameof(StockOpeningBalanceRequest.DocumentNumber));
+            "DocumentNumber");
 
     public static Error Concurrency() =>
         Error.Conflict(

@@ -9,13 +9,10 @@ public sealed record StockOpeningBalanceLineRequest(
 
 public sealed record StockOpeningBalanceRequest(
     int StoreId,
-    string DocumentNumber,
     DateOnly DocumentDate,
     IReadOnlyList<StockOpeningBalanceLineRequest> Lines,
     string? Notes)
 {
-    public const int DocumentNumberMaximumLength = 50;
-
     public const int MaximumLineCount = 100;
 
     public const int NotesMaximumLength = 1_000;
@@ -24,7 +21,6 @@ public sealed record StockOpeningBalanceRequest(
 
 public sealed record StockOpeningBalanceUpdateRequest(
     int StoreId,
-    string DocumentNumber,
     DateOnly DocumentDate,
     IReadOnlyList<StockOpeningBalanceLineRequest> Lines,
     string? Notes,

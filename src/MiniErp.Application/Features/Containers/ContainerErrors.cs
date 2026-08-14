@@ -18,7 +18,7 @@ public static class ContainerErrors
         Error.Conflict(
             "Containers.CodeExists",
             $"كود العبوة '{code}' مستخدم بالفعل في عبوة نشطة.",
-            nameof(ContainerRequest.Code));
+            "Code");
 
     public static Error HasStoreAssignments() =>
         Error.Conflict(

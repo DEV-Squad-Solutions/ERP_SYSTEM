@@ -26,11 +26,13 @@ public sealed class InventoryDocumentServiceTests
 
         var created = await service.AddAsync(
             AdjustmentRequest(
-                "SA-1",
                 StockAdjustmentDirection.Increase,
                 2m));
 
         Assert.True(created.IsSuccess);
+        Assert.Matches(
+            "^ADJ-[0-9]{4,}$",
+            created.Value.DocumentNumber);
         var initialVersion = created.Value.RowVersion;
         var initialMovement = await database.Context.ItemMovements
             .AsNoTracking()
@@ -38,6 +40,7 @@ public sealed class InventoryDocumentServiceTests
                 movement.MovementType != ItemMovementType.OpeningBalance)
             .SingleAsync();
         Assert.Equal(ItemMovementType.AdjustmentIncrease, initialMovement.MovementType);
+        Assert.Equal(created.Value.DocumentNumber, initialMovement.ReferenceNumber);
         Assert.Equal(2m, initialMovement.QuantityIn);
         Assert.Equal(0m, initialMovement.QuantityOut);
 
@@ -45,7 +48,6 @@ public sealed class InventoryDocumentServiceTests
             created.Value.Id,
             new StockAdjustmentUpdateRequest(
                 1,
-                "SA-1",
                 new DateOnly(2026, 7, 28),
                 StockAdjustmentDirection.Increase,
                 "line-only change",
@@ -68,7 +70,6 @@ public sealed class InventoryDocumentServiceTests
             created.Value.Id,
             new StockAdjustmentUpdateRequest(
                 1,
-                "SA-1",
                 new DateOnly(2026, 7, 28),
                 StockAdjustmentDirection.Increase,
                 null,
@@ -87,7 +88,6 @@ public sealed class InventoryDocumentServiceTests
 
         var result = await service.AddAsync(
             AdjustmentRequest(
-                "SA-OUT",
                 StockAdjustmentDirection.Decrease,
                 11m));
 
@@ -108,7 +108,6 @@ public sealed class InventoryDocumentServiceTests
         var result = await database.CreateStockAdjustmentService().AddAsync(
             new StockAdjustmentRequest(
                 1,
-                "SA-COST-REQUIRED",
                 new DateOnly(2026, 7, 28),
                 StockAdjustmentDirection.Increase,
                 null,
@@ -127,7 +126,6 @@ public sealed class InventoryDocumentServiceTests
         var result = await database.CreateStockAdjustmentService().AddAsync(
             new StockAdjustmentRequest(
                 1,
-                "SA-OUT-COST",
                 new DateOnly(2026, 7, 28),
                 StockAdjustmentDirection.Decrease,
                 null,
@@ -155,7 +153,6 @@ public sealed class InventoryDocumentServiceTests
 
         var result = await service.AddAsync(
             AdjustmentRequest(
-                "SA-NONE",
                 StockAdjustmentDirection.Decrease,
                 11m));
 
@@ -175,7 +172,6 @@ public sealed class InventoryDocumentServiceTests
 
         var result = await service.AddAsync(
             AdjustmentRequest(
-                "SA-OUT-VALID",
                 StockAdjustmentDirection.Decrease,
                 4m));
 
@@ -199,13 +195,12 @@ public sealed class InventoryDocumentServiceTests
             await InventoryDocumentTestDatabase.CreateAsync();
         var service = database.CreateStockAdjustmentService();
         var created = (await service.AddAsync(
-            AdjustmentRequest("SA-HEADER", StockAdjustmentDirection.Increase, 2m))).Value;
+            AdjustmentRequest(StockAdjustmentDirection.Increase, 2m))).Value;
 
         var updated = await service.UpdateAsync(
             created.Id,
             new StockAdjustmentUpdateRequest(
                 created.StoreId,
-                created.DocumentNumber,
                 created.DocumentDate,
                 created.Direction,
                 "header-only change",
@@ -220,7 +215,6 @@ public sealed class InventoryDocumentServiceTests
             created.Id,
             new StockAdjustmentUpdateRequest(
                 created.StoreId,
-                created.DocumentNumber,
                 created.DocumentDate,
                 created.Direction,
                 "stale header change",
@@ -240,7 +234,6 @@ public sealed class InventoryDocumentServiceTests
         var created = (await service.AddAsync(
             new StockAdjustmentRequest(
                 1,
-                "SA-LINES",
                 new DateOnly(2026, 7, 28),
                 StockAdjustmentDirection.Increase,
                 null,
@@ -253,7 +246,6 @@ public sealed class InventoryDocumentServiceTests
             created.Id,
             new StockAdjustmentUpdateRequest(
                 1,
-                "SA-LINES",
                 new DateOnly(2026, 7, 28),
                 StockAdjustmentDirection.Increase,
                 null,
@@ -286,7 +278,6 @@ public sealed class InventoryDocumentServiceTests
         await service.AddAsync(
             new StockAdjustmentRequest(
                 1,
-                "SA-LIST",
                 new DateOnly(2026, 7, 28),
                 StockAdjustmentDirection.Increase,
                 null,
@@ -315,7 +306,7 @@ public sealed class InventoryDocumentServiceTests
             await InventoryDocumentTestDatabase.CreateAsync();
         var service = database.CreateStockAdjustmentService();
         var created = (await service.AddAsync(
-            AdjustmentRequest("SA-DELETE", StockAdjustmentDirection.Increase, 2m))).Value;
+            AdjustmentRequest(StockAdjustmentDirection.Increase, 2m))).Value;
 
         var deleted = await service.DeleteAsync(created.Id);
 
@@ -348,14 +339,12 @@ public sealed class InventoryDocumentServiceTests
         var companyTwoService = database.CreateStockAdjustmentService(2);
         var created = await companyOneService.AddAsync(
             AdjustmentRequest(
-                "SA-TENANT",
                 StockAdjustmentDirection.Increase,
                 1m));
 
         var read = await companyTwoService.GetByIdAsync(created.Value.Id);
         var add = await companyTwoService.AddAsync(
             AdjustmentRequest(
-                "SA-OTHER",
                 StockAdjustmentDirection.Increase,
                 1m));
 
@@ -370,9 +359,12 @@ public sealed class InventoryDocumentServiceTests
             await InventoryDocumentTestDatabase.CreateAsync();
         var service = database.CreateInventoryCountService();
 
-        var result = await service.AddAsync(CountRequest("COUNT-1"));
+        var result = await service.AddAsync(CountRequest());
 
         Assert.True(result.IsSuccess);
+        Assert.Matches(
+            "^IC-[0-9]{4,}$",
+            result.Value.DocumentNumber);
         Assert.Equal(2, result.Value.Lines.Count);
         Assert.Equal(
             10m,
@@ -393,7 +385,7 @@ public sealed class InventoryDocumentServiceTests
         var countService = database.CreateInventoryCountService();
         var adjustmentService = database.CreateStockAdjustmentService();
         var created = (await countService.AddAsync(
-            CountRequest("COUNT-MIXED"))).Value;
+            CountRequest())).Value;
         var updated = await UpdateCountAsync(
             countService,
             created,
@@ -426,6 +418,8 @@ public sealed class InventoryDocumentServiceTests
             adjustment.Direction == StockAdjustmentDirection.Increase);
         var decrease = adjustments.Single(adjustment =>
             adjustment.Direction == StockAdjustmentDirection.Decrease);
+        Assert.Equal("ADJ-0001", increase.DocumentNumber);
+        Assert.Equal("ADJ-0002", decrease.DocumentNumber);
         Assert.Equal(3m, increase.Lines.Single().Quantity);
         Assert.Equal(4m, increase.Lines.Single().UnitCost);
         Assert.Equal(2m, decrease.Lines.Single().Quantity);
@@ -461,7 +455,6 @@ public sealed class InventoryDocumentServiceTests
             increase.Id,
             new StockAdjustmentUpdateRequest(
                 increase.StoreId,
-                increase.DocumentNumber,
                 increase.DocumentDate,
                 increase.Direction,
                 increase.Reason,
@@ -487,7 +480,7 @@ public sealed class InventoryDocumentServiceTests
             await InventoryDocumentTestDatabase.CreateAsync();
         var service = database.CreateInventoryCountService();
         var created = (await service.AddAsync(
-            CountRequest("COUNT-COST-REQUIRED"))).Value;
+            CountRequest())).Value;
         var updated = await UpdateCountAsync(
             service,
             created,
@@ -516,7 +509,7 @@ public sealed class InventoryDocumentServiceTests
             await InventoryDocumentTestDatabase.CreateAsync();
         var service = database.CreateInventoryCountService();
         var created = (await service.AddAsync(
-            CountRequest("COUNT-EQUAL"))).Value;
+            CountRequest())).Value;
         var updated = await UpdateCountAsync(
             service,
             created,
@@ -548,7 +541,7 @@ public sealed class InventoryDocumentServiceTests
             await InventoryDocumentTestDatabase.CreateAsync();
         var service = database.CreateInventoryCountService();
         var created = (await service.AddAsync(
-            CountRequest("COUNT-STALE"))).Value;
+            CountRequest())).Value;
 
         database.Context.ItemMovements.Add(
             new ItemMovement
@@ -591,7 +584,7 @@ public sealed class InventoryDocumentServiceTests
             await InventoryDocumentTestDatabase.CreateAsync();
         var service = database.CreateInventoryCountService();
         var created = (await service.AddAsync(
-            CountRequest("COUNT-FROZEN"))).Value;
+            CountRequest())).Value;
 
         var result = await service.UpdateAsync(
             created.Id,
@@ -607,12 +600,10 @@ public sealed class InventoryDocumentServiceTests
     }
 
     private static StockAdjustmentRequest AdjustmentRequest(
-        string documentNumber,
         StockAdjustmentDirection direction,
         decimal quantity) =>
         new(
             1,
-            documentNumber,
             new DateOnly(2026, 7, 28),
             direction,
             null,
@@ -631,10 +622,9 @@ public sealed class InventoryDocumentServiceTests
             UnitCost = 0m
         };
 
-    private static InventoryCountRequest CountRequest(string documentNumber) =>
+    private static InventoryCountRequest CountRequest() =>
         new(
             1,
-            documentNumber,
             new DateOnly(2026, 7, 28),
             null);
 

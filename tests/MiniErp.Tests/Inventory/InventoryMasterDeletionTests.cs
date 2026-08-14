@@ -137,19 +137,20 @@ public sealed class InventoryMasterDeletionTests
         var result = await service.AddAsync(
             new ItemRequest(
                 1,
-                "  NEW  ",
                 "  New Item  ",
                 "   "));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value.CompanyId);
-        Assert.Equal("NEW", result.Value.Code);
+        Assert.Matches(
+            "^ITM-[0-9]{4,}$",
+            result.Value.Code);
         Assert.Equal("New Item", result.Value.Name);
         Assert.Null(result.Value.Description);
     }
 
     [Fact]
-    public async Task AddItem_RejectsNormalizedDuplicateCode()
+    public async Task AddItem_GeneratesAUniqueCode()
     {
         await using var database = await InventoryDeletionDatabase.CreateAsync();
         var service = database.CreateItemService(companyId: 1);
@@ -157,12 +158,11 @@ public sealed class InventoryMasterDeletionTests
         var result = await service.AddAsync(
             new ItemRequest(
                 1,
-                "  ITEM-1  ",
                 "Another Item",
                 null));
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("Items.CodeExists", result.Error.Code);
+        Assert.True(result.IsSuccess);
+        Assert.NotEqual("ITEM-1", result.Value.Code);
     }
 
     [Fact]
@@ -174,7 +174,6 @@ public sealed class InventoryMasterDeletionTests
         var result = await service.AddAsync(
             new ItemRequest(
                 5,
-                "NEW",
                 "New Item",
                 null));
 
@@ -192,7 +191,6 @@ public sealed class InventoryMasterDeletionTests
             1,
             new ItemRequest(
                 2,
-                "  ITEM-1  ",
                 "  Updated Item  ",
                 "  Updated description  "));
 
@@ -209,7 +207,6 @@ public sealed class InventoryMasterDeletionTests
         var validator = new ItemRequestValidator();
         var request = new ItemRequest(
             1,
-            $"  {new string('C', 50)}  ",
             $"  {new string('N', 200)}  ",
             $"  {new string('D', 1_000)}  ");
 
@@ -219,41 +216,21 @@ public sealed class InventoryMasterDeletionTests
     }
 
     [Fact]
-    public async Task ItemValidator_UsesSharedMaximumLengthRuleForTrimmedValue()
-    {
-        var validator = new ItemRequestValidator();
-        var request = new ItemRequest(
-            1,
-            $"  {new string('C', 51)}  ",
-            "Item",
-            null);
-
-        var result = await validator.ValidateAsync(request);
-
-        var error = Assert.Single(result.Errors);
-        Assert.Equal(nameof(ItemRequest.Code), error.PropertyName);
-        Assert.Equal("MaximumLengthValidator", error.ErrorCode);
-    }
-
-    [Fact]
     public async Task ItemValidator_ReturnsOneRequiredErrorPerWhitespaceValue()
     {
         var validator = new ItemRequestValidator();
         var request = new ItemRequest(
             1,
             "   ",
-            "   ",
             null);
 
         var result = await validator.ValidateAsync(request);
 
-        Assert.Equal(2, result.Errors.Count);
+        var error = Assert.Single(result.Errors);
         Assert.All(
             result.Errors,
             error => Assert.Equal("NotEmptyValidator", error.ErrorCode));
-        Assert.Equal(
-            [nameof(ItemRequest.Code), nameof(ItemRequest.Name)],
-            result.Errors.Select(error => error.PropertyName));
+        Assert.Equal(nameof(ItemRequest.Name), error.PropertyName);
     }
 
     [Fact]

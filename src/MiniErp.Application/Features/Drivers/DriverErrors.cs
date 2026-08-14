@@ -14,7 +14,7 @@ public static class DriverErrors
         Error.Conflict(
             "Drivers.CodeExists",
             $"كود السائق '{code}' مستخدم بالفعل.",
-            nameof(DriverRequest.Code));
+            "Code");
 
     public static Error LicenseNumberExists(string licenseNumber) =>
         Error.Conflict(

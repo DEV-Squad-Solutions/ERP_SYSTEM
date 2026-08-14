@@ -382,7 +382,6 @@ public sealed class InventoryCostingServiceTests
             increase.Id,
             new StockAdjustmentUpdateRequest(
                 increase.StoreId,
-                increase.DocumentNumber,
                 increase.DocumentDate,
                 increase.Direction,
                 increase.Reason,
@@ -434,7 +433,6 @@ public sealed class InventoryCostingServiceTests
             increase.Id,
             new StockAdjustmentUpdateRequest(
                 increase.StoreId,
-                increase.DocumentNumber,
                 new DateOnly(2026, 7, 10),
                 increase.Direction,
                 increase.Reason,
@@ -514,7 +512,6 @@ public sealed class InventoryCostingServiceTests
             increase.Id,
             new StockAdjustmentUpdateRequest(
                 increase.StoreId,
-                increase.DocumentNumber,
                 increase.DocumentDate,
                 increase.Direction,
                 increase.Reason,
@@ -605,7 +602,6 @@ public sealed class InventoryCostingServiceTests
         var result = await database.CreateStockAdjustmentService().AddAsync(
             new StockAdjustmentRequest(
                 1,
-                documentNumber,
                 date ?? new DateOnly(2026, 7, 28),
                 direction,
                 null,

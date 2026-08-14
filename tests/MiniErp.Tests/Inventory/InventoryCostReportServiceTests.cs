@@ -111,7 +111,6 @@ public sealed class InventoryCostReportServiceTests
         var result = await database.CreateStockAdjustmentService().AddAsync(
             new StockAdjustmentRequest(
                 1,
-                documentNumber,
                 date ?? new DateOnly(2026, 1, 2),
                 direction,
                 null,

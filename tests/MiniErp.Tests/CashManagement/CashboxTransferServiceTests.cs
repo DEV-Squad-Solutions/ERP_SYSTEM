@@ -28,7 +28,7 @@ public sealed class CashboxTransferServiceTests
         var result = await service.AddAsync(CreateRequest(amount: 200m));
 
         Assert.True(result.IsSuccess);
-        Assert.StartsWith("TRF-20260808-", result.Value.TransferNumber);
+        Assert.Matches("^TRF-[0-9]{4,}$", result.Value.TransferNumber);
         Assert.Equal(200m, result.Value.Amount);
         Assert.Equal(CurrencyCode.EGP, result.Value.Currency);
         Assert.Equal(1m, result.Value.ExchangeRate);
@@ -48,14 +48,17 @@ public sealed class CashboxTransferServiceTests
             Assert.Equal(CashPartyType.None, voucher.PartyType);
             Assert.Equal(result.Value.TransferNumber, voucher.ReferenceNumber);
         });
-        Assert.Contains(vouchers, voucher =>
-            voucher.Id == result.Value.PaymentVoucherId &&
-            voucher.CashboxId == 1 &&
-            voucher.Direction == CashDirection.Payment);
-        Assert.Contains(vouchers, voucher =>
-            voucher.Id == result.Value.ReceiptVoucherId &&
-            voucher.CashboxId == 2 &&
-            voucher.Direction == CashDirection.Receipt);
+        var paymentVoucher = Assert.Single(vouchers, voucher =>
+            voucher.Id == result.Value.PaymentVoucherId);
+        Assert.Equal(1, paymentVoucher.CashboxId);
+        Assert.Equal(CashDirection.Payment, paymentVoucher.Direction);
+        Assert.Matches("^PAY-[0-9]{4,}$", paymentVoucher.VoucherNumber);
+
+        var receiptVoucher = Assert.Single(vouchers, voucher =>
+            voucher.Id == result.Value.ReceiptVoucherId);
+        Assert.Equal(2, receiptVoucher.CashboxId);
+        Assert.Equal(CashDirection.Receipt, receiptVoucher.Direction);
+        Assert.Matches("^RCV-[0-9]{4,}$", receiptVoucher.VoucherNumber);
 
         var source = await database.CreateCashboxService(1)
             .GetByIdAsync(1);

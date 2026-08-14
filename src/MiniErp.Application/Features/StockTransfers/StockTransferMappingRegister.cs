@@ -9,9 +9,7 @@ public sealed class StockTransferMappingRegister : IRegister
     {
         config.ForType<StockTransferRequest, StockTransfer>()
             .Ignore(transfer => transfer.Lines)
-            .Map(
-                transfer => transfer.DocumentNumber,
-                request => request.DocumentNumber.Trim())
+            .Ignore(transfer => transfer.DocumentNumber)
             .Map(
                 transfer => transfer.Notes,
                 request => Normalize(request.Notes));

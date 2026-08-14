@@ -649,7 +649,10 @@ public sealed partial class InvoiceService
                 DiscountAmount: discountAmount));
     }
 
-    private static Error? ValidateAmounts(Invoice invoice)
+    private static Error? ValidateAmounts(
+        Invoice invoice,
+        decimal? requestedWBTotal,
+        bool requireCalculatedWBTotalMatch)
     {
         if (!InvoiceAmountRules.IsValidQuantity(invoice.WBWeight) ||
             !InvoiceAmountRules.IsValidQuantity(
@@ -660,17 +663,38 @@ public sealed partial class InvoiceService
             return InvalidWBTotal();
         }
 
+        if (requestedWBTotal.HasValue &&
+            !InvoiceAmountRules.IsValidQuantity(requestedWBTotal.Value))
+        {
+            return InvalidWBTotal(
+                fieldName: nameof(InvoiceRequest.WBTotal));
+        }
+
+        var requestedPositiveWBTotal = requestedWBTotal is > 0m;
+        if (requestedPositiveWBTotal &&
+            requestedWBTotal!.Value != invoice.WBTotal)
+        {
+            return WBTotalDoesNotMatchCalculatedTotal(
+                requestedWBTotal.Value,
+                invoice.WBTotal);
+        }
+
         if (invoice.ContentType == InvoiceContentType.Items)
         {
             var totalItemWeight = decimal.Round(
                 invoice.Lines.Sum(line => line.Weight),
                 InvoiceAmountRules.QuantityScale,
                 MidpointRounding.AwayFromZero);
-            if (invoice.WBTotal != totalItemWeight)
+            if ((requireCalculatedWBTotalMatch ||
+                 requestedPositiveWBTotal) &&
+                invoice.WBTotal != totalItemWeight)
             {
                 return WBTotalDoesNotMatchItemWeight(
                     invoice.WBTotal,
-                    totalItemWeight);
+                    totalItemWeight,
+                    fieldName: requestedPositiveWBTotal
+                        ? nameof(InvoiceRequest.WBTotal)
+                        : nameof(InvoiceRequest.WBWeight));
             }
         }
 

@@ -120,22 +120,22 @@ public sealed class StockOpeningBalanceService(
                 .ToArray(),
             cancellationToken);
 
-        var documentNumberExists = await dbContext.StockOpeningBalances.AnyAsync(
-            balance =>
-                balance.CompanyId == companyId &&
-                balance.DocumentNumber == normalized.DocumentNumber,
-            cancellationToken);
-        if (documentNumberExists)
-        {
-            return Result<StockOpeningBalanceResponse>.Failure(
-                DocumentNumberExists(normalized.DocumentNumber));
-        }
+        var documentNumber = await EntityIdentifierGenerator
+            .GenerateUniqueAsync(
+                dbContext,
+                prefix: "SOB",
+                companyId: companyId,
+                existingIdentifiers: dbContext.StockOpeningBalances
+                    .IgnoreQueryFilters()
+                    .Where(entity => entity.CompanyId == companyId)
+                    .Select(entity => entity.DocumentNumber),
+                cancellationToken);
 
         var openingBalance = new StockOpeningBalance
         {
             CompanyId = companyId,
             StoreId = normalized.StoreId,
-            DocumentNumber = normalized.DocumentNumber,
+            DocumentNumber = documentNumber,
             DocumentDate = normalized.DocumentDate,
             Notes = normalized.Notes
         };
@@ -235,20 +235,7 @@ public sealed class StockOpeningBalanceService(
                 validationResult.Error);
         }
 
-        var documentNumberExists = await dbContext.StockOpeningBalances.AnyAsync(
-            balance =>
-                balance.CompanyId == companyId &&
-                balance.Id != id &&
-                balance.DocumentNumber == normalized.DocumentNumber,
-            cancellationToken);
-        if (documentNumberExists)
-        {
-            return Result<StockOpeningBalanceResponse>.Failure(
-                DocumentNumberExists(normalized.DocumentNumber));
-        }
-
         openingBalance.StoreId = normalized.StoreId;
-        openingBalance.DocumentNumber = normalized.DocumentNumber;
         openingBalance.DocumentDate = normalized.DocumentDate;
         openingBalance.Notes = normalized.Notes;
 

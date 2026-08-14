@@ -34,7 +34,8 @@ public static class SwaggerExtensions
 
             options.SchemaFilter<EnumSchemaDocumentationFilter>();
             options.OperationFilter<AllowAnonymousOperationFilter>();
-            options.OperationFilter<AuthenticationSwaggerDocumentation>();
+            options.OperationFilter<AuthenticationSwaggerDocumentation>(
+                configuration);
             options.OperationFilter<BusinessPartnersSwaggerDocumentation>();
             options.OperationFilter<CashboxesSwaggerDocumentation>();
             options.OperationFilter<CashboxTransfersSwaggerDocumentation>();

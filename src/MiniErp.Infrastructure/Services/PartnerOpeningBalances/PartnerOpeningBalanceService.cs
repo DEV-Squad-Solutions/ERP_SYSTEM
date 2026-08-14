@@ -109,18 +109,17 @@ public sealed class PartnerOpeningBalanceService(
                 exchangeRateResult.Error);
         }
 
-        var documentNumberExists = await dbContext.PartnerOpeningBalances.AnyAsync(
-            balance =>
-                balance.CompanyId == companyId &&
-                balance.DocumentNumber == normalized.DocumentNumber,
-            cancellationToken);
-        if (documentNumberExists)
-        {
-            return Result<PartnerOpeningBalanceResponse>.Failure(
-                DocumentNumberExists(normalized.DocumentNumber));
-        }
-
         normalized.CompanyId = companyId;
+        normalized.DocumentNumber = await EntityIdentifierGenerator
+            .GenerateUniqueAsync(
+                dbContext,
+                prefix: "POB",
+                companyId: companyId,
+                existingIdentifiers: dbContext.PartnerOpeningBalances
+                    .IgnoreQueryFilters()
+                    .Where(entity => entity.CompanyId == companyId)
+                    .Select(entity => entity.DocumentNumber),
+                cancellationToken);
         normalized.ApplyExchangeRate(
             exchangeRateResult.Value.ExchangeRateId,
             exchangeRateResult.Value.Rate);
@@ -194,20 +193,7 @@ public sealed class PartnerOpeningBalanceService(
                 exchangeRateResult.Error);
         }
 
-        var documentNumberExists = await dbContext.PartnerOpeningBalances.AnyAsync(
-            balance =>
-                balance.CompanyId == companyId &&
-                balance.Id != id &&
-                balance.DocumentNumber == normalized.DocumentNumber,
-            cancellationToken);
-        if (documentNumberExists)
-        {
-            return Result<PartnerOpeningBalanceResponse>.Failure(
-                DocumentNumberExists(normalized.DocumentNumber));
-        }
-
         openingBalance.BusinessPartnerId = normalized.BusinessPartnerId;
-        openingBalance.DocumentNumber = normalized.DocumentNumber;
         openingBalance.DocumentDate = normalized.DocumentDate;
         openingBalance.Currency = normalized.Currency;
         openingBalance.BalanceType = normalized.BalanceType;

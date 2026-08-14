@@ -13,6 +13,12 @@ public sealed class DriverTripCostMappingRegister : IRegister
                 response => response.TripNumber,
                 trip => "TR-" + trip.Id)
             .Map(
+                response => response.BusinessPartnerId,
+                trip => trip.BusinessPartnerId)
+            .Map(
+                response => response.BusinessPartnerName,
+                trip => trip.BusinessPartner.Name)
+            .Map(
                 response => response.DriverName,
                 trip => trip.Driver.Name)
             .Map(response => response.CostNotes, trip => trip.CostNotes);

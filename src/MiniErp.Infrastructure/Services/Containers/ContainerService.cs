@@ -95,14 +95,15 @@ public sealed class ContainerService(
     {
         var container = request.Adapt<Container>();
         container.CompanyId = companyId;
-
-        if (await ActiveCodeExistsAsync(
-                container,
-                excludedId: null,
-                cancellationToken))
-        {
-            return Result<ContainerResponse>.Failure(CodeExists(container.Code));
-        }
+        container.Code = await EntityIdentifierGenerator.GenerateUniqueAsync(
+            dbContext,
+            prefix: "CNT",
+            companyId: companyId,
+            existingIdentifiers: dbContext.Containers
+                .IgnoreQueryFilters()
+                .Where(entity => entity.CompanyId == companyId)
+                .Select(entity => entity.Code),
+            cancellationToken);
 
         dbContext.Containers.Add(container);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -129,18 +130,9 @@ public sealed class ContainerService(
             return Result<ContainerResponse>.Failure(NotFound(id));
         }
 
-        var normalizedContainer = request.Adapt<Container>();
-        normalizedContainer.CompanyId = companyId;
-        if (await ActiveCodeExistsAsync(
-                normalizedContainer,
-                id,
-                cancellationToken))
-        {
-            return Result<ContainerResponse>.Failure(
-                CodeExists(normalizedContainer.Code));
-        }
-
+        var code = container.Code;
         request.Adapt(container);
+        container.Code = code;
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<ContainerResponse>.Success(
@@ -182,19 +174,5 @@ public sealed class ContainerService(
 
         return Result.Success();
     }
-
-    private Task<bool> ActiveCodeExistsAsync(
-        Container container,
-        int? excludedId,
-        CancellationToken cancellationToken) =>
-        container.IsActive
-            ? dbContext.Containers.AsNoTracking().AnyAsync(
-                entity =>
-                    entity.CompanyId == companyId &&
-                    entity.IsActive &&
-                    entity.Code == container.Code &&
-                    (!excludedId.HasValue || entity.Id != excludedId.Value),
-                cancellationToken)
-            : Task.FromResult(false);
 
 }

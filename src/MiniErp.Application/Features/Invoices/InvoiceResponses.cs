@@ -140,7 +140,10 @@ public sealed record InvoiceItemBalanceResponse(
     DateOnly AsOfDate,
     decimal Balance,
     decimal AverageCost,
-    decimal InventoryValue);
+    decimal InventoryValue)
+{
+    public decimal CurrentQuantity => Balance;
+}
 
 public sealed record InvoicePagedResponse(
     IReadOnlyList<InvoiceListResponse> Items,

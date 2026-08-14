@@ -9,9 +9,7 @@ public sealed class InventoryCountMappingRegister : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.ForType<InventoryCountRequest, InventoryCount>()
-            .Map(
-                count => count.DocumentNumber,
-                request => request.DocumentNumber.Trim())
+            .Ignore(count => count.DocumentNumber)
             .Map(
                 count => count.Notes,
                 request => Normalize(request.Notes));

@@ -118,6 +118,15 @@ public sealed class DriverService(
     {
         var driver = request.Adapt<Driver>();
         driver.CompanyId = companyId;
+        driver.Code = await EntityIdentifierGenerator.GenerateUniqueAsync(
+            dbContext,
+            prefix: "DRV",
+            companyId: companyId,
+            existingIdentifiers: dbContext.Drivers
+                .IgnoreQueryFilters()
+                .Where(entity => entity.CompanyId == companyId)
+                .Select(entity => entity.Code),
+            cancellationToken);
 
         var duplicateError = await FindDuplicateAsync(
             driver,
@@ -162,7 +171,9 @@ public sealed class DriverService(
             return Result<DriverResponse>.Failure(duplicateError);
         }
 
+        var code = driver.Code;
         request.Adapt(driver);
+        driver.Code = code;
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<DriverResponse>.Success(driver.Adapt<DriverResponse>());
@@ -231,14 +242,12 @@ public sealed class DriverService(
                 entity.CompanyId == companyId &&
                 (!excludedId.HasValue || entity.Id != excludedId.Value) &&
                 (entity.Name == driver.Name ||
-                 entity.Code == driver.Code ||
                  entity.LicenseNumber == driver.LicenseNumber ||
                  (driver.NationalId != null &&
                   entity.NationalId == driver.NationalId)))
             .Select(entity => new
             {
                 entity.Name,
-                entity.Code,
                 entity.LicenseNumber,
                 entity.NationalId
             })
@@ -250,14 +259,6 @@ public sealed class DriverService(
                 StringComparison.OrdinalIgnoreCase)))
         {
             return NameExists(driver.Name);
-        }
-
-        if (duplicates.Any(entity => string.Equals(
-                entity.Code,
-                driver.Code,
-                StringComparison.OrdinalIgnoreCase)))
-        {
-            return CodeExists(driver.Code);
         }
 
         if (duplicates.Any(entity => string.Equals(

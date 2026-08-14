@@ -12,14 +12,11 @@ public sealed record StockAdjustmentLineRequest(
 
 public sealed record StockAdjustmentRequest(
     int StoreId,
-    string DocumentNumber,
     DateOnly DocumentDate,
     StockAdjustmentDirection Direction,
     string? Reason,
     IReadOnlyList<StockAdjustmentLineRequest> Lines)
 {
-    public const int DocumentNumberMaximumLength = 50;
-
     public const int ReasonMaximumLength = 1_000;
 
     public const int MaximumLineCount = 100;
@@ -27,7 +24,6 @@ public sealed record StockAdjustmentRequest(
 
 public sealed record StockAdjustmentUpdateRequest(
     int StoreId,
-    string DocumentNumber,
     DateOnly DocumentDate,
     StockAdjustmentDirection Direction,
     string? Reason,

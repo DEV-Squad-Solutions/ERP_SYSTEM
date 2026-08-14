@@ -6,11 +6,6 @@ public sealed class StoreRequestValidator : AbstractValidator<StoreRequest>
 {
     public StoreRequestValidator()
     {
-        RuleFor(request => request.Code)
-            .NotEmpty()
-            .Must(code => !string.IsNullOrWhiteSpace(code))
-            .MaximumLength(50);
-
         RuleFor(request => request.Name)
             .NotEmpty()
             .Must(name => !string.IsNullOrWhiteSpace(name))

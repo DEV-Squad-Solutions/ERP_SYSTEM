@@ -538,6 +538,14 @@ internal static class InvoiceValidationRules
     private static void AddWeighbridgeRules(
         AbstractValidator<InvoiceRequest> validator)
     {
+        validator.RuleFor(request => request.WBTotal)
+            .Must(wbTotal =>
+                !wbTotal.HasValue ||
+                InvoiceAmountRules.IsValidQuantity(wbTotal.Value))
+            .WithMessage(
+                "يجب ألا يكون صافي وزن الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBTotal");
+
         validator.RuleFor(request => request.WBWeight)
             .GreaterThanOrEqualTo(0m)
             .PrecisionScale(
@@ -576,16 +584,30 @@ internal static class InvoiceValidationRules
                 "يجب ألا يتجاوز مجموع فرق الميزان وخصم الميزان وزن الميزان.")
             .WithErrorCode("Invoices.InvalidWBTotal");
 
-        validator.RuleFor(request => request.WBWeight)
-            .Must((request, _) => WeighbridgeMatchesItemWeight(
-                request.ContentType,
-                request.Lines,
+        validator.RuleFor(request => request.WBTotal)
+            .Must((request, _) => RequestedWBTotalMatchesCalculatedTotal(
                 request.WBWeight,
                 request.WBScaleDifference,
-                request.WBDiscount))
+                request.WBDiscount,
+                request.WBTotal))
+            .WithMessage(
+                "صافي وزن الميزان المرسل يجب أن يساوي صافي وزن الميزان المحسوب.")
+            .WithErrorCode(
+                "Invoices.WBTotalDoesNotMatchCalculatedTotal");
+
+        validator.RuleFor(request => request.WBTotal)
+            .Must((request, _) => RequestedWBTotalMatchesItemWeight(
+                request.ContentType,
+                request.Lines,
+                request.WBTotal))
             .WithMessage(
                 "صافي وزن الميزان يجب أن يساوي مجموع أوزان الأصناف.")
-            .WithErrorCode("Invoices.WBTotalDoesNotMatchItemWeight");
+            .WithErrorCode("Invoices.WBTotalDoesNotMatchItemWeight")
+            .When(request => RequestedWBTotalMatchesCalculatedTotal(
+                request.WBWeight,
+                request.WBScaleDifference,
+                request.WBDiscount,
+                request.WBTotal));
     }
 
     private static void AddWeighbridgeRules(
@@ -702,8 +724,40 @@ internal static class InvoiceValidationRules
         decimal wbDiscount)
     {
         if (contentType != InvoiceContentType.Items ||
-            lines is null ||
             !InvoiceAmountRules.IsValidQuantity(wbWeight) ||
+            !InvoiceAmountRules.IsValidQuantity(wbScaleDifference) ||
+            !InvoiceAmountRules.IsValidQuantity(wbDiscount) ||
+            wbScaleDifference + wbDiscount > wbWeight ||
+            !TryCalculateTotalItemWeight(
+                contentType,
+                lines,
+                out var totalItemWeight))
+        {
+            return true;
+        }
+
+        var wbTotal = decimal.Round(
+            wbWeight - wbScaleDifference - wbDiscount,
+            InvoiceAmountRules.QuantityScale,
+            MidpointRounding.AwayFromZero);
+
+        return wbTotal == totalItemWeight;
+    }
+
+    private static bool RequestedWBTotalMatchesCalculatedTotal(
+        decimal wbWeight,
+        decimal wbScaleDifference,
+        decimal wbDiscount,
+        decimal? requestedWBTotal)
+    {
+        if (!requestedWBTotal.HasValue ||
+            requestedWBTotal.Value <= 0m ||
+            !InvoiceAmountRules.IsValidQuantity(requestedWBTotal.Value))
+        {
+            return true;
+        }
+
+        if (!InvoiceAmountRules.IsValidQuantity(wbWeight) ||
             !InvoiceAmountRules.IsValidQuantity(wbScaleDifference) ||
             !InvoiceAmountRules.IsValidQuantity(wbDiscount) ||
             wbScaleDifference + wbDiscount > wbWeight)
@@ -711,7 +765,45 @@ internal static class InvoiceValidationRules
             return true;
         }
 
-        var totalItemWeight = 0m;
+        var calculatedWBTotal = decimal.Round(
+            wbWeight - wbScaleDifference - wbDiscount,
+            InvoiceAmountRules.QuantityScale,
+            MidpointRounding.AwayFromZero);
+
+        return requestedWBTotal.Value == calculatedWBTotal;
+    }
+
+    private static bool RequestedWBTotalMatchesItemWeight(
+        InvoiceContentType contentType,
+        IReadOnlyList<InvoiceLineRequest>? lines,
+        decimal? requestedWBTotal)
+    {
+        if (contentType != InvoiceContentType.Items ||
+            !requestedWBTotal.HasValue ||
+            requestedWBTotal.Value <= 0m ||
+            !InvoiceAmountRules.IsValidQuantity(requestedWBTotal.Value) ||
+            !TryCalculateTotalItemWeight(
+                contentType,
+                lines,
+                out var totalItemWeight))
+        {
+            return true;
+        }
+
+        return requestedWBTotal.Value == totalItemWeight;
+    }
+
+    private static bool TryCalculateTotalItemWeight(
+        InvoiceContentType contentType,
+        IReadOnlyList<InvoiceLineRequest>? lines,
+        out decimal totalItemWeight)
+    {
+        totalItemWeight = 0m;
+        if (contentType != InvoiceContentType.Items || lines is null)
+        {
+            return false;
+        }
+
         foreach (var line in lines)
         {
             if (line is null ||
@@ -720,7 +812,7 @@ internal static class InvoiceValidationRules
                     out _,
                     out _))
             {
-                return true;
+                return false;
             }
 
             totalItemWeight +=
@@ -731,16 +823,12 @@ internal static class InvoiceValidationRules
                     : line.Weight!.Value;
         }
 
-        var wbTotal = decimal.Round(
-            wbWeight - wbScaleDifference - wbDiscount,
-            InvoiceAmountRules.QuantityScale,
-            MidpointRounding.AwayFromZero);
         totalItemWeight = decimal.Round(
             totalItemWeight,
             InvoiceAmountRules.QuantityScale,
             MidpointRounding.AwayFromZero);
 
-        return wbTotal == totalItemWeight;
+        return true;
     }
 
     private static void AddPaymentVoucherShapeRules(

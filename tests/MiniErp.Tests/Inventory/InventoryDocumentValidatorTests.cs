@@ -11,7 +11,6 @@ public sealed class InventoryDocumentValidatorTests
     {
         var request = new StockAdjustmentRequest(
             1,
-            "SA-1",
             new DateOnly(2026, 7, 28),
             StockAdjustmentDirection.Increase,
             null,

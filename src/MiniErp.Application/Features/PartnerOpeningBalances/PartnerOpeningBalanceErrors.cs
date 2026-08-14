@@ -42,7 +42,7 @@ public static class PartnerOpeningBalanceErrors
         Error.Conflict(
             "PartnerOpeningBalances.DocumentNumberExists",
             $"رقم المستند '{number}' مستخدم بالفعل.",
-            nameof(PartnerOpeningBalanceRequest.DocumentNumber));
+            "DocumentNumber");
 
     public static Error Concurrency() =>
         Error.Conflict(

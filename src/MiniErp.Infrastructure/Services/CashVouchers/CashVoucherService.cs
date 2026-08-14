@@ -159,9 +159,19 @@ public sealed class CashVoucherService(
 
         var voucher = request.Adapt<CashVoucher>();
         voucher.CompanyId = companyId;
-        voucher.VoucherNumber = GenerateVoucherNumber(
-            request.Direction,
-            request.VoucherDate);
+        var prefix = request.Direction == CashDirection.Receipt
+            ? "RCV"
+            : "PAY";
+        voucher.VoucherNumber = await EntityIdentifierGenerator
+            .GenerateUniqueAsync(
+                dbContext,
+                prefix,
+                companyId,
+                dbContext.CashVouchers
+                    .IgnoreQueryFilters()
+                    .Where(entity => entity.CompanyId == companyId)
+                    .Select(entity => entity.VoucherNumber),
+                cancellationToken);
         voucher.CashMovementTypeId = null;
         voucher.PartyType = CashPartyType.None;
         voucher.InitializeDraft(cashbox.Currency);
@@ -668,17 +678,6 @@ public sealed class CashVoucherService(
             .Select(settings => (CurrencyCode?)settings.BaseCurrency)
             .SingleOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
         voucher.ApplyExchangeRate(exchangeRateId: null, exchangeRate: 1m);
-    }
-
-    private static string GenerateVoucherNumber(
-        CashDirection direction,
-        DateOnly voucherDate)
-    {
-        var prefix = direction == CashDirection.Receipt ? "RCV" : "PAY";
-        var suffix = Guid.NewGuid()
-            .ToString("N")[..8]
-            .ToUpperInvariant();
-        return $"{prefix}-{voucherDate:yyyyMMdd}-{suffix}";
     }
 
     private sealed record VoucherPreparation(

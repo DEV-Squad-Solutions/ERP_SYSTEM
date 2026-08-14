@@ -47,7 +47,8 @@ public sealed record InvoiceRequest(
     decimal PaidAmount,
     string? Notes,
     IReadOnlyList<InvoiceLineRequest> Lines,
-    IReadOnlyList<InvoiceContainerLineRequest> ContainerLines
+    IReadOnlyList<InvoiceContainerLineRequest> ContainerLines,
+    decimal? WBTotal = null
     )
 {
     public const int InvoiceNumberMaximumLength = 100;

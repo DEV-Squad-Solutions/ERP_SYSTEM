@@ -14,7 +14,7 @@ public static class BusinessPartnerErrors
         Error.Conflict(
             "BusinessPartners.CodeExists",
             $"كود العميل أو المورد '{code}' مستخدم بالفعل.",
-            nameof(BusinessPartnerRequest.Code));
+            "Code");
 
     public static Error TaxNumberExists() =>
         Error.Conflict(

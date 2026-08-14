@@ -116,7 +116,7 @@ public sealed class CashVoucherServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.True(result.Value.IsDraft);
-        Assert.StartsWith("RCV-20260801-", result.Value.VoucherNumber);
+        Assert.Matches("^RCV-[0-9]{4,}$", result.Value.VoucherNumber);
         Assert.Equal(1, result.Value.CashboxId);
         Assert.Null(result.Value.CashMovementTypeId);
         Assert.Equal(
@@ -547,7 +547,8 @@ public sealed class CashVoucherServiceTests
         Assert.True(first.IsSuccess);
         Assert.True(second.IsSuccess);
         Assert.NotEqual(first.Value.Id, second.Value.Id);
-        Assert.NotEqual(first.Value.VoucherNumber, second.Value.VoucherNumber);
+        Assert.Equal("RCV-0001", first.Value.VoucherNumber);
+        Assert.Equal("RCV-0002", second.Value.VoucherNumber);
         Assert.Equal(1040m, cashbox.Value.CurrentBalance);
         Assert.Equal(
             2,

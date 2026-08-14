@@ -45,11 +45,6 @@ public sealed class StockAdjustmentRequestValidator
         RuleFor(request => request.StoreId)
             .GreaterThan(0);
 
-        RuleFor(request => request.DocumentNumber)
-            .NotEmpty()
-            .MaximumLength(
-                StockAdjustmentRequest.DocumentNumberMaximumLength);
-
         RuleFor(request => request.DocumentDate)
             .Must(date => date != default)
             .WithMessage("تاريخ المستند مطلوب.");
@@ -105,11 +100,6 @@ public sealed class StockAdjustmentUpdateRequestValidator
     {
         RuleFor(request => request.StoreId)
             .GreaterThan(0);
-
-        RuleFor(request => request.DocumentNumber)
-            .NotEmpty()
-            .MaximumLength(
-                StockAdjustmentRequest.DocumentNumberMaximumLength);
 
         RuleFor(request => request.DocumentDate)
             .Must(date => date != default)

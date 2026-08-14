@@ -5,4 +5,7 @@ public sealed record InventoryCountFilterRequest(
     int? StoreId = null,
     bool? IsReconciled = null,
     DateOnly? FromDate = null,
-    DateOnly? ToDate = null);
+    DateOnly? ToDate = null)
+{
+    public const int DocumentNumberMaximumLength = 50;
+}

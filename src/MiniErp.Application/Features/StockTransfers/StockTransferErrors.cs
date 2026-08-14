@@ -18,7 +18,7 @@ public static class StockTransferErrors
         Error.Conflict(
             "StockTransfers.DocumentNumberExists",
             $"رقم تحويل المخزون '{number}' مستخدم بالفعل.",
-            nameof(StockTransferRequest.DocumentNumber));
+            "DocumentNumber");
 
     public static Error StoresMustDiffer() =>
         Error.Validation(

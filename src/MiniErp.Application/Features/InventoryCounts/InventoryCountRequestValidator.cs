@@ -11,11 +11,6 @@ public sealed class InventoryCountRequestValidator
         RuleFor(request => request.StoreId)
             .GreaterThan(0);
 
-        RuleFor(request => request.DocumentNumber)
-            .NotEmpty()
-            .MaximumLength(
-                InventoryCountRequest.DocumentNumberMaximumLength);
-
         RuleFor(request => request.CountDate)
             .Must(date => date != default)
             .WithMessage("تاريخ الجرد مطلوب.");
