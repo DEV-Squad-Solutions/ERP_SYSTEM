@@ -95,6 +95,15 @@ public static class ApiErrorResponseFactory
             "Server.UnexpectedError",
             ErrorType.Failure.ToString());
 
+    public static ApiErrorResponse DatabaseUnavailable(HttpContext httpContext) =>
+        Create(
+            httpContext,
+            StatusCodes.Status503ServiceUnavailable,
+            "الخدمة غير جاهزة مؤقتاً.",
+            "الاتصال بقاعدة البيانات غير متاح حالياً. يرجى المحاولة مرة أخرى.",
+            "Database.Unavailable",
+            ErrorType.Failure.ToString());
+
     public static ApiErrorResponse FromStatusCode(
         HttpContext httpContext,
         int statusCode)
@@ -240,6 +249,8 @@ public static class ApiErrorResponseFactory
                 "https://tools.ietf.org/html/rfc9110#section-15.6.5",
             StatusCodes.Status500InternalServerError =>
                 "https://tools.ietf.org/html/rfc9110#section-15.6.1",
+            StatusCodes.Status503ServiceUnavailable =>
+                "https://tools.ietf.org/html/rfc9110#section-15.6.4",
             _ => "about:blank"
         };
 }

@@ -151,5 +151,8 @@ public sealed class InventoryCostAllocationConfiguration
                 movement.Id
             })
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasQueryFilter(allocation =>
+            !allocation.Company.IsDeleted);
     }
 }

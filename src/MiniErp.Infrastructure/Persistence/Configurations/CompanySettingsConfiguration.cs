@@ -15,6 +15,7 @@ public sealed class CompanySettingsConfiguration
         builder.Property(settings => settings.BaseCurrency)
             .HasConversion<int>()
             .HasDefaultValue(Domain.Enums.CurrencyCode.EGP)
+            .HasSentinel(Domain.Enums.CurrencyCode.EGP)
             .IsRequired();
 
         builder.Property(settings => settings.StockBalanceCheckMode)

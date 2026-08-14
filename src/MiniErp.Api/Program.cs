@@ -9,6 +9,7 @@ using MiniErp.Api.Exceptions;
 using MiniErp.Api.ModelBinding;
 using MiniErp.Api.Realtime;
 using MiniErp.Api.Swagger;
+using MiniErp.Api.Startup;
 using MiniErp.Api.Validation;
 using MiniErp.Application;
 using MiniErp.Application.Common.Abstractions;
@@ -16,7 +17,6 @@ using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Validation;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
-using MiniErp.Infrastructure.Seeding;
 using SharpGrip.FluentValidation.AutoValidation.Mvc.Extensions;
 
 const string AllowAnyFrontendPolicy = "AllowAnyFrontend";
@@ -55,6 +55,9 @@ builder.Services.AddCors(options =>
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<StartupDatabaseStatus>();
+builder.Services.AddSingleton<StartupDatabaseInitializer>();
+builder.Services.AddHostedService<DatabaseRecoveryService>();
 var hangfireConnectionString = builder.Configuration
     .GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException(
@@ -67,11 +70,13 @@ builder.Services.AddHangfire(configuration => configuration
         hangfireConnectionString,
         new SqlServerStorageOptions
         {
-            PrepareSchemaIfNecessary = true,
+            PrepareSchemaIfNecessary = false,
+            TryAutoDetectSchemaDependentOptions = false,
+            DisableGlobalLocks = true,
             QueuePollInterval = TimeSpan.FromSeconds(15),
             UseRecommendedIsolationLevel = true
         }));
-builder.Services.AddHangfireServer();
+builder.Services.AddHostedService<DeferredHangfireServer>();
 builder.Services.Configure<ApiBehaviorOptions>(options =>
 {
     options.SuppressMapClientErrors = true;
@@ -120,16 +125,6 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-if (app.Configuration.GetValue("Database:ApplyMigrationsOnStartup", true))
-{
-    await app.ApplyPendingMigrationsAsync();
-}
-
-if (app.Configuration.GetValue("Seed:Enabled", false))
-{
-    await DevelopmentDataSeeder.SeedAsync(app.Services, app.Configuration);
-}
-
 app.UseExceptionHandler();
 app.UseStatusCodePages(async context =>
 {
@@ -144,9 +139,30 @@ app.UseSwaggerDocumentation();
 
 app.UseHttpsRedirection();
 app.UseCors(AllowAnyFrontendPolicy);
+app.UseMiddleware<DatabaseReadinessMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<UpdatesHub>("/hubs/updates");
+app.MapGet("/health/live", () => Results.Ok(new { Status = "Live" }))
+    .AllowAnonymous();
+app.MapGet(
+        "/health/ready",
+        (StartupDatabaseStatus status) => DatabaseHealthResult(status))
+    .AllowAnonymous();
+app.MapGet(
+        "/health/database",
+        (StartupDatabaseStatus status) => DatabaseHealthResult(status))
+    .AllowAnonymous();
 
 app.Run();
+
+static IResult DatabaseHealthResult(StartupDatabaseStatus status)
+{
+    var snapshot = status.GetSnapshot();
+    return snapshot.IsReady
+        ? Results.Ok(new { Status = snapshot.State })
+        : Results.Json(
+            new { Status = snapshot.State },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+}
