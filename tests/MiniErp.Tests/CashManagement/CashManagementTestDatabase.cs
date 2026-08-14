@@ -199,7 +199,90 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 CompanyId INTEGER NOT NULL,
                 InvoiceNumber TEXT NOT NULL,
                 PartnerInvoiceNo TEXT NULL,
+                InvoiceType INTEGER NOT NULL DEFAULT 1,
                 ContentType INTEGER NOT NULL DEFAULT 1,
+                IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE TABLE Stores (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                BusinessPartnerId INTEGER NULL,
+                Code TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                Address TEXT NULL,
+                IsContainerStore INTEGER NOT NULL DEFAULT 0,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE TABLE Containers (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                Code TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                Description TEXT NULL,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE TABLE StoreContainers (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                StoreId INTEGER NOT NULL,
+                ContainerId INTEGER NOT NULL,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE TABLE ContainerMovements (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                BusinessPartnerId INTEGER NOT NULL,
+                ContainerStoreId INTEGER NOT NULL,
+                ContainerId INTEGER NOT NULL,
+                InvoiceId INTEGER NOT NULL,
+                InvoiceNumber TEXT NOT NULL,
+                MovementDate TEXT NOT NULL,
+                OutgoingUnits INTEGER NOT NULL,
+                IncomingUnits INTEGER NOT NULL,
+                Description TEXT NULL,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
                 IsDeleted INTEGER NOT NULL
             );
 
@@ -554,11 +637,55 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 (3, 2, 'DRV-3', 'Other Company Driver', 'LIC-3', 1,
                  'test', '2026-01-01', 'test', 0);
 
-            INSERT INTO Invoices (Id, CompanyId, InvoiceNumber, IsDeleted)
+            INSERT INTO Invoices (
+                Id, CompanyId, InvoiceNumber, InvoiceType, IsDeleted)
             VALUES
-                (1, 1, 'INV-1', 0),
-                (2, 1, 'INV-2', 0),
-                (3, 2, 'INV-3', 0);
+                (1, 1, 'INV-1', 1, 0),
+                (2, 1, 'INV-2', 2, 0),
+                (3, 2, 'INV-3', 1, 0);
+
+            INSERT INTO Stores (
+                Id, CompanyId, BusinessPartnerId, Code, Name, Address,
+                IsContainerStore, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 1, 'CSTORE-1', 'Customer One Containers',
+                 'Container yard', 1, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (2, 2, 3, 'CSTORE-OTHER', 'Other Company Containers',
+                 NULL, 1, 1,
+                 'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO Containers (
+                Id, CompanyId, Code, Name, Description, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 'CONT-1', 'Large Crate', 'Large reusable crate', 1,
+                 'test', '2026-01-01', 'test', 0),
+                (2, 1, 'CONT-2', 'Old Crate', 'Historical crate', 0,
+                 'test', '2026-01-01', 'test', 0),
+                (3, 1, 'CONT-3', 'Spare Crate', 'No movements', 1,
+                 'test', '2026-01-01', 'test', 0),
+                (4, 2, 'CONT-4', 'Other Company Crate', NULL, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (5, 1, 'CONT-5', 'Archived Crate',
+                 'Historical assignment without movements', 0,
+                 'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO StoreContainers (
+                Id, CompanyId, StoreId, ContainerId, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 1, 1, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (2, 1, 1, 2, 0,
+                 'test', '2026-01-01', 'test', 0),
+                (3, 1, 1, 3, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (4, 2, 2, 4, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (5, 1, 1, 5, 0,
+                 'test', '2026-01-01', 'test', 0);
 
             INSERT INTO Cashboxes (
                 Id, CompanyId, Code, Name, Currency, OpeningBalance, IsActive,

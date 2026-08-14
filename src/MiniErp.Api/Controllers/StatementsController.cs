@@ -59,4 +59,20 @@ public sealed class StatementsController(
             cancellationToken);
         return this.ToActionResult(result);
     }
+
+    [HttpGet("container-store")]
+    [ProducesResponseType<ContainerStoreStatementResponse>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetContainerStoreStatement(
+        [FromQuery] PaginationRequest pagination,
+        [FromQuery] ContainerStoreStatementFilterRequest filters,
+        CancellationToken cancellationToken)
+    {
+        var result = await statementService.GetContainerStoreStatementAsync(
+            pagination,
+            filters,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
 }

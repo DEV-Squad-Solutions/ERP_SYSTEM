@@ -150,3 +150,74 @@ public sealed record DriverStatementResponse(
     int TotalCount,
     int TotalPages,
     DriverStatementSummaryResponse Summary);
+
+public sealed record ContainerStorePartnerResponse(
+    int Id,
+    string Code,
+    string Name,
+    string? PhoneNumber,
+    string? Email,
+    string? Address,
+    string? TaxNumber,
+    CurrencyCode Currency,
+    bool IsActive);
+
+public sealed record ContainerStoreHeaderResponse(
+    int Id,
+    string Code,
+    string Name,
+    string? Address,
+    bool IsActive);
+
+public sealed record ContainerStoreStatementItemResponse(
+    int MovementId,
+    DateOnly MovementDate,
+    int InvoiceId,
+    string InvoiceNumber,
+    string? PartnerInvoiceNumber,
+    InvoiceType InvoiceType,
+    int ContainerId,
+    string ContainerCode,
+    string ContainerName,
+    string? ContainerDescription,
+    bool IsContainerActive,
+    bool IsCurrentlyAssignedToStore,
+    int OutgoingUnits,
+    int IncomingUnits,
+    int NetUnits,
+    int RunningBalanceUnits,
+    string? MovementDescription,
+    DateTime CreatedOn);
+
+public sealed record ContainerStoreContainerSummaryResponse(
+    int ContainerId,
+    string ContainerCode,
+    string ContainerName,
+    string? ContainerDescription,
+    bool IsContainerActive,
+    bool IsCurrentlyAssignedToStore,
+    int OpeningUnits,
+    int PeriodOutgoingUnits,
+    int PeriodIncomingUnits,
+    int PeriodNetUnits,
+    int ClosingUnits);
+
+public sealed record ContainerStoreStatementSummaryResponse(
+    int OpeningUnits,
+    int TotalOutgoingUnits,
+    int TotalIncomingUnits,
+    int NetUnits,
+    int ClosingUnits,
+    int DistinctContainerCount,
+    int MovementCount);
+
+public sealed record ContainerStoreStatementResponse(
+    ContainerStorePartnerResponse BusinessPartner,
+    ContainerStoreHeaderResponse ContainerStore,
+    IReadOnlyList<ContainerStoreStatementItemResponse> Items,
+    IReadOnlyList<ContainerStoreContainerSummaryResponse> Containers,
+    int PageNumber,
+    int PageSize,
+    int TotalCount,
+    int TotalPages,
+    ContainerStoreStatementSummaryResponse Summary);

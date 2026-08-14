@@ -36,6 +36,22 @@ public sealed record DriverStatementFilterRequest(
     bool? TransactionsWithoutTrip = null,
     bool? HasCost = null);
 
+public sealed record ContainerStoreStatementFilterRequest(
+    int BusinessPartnerId,
+    string? Search = null,
+    DateOnly? FromDate = null,
+    DateOnly? ToDate = null,
+    int? ContainerId = null,
+    InvoiceType? InvoiceType = null,
+    string? InvoiceNumber = null,
+    ContainerMovementDirection? Direction = null);
+
+public enum ContainerMovementDirection
+{
+    Outgoing = 1,
+    Incoming = 2
+}
+
 public enum PartnerStatementSourceType
 {
     OpeningBalance = 1,
