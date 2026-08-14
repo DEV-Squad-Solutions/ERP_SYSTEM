@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using MiniErp.Domain.Entities.Payroll;
 
@@ -17,14 +17,13 @@ public sealed class PayrollEntryConfiguration
             {
                 table.HasCheckConstraint(
                     "CK_PayrollEntries_Amounts_NonNegative",
-                    "[Overtimebydayunit] >= 0 AND " +
-                    "[RequiredWorkingDays] >= 0 AND " +
-                    "([SalaryPerDay] IS NULL OR [SalaryPerDay] >= 0) AND " +
-                    "[CalculatedSalary] >= 0 AND " +
-                    "[TotalCredits] >= 0 AND " +
-                    "[TotalDebits] >= 0 AND " +
+                    "([Overtimebydayunit] IS NULL OR [Overtimebydayunit] >= 0) AND " +
+                    "([RequiredWorkingDays] IS NULL OR [RequiredWorkingDays] >= 0) AND " +
+                    "[Bonus] >= 0 AND " +
+                    "[Deduction] >= 0 AND " +
                     "([GrossSalary] IS NULL OR [GrossSalary] >= 0) AND " +
-                    "([NetSalary] IS NULL OR [NetSalary] >= 0)");
+                    "([NetSalary] IS NULL OR [NetSalary] >= 0) AND " +
+                    "([Deductionbydayunit] IS NULL OR [Deductionbydayunit] >= 0)");
 
                 table.HasCheckConstraint(
                     "CK_PayrollEntries_Dates",
@@ -34,7 +33,7 @@ public sealed class PayrollEntryConfiguration
                     "CK_PayrollEntries_Days",
                     "[PresentDays] >= 0 AND " +
                     "[AbsentDays] >= 0 AND " +
-                    "[WorkedDays] >= 0");
+                    "[WorkedDaysbydayunit] >= 0");
             });
 
         builder.HasKey(entry => entry.Id);
@@ -80,16 +79,18 @@ public sealed class PayrollEntryConfiguration
         builder.Property(entry => entry.AbsentDays)
             .IsRequired();
 
-        builder.Property(entry => entry.WorkedDays)
+        builder.Property(entry => entry.WorkedDaysbydayunit)
+            .HasPrecision(18, 2)
             .IsRequired();
 
         builder.Property(entry => entry.Overtimebydayunit)
-            .HasPrecision(18, 2)
-            .IsRequired();
+            .HasPrecision(18, 2);
+
+        builder.Property(entry => entry.Deductionbydayunit)
+            .HasPrecision(18, 2);
 
         builder.Property(entry => entry.RequiredWorkingDays)
-            .HasPrecision(18, 2)
-            .IsRequired();
+            .HasPrecision(18, 2);
 
         builder.Property(entry => entry.SalaryPerDay)
             .HasPrecision(18, 2);
@@ -98,11 +99,11 @@ public sealed class PayrollEntryConfiguration
             .HasPrecision(18, 2)
             .IsRequired();
 
-        builder.Property(entry => entry.TotalCredits)
+        builder.Property(entry => entry.Bonus)
             .HasPrecision(18, 2)
             .IsRequired();
 
-        builder.Property(entry => entry.TotalDebits)
+        builder.Property(entry => entry.Deduction)
             .HasPrecision(18, 2)
             .IsRequired();
 
@@ -114,6 +115,8 @@ public sealed class PayrollEntryConfiguration
 
         builder.Property(entry => entry.IsTakeSalary)
             .IsRequired();
+
+        builder.Property(entry => entry.CashVoucherId);
 
         builder.HasIndex(entry => new
         {
@@ -138,11 +141,7 @@ public sealed class PayrollEntryConfiguration
             entry.EmployeeType
         });
 
-        builder.HasIndex(entry => new
-        {
-            entry.CompanyId,
-            entry.IsTakeSalary
-        });
+
 
         builder.HasOne(entry => entry.Company)
             .WithMany()
@@ -161,6 +160,21 @@ public sealed class PayrollEntryConfiguration
                 employee.CompanyId,
                 employee.Id
             })
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(entry => entry.CashVoucher)
+            .WithMany()
+            .HasForeignKey(entry => new
+            {
+                entry.CompanyId,
+                entry.CashVoucherId
+            })
+            .HasPrincipalKey(voucher => new
+            {
+                voucher.CompanyId,
+                voucher.Id
+            })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

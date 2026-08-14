@@ -1,11 +1,11 @@
-namespace MiniErp.Application.Features.PayrollEntries
-{
-    public sealed record PayrollEntryFilterRequest(
-        int? CompanyId = null,
-        int? EmployeeId = null,
-        DateOnly? StartDate = null,
-        DateOnly? EndDate = null,
-        string? Search = null);
-   
-}
+using MiniErp.Domain.Enums;
 
+namespace MiniErp.Application.Features.PayrollEntries;
+
+public sealed record PayrollEntryFilterRequest(
+    int? EmployeeId = null,
+    DateOnly? StartDate = null,
+    DateOnly? EndDate = null,
+    bool? IsTakeSalary = null,
+    EmployeeType? EmployeeType = null,
+    string? Search = null);

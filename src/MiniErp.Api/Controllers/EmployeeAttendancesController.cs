@@ -62,6 +62,21 @@ public sealed class EmployeeAttendancesController(
     }
 
     [Authorize(Roles = "Admin")]
+    [HttpPost("bulk")]
+    [ProducesResponseType<List<EmployeeAttendanceResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CreateBulk(
+        BulkEmployeeAttendanceRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await employeeAttendanceService.AddBulkAsync(
+            request,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}")]
     [ProducesResponseType<EmployeeAttendanceResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

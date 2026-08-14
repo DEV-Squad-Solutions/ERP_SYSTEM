@@ -5,7 +5,7 @@ namespace MiniErp.Application.Features.PayrollEntries;
 
 public interface IPayrollEntryService
 {
-    Task<Result<PagedResponse<PayrollEntryResponse>>> GetAllAsync(
+    Task<Result<PagedResponse<PayrollEntriesListResponse>>> GetAllAsync(
         PaginationRequest pagination,
         PayrollEntryFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
@@ -18,10 +18,10 @@ public interface IPayrollEntryService
         PayrollEntryRequest request,
         CancellationToken cancellationToken = default);
 
-    //Task<Result<PayrollEntryResponse>> UpdateAsync(
-    //    int id,
-    //    PayrollEntryRequest request,
-    //    CancellationToken cancellationToken = default);
+    Task<Result<PayrollEntryResponse>> PaySalaryAsync(
+        int id,
+        PayrollEntrySalaryPaymentRequest request,
+        CancellationToken cancellationToken = default);
 
     Task<Result> DeleteAsync(
         int id,

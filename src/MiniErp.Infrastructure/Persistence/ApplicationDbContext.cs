@@ -86,6 +86,10 @@ public sealed class ApplicationDbContext(
 
         builder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
 
+        var isSqlite = Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite";
+        builder.ApplyConfiguration(new Configurations.EmployeeConfiguration(isSqlite));
+        builder.ApplyConfiguration(new Configurations.PayrollPeriodConfiguration(isSqlite));
+
         builder.Entity<ApplicationUser>(entity =>
         {
             entity.Property(user => user.FirstName)

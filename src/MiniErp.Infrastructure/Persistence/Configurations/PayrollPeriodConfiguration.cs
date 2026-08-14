@@ -1,10 +1,10 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using MiniErp.Domain.Entities.Payroll;
 
 namespace MiniErp.Infrastructure.Persistence.Configurations;
 
-public sealed class PayrollPeriodConfiguration
+public sealed class PayrollPeriodConfiguration(bool isSqlite)
     : AuditableEntityConfiguration<PayrollPeriod>
 {
     public override void Configure(
@@ -55,11 +55,20 @@ public sealed class PayrollPeriodConfiguration
             period.Id
         });
 
-        builder.Property(period => period.Code)
-            .HasComputedColumnSql(
-                "N'Roll-' + RIGHT(N'000' + CAST([Id] AS NVARCHAR(10)), 3)",
-                stored: true)
-            .IsUnicode();
+        if (isSqlite)
+        {
+            builder.Property(period => period.Code)
+                .HasComputedColumnSql("'Roll-' || SUBSTR('000' || Id, -3, 3)")
+                .IsUnicode();
+        }
+        else
+        {
+            builder.Property(period => period.Code)
+                .HasComputedColumnSql(
+                    "N'Roll-' + RIGHT(N'000' + CAST([Id] AS NVARCHAR(10)), 3)",
+                    stored: true)
+                .IsUnicode();
+        }
 
         builder.HasIndex(period => new
         {

@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Features.Employees;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Employees;
@@ -99,7 +99,7 @@ namespace MiniErp.Infrastructure.Services.Employees
                     summary.TotalDailyEmployees
                 ));
         }
-        private async Task<(Employee?, IEnumerable<MiniErp.Domain.Entities.Employees.EmployeeAttendance?>)> LoadForWriteAsync(
+        private async Task<(Employee?, IEnumerable<MiniErp.Domain.Entities.Employees.EmployeeAttendance>)> LoadForWriteAsync(
             int id,
             CancellationToken cancellationToken)
         {

@@ -1597,7 +1597,7 @@ public static class DevelopmentDataSeeder
 
         var existingTransactions = await dbContext.EmployeeTransactions
             .IgnoreQueryFilters()
-            .Where(t => t.CompanyId == company.Id && t.Notes.Contains("Seed transaction"))
+            .Where(t => t.CompanyId == company.Id && t.Notes != null && t.Notes.Contains("Seed transaction"))
             .AnyAsync(cancellationToken);
 
         if (existingTransactions) return;

@@ -11,4 +11,14 @@ public sealed record EmployeeTransactionResponse(
     decimal Amount,
     DateOnly TransactionDate,
     string? Notes,
-    bool IsProcessed);
+    decimal RunningBalance,
+    EmployeeTransactionSource SourceType,
+    int? SourceId,
+    int? CashVoucherId);
+
+public sealed record EmployeeAccountBalanceResponse(
+    int EmployeeId,
+    string EmployeeName,
+    decimal TotalCredit,
+    decimal TotalDebit,
+    decimal Balance);

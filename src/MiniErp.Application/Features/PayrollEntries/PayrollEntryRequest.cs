@@ -8,4 +8,6 @@ public sealed record PayrollEntryRequest(
     int EmployeeId,
     decimal Bonus = 0,
     decimal Deduction = 0,
-    decimal Overtimebydayunit = 0);
+    decimal Overtimebydayunit = 0,
+    int? CashboxId = null,
+    int? CashMovementTypeId = null);

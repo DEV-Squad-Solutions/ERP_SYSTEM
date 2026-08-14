@@ -14,7 +14,7 @@ public sealed class PayrollEntriesController(
     : ApiControllerBase
 {
     [HttpGet]
-    [ProducesResponseType<PagedResponse<PayrollEntryResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<PagedResponse<PayrollEntriesListResponse>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
         [FromQuery] PayrollEntryFilterRequest filters,
@@ -34,9 +34,7 @@ public sealed class PayrollEntriesController(
         int id,
         CancellationToken cancellationToken)
     {
-        var result = await payrollEntryService.GetByIdAsync(
-            id,
-            cancellationToken);
+        var result = await payrollEntryService.GetByIdAsync(id, cancellationToken);
         return this.ToActionResult(result);
     }
 
@@ -49,9 +47,7 @@ public sealed class PayrollEntriesController(
         PayrollEntryRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await payrollEntryService.AddAsync(
-            request,
-            cancellationToken);
+        var result = await payrollEntryService.AddAsync(request, cancellationToken);
 
         return result.IsFailure
             ? this.ToProblem(result.Error)
@@ -61,22 +57,22 @@ public sealed class PayrollEntriesController(
                 result.Value);
     }
 
-    //[Authorize(Roles = "Admin")]
-    //[HttpPut("{id:int}")]
-    //[ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status200OK)]
-    //[ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    //[ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    //public async Task<IActionResult> Update(
-    //    int id,
-    //    PayrollEntryRequest request,
-    //    CancellationToken cancellationToken)
-    //{
-    //    var result = await payrollEntryService.UpdateAsync(
-    //        id,
-    //        request,
-    //        cancellationToken);
-    //    return this.ToActionResult(result);
-    //}
+    [Authorize(Roles = "Admin")]
+    [HttpPost("{id:int}/pay")]
+    [ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> PaySalary(
+        int id,
+        PayrollEntrySalaryPaymentRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await payrollEntryService.PaySalaryAsync(
+            id,
+            request,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
 
     [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
@@ -87,9 +83,7 @@ public sealed class PayrollEntriesController(
         int id,
         CancellationToken cancellationToken)
     {
-        var result = await payrollEntryService.DeleteAsync(
-            id,
-            cancellationToken);
+        var result = await payrollEntryService.DeleteAsync(id, cancellationToken);
         return this.ToActionResult(result);
     }
 }

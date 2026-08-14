@@ -18,6 +18,10 @@ public interface IEmployeeAttendanceService
         EmployeeAttendanceRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<Result<List<EmployeeAttendanceResponse>>> AddBulkAsync(
+        BulkEmployeeAttendanceRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<Result<EmployeeAttendanceResponse>> UpdateAsync(
         int id,
         EmployeeAttendanceRequest request,

@@ -1,10 +1,10 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using MiniErp.Domain.Entities.Employees;
 
 namespace MiniErp.Infrastructure.Persistence.Configurations;
 
-public sealed class EmployeeConfiguration
+public sealed class EmployeeConfiguration(bool isSqlite)
     : AuditableEntityConfiguration<Employee>
 {
     public override void Configure(EntityTypeBuilder<Employee> builder)
@@ -45,11 +45,20 @@ public sealed class EmployeeConfiguration
             employee.Id
         });
 
-        builder.Property(employee => employee.Code)
-            .HasComputedColumnSql(
-                "N'Emp-' + RIGHT(N'000' + CAST([Id] AS NVARCHAR(10)), 3)",
-                stored: true)
-            .IsUnicode();
+        if (isSqlite)
+        {
+            builder.Property(employee => employee.Code)
+                .HasComputedColumnSql("'Emp-' || SUBSTR('000' || Id, -3, 3)")
+                .IsUnicode();
+        }
+        else
+        {
+            builder.Property(employee => employee.Code)
+                .HasComputedColumnSql(
+                    "N'Emp-' + RIGHT(N'000' + CAST([Id] AS NVARCHAR(10)), 3)",
+                    stored: true)
+                .IsUnicode();
+        }
 
         builder.HasIndex(employee => new
         {

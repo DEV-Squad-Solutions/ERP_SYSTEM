@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using MiniErp.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using MiniErp.Infrastructure.Persistence;
 namespace MiniErp.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260811175230_updatepayroll1")]
+    partial class updatepayroll1
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1494,9 +1497,6 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
-                    b.Property<int?>("CashVoucherId")
-                        .HasColumnType("int");
-
                     b.Property<int>("CompanyId")
                         .HasColumnType("int");
 
@@ -1530,18 +1530,14 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsProcessed")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
-                    b.Property<decimal>("RunningBalance")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<int?>("SourceId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("SourceType")
+                    b.Property<int?>("PayrollEntryId")
                         .HasColumnType("int");
 
                     b.Property<DateOnly>("TransactionDate")
@@ -1565,15 +1561,12 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
 
                     b.HasAlternateKey("CompanyId", "Id");
 
-                    b.HasIndex("CompanyId", "CashVoucherId")
-                        .HasFilter("[CashVoucherId] IS NOT NULL AND [IsDeleted] = 0");
-
-                    b.HasIndex("CompanyId", "EmployeeId", "Type");
-
-                    b.HasIndex("CompanyId", "SourceType", "SourceId")
-                        .HasFilter("[SourceId] IS NOT NULL AND [IsDeleted] = 0");
+                    b.HasIndex("CompanyId", "PayrollEntryId")
+                        .HasFilter("[PayrollEntryId] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.HasIndex("CompanyId", "EmployeeId", "TransactionDate", "Id");
+
+                    b.HasIndex("CompanyId", "EmployeeId", "Type", "IsProcessed");
 
                     b.ToTable("EmployeeTransactions", null, t =>
                         {
@@ -3370,20 +3363,12 @@ namespace MiniErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("MiniErp.Domain.Entities.CashManagement.CashVoucher", "CashVoucher")
-                        .WithMany()
-                        .HasForeignKey("CompanyId", "CashVoucherId")
-                        .HasPrincipalKey("CompanyId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("MiniErp.Domain.Entities.Employees.Employee", "Employee")
                         .WithMany()
                         .HasForeignKey("CompanyId", "EmployeeId")
                         .HasPrincipalKey("CompanyId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.Navigation("CashVoucher");
 
                     b.Navigation("Company");
 

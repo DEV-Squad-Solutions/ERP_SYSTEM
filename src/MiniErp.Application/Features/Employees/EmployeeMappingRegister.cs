@@ -1,10 +1,14 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+using Mapster;
+using MiniErp.Domain.Entities.Employees;
+using MiniErp.Domain.Enums;
 
-namespace MiniErp.Application.Features.Employees
+namespace MiniErp.Application.Features.Employees;
+
+public sealed class EmployeeMappingRegister : IRegister
 {
-    internal class EmployeeMappingRegister
+    public void Register(TypeAdapterConfig config)
     {
+        config.ForType<Employee, EmployeeListResponse>()
+            .Map(dest => dest.Salary, src => src.Type == EmployeeType.Monthly ? (src.MonthlySalary ?? 0) : (src.DailySalary ?? 0));
     }
 }

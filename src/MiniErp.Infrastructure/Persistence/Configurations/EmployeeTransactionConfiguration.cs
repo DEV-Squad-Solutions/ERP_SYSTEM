@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using MiniErp.Domain.Entities.Employees;
 
@@ -7,8 +7,7 @@ namespace MiniErp.Infrastructure.Persistence.Configurations;
 public sealed class EmployeeTransactionConfiguration
     : AuditableEntityConfiguration<EmployeeTransaction>
 {
-    public override void Configure(
-        EntityTypeBuilder<EmployeeTransaction> builder)
+    public override void Configure(EntityTypeBuilder<EmployeeTransaction> builder)
     {
         base.Configure(builder);
 
@@ -21,83 +20,100 @@ public sealed class EmployeeTransactionConfiguration
                     "[Amount] > 0");
             });
 
-        builder.HasKey(transaction => transaction.Id);
+        builder.HasKey(t => t.Id);
 
-        builder.Property(transaction => transaction.Id)
+        builder.Property(t => t.Id)
             .ValueGeneratedOnAdd();
 
-        builder.Property(transaction => transaction.CompanyId)
+        builder.Property(t => t.CompanyId)
             .IsRequired();
 
-        builder.HasAlternateKey(transaction => new
-        {
-            transaction.CompanyId,
-            transaction.Id
-        });
+        builder.HasAlternateKey(t => new { t.CompanyId, t.Id });
 
-        builder.Property(transaction => transaction.EmployeeId)
+        builder.Property(t => t.EmployeeId)
             .IsRequired();
 
-        builder.Property(transaction => transaction.Type)
+        builder.Property(t => t.Type)
             .HasConversion<int>()
             .IsRequired();
 
-        builder.Property(transaction => transaction.Amount)
+        builder.Property(t => t.Amount)
             .HasPrecision(18, 2)
             .IsRequired();
 
-        builder.Property(transaction => transaction.TransactionDate)
+        builder.Property(t => t.TransactionDate)
             .HasColumnType("date")
             .IsRequired();
 
-        builder.Property(transaction => transaction.IsProcessed)
+        builder.Property(t => t.RunningBalance)
+            .HasPrecision(18, 2)
             .IsRequired();
 
-        builder.Property(transaction => transaction.PayrollEntryId);
+        builder.Property(t => t.SourceType)
+            .HasConversion<int>()
+            .IsRequired();
 
-        builder.Property(transaction => transaction.Notes)
+        builder.Property(t => t.SourceId);
+
+        builder.Property(t => t.CashVoucherId);
+
+        builder.Property(t => t.Notes)
             .HasMaxLength(1000);
 
-        builder.HasIndex(transaction => new
+        // ── Indexes ─────────────────────────────────────────────────────────
+
+        // Statement query: latest entries first per employee
+        builder.HasIndex(t => new
         {
-            transaction.CompanyId,
-            transaction.EmployeeId,
-            transaction.TransactionDate,
-            transaction.Id
+            t.CompanyId,
+            t.EmployeeId,
+            t.TransactionDate,
+            t.Id
         });
 
-        builder.HasIndex(transaction => new
+        // Balance query per type
+        builder.HasIndex(t => new
         {
-            transaction.CompanyId,
-            transaction.EmployeeId,
-            transaction.Type,
-            transaction.IsProcessed
+            t.CompanyId,
+            t.EmployeeId,
+            t.Type
         });
 
-        builder.HasIndex(transaction => new
+        // Source document lookup (e.g., find all entries from a payroll run)
+        builder.HasIndex(t => new
         {
-            transaction.CompanyId,
-            transaction.PayrollEntryId
+            t.CompanyId,
+            t.SourceType,
+            t.SourceId
         })
-            .HasFilter("[PayrollEntryId] IS NOT NULL AND [IsDeleted] = 0");
+            .HasFilter("[SourceId] IS NOT NULL AND [IsDeleted] = 0");
 
-        builder.HasOne(transaction => transaction.Company)
+        // Cash voucher lookup
+        builder.HasIndex(t => new
+        {
+            t.CompanyId,
+            t.CashVoucherId
+        })
+            .HasFilter("[CashVoucherId] IS NOT NULL AND [IsDeleted] = 0");
+
+        // ── Relationships ────────────────────────────────────────────────────
+
+        builder.HasOne(t => t.Company)
             .WithMany()
-            .HasForeignKey(transaction => transaction.CompanyId)
+            .HasForeignKey(t => t.CompanyId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        builder.HasOne(transaction => transaction.Employee)
+        builder.HasOne(t => t.Employee)
             .WithMany()
-            .HasForeignKey(transaction => new
-            {
-                transaction.CompanyId,
-                transaction.EmployeeId
-            })
-            .HasPrincipalKey(employee => new
-            {
-                employee.CompanyId,
-                employee.Id
-            })
+            .HasForeignKey(t => new { t.CompanyId, t.EmployeeId })
+            .HasPrincipalKey(e => new { e.CompanyId, e.Id })
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(t => t.CashVoucher)
+            .WithMany()
+            .HasForeignKey(t => new { t.CompanyId, t.CashVoucherId })
+            .HasPrincipalKey(v => new { v.CompanyId, v.Id })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

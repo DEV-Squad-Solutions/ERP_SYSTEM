@@ -45,7 +45,7 @@ public sealed class EmployeeTransactionsController(
     [ProducesResponseType<EmployeeTransactionResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Create(
-        EmployeeTransactionRequest request,
+        EmployeeAccountEntryRequest request,
         CancellationToken cancellationToken)
     {
         var result = await employeeTransactionService.AddAsync(
@@ -66,7 +66,7 @@ public sealed class EmployeeTransactionsController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Update(
         int id,
-        EmployeeTransactionRequest request,
+        EmployeeAccountEntryRequest request,
         CancellationToken cancellationToken)
     {
         var result = await employeeTransactionService.UpdateAsync(
