@@ -585,34 +585,26 @@ internal static class InvoiceValidationRules
             .WithErrorCode("Invoices.InvalidWBTotal");
 
         validator.RuleFor(request => request.WBTotal)
-            .Must((request, _) => RequestedWBTotalMatchesCalculatedTotal(
-                request.WBWeight,
-                request.WBScaleDifference,
-                request.WBDiscount,
-                request.WBTotal))
-            .WithMessage(
-                "صافي وزن الميزان المرسل يجب أن يساوي صافي وزن الميزان المحسوب.")
-            .WithErrorCode(
-                "Invoices.WBTotalDoesNotMatchCalculatedTotal");
-
-        validator.RuleFor(request => request.WBTotal)
-            .Must((request, _) => RequestedWBTotalMatchesItemWeight(
+            .Must((request, _) => RequestedWBTotalMatchesItemQuantity(
                 request.ContentType,
                 request.Lines,
                 request.WBTotal))
             .WithMessage(
-                "صافي وزن الميزان يجب أن يساوي مجموع أوزان الأصناف.")
-            .WithErrorCode("Invoices.WBTotalDoesNotMatchItemWeight")
-            .When(request => RequestedWBTotalMatchesCalculatedTotal(
-                request.WBWeight,
-                request.WBScaleDifference,
-                request.WBDiscount,
-                request.WBTotal));
+                "صافي وزن الميزان يجب أن يساوي مجموع كميات الأصناف.")
+            .WithErrorCode("Invoices.WBTotalDoesNotMatchItemQuantity");
     }
 
     private static void AddWeighbridgeRules(
         AbstractValidator<InvoiceUpdateRequest> validator)
     {
+        validator.RuleFor(request => request.WBTotal)
+            .Must(wbTotal =>
+                !wbTotal.HasValue ||
+                InvoiceAmountRules.IsValidQuantity(wbTotal.Value))
+            .WithMessage(
+                "يجب ألا يكون صافي وزن الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBTotal");
+
         validator.RuleFor(request => request.WBWeight)
             .GreaterThanOrEqualTo(0m)
             .PrecisionScale(
@@ -651,16 +643,14 @@ internal static class InvoiceValidationRules
                 "يجب ألا يتجاوز مجموع فرق الميزان وخصم الميزان وزن الميزان.")
             .WithErrorCode("Invoices.InvalidWBTotal");
 
-        validator.RuleFor(request => request.WBWeight)
-            .Must((request, _) => WeighbridgeMatchesItemWeight(
+        validator.RuleFor(request => request.WBTotal)
+            .Must((request, _) => RequestedWBTotalMatchesItemQuantity(
                 request.ContentType,
                 request.Lines,
-                request.WBWeight,
-                request.WBScaleDifference,
-                request.WBDiscount))
+                request.WBTotal))
             .WithMessage(
-                "صافي وزن الميزان يجب أن يساوي مجموع أوزان الأصناف.")
-            .WithErrorCode("Invoices.WBTotalDoesNotMatchItemWeight");
+                "صافي وزن الميزان يجب أن يساوي مجموع كميات الأصناف.")
+            .WithErrorCode("Invoices.WBTotalDoesNotMatchItemQuantity");
     }
 
     private static void AddAmountRules(
@@ -716,64 +706,7 @@ internal static class InvoiceValidationRules
             .WithErrorCode("Invoices.CreditInvoiceCannotBeFullyPaid");
     }
 
-    private static bool WeighbridgeMatchesItemWeight(
-        InvoiceContentType contentType,
-        IReadOnlyList<InvoiceLineRequest>? lines,
-        decimal wbWeight,
-        decimal wbScaleDifference,
-        decimal wbDiscount)
-    {
-        if (contentType != InvoiceContentType.Items ||
-            !InvoiceAmountRules.IsValidQuantity(wbWeight) ||
-            !InvoiceAmountRules.IsValidQuantity(wbScaleDifference) ||
-            !InvoiceAmountRules.IsValidQuantity(wbDiscount) ||
-            wbScaleDifference + wbDiscount > wbWeight ||
-            !TryCalculateTotalItemWeight(
-                contentType,
-                lines,
-                out var totalItemWeight))
-        {
-            return true;
-        }
-
-        var wbTotal = decimal.Round(
-            wbWeight - wbScaleDifference - wbDiscount,
-            InvoiceAmountRules.QuantityScale,
-            MidpointRounding.AwayFromZero);
-
-        return wbTotal == totalItemWeight;
-    }
-
-    private static bool RequestedWBTotalMatchesCalculatedTotal(
-        decimal wbWeight,
-        decimal wbScaleDifference,
-        decimal wbDiscount,
-        decimal? requestedWBTotal)
-    {
-        if (!requestedWBTotal.HasValue ||
-            requestedWBTotal.Value <= 0m ||
-            !InvoiceAmountRules.IsValidQuantity(requestedWBTotal.Value))
-        {
-            return true;
-        }
-
-        if (!InvoiceAmountRules.IsValidQuantity(wbWeight) ||
-            !InvoiceAmountRules.IsValidQuantity(wbScaleDifference) ||
-            !InvoiceAmountRules.IsValidQuantity(wbDiscount) ||
-            wbScaleDifference + wbDiscount > wbWeight)
-        {
-            return true;
-        }
-
-        var calculatedWBTotal = decimal.Round(
-            wbWeight - wbScaleDifference - wbDiscount,
-            InvoiceAmountRules.QuantityScale,
-            MidpointRounding.AwayFromZero);
-
-        return requestedWBTotal.Value == calculatedWBTotal;
-    }
-
-    private static bool RequestedWBTotalMatchesItemWeight(
+    private static bool RequestedWBTotalMatchesItemQuantity(
         InvoiceContentType contentType,
         IReadOnlyList<InvoiceLineRequest>? lines,
         decimal? requestedWBTotal)
@@ -782,23 +715,23 @@ internal static class InvoiceValidationRules
             !requestedWBTotal.HasValue ||
             requestedWBTotal.Value <= 0m ||
             !InvoiceAmountRules.IsValidQuantity(requestedWBTotal.Value) ||
-            !TryCalculateTotalItemWeight(
+            !TryCalculateTotalItemQuantity(
                 contentType,
                 lines,
-                out var totalItemWeight))
+                out var totalItemQuantity))
         {
             return true;
         }
 
-        return requestedWBTotal.Value == totalItemWeight;
+        return requestedWBTotal.Value == totalItemQuantity;
     }
 
-    private static bool TryCalculateTotalItemWeight(
+    private static bool TryCalculateTotalItemQuantity(
         InvoiceContentType contentType,
         IReadOnlyList<InvoiceLineRequest>? lines,
-        out decimal totalItemWeight)
+        out decimal totalItemQuantity)
     {
-        totalItemWeight = 0m;
+        totalItemQuantity = 0m;
         if (contentType != InvoiceContentType.Items || lines is null)
         {
             return false;
@@ -809,22 +742,17 @@ internal static class InvoiceValidationRules
             if (line is null ||
                 !InvoiceLineRequestValidator.TryCalculateLine(
                     line,
-                    out _,
+                    out var quantity,
                     out _))
             {
                 return false;
             }
 
-            totalItemWeight +=
-                line.Count.GetValueOrDefault() <= 0 &&
-                line.Weight.GetValueOrDefault() <= 0m &&
-                line.Quantity.HasValue
-                    ? line.Quantity.Value
-                    : line.Weight!.Value;
+            totalItemQuantity += quantity;
         }
 
-        totalItemWeight = decimal.Round(
-            totalItemWeight,
+        totalItemQuantity = decimal.Round(
+            totalItemQuantity,
             InvoiceAmountRules.QuantityScale,
             MidpointRounding.AwayFromZero);
 

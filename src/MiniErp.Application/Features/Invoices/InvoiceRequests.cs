@@ -97,4 +97,5 @@ public sealed record InvoiceUpdateRequest(
     decimal WBWeight = 0m,
     decimal WBScaleDifference = 0m,
     decimal WBDiscount = 0m,
-    int? ItemsCategoryId = null);
+    int? ItemsCategoryId = null,
+    decimal? WBTotal = null);

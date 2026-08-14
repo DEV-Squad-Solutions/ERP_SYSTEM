@@ -651,8 +651,7 @@ public sealed partial class InvoiceService
 
     private static Error? ValidateAmounts(
         Invoice invoice,
-        decimal? requestedWBTotal,
-        bool requireCalculatedWBTotalMatch)
+        decimal? requestedWBTotal)
     {
         if (!InvoiceAmountRules.IsValidQuantity(invoice.WBWeight) ||
             !InvoiceAmountRules.IsValidQuantity(
@@ -670,31 +669,19 @@ public sealed partial class InvoiceService
                 fieldName: nameof(InvoiceRequest.WBTotal));
         }
 
-        var requestedPositiveWBTotal = requestedWBTotal is > 0m;
-        if (requestedPositiveWBTotal &&
-            requestedWBTotal!.Value != invoice.WBTotal)
+        if (invoice.ContentType == InvoiceContentType.Items &&
+            requestedWBTotal is > 0m)
         {
-            return WBTotalDoesNotMatchCalculatedTotal(
-                requestedWBTotal.Value,
-                invoice.WBTotal);
-        }
-
-        if (invoice.ContentType == InvoiceContentType.Items)
-        {
-            var totalItemWeight = decimal.Round(
-                invoice.Lines.Sum(line => line.Weight),
+            var totalItemQuantity = decimal.Round(
+                invoice.Lines.Sum(line => line.Quantity),
                 InvoiceAmountRules.QuantityScale,
                 MidpointRounding.AwayFromZero);
-            if ((requireCalculatedWBTotalMatch ||
-                 requestedPositiveWBTotal) &&
-                invoice.WBTotal != totalItemWeight)
+            if (requestedWBTotal.Value != totalItemQuantity)
             {
-                return WBTotalDoesNotMatchItemWeight(
-                    invoice.WBTotal,
-                    totalItemWeight,
-                    fieldName: requestedPositiveWBTotal
-                        ? nameof(InvoiceRequest.WBTotal)
-                        : nameof(InvoiceRequest.WBWeight));
+                return WBTotalDoesNotMatchItemQuantity(
+                    requestedWBTotal.Value,
+                    totalItemQuantity,
+                    fieldName: nameof(InvoiceRequest.WBTotal));
             }
         }
 
