@@ -19,4 +19,10 @@ public interface IFinancialStatementService
         PaginationRequest pagination,
         DriverStatementFilterRequest filters,
         CancellationToken cancellationToken = default);
+
+    Task<Result<ContainerStoreStatementResponse>>
+        GetContainerStoreStatementAsync(
+            PaginationRequest pagination,
+            ContainerStoreStatementFilterRequest filters,
+            CancellationToken cancellationToken = default);
 }

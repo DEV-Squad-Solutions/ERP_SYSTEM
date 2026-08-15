@@ -18,4 +18,14 @@ public static class StatementErrors
         Error.NotFound(
             "Statements.DriverNotFound",
             $"لم يتم العثور على السائق رقم {id}.");
+
+    public static Error ContainerStorePartnerNotFound(int id) =>
+        Error.NotFound(
+            "Statements.ContainerStorePartnerNotFound",
+            $"لم يتم العثور على عميل مخزن العبوات رقم {id}.");
+
+    public static Error ContainerStoreNotFound(int businessPartnerId) =>
+        Error.NotFound(
+            "Statements.ContainerStoreNotFound",
+            $"لا يوجد مخزن عبوات نشط للعميل رقم {businessPartnerId}.");
 }

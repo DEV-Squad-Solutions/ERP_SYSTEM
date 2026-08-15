@@ -96,3 +96,30 @@ public sealed class DriverStatementFilterRequestValidator
                 "تاريخ النهاية يجب ألا يسبق تاريخ البداية.");
     }
 }
+
+public sealed class ContainerStoreStatementFilterRequestValidator
+    : AbstractValidator<ContainerStoreStatementFilterRequest>
+{
+    public ContainerStoreStatementFilterRequestValidator()
+    {
+        RuleFor(filter => filter.BusinessPartnerId).GreaterThan(0);
+        RuleFor(filter => filter.Search).MaximumLength(256);
+        RuleFor(filter => filter.ContainerId)
+            .GreaterThan(0)
+            .When(filter => filter.ContainerId.HasValue);
+        RuleFor(filter => filter.InvoiceType)
+            .IsInEnum()
+            .When(filter => filter.InvoiceType.HasValue);
+        RuleFor(filter => filter.InvoiceNumber).MaximumLength(100);
+        RuleFor(filter => filter.Direction)
+            .IsInEnum()
+            .When(filter => filter.Direction.HasValue);
+        RuleFor(filter => filter.ToDate)
+            .GreaterThanOrEqualTo(filter => filter.FromDate)
+            .When(filter =>
+                filter.FromDate.HasValue &&
+                filter.ToDate.HasValue)
+            .WithMessage(
+                "تاريخ النهاية يجب ألا يسبق تاريخ البداية.");
+    }
+}

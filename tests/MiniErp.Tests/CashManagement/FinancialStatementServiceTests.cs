@@ -353,6 +353,325 @@ public sealed class FinancialStatementServiceTests
         Assert.Equal(1000m, cashbox.Value.Summary.ClosingBalance);
     }
 
+    [Fact]
+    public async Task ContainerStoreStatementReturnsDetailedBalancesAcrossPages()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await SeedContainerStatementDataAsync(database);
+
+        var result = await database.CreateStatementService(1)
+            .GetContainerStoreStatementAsync(
+                new PaginationRequest
+                {
+                    PageNumber = 2,
+                    PageSize = 2
+                },
+                new ContainerStoreStatementFilterRequest(
+                    BusinessPartnerId: 1,
+                    FromDate: new DateOnly(2026, 7, 10),
+                    ToDate: new DateOnly(2026, 7, 12)));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value.BusinessPartner.Id);
+        Assert.Equal("BP-1", result.Value.BusinessPartner.Code);
+        Assert.Equal("Customer One", result.Value.BusinessPartner.Name);
+        Assert.Equal("01000000000", result.Value.BusinessPartner.PhoneNumber);
+        Assert.Equal("customer@example.com", result.Value.BusinessPartner.Email);
+        Assert.Equal("Customer address", result.Value.BusinessPartner.Address);
+        Assert.Equal("TAX-CUSTOMER", result.Value.BusinessPartner.TaxNumber);
+        Assert.Equal(
+            CurrencyCode.EGP,
+            result.Value.BusinessPartner.Currency);
+        Assert.True(result.Value.BusinessPartner.IsActive);
+
+        Assert.Equal(1, result.Value.ContainerStore.Id);
+        Assert.Equal("CSTORE-1", result.Value.ContainerStore.Code);
+        Assert.Equal(
+            "Customer One Containers",
+            result.Value.ContainerStore.Name);
+        Assert.Equal("Container yard", result.Value.ContainerStore.Address);
+        Assert.True(result.Value.ContainerStore.IsActive);
+
+        Assert.Equal(2, result.Value.PageNumber);
+        Assert.Equal(2, result.Value.PageSize);
+        Assert.Equal(3, result.Value.TotalCount);
+        Assert.Equal(2, result.Value.TotalPages);
+
+        var item = Assert.Single(result.Value.Items);
+        Assert.Equal(4, item.MovementId);
+        Assert.Equal(new DateOnly(2026, 7, 12), item.MovementDate);
+        Assert.Equal(1, item.InvoiceId);
+        Assert.Equal("INV-1", item.InvoiceNumber);
+        Assert.Equal("PARTNER-INV-1", item.PartnerInvoiceNumber);
+        Assert.Equal(InvoiceType.Sales, item.InvoiceType);
+        Assert.Equal(1, item.ContainerId);
+        Assert.Equal("CONT-1", item.ContainerCode);
+        Assert.Equal("Large Crate", item.ContainerName);
+        Assert.Equal("Large reusable crate", item.ContainerDescription);
+        Assert.True(item.IsContainerActive);
+        Assert.True(item.IsCurrentlyAssignedToStore);
+        Assert.Equal(0, item.OutgoingUnits);
+        Assert.Equal(2, item.IncomingUnits);
+        Assert.Equal(-2, item.NetUnits);
+        Assert.Equal(6, item.RunningBalanceUnits);
+        Assert.Equal("Customer return", item.MovementDescription);
+        Assert.Equal(
+            new DateTime(2026, 7, 12, 9, 0, 0, DateTimeKind.Utc),
+            item.CreatedOn.ToUniversalTime());
+
+        Assert.Equal(5, result.Value.Summary.OpeningUnits);
+        Assert.Equal(7, result.Value.Summary.TotalOutgoingUnits);
+        Assert.Equal(2, result.Value.Summary.TotalIncomingUnits);
+        Assert.Equal(5, result.Value.Summary.NetUnits);
+        Assert.Equal(10, result.Value.Summary.ClosingUnits);
+        Assert.Equal(4, result.Value.Summary.DistinctContainerCount);
+        Assert.Equal(3, result.Value.Summary.MovementCount);
+
+        Assert.Collection(
+            result.Value.Containers,
+            first =>
+            {
+                Assert.Equal(1, first.ContainerId);
+                Assert.Equal("CONT-1", first.ContainerCode);
+                Assert.Equal("Large Crate", first.ContainerName);
+                Assert.True(first.IsContainerActive);
+                Assert.True(first.IsCurrentlyAssignedToStore);
+                Assert.Equal(5, first.OpeningUnits);
+                Assert.Equal(3, first.PeriodOutgoingUnits);
+                Assert.Equal(2, first.PeriodIncomingUnits);
+                Assert.Equal(1, first.PeriodNetUnits);
+                Assert.Equal(6, first.ClosingUnits);
+            },
+            second =>
+            {
+                Assert.Equal(2, second.ContainerId);
+                Assert.Equal("CONT-2", second.ContainerCode);
+                Assert.False(second.IsContainerActive);
+                Assert.False(second.IsCurrentlyAssignedToStore);
+                Assert.Equal(4, second.PeriodOutgoingUnits);
+                Assert.Equal(4, second.PeriodNetUnits);
+                Assert.Equal(4, second.ClosingUnits);
+            },
+            third =>
+            {
+                Assert.Equal(3, third.ContainerId);
+                Assert.Equal("CONT-3", third.ContainerCode);
+                Assert.True(third.IsCurrentlyAssignedToStore);
+                Assert.Equal(0, third.OpeningUnits);
+                Assert.Equal(0, third.PeriodOutgoingUnits);
+                Assert.Equal(0, third.PeriodIncomingUnits);
+                Assert.Equal(0, third.ClosingUnits);
+            },
+            fourth =>
+            {
+                Assert.Equal(5, fourth.ContainerId);
+                Assert.Equal("CONT-5", fourth.ContainerCode);
+                Assert.False(fourth.IsContainerActive);
+                Assert.False(fourth.IsCurrentlyAssignedToStore);
+                Assert.Equal(0, fourth.OpeningUnits);
+                Assert.Equal(0, fourth.PeriodOutgoingUnits);
+                Assert.Equal(0, fourth.PeriodIncomingUnits);
+                Assert.Equal(0, fourth.ClosingUnits);
+            });
+    }
+
+    [Fact]
+    public async Task ContainerStoreStatementCombinesAllMovementFilters()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await SeedContainerStatementDataAsync(database);
+
+        var result = await database.CreateStatementService(1)
+            .GetContainerStoreStatementAsync(
+                Page(),
+                new ContainerStoreStatementFilterRequest(
+                    BusinessPartnerId: 1,
+                    Search: "Needle",
+                    FromDate: new DateOnly(2026, 7, 10),
+                    ToDate: new DateOnly(2026, 7, 31),
+                    ContainerId: 1,
+                    InvoiceType: InvoiceType.Sales,
+                    InvoiceNumber: "PARTNER-INV",
+                    Direction: ContainerMovementDirection.Outgoing));
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value.Items);
+        Assert.Equal(2, item.MovementId);
+        Assert.Equal(3, item.OutgoingUnits);
+        Assert.Equal(0, item.IncomingUnits);
+        Assert.Equal(8, item.RunningBalanceUnits);
+        Assert.Equal(1, result.Value.TotalCount);
+        Assert.Equal(3, result.Value.Summary.TotalOutgoingUnits);
+        Assert.Equal(0, result.Value.Summary.TotalIncomingUnits);
+        Assert.Equal(5, result.Value.Summary.OpeningUnits);
+        Assert.Equal(8, result.Value.Summary.ClosingUnits);
+        Assert.Equal(1, result.Value.Summary.DistinctContainerCount);
+    }
+
+    [Fact]
+    public async Task ContainerStoreStatementSummaryOpeningMatchesFilteredContainers()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await SeedContainerStatementDataAsync(database);
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO ContainerMovements (
+                Id, CompanyId, BusinessPartnerId, ContainerStoreId,
+                ContainerId, InvoiceId, InvoiceNumber, MovementDate,
+                OutgoingUnits, IncomingUnits, Description,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                8, 1, 1, 1, 2, 2, 'INV-2', '2026-07-02',
+                11, 0, 'Excluded container opening',
+                'test', '2026-07-02T09:00:00Z', 'test', 0);
+            """);
+        database.Context.ChangeTracker.Clear();
+
+        var result = await database.CreateStatementService(1)
+            .GetContainerStoreStatementAsync(
+                Page(),
+                new ContainerStoreStatementFilterRequest(
+                    BusinessPartnerId: 1,
+                    Search: "Needle",
+                    FromDate: new DateOnly(2026, 7, 10),
+                    ToDate: new DateOnly(2026, 7, 31)));
+
+        Assert.True(result.IsSuccess);
+        var container = Assert.Single(result.Value.Containers);
+        Assert.Equal(1, container.ContainerId);
+        Assert.Equal(5, container.OpeningUnits);
+        Assert.Equal(10, container.PeriodOutgoingUnits);
+        Assert.Equal(15, container.ClosingUnits);
+        Assert.Equal(5, result.Value.Summary.OpeningUnits);
+        Assert.Equal(10, result.Value.Summary.TotalOutgoingUnits);
+        Assert.Equal(0, result.Value.Summary.TotalIncomingUnits);
+        Assert.Equal(15, result.Value.Summary.ClosingUnits);
+        Assert.Equal(1, result.Value.Summary.DistinctContainerCount);
+    }
+
+    [Fact]
+    public async Task ContainerStoreStatementDoesNotLeakOtherCompanyOrMissingStore()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+
+        var otherCompanyPartner = await database.CreateStatementService(1)
+            .GetContainerStoreStatementAsync(
+                Page(),
+                new ContainerStoreStatementFilterRequest(
+                    BusinessPartnerId: 3));
+        var partnerWithoutStore = await database.CreateStatementService(1)
+            .GetContainerStoreStatementAsync(
+                Page(),
+                new ContainerStoreStatementFilterRequest(
+                    BusinessPartnerId: 2));
+
+        Assert.True(otherCompanyPartner.IsFailure);
+        Assert.Equal(
+            "Statements.ContainerStorePartnerNotFound",
+            otherCompanyPartner.Error.Code);
+        Assert.True(partnerWithoutStore.IsFailure);
+        Assert.Equal(
+            "Statements.ContainerStoreNotFound",
+            partnerWithoutStore.Error.Code);
+    }
+
+    [Fact]
+    public void ContainerStoreStatementFilterValidatorRejectsInvalidValues()
+    {
+        var validator = new ContainerStoreStatementFilterRequestValidator();
+        var result = validator.Validate(
+            new ContainerStoreStatementFilterRequest(
+                BusinessPartnerId: 0,
+                Search: new string('x', 257),
+                FromDate: new DateOnly(2026, 8, 2),
+                ToDate: new DateOnly(2026, 8, 1),
+                ContainerId: 0,
+                InvoiceType: (InvoiceType)99,
+                InvoiceNumber: new string('y', 101),
+                Direction: (ContainerMovementDirection)99));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName == "BusinessPartnerId");
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName == "Search");
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName == "ToDate");
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName == "ContainerId");
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName == "InvoiceType");
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName == "InvoiceNumber");
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName == "Direction");
+        Assert.Null(
+            typeof(ContainerStoreStatementFilterRequest)
+                .GetProperty("ContainerStoreId"));
+    }
+
+    private static async Task SeedContainerStatementDataAsync(
+        CashManagementTestDatabase database)
+    {
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE BusinessPartners
+            SET PhoneNumber = '01000000000',
+                Email = 'customer@example.com',
+                Address = 'Customer address',
+                TaxNumber = 'TAX-CUSTOMER'
+            WHERE Id = 1;
+
+            UPDATE Invoices
+            SET PartnerInvoiceNo = 'PARTNER-INV-1'
+            WHERE Id = 1;
+
+            UPDATE Invoices
+            SET PartnerInvoiceNo = 'PARTNER-INV-2'
+            WHERE Id = 2;
+
+            INSERT INTO ContainerMovements (
+                Id, CompanyId, BusinessPartnerId, ContainerStoreId,
+                ContainerId, InvoiceId, InvoiceNumber, MovementDate,
+                OutgoingUnits, IncomingUnits, Description,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 1, 1, 1, 1, 'INV-1', '2026-07-01',
+                 5, 0, 'Opening dispatch',
+                 'test', '2026-07-01T09:00:00Z', 'test', 0),
+                (2, 1, 1, 1, 1, 1, 'INV-1', '2026-07-10',
+                 3, 0, 'Needle outgoing',
+                 'test', '2026-07-10T09:00:00Z', 'test', 0),
+                (3, 1, 1, 1, 2, 2, 'INV-2', '2026-07-11',
+                 4, 0, 'Historical inactive container',
+                 'test', '2026-07-11T09:00:00Z', 'test', 0),
+                (4, 1, 1, 1, 1, 1, 'INV-1', '2026-07-12',
+                 0, 2, 'Customer return',
+                 'test', '2026-07-12T09:00:00Z', 'test', 0),
+                (5, 1, 1, 1, 1, 2, 'INV-2', '2026-07-13',
+                 7, 0, 'Needle purchase movement',
+                 'test', '2026-07-13T09:00:00Z', 'test', 0),
+                (6, 1, 1, 1, 1, 1, 'INV-1', '2026-07-14',
+                 9, 0, 'Needle deleted movement',
+                 'test', '2026-07-14T09:00:00Z', 'test', 1),
+                (7, 2, 3, 2, 4, 3, 'INV-3', '2026-07-10',
+                 99, 0, 'Needle other company',
+                 'test', '2026-07-10T09:00:00Z', 'test', 0);
+            """);
+        database.Context.ChangeTracker.Clear();
+    }
+
     private static PaginationRequest Page() =>
         new()
         {

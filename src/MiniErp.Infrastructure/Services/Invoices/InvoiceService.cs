@@ -89,8 +89,7 @@ public sealed partial class InvoiceService(
             exchangeRateResult.Value.Rate);
         var amountError = ValidateAmounts(
             invoice,
-            requestedWBTotal: request.WBTotal,
-            requireCalculatedWBTotalMatch: false);
+            requestedWBTotal: request.WBTotal);
         if (amountError is not null)
         {
             await transaction.RollbackAsync(cancellationToken);
@@ -251,8 +250,7 @@ public sealed partial class InvoiceService(
             exchangeRateResult.Value.Rate);
         var amountError = ValidateAmounts(
             invoice,
-            requestedWBTotal: null,
-            requireCalculatedWBTotalMatch: true);
+            requestedWBTotal: request.WBTotal);
         if (amountError is not null)
         {
             await transaction.RollbackAsync(cancellationToken);

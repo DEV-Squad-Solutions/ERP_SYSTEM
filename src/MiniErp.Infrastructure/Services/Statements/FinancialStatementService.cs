@@ -9,7 +9,7 @@ using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.Statements;
 
-public sealed class FinancialStatementService(
+public sealed partial class FinancialStatementService(
     ApplicationDbContext dbContext,
     ICurrentCompanyContext currentCompanyContext)
     : IFinancialStatementService, IScopedService
