@@ -7,3 +7,4 @@ client/dist/
 client/.env.local
 client/*.tsbuildinfo
 /client/
+graphify-out
