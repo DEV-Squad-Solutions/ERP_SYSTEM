@@ -91,6 +91,7 @@ namespace MiniErp.Infrastructure.Services.Employees
 
             return Result<EmployeeResponse>.Success(
                 new EmployeeResponse(
+                    employee.Id,
                     employee.Code,
                     employee.Name,
                     employee.JobTitle,
@@ -105,17 +106,17 @@ namespace MiniErp.Infrastructure.Services.Employees
                 ));
         }
 
-        public async Task<Result<EmployeeResponse>> AddAsync(EmployeeRequest request, CancellationToken cancellationToken = default)
+        public async Task<Result<EmployeeResponse>> AddAsync(EmployeeCreateRequest request, CancellationToken cancellationToken = default)
         {
             var validationError = await ValidateAddAsync(request, cancellationToken);
-            if (validationError is not null)
+            if (validationError != null)
             {
                 return Result<EmployeeResponse>.Failure(validationError);
             }
             await using var transaction = await dbContext.Database.BeginTransactionAsync(
                 cancellationToken);
             var employee = new Employee
-            {
+            { //EmployeeType): Daily = 0, Monthly = 1
                 CompanyId = campanyId,
                 Name = request.Name.Trim(),
                 JobTitle = !string.IsNullOrWhiteSpace(request.JobTitle) ? request.JobTitle.Trim() : null,
@@ -123,9 +124,9 @@ namespace MiniErp.Infrastructure.Services.Employees
                 Email = !string.IsNullOrWhiteSpace(request.Email) ? request.Email.Trim() : null,
                 Address = !string.IsNullOrWhiteSpace(request.Address) ? request.Address.Trim() : null,
                 Type = request.Type,
-                DailySalary = request.Type.ToString() == "Daily" ? request.Salary : null,
-                MonthlySalary = request.Type.ToString() == "Monthly" ? request.Salary : null,
-                RequiredWorkingDaysPerMonth = request.RequiredWorkingDaysPerMonth,                
+                DailySalary = (int)request.Type==0 ? request.Salary : null,
+                MonthlySalary = (int)request.Type== 1 ? request.Salary : null,
+                RequiredWorkingDaysPerMonth = (int)request.Type == 1 ? request.RequiredWorkingDaysPerMonth : null,    
                 IsActive = request.IsActive
             };
 
@@ -135,6 +136,7 @@ namespace MiniErp.Infrastructure.Services.Employees
 
             return Result<EmployeeResponse>.Success(
                 new EmployeeResponse(
+                    employee.Id,
                     employee.Code,
                     employee.Name,
                     employee.JobTitle,
@@ -188,6 +190,7 @@ namespace MiniErp.Infrastructure.Services.Employees
 
             return Result<EmployeeResponse>.Success(
                 new EmployeeResponse(
+                    employee.Id,
                     employee.Code,
                     employee.Name,
                     employee.JobTitle,

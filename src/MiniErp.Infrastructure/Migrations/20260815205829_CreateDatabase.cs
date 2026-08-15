@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace MiniErp.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class createdatabase : Migration
+    public partial class CreateDatabase : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -434,7 +434,7 @@ namespace MiniErp.Infrastructure.Migrations
                     table.UniqueConstraint("AK_Employees_CompanyId_Id", x => new { x.CompanyId, x.Id });
                     table.CheckConstraint("CK_Employees_RequiredWorkingDays", "[RequiredWorkingDaysPerMonth] IS NULL OR ([RequiredWorkingDaysPerMonth] >= 1 AND [RequiredWorkingDaysPerMonth] <= 31)");
                     table.CheckConstraint("CK_Employees_Salary_NonNegative", "([DailySalary] IS NULL OR [DailySalary] >= 0) AND ([MonthlySalary] IS NULL OR [MonthlySalary] >= 0)");
-                    table.CheckConstraint("CK_Employees_SalaryType", "([Type] = 1 AND [DailySalary] IS NOT NULL AND [MonthlySalary] IS NULL) OR ([Type] = 2 AND [MonthlySalary] IS NOT NULL AND [DailySalary] IS NULL)");
+                    table.CheckConstraint("CK_Employees_SalaryType", "([Type] = 0 AND [DailySalary] IS NOT NULL AND [MonthlySalary] IS NULL) OR ([Type] = 1 AND [MonthlySalary] IS NOT NULL AND [DailySalary] IS NULL)");
                     table.ForeignKey(
                         name: "FK_Employees_Companies_CompanyId",
                         column: x => x.CompanyId,

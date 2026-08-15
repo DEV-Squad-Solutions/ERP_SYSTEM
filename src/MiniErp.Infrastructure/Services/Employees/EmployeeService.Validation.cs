@@ -47,8 +47,8 @@ namespace MiniErp.Infrastructure.Services.Employees
             return null;
         }
 
-        private async Task<Error?> ValidateAddAsync(EmployeeRequest request, CancellationToken cancellationToken)
-        {            
+        private async Task<Error?> ValidateAddAsync(EmployeeCreateRequest request, CancellationToken cancellationToken)
+        {  
             var PhoneNumberExists = await dbContext.Employees
                 .AnyAsync(e => e.CompanyId == campanyId && e.PhoneNumber == request.PhoneNumber, cancellationToken);
 

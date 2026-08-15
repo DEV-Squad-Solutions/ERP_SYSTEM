@@ -35,6 +35,7 @@ namespace MiniErp.Application.Features.Employees
 
 
     public record EmployeeResponse(
+        int EmployeeId,
         string Code,
         string Name,
         string? JobTitle,

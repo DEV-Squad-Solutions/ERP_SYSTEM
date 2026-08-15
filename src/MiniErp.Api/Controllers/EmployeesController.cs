@@ -13,7 +13,7 @@ public sealed class EmployeesController(
     IEmployeeService employeeService)
     : ApiControllerBase
 {
-    [HttpGet]
+    [HttpGet("GetAll")]
     [ProducesResponseType<EmployeePageResponse>(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] PaginationRequest pagination,
@@ -49,11 +49,11 @@ public sealed class EmployeesController(
     }
 
     [Authorize(Roles = "Admin")]
-    [HttpPost]
+    [HttpPost("Create")]
     [ProducesResponseType<EmployeeResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Create(
-        EmployeeRequest request,
+        EmployeeCreateRequest request,
         CancellationToken cancellationToken)
     {
         var result = await employeeService.AddAsync(

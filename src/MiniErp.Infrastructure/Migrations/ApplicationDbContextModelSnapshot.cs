@@ -1795,7 +1795,7 @@ namespace MiniErp.Infrastructure.Migrations
                         {
                             t.HasCheckConstraint("CK_Employees_RequiredWorkingDays", "[RequiredWorkingDaysPerMonth] IS NULL OR ([RequiredWorkingDaysPerMonth] >= 1 AND [RequiredWorkingDaysPerMonth] <= 31)");
 
-                            t.HasCheckConstraint("CK_Employees_SalaryType", "([Type] = 1 AND [DailySalary] IS NOT NULL AND [MonthlySalary] IS NULL) OR ([Type] = 2 AND [MonthlySalary] IS NOT NULL AND [DailySalary] IS NULL)");
+                            t.HasCheckConstraint("CK_Employees_SalaryType", "([Type] = 0 AND [DailySalary] IS NOT NULL AND [MonthlySalary] IS NULL) OR ([Type] = 1 AND [MonthlySalary] IS NOT NULL AND [DailySalary] IS NULL)");
 
                             t.HasCheckConstraint("CK_Employees_Salary_NonNegative", "([DailySalary] IS NULL OR [DailySalary] >= 0) AND ([MonthlySalary] IS NULL OR [MonthlySalary] >= 0)");
                         });

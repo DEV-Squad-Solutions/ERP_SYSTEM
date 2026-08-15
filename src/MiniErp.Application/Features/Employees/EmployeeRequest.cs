@@ -16,9 +16,20 @@ namespace MiniErp.Application.Features.Employees
         int? RequiredWorkingDaysPerMonth = 26,
         bool IsActive = true
     );
-
+    public record EmployeeCreateRequest(
+        int EmployeesId,
+        string Name,
+        string? JobTitle,
+        string? PhoneNumber,
+        string? Email,
+        string? Address,
+        EmployeeType Type,
+        decimal? Salary,
+        int? RequiredWorkingDaysPerMonth=26,
+        bool IsActive = true
+    );
     public record EmployeeUpdateRequest(
-        string Code,
+        int CompanyId,
         string Name,
         string? JobTitle,
         string? PhoneNumber,

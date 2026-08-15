@@ -18,7 +18,7 @@ namespace MiniErp.Application.Features.Employees
             CancellationToken cancellationToken = default);
 
         Task<Result<EmployeeResponse>> AddAsync(
-            EmployeeRequest request,
+            EmployeeCreateRequest request,
             CancellationToken cancellationToken = default);
 
         Task<Result<EmployeeResponse>> UpdateAsync(

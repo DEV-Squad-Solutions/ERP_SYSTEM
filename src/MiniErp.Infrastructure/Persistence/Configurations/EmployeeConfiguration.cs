@@ -22,8 +22,8 @@ public sealed class EmployeeConfiguration(bool isSqlite)
 
                 table.HasCheckConstraint(
                     "CK_Employees_SalaryType",
-                    "([Type] = 1 AND [DailySalary] IS NOT NULL AND [MonthlySalary] IS NULL) OR " +
-                    "([Type] = 2 AND [MonthlySalary] IS NOT NULL AND [DailySalary] IS NULL)");
+                    "([Type] = 0 AND [DailySalary] IS NOT NULL AND [MonthlySalary] IS NULL) OR " +
+                    "([Type] = 1 AND [MonthlySalary] IS NOT NULL AND [DailySalary] IS NULL)");
 
                 table.HasCheckConstraint(
                     "CK_Employees_RequiredWorkingDays",
