@@ -25,7 +25,7 @@ public sealed class DatabaseRecoveryService(
                     "Database:ApplyMigrationsOnStartup",
                     true);
                 await initializer.InitializeAsync(
-                    applyMigrations: true,
+                    applyMigrations: applyMigrations,
                     seedEnabled: configuration.GetValue("Seed:Enabled", false),
                     canConnectAsync: CanConnectAsync,
                     applyMigrationsAsync: cancellationToken =>
