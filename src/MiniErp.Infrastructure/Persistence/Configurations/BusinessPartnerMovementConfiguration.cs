@@ -69,6 +69,27 @@ public sealed class BusinessPartnerMovementConfiguration
             .HasPrecision(18, 2)
             .IsRequired();
 
+        builder.Property(movement => movement.ExchangeRate)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.RatePrecision,
+                Domain.Entities.Companies.ExchangeRateRules.RateScale)
+            .HasDefaultValue(1m)
+            .IsRequired();
+
+        builder.Property(movement => movement.BaseDebit)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountPrecision,
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
+        builder.Property(movement => movement.BaseCredit)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountPrecision,
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
         builder.Property(movement => movement.Description)
             .HasMaxLength(1_000);
 

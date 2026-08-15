@@ -12,5 +12,9 @@ public sealed record CashVoucherFilterRequest(
     int? BusinessPartnerId = null,
     int? DriverId = null,
     int? DriverTripId = null,
+    bool? IsDraft = null,
     DateOnly? FromDate = null,
-    DateOnly? ToDate = null);
+    DateOnly? ToDate = null)
+{
+    public const int VoucherNumberMaximumLength = 100;
+}

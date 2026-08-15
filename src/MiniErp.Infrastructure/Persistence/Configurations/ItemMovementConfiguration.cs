@@ -22,6 +22,19 @@ public sealed class ItemMovementConfiguration
                     "CK_ItemMovements_ExactlyOneDirection",
                     "([QuantityIn] > 0 AND [QuantityOut] = 0) OR " +
                     "([QuantityIn] = 0 AND [QuantityOut] > 0)");
+                table.HasCheckConstraint(
+                    "CK_ItemMovements_Costs_NonNegative",
+                    "[PendingCostQuantity] >= 0 AND " +
+                    "[TotalCost] >= 0 AND " +
+                    "[AverageCostAfter] >= 0 AND " +
+                    "[InventoryValueAfter] >= 0");
+                table.HasCheckConstraint(
+                    "CK_ItemMovements_NonPositiveState",
+                    "[QuantityAfter] > 0 OR " +
+                    "([AverageCostAfter] = 0 AND [InventoryValueAfter] = 0)");
+                table.HasCheckConstraint(
+                    "CK_ItemMovements_PendingWithinOutbound",
+                    "[PendingCostQuantity] <= [QuantityOut]");
             });
         builder.HasKey(movement => movement.Id);
 
@@ -68,6 +81,45 @@ public sealed class ItemMovementConfiguration
             .HasPrecision(18, 6)
             .IsRequired();
 
+        builder.Property(movement => movement.CostStatus)
+            .HasConversion<int>()
+            .IsRequired();
+
+        builder.Property(movement => movement.PendingCostQuantity)
+            .HasPrecision(
+                InventoryCostRules.QuantityPrecision,
+                InventoryCostRules.QuantityScale)
+            .IsRequired();
+
+        builder.Property(movement => movement.UnitCost)
+            .HasPrecision(
+                InventoryCostRules.UnitCostPrecision,
+                InventoryCostRules.UnitCostScale);
+
+        builder.Property(movement => movement.TotalCost)
+            .HasPrecision(
+                InventoryCostRules.ValuePrecision,
+                InventoryCostRules.ValueScale)
+            .IsRequired();
+
+        builder.Property(movement => movement.QuantityAfter)
+            .HasPrecision(
+                InventoryCostRules.QuantityPrecision,
+                InventoryCostRules.QuantityScale)
+            .IsRequired();
+
+        builder.Property(movement => movement.AverageCostAfter)
+            .HasPrecision(
+                InventoryCostRules.UnitCostPrecision,
+                InventoryCostRules.UnitCostScale)
+            .IsRequired();
+
+        builder.Property(movement => movement.InventoryValueAfter)
+            .HasPrecision(
+                InventoryCostRules.ValuePrecision,
+                InventoryCostRules.ValueScale)
+            .IsRequired();
+
         builder.Property(movement => movement.Description)
             .HasMaxLength(1_000);
 
@@ -77,8 +129,23 @@ public sealed class ItemMovementConfiguration
             movement.StoreId,
             movement.ItemId,
             movement.MovementDate,
+            movement.CreatedOn,
             movement.Id
-        });
+        })
+            .HasFilter("[IsDeleted] = 0");
+
+        builder.HasIndex(movement => new
+        {
+            movement.CompanyId,
+            movement.StoreId,
+            movement.ItemId,
+            movement.CostStatus,
+            movement.MovementDate,
+            movement.CreatedOn,
+            movement.Id
+        })
+            .HasFilter(
+                "[IsDeleted] = 0 AND [CostStatus] IN (2, 3)");
 
         builder.HasIndex(movement => new
         {

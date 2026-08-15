@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -6,9 +7,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Extensions.Options;
 using MiniErp.Application.Common.Authentication;
 using MiniErp.Infrastructure.Identity;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Application.Features.ExchangeRates;
+using MiniErp.Infrastructure.Services.ExchangeRates;
 using MiniErp.Infrastructure.Persistence.Interceptors;
 
 namespace MiniErp.Infrastructure;
@@ -26,6 +30,27 @@ public static class DependencyInjection
         services.AddHttpContextAccessor();
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<AuditableEntityInterceptor>();
+        services.AddOptions<FrankfurterOptions>()
+            .Bind(configuration.GetSection(FrankfurterOptions.SectionName))
+            .Validate(options =>
+                Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var uri) &&
+                uri.Scheme is "http" or "https",
+                "Frankfurter:BaseUrl must be an absolute HTTP or HTTPS URI.")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.Provider),
+                "Frankfurter:Provider is required.")
+            .Validate(options => options.TimeoutSeconds is > 0 and <= 120,
+                "Frankfurter:TimeoutSeconds must be between 1 and 120.")
+            .ValidateOnStart();
+        services.AddHttpClient<IExchangeRateProvider, FrankfurterExchangeRateProvider>(
+            (serviceProvider, client) =>
+            {
+                var options = serviceProvider.GetRequiredService<IOptions<FrankfurterOptions>>().Value;
+                client.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/", UriKind.Absolute);
+                client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+                client.DefaultRequestHeaders.Accept.Clear();
+                client.DefaultRequestHeaders.Accept.Add(
+                    new MediaTypeWithQualityHeaderValue("application/json"));
+            });
 
         services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
             options
@@ -78,6 +103,18 @@ public static class DependencyInjection
                 };
                 options.Events = new JwtBearerEvents
                 {
+                    OnMessageReceived = context =>
+                    {
+                        var accessToken = context.Request.Query["access_token"];
+                        if (!string.IsNullOrEmpty(accessToken) &&
+                            context.HttpContext.Request.Path.StartsWithSegments(
+                                "/hubs/updates"))
+                        {
+                            context.Token = accessToken;
+                        }
+
+                        return Task.CompletedTask;
+                    },
                     OnTokenValidated = async context =>
                     {
                         var tokenUse = context.Principal?

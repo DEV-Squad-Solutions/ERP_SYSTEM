@@ -12,13 +12,37 @@ public sealed record CashboxStatementItemResponse(
     decimal ReceiptAmount,
     decimal PaymentAmount,
     decimal Balance,
-    string? ReferenceNumber);
+    string? ReferenceNumber)
+{
+    public CurrencyCode Currency { get; init; }
+
+    public CurrencyCode BaseCurrency { get; init; }
+
+    public decimal ExchangeRate { get; init; }
+
+    public bool IsBaseCurrency { get; init; }
+
+    public decimal BaseReceiptAmount { get; init; }
+
+    public decimal BasePaymentAmount { get; init; }
+
+    public decimal BaseBalance { get; init; }
+}
 
 public sealed record CashboxStatementSummaryResponse(
     decimal OpeningBalance,
     decimal TotalReceipts,
     decimal TotalPayments,
-    decimal ClosingBalance);
+    decimal ClosingBalance)
+{
+    public decimal BaseOpeningBalance { get; init; }
+
+    public decimal BaseTotalReceipts { get; init; }
+
+    public decimal BaseTotalPayments { get; init; }
+
+    public decimal BaseClosingBalance { get; init; }
+}
 
 public sealed record CashboxStatementResponse(
     int CashboxId,
@@ -29,7 +53,16 @@ public sealed record CashboxStatementResponse(
     int PageSize,
     int TotalCount,
     int TotalPages,
-    CashboxStatementSummaryResponse Summary);
+    CashboxStatementSummaryResponse Summary)
+{
+    public CurrencyCode BaseCurrency { get; init; }
+
+    public DateOnly OpeningBalanceDate { get; init; }
+
+    public decimal OpeningExchangeRate { get; init; }
+
+    public bool IsBaseCurrency { get; init; }
+}
 
 public sealed record PartnerStatementItemResponse(
     DateOnly Date,
@@ -40,13 +73,27 @@ public sealed record PartnerStatementItemResponse(
     decimal CreditAmount,
     decimal BalanceAmount,
     string BalanceDescription,
-    string? ReferenceNumber);
+    string? ReferenceNumber)
+{
+    public decimal ExchangeRate { get; init; }
+
+    public decimal BaseDebitAmount { get; init; }
+
+    public decimal BaseCreditAmount { get; init; }
+
+    public decimal BaseBalanceAmount { get; init; }
+}
 
 public sealed record PartnerStatementSummaryResponse(
     decimal OpeningBalanceAmount,
     string OpeningBalanceDescription,
     decimal ClosingBalanceAmount,
-    string ClosingBalanceDescription);
+    string ClosingBalanceDescription)
+{
+    public decimal BaseOpeningBalanceAmount { get; init; }
+
+    public decimal BaseClosingBalanceAmount { get; init; }
+}
 
 public sealed record PartnerStatementResponse(
     int BusinessPartnerId,
@@ -57,7 +104,10 @@ public sealed record PartnerStatementResponse(
     int PageSize,
     int TotalCount,
     int TotalPages,
-    PartnerStatementSummaryResponse Summary);
+    PartnerStatementSummaryResponse Summary)
+{
+    public CurrencyCode BaseCurrency { get; init; }
+}
 
 public sealed record DriverStatementItemResponse(
     int SourceId,
@@ -75,7 +125,12 @@ public sealed record DriverStatementItemResponse(
     decimal BalanceAmount,
     string BalanceDescription,
     string? CashboxName,
-    string? ReferenceNumber);
+    string? ReferenceNumber)
+{
+    public int? BusinessPartnerId { get; init; }
+
+    public string? BusinessPartnerName { get; init; }
+}
 
 public sealed record DriverStatementSummaryResponse(
     decimal OpeningBalanceAmount,
@@ -95,3 +150,74 @@ public sealed record DriverStatementResponse(
     int TotalCount,
     int TotalPages,
     DriverStatementSummaryResponse Summary);
+
+public sealed record ContainerStorePartnerResponse(
+    int Id,
+    string Code,
+    string Name,
+    string? PhoneNumber,
+    string? Email,
+    string? Address,
+    string? TaxNumber,
+    CurrencyCode Currency,
+    bool IsActive);
+
+public sealed record ContainerStoreHeaderResponse(
+    int Id,
+    string Code,
+    string Name,
+    string? Address,
+    bool IsActive);
+
+public sealed record ContainerStoreStatementItemResponse(
+    int MovementId,
+    DateOnly MovementDate,
+    int InvoiceId,
+    string InvoiceNumber,
+    string? PartnerInvoiceNumber,
+    InvoiceType InvoiceType,
+    int ContainerId,
+    string ContainerCode,
+    string ContainerName,
+    string? ContainerDescription,
+    bool IsContainerActive,
+    bool IsCurrentlyAssignedToStore,
+    int OutgoingUnits,
+    int IncomingUnits,
+    int NetUnits,
+    int RunningBalanceUnits,
+    string? MovementDescription,
+    DateTime CreatedOn);
+
+public sealed record ContainerStoreContainerSummaryResponse(
+    int ContainerId,
+    string ContainerCode,
+    string ContainerName,
+    string? ContainerDescription,
+    bool IsContainerActive,
+    bool IsCurrentlyAssignedToStore,
+    int OpeningUnits,
+    int PeriodOutgoingUnits,
+    int PeriodIncomingUnits,
+    int PeriodNetUnits,
+    int ClosingUnits);
+
+public sealed record ContainerStoreStatementSummaryResponse(
+    int OpeningUnits,
+    int TotalOutgoingUnits,
+    int TotalIncomingUnits,
+    int NetUnits,
+    int ClosingUnits,
+    int DistinctContainerCount,
+    int MovementCount);
+
+public sealed record ContainerStoreStatementResponse(
+    ContainerStorePartnerResponse BusinessPartner,
+    ContainerStoreHeaderResponse ContainerStore,
+    IReadOnlyList<ContainerStoreStatementItemResponse> Items,
+    IReadOnlyList<ContainerStoreContainerSummaryResponse> Containers,
+    int PageNumber,
+    int PageSize,
+    int TotalCount,
+    int TotalPages,
+    ContainerStoreStatementSummaryResponse Summary);

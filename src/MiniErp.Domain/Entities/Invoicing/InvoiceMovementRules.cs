@@ -31,21 +31,33 @@ public static class InvoiceMovementRules
             _ => throw new ArgumentOutOfRangeException(nameof(invoiceType))
         };
 
-    public static bool ShouldCreatePartnerMovement(decimal remainingAmount) =>
-        remainingAmount > 0m;
+    public static bool ShouldCreatePartnerMovement(decimal total) =>
+        total > 0m;
 
     public static (decimal Debit, decimal Credit) GetPartnerAmounts(
         InvoiceType invoiceType,
-        decimal remainingAmount)
+        decimal total)
     {
-        if (remainingAmount < 0m)
+        if (total < 0m)
         {
-            throw new ArgumentOutOfRangeException(nameof(remainingAmount));
+            throw new ArgumentOutOfRangeException(nameof(total));
         }
 
         return invoiceType is
             InvoiceType.Sales or InvoiceType.PurchaseReturn
-            ? (remainingAmount, 0m)
-            : (0m, remainingAmount);
+            ? (total, 0m)
+            : (0m, total);
     }
+
+    public static CashDirection GetPaymentDirection(
+        InvoiceType invoiceType) =>
+        invoiceType is InvoiceType.Sales or InvoiceType.PurchaseReturn
+            ? CashDirection.Receipt
+            : CashDirection.Payment;
+
+    public static PartnerAccountEffect GetPaymentPartnerEffect(
+        InvoiceType invoiceType) =>
+        GetPaymentDirection(invoiceType) == CashDirection.Receipt
+            ? PartnerAccountEffect.Credit
+            : PartnerAccountEffect.Debit;
 }

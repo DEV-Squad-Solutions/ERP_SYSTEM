@@ -1,5 +1,8 @@
 using FluentValidation;
+using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.Invoices;
 
@@ -8,18 +11,37 @@ public sealed class InvoiceLineRequestValidator
 {
     public InvoiceLineRequestValidator()
     {
+        RuleFor(line => line)
+            .Must(line => line.ItemId.HasValue || !string.IsNullOrWhiteSpace(line.ItemName))
+            .WithMessage("يجب تحديد صنف من الكتالوج أو إدخال اسم صنف نصي.");
+
         RuleFor(line => line.ItemId)
-            .GreaterThan(0);
+            .GreaterThan(0)
+            .When(line => line.ItemId.HasValue);
+
+        RuleFor(line => line.ItemName)
+            .MaximumLength(200)
+            .When(line => !string.IsNullOrWhiteSpace(line.ItemName));
 
         RuleFor(line => line.Count)
-            .GreaterThan(0);
+            .GreaterThan(0)
+            .When(line => line.Count.HasValue);
 
         RuleFor(line => line.Weight)
             .GreaterThan(0)
             .PrecisionScale(
                 InvoiceAmountRules.QuantityPrecision,
                 InvoiceAmountRules.QuantityScale,
-                ignoreTrailingZeros: true);
+                ignoreTrailingZeros: true)
+            .When(line => line.Weight.HasValue);
+
+        RuleFor(line => line.Quantity)
+            .GreaterThan(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .When(line => line.Quantity.HasValue);
 
         RuleFor(line => line.Price)
             .GreaterThanOrEqualTo(0)
@@ -28,11 +50,21 @@ public sealed class InvoiceLineRequestValidator
                 InvoiceAmountRules.MoneyScale,
                 ignoreTrailingZeros: true);
 
+        RuleFor(line => line.SourceInvoiceLineId)
+            .GreaterThan(0)
+            .When(line => line.SourceInvoiceLineId.HasValue);
+
+        RuleFor(line => line.ReturnUnitCost)
+            .GreaterThanOrEqualTo(0m)
+            .When(line => line.ReturnUnitCost.HasValue)
+            .PrecisionScale(
+                InventoryCostRules.UnitCostPrecision,
+                InventoryCostRules.UnitCostScale,
+                ignoreTrailingZeros: true);
+
         RuleFor(line => line)
-            .Must(line => InvoiceAmountRules.TryCalculate(
-                line.Count,
-                line.Weight,
-                line.Price,
+            .Must(line => InvoiceLineRequestValidator.TryCalculateLine(
+                line,
                 out _,
                 out _))
             .WithMessage(
@@ -40,6 +72,55 @@ public sealed class InvoiceLineRequestValidator
 
         RuleFor(line => line.Notes)
             .MaximumLength(InvoiceRequest.NotesMaximumLength);
+    }
+
+    internal static bool TryCalculateLine(
+        InvoiceLineRequest line,
+        out decimal quantity,
+        out decimal total)
+    {
+        var count = line.Count.GetValueOrDefault();
+        var weight = line.Weight.GetValueOrDefault();
+
+        if (count <= 0 && weight <= 0m && line.Quantity.HasValue)
+        {
+            quantity = line.Quantity.Value;
+            if (!InvoiceAmountRules.IsValidQuantity(quantity) ||
+                line.Price < 0m)
+            {
+                total = 0m;
+                return false;
+            }
+
+            try
+            {
+                total = decimal.Round(
+                    quantity * line.Price,
+                    InvoiceAmountRules.MoneyScale,
+                    MidpointRounding.AwayFromZero);
+            }
+            catch (OverflowException)
+            {
+                total = 0m;
+                return false;
+            }
+
+            return InvoiceAmountRules.IsValidMoney(total);
+        }
+
+        if (!line.Count.HasValue || !line.Weight.HasValue)
+        {
+            quantity = 0m;
+            total = 0m;
+            return false;
+        }
+
+        return InvoiceAmountRules.TryCalculate(
+            line.Count.Value,
+            line.Weight.Value,
+            line.Price,
+            out quantity,
+            out total);
     }
 }
 
@@ -71,6 +152,18 @@ public sealed class InvoiceRequestValidator
     public InvoiceRequestValidator()
     {
         InvoiceValidationRules.AddCreateRules(this);
+
+        RuleFor(request => request.ExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف الفاتورة أكبر من صفر.");
+
+        RuleFor(request => request.CashboxExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف صندوق النقدية أكبر من صفر.");
     }
 }
 
@@ -80,6 +173,18 @@ public sealed class InvoiceUpdateRequestValidator
     public InvoiceUpdateRequestValidator()
     {
         InvoiceValidationRules.AddUpdateRules(this);
+
+        RuleFor(request => request.ExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف الفاتورة أكبر من صفر.");
+
+        RuleFor(request => request.CashboxExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف صندوق النقدية أكبر من صفر.");
 
         RuleFor(request => request.RowVersion)
             .NotNull()
@@ -107,6 +212,9 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.InvoiceType)
             .IsInEnum();
 
+        validator.RuleFor(request => request.ContentType)
+            .IsInEnum();
+
         validator.RuleFor(request => request.PaymentTerm)
             .IsInEnum();
 
@@ -123,6 +231,10 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.CountryId)
             .GreaterThan(0)
             .When(request => request.CountryId.HasValue);
+
+        validator.RuleFor(request => request.ItemsCategoryId)
+            .GreaterThan(0)
+            .When(request => request.ItemsCategoryId.HasValue);
 
         validator.RuleFor(request => request.ContainerStoreId)
             .GreaterThan(0)
@@ -155,6 +267,11 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.ExportInvoiceCode)
             .MaximumLength(InvoiceRequest.ExportInvoiceCodeMaximumLength);
 
+        validator.RuleFor(request => request.PartnerInvoiceNo)
+            .MaximumLength(InvoiceRequest.PartnerInvoiceNoMaximumLength);
+
+        AddPaymentVoucherShapeRules(validator);
+
         validator.RuleFor(request => request.Notes)
             .MaximumLength(InvoiceRequest.NotesMaximumLength);
 
@@ -172,11 +289,13 @@ internal static class InvoiceValidationRules
                 InvoiceAmountRules.MoneyScale,
                 ignoreTrailingZeros: true);
 
+        AddWeighbridgeRules(validator);
         AddAmountRules(validator);
 
         validator.RuleFor(request => request.Lines)
             .NotNull()
             .NotEmpty()
+            .When(request => request.ContentType == InvoiceContentType.Items)
             .Must(lines => lines is not null &&
                 lines.Count <= InvoiceRequest.MaximumLineCount)
             .WithMessage(
@@ -186,11 +305,16 @@ internal static class InvoiceValidationRules
             .WithMessage("كل سطر في الفاتورة مطلوب.")
             .Must(lines => lines is not null &&
                 lines.All(line => line is not null) &&
-                lines.Select(line => line.ItemId).Distinct().Count() == lines.Count)
+                lines.Where(line => line.ItemId.HasValue)
+                    .Select(line => line.ItemId)
+                    .Distinct().Count() ==
+                lines.Count(line => line.ItemId.HasValue))
             .WithMessage("لا يجوز تكرار الصنف في سطور الفاتورة.");
 
         validator.RuleFor(request => request.ContainerLines)
             .NotNull()
+            .NotEmpty()
+            .When(request => request.ContentType == InvoiceContentType.Containers)
             .Must(lines => lines is not null &&
                 lines.Count <= InvoiceRequest.MaximumContainerLineCount)
             .WithMessage(
@@ -226,6 +350,9 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.InvoiceType)
             .IsInEnum();
 
+        validator.RuleFor(request => request.ContentType)
+            .IsInEnum();
+
         validator.RuleFor(request => request.PaymentTerm)
             .IsInEnum();
 
@@ -242,6 +369,10 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.CountryId)
             .GreaterThan(0)
             .When(request => request.CountryId.HasValue);
+
+        validator.RuleFor(request => request.ItemsCategoryId)
+            .GreaterThan(0)
+            .When(request => request.ItemsCategoryId.HasValue);
 
         validator.RuleFor(request => request.ContainerStoreId)
             .GreaterThan(0)
@@ -274,6 +405,11 @@ internal static class InvoiceValidationRules
         validator.RuleFor(request => request.ExportInvoiceCode)
             .MaximumLength(InvoiceRequest.ExportInvoiceCodeMaximumLength);
 
+        validator.RuleFor(request => request.PartnerInvoiceNo)
+            .MaximumLength(InvoiceRequest.PartnerInvoiceNoMaximumLength);
+
+        AddPaymentVoucherShapeRules(validator);
+
         validator.RuleFor(request => request.Notes)
             .MaximumLength(InvoiceRequest.NotesMaximumLength);
 
@@ -291,11 +427,13 @@ internal static class InvoiceValidationRules
                 InvoiceAmountRules.MoneyScale,
                 ignoreTrailingZeros: true);
 
+        AddWeighbridgeRules(validator);
         AddAmountRules(validator);
 
         validator.RuleFor(request => request.Lines)
             .NotNull()
             .NotEmpty()
+            .When(request => request.ContentType == InvoiceContentType.Items)
             .Must(lines => lines is not null &&
                 lines.Count <= InvoiceRequest.MaximumLineCount)
             .WithMessage(
@@ -305,11 +443,16 @@ internal static class InvoiceValidationRules
             .WithMessage("كل سطر في الفاتورة مطلوب.")
             .Must(lines => lines is not null &&
                 lines.All(line => line is not null) &&
-                lines.Select(line => line.ItemId).Distinct().Count() == lines.Count)
+                lines.Where(line => line.ItemId.HasValue)
+                    .Select(line => line.ItemId)
+                    .Distinct().Count() ==
+                lines.Count(line => line.ItemId.HasValue))
             .WithMessage("لا يجوز تكرار الصنف في سطور الفاتورة.");
 
         validator.RuleFor(request => request.ContainerLines)
             .NotNull()
+            .NotEmpty()
+            .When(request => request.ContentType == InvoiceContentType.Containers)
             .Must(lines => lines is not null &&
                 lines.Count <= InvoiceRequest.MaximumContainerLineCount)
             .WithMessage(
@@ -365,6 +508,149 @@ internal static class InvoiceValidationRules
             .WithMessage(
                 "المبلغ المدفوع يجب ألا يكون سالبًا ولا يمكن أن يتجاوز صافي الفاتورة.")
             .WithErrorCode("Invoices.InvalidPaidAmount");
+
+        validator.RuleFor(request => request.PaidAmount)
+            .Must((request, paidAmount) =>
+                !TryCalculateNetTotal(
+                    request.Lines,
+                    request.DiscountAmount,
+                    out _,
+                    out var total) ||
+                request.PaymentTerm != PaymentTerm.Cash ||
+                paidAmount == total)
+            .WithMessage("الفاتورة النقدية يجب أن تكون مدفوعة بالكامل.")
+            .WithErrorCode("Invoices.CashInvoiceMustBeFullyPaid");
+
+        validator.RuleFor(request => request.PaidAmount)
+            .Must((request, paidAmount) =>
+                !TryCalculateNetTotal(
+                    request.Lines,
+                    request.DiscountAmount,
+                    out _,
+                    out var total) ||
+                request.PaymentTerm != PaymentTerm.Credit ||
+                total <= 0m ||
+                paidAmount < total)
+            .WithMessage("الفاتورة الآجلة لا تقبل السداد الكامل؛ استخدم الفاتورة النقدية.")
+            .WithErrorCode("Invoices.CreditInvoiceCannotBeFullyPaid");
+    }
+
+    private static void AddWeighbridgeRules(
+        AbstractValidator<InvoiceRequest> validator)
+    {
+        validator.RuleFor(request => request.WBTotal)
+            .Must(wbTotal =>
+                !wbTotal.HasValue ||
+                InvoiceAmountRules.IsValidQuantity(wbTotal.Value))
+            .WithMessage(
+                "يجب ألا يكون صافي وزن الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBTotal");
+
+        validator.RuleFor(request => request.WBWeight)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .WithMessage(
+                "يجب ألا يكون وزن الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBWeight");
+
+        validator.RuleFor(request => request.WBScaleDifference)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .WithMessage(
+                "يجب ألا يكون فرق الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBScaleDifference");
+
+        validator.RuleFor(request => request.WBDiscount)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .WithMessage(
+                "يجب ألا يكون خصم الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBDiscount");
+
+        validator.RuleFor(request => request)
+            .Must(request =>
+                request.WBScaleDifference + request.WBDiscount <=
+                request.WBWeight)
+            .WithMessage(
+                "يجب ألا يتجاوز مجموع فرق الميزان وخصم الميزان وزن الميزان.")
+            .WithErrorCode("Invoices.InvalidWBTotal");
+
+        validator.RuleFor(request => request.WBTotal)
+            .Must((request, _) => RequestedWBTotalMatchesItemQuantity(
+                request.ContentType,
+                request.Lines,
+                request.WBTotal))
+            .WithMessage(
+                "صافي وزن الميزان يجب أن يساوي مجموع كميات الأصناف.")
+            .WithErrorCode("Invoices.WBTotalDoesNotMatchItemQuantity");
+    }
+
+    private static void AddWeighbridgeRules(
+        AbstractValidator<InvoiceUpdateRequest> validator)
+    {
+        validator.RuleFor(request => request.WBTotal)
+            .Must(wbTotal =>
+                !wbTotal.HasValue ||
+                InvoiceAmountRules.IsValidQuantity(wbTotal.Value))
+            .WithMessage(
+                "يجب ألا يكون صافي وزن الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBTotal");
+
+        validator.RuleFor(request => request.WBWeight)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .WithMessage(
+                "يجب ألا يكون وزن الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBWeight");
+
+        validator.RuleFor(request => request.WBScaleDifference)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .WithMessage(
+                "يجب ألا يكون فرق الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBScaleDifference");
+
+        validator.RuleFor(request => request.WBDiscount)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(
+                InvoiceAmountRules.QuantityPrecision,
+                InvoiceAmountRules.QuantityScale,
+                ignoreTrailingZeros: true)
+            .WithMessage(
+                "يجب ألا يكون خصم الميزان سالبًا وألا يتجاوز الدقة المسموح بها.")
+            .WithErrorCode("Invoices.InvalidWBDiscount");
+
+        validator.RuleFor(request => request)
+            .Must(request =>
+                request.WBScaleDifference + request.WBDiscount <=
+                request.WBWeight)
+            .WithMessage(
+                "يجب ألا يتجاوز مجموع فرق الميزان وخصم الميزان وزن الميزان.")
+            .WithErrorCode("Invoices.InvalidWBTotal");
+
+        validator.RuleFor(request => request.WBTotal)
+            .Must((request, _) => RequestedWBTotalMatchesItemQuantity(
+                request.ContentType,
+                request.Lines,
+                request.WBTotal))
+            .WithMessage(
+                "صافي وزن الميزان يجب أن يساوي مجموع كميات الأصناف.")
+            .WithErrorCode("Invoices.WBTotalDoesNotMatchItemQuantity");
     }
 
     private static void AddAmountRules(
@@ -393,6 +679,126 @@ internal static class InvoiceValidationRules
             .WithMessage(
                 "المبلغ المدفوع يجب ألا يكون سالبًا ولا يمكن أن يتجاوز صافي الفاتورة.")
             .WithErrorCode("Invoices.InvalidPaidAmount");
+
+        validator.RuleFor(request => request.PaidAmount)
+            .Must((request, paidAmount) =>
+                !TryCalculateNetTotal(
+                    request.Lines,
+                    request.DiscountAmount,
+                    out _,
+                    out var total) ||
+                request.PaymentTerm != PaymentTerm.Cash ||
+                paidAmount == total)
+            .WithMessage("الفاتورة النقدية يجب أن تكون مدفوعة بالكامل.")
+            .WithErrorCode("Invoices.CashInvoiceMustBeFullyPaid");
+
+        validator.RuleFor(request => request.PaidAmount)
+            .Must((request, paidAmount) =>
+                !TryCalculateNetTotal(
+                    request.Lines,
+                    request.DiscountAmount,
+                    out _,
+                    out var total) ||
+                request.PaymentTerm != PaymentTerm.Credit ||
+                total <= 0m ||
+                paidAmount < total)
+            .WithMessage("الفاتورة الآجلة لا تقبل السداد الكامل؛ استخدم الفاتورة النقدية.")
+            .WithErrorCode("Invoices.CreditInvoiceCannotBeFullyPaid");
+    }
+
+    private static bool RequestedWBTotalMatchesItemQuantity(
+        InvoiceContentType contentType,
+        IReadOnlyList<InvoiceLineRequest>? lines,
+        decimal? requestedWBTotal)
+    {
+        if (contentType != InvoiceContentType.Items ||
+            !requestedWBTotal.HasValue ||
+            requestedWBTotal.Value <= 0m ||
+            !InvoiceAmountRules.IsValidQuantity(requestedWBTotal.Value) ||
+            !TryCalculateTotalItemQuantity(
+                contentType,
+                lines,
+                out var totalItemQuantity))
+        {
+            return true;
+        }
+
+        return requestedWBTotal.Value == totalItemQuantity;
+    }
+
+    private static bool TryCalculateTotalItemQuantity(
+        InvoiceContentType contentType,
+        IReadOnlyList<InvoiceLineRequest>? lines,
+        out decimal totalItemQuantity)
+    {
+        totalItemQuantity = 0m;
+        if (contentType != InvoiceContentType.Items || lines is null)
+        {
+            return false;
+        }
+
+        foreach (var line in lines)
+        {
+            if (line is null ||
+                !InvoiceLineRequestValidator.TryCalculateLine(
+                    line,
+                    out var quantity,
+                    out _))
+            {
+                return false;
+            }
+
+            totalItemQuantity += quantity;
+        }
+
+        totalItemQuantity = decimal.Round(
+            totalItemQuantity,
+            InvoiceAmountRules.QuantityScale,
+            MidpointRounding.AwayFromZero);
+
+        return true;
+    }
+
+    private static void AddPaymentVoucherShapeRules(
+        AbstractValidator<InvoiceRequest> validator)
+    {
+        validator.RuleFor(request => request.CashboxId)
+            .GreaterThan(0)
+            .When(request => request.CashboxId.HasValue);
+
+        validator.RuleFor(request => request.CashboxId)
+            .NotNull()
+            .When(request => request.PaidAmount > 0m)
+            .WithMessage("صندوق النقدية مطلوب عند تسجيل دفعة.")
+            .WithErrorCode("Invoices.CashboxRequiredForPayment");
+
+        validator.RuleFor(request => request.CashboxId)
+            .Null()
+            .When(request => request.PaidAmount <= 0m)
+            .WithMessage("لا يجوز تحديد صندوق نقدية دون دفعة.")
+            .WithErrorCode("Invoices.CashboxNotAllowedWithoutPayment");
+
+    }
+
+    private static void AddPaymentVoucherShapeRules(
+        AbstractValidator<InvoiceUpdateRequest> validator)
+    {
+        validator.RuleFor(request => request.CashboxId)
+            .GreaterThan(0)
+            .When(request => request.CashboxId.HasValue);
+
+        validator.RuleFor(request => request.CashboxId)
+            .NotNull()
+            .When(request => request.PaidAmount > 0m)
+            .WithMessage("صندوق النقدية مطلوب عند تسجيل دفعة.")
+            .WithErrorCode("Invoices.CashboxRequiredForPayment");
+
+        validator.RuleFor(request => request.CashboxId)
+            .Null()
+            .When(request => request.PaidAmount <= 0m)
+            .WithMessage("لا يجوز تحديد صندوق نقدية دون دفعة.")
+            .WithErrorCode("Invoices.CashboxNotAllowedWithoutPayment");
+
     }
 
     private static bool TryCalculateNetTotal(
@@ -414,10 +820,8 @@ internal static class InvoiceValidationRules
             foreach (var line in lines)
             {
                 if (line is null ||
-                    !InvoiceAmountRules.TryCalculate(
-                        line.Count,
-                        line.Weight,
-                        line.Price,
+                    !InvoiceLineRequestValidator.TryCalculateLine(
+                        line,
                         out _,
                         out var lineTotal))
                 {

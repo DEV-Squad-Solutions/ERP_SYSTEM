@@ -32,7 +32,7 @@ public sealed class InvoicePaymentTermTests
     }
 
     [Fact]
-    public void CashInvoice_CanHaveZeroPaidAmount()
+    public void UnpaidPositiveInvoice_HasUnpaidStatus()
     {
         var invoice = CreateInvoice(PaymentTerm.Cash, 0m);
 
@@ -46,7 +46,7 @@ public sealed class InvoicePaymentTermTests
     {
         var invoice = CreateInvoice(PaymentTerm.Credit, 10m);
 
-        Assert.Equal(PaymentStatus.Unpaid, invoice.GetPaymentStatus());
+        Assert.Equal(PaymentStatus.PartiallyPaid, invoice.GetPaymentStatus());
         Assert.Equal(10m, invoice.PaidAmount);
         Assert.Equal(15m, invoice.RemainingAmount);
     }
@@ -55,7 +55,7 @@ public sealed class InvoicePaymentTermTests
     [InlineData(PaymentTerm.Cash, 25, PaymentStatus.Paid, 0)]
     [InlineData(PaymentTerm.Cash, 0, PaymentStatus.Unpaid, 25)]
     [InlineData(PaymentTerm.Credit, 0, PaymentStatus.Unpaid, 25)]
-    [InlineData(PaymentTerm.Credit, 10, PaymentStatus.Unpaid, 15)]
+    [InlineData(PaymentTerm.Credit, 10, PaymentStatus.PartiallyPaid, 15)]
     [InlineData(PaymentTerm.Credit, 25, PaymentStatus.Paid, 0)]
     public void Mapping_ExposesPaymentSummary(
         PaymentTerm paymentTerm,
@@ -84,33 +84,42 @@ public sealed class InvoicePaymentTermTests
     }
 
     [Theory]
-    [InlineData(PaymentTerm.Cash, 0)]
+    [InlineData(PaymentTerm.Cash, 25)]
     [InlineData(PaymentTerm.Credit, 0)]
     public void Validator_AcceptsBothPaymentTerms(
         PaymentTerm paymentTerm,
         decimal paidAmount)
     {
         var request = new InvoiceRequest(
-            "INV-TEST",
-            InvoiceType.Sales,
-            paymentTerm,
-            new DateOnly(2026, 7, 25),
-            null,
-            1,
-            1,
-            null,
-            null,
-            null,
-            null,
-            false,
-            null,
-            null,
-            null,
-            0m,
-            paidAmount,
-            null,
-            [new InvoiceLineRequest(1, 1, 1m, 25m, null)],
-            []);
+            InvoiceNumber: "INV-TEST",
+            InvoiceType: InvoiceType.Sales,
+            ItemsCategoryId: null,
+            ContentType: InvoiceContentType.Items,
+            PaymentTerm: paymentTerm,
+            InvoiceDate: new DateOnly(2026, 7, 25),
+            DueDate: null,
+            StoreId: 1,
+            BusinessPartnerId: 1,
+            PartnerInvoiceNo: null,
+            CashboxId: paidAmount > 0m ? 1 : null,
+            ExchangeRate: null,
+            CashboxExchangeRate: null,
+            WBWeight: 1m,
+            WBScaleDifference: 0m,
+            WBDiscount: 0m,
+            ContainerStoreId: null,
+            CountryId: null,
+            DriverId: null,
+            ActualDriverId: null,
+            UsesExternalDriver: false,
+            ExternalDriverName: null,
+            VehicleNumber: null,
+            ExportInvoiceCode: null,
+            DiscountAmount: 0m,
+            PaidAmount: paidAmount,
+            Notes: null,
+            Lines: [new InvoiceLineRequest(1, 1, 1m, 25m, null)],
+            ContainerLines: []);
 
         var result = new InvoiceRequestValidator().Validate(request);
 
@@ -131,29 +140,77 @@ public sealed class InvoicePaymentTermTests
     }
 
     [Fact]
+    public void RequestContracts_ExposeOptionalCreateOnlyWBTotalAssertion()
+    {
+        var createWBTotal = Assert.Single(
+            typeof(InvoiceRequest).GetProperties(),
+            property => property.Name == nameof(InvoiceRequest.WBTotal));
+        Assert.Equal(typeof(decimal?), createWBTotal.PropertyType);
+
+        var createConstructor = Assert.Single(
+            typeof(InvoiceRequest).GetConstructors());
+        var createWBTotalParameter = Assert.Single(
+            createConstructor.GetParameters(),
+            parameter => parameter.Name == nameof(InvoiceRequest.WBTotal));
+        Assert.True(createWBTotalParameter.IsOptional);
+        Assert.Null(createWBTotalParameter.DefaultValue);
+
+        Assert.DoesNotContain(
+            typeof(InvoiceUpdateRequest).GetProperties(),
+            property => property.Name == "WBTotal");
+        var detailsWBTotal = Assert.Single(
+            typeof(InvoiceResponse).GetProperties(),
+            property => property.Name == "WBTotal");
+        Assert.Equal(typeof(decimal), detailsWBTotal.PropertyType);
+        var listWBTotal = Assert.Single(
+            typeof(InvoiceListResponse).GetProperties(),
+            property => property.Name == "WBTotal");
+        Assert.Equal(typeof(decimal), listWBTotal.PropertyType);
+
+        Assert.DoesNotContain(
+            typeof(InvoiceRequest).GetProperties(),
+            property => property.Name == "CashMovementTypeId");
+        Assert.DoesNotContain(
+            typeof(InvoiceUpdateRequest).GetProperties(),
+            property => property.Name == "CashMovementTypeId");
+        Assert.Contains(
+            typeof(InvoiceResponse).GetProperties(),
+            property => property.Name == "CashMovementTypeId");
+    }
+
+    [Fact]
     public void Validator_RejectsUnsupportedPaymentTerm()
     {
         var request = new InvoiceRequest(
-            "INV-TEST",
-            InvoiceType.Sales,
-            (PaymentTerm)999,
-            new DateOnly(2026, 7, 25),
-            null,
-            1,
-            1,
-            null,
-            null,
-            null,
-            null,
-            false,
-            null,
-            null,
-            null,
-            0m,
-            0m,
-            null,
-            [new InvoiceLineRequest(1, 1, 1m, 25m, null)],
-            []);
+            InvoiceNumber: "INV-TEST",
+            InvoiceType: InvoiceType.Sales,
+            ItemsCategoryId: null,
+            ContentType: InvoiceContentType.Items,
+            PaymentTerm: (PaymentTerm)999,
+            InvoiceDate: new DateOnly(2026, 7, 25),
+            DueDate: null,
+            StoreId: 1,
+            BusinessPartnerId: 1,
+            PartnerInvoiceNo: null,
+            CashboxId: null,
+            ExchangeRate: null,
+            CashboxExchangeRate: null,
+            WBWeight: 1m,
+            WBScaleDifference: 0m,
+            WBDiscount: 0m,
+            ContainerStoreId: null,
+            CountryId: null,
+            DriverId: null,
+            ActualDriverId: null,
+            UsesExternalDriver: false,
+            ExternalDriverName: null,
+            VehicleNumber: null,
+            ExportInvoiceCode: null,
+            DiscountAmount: 0m,
+            PaidAmount: 0m,
+            Notes: null,
+            Lines: [new InvoiceLineRequest(1, 1, 1m, 25m, null)],
+            ContainerLines: []);
 
         var result = new InvoiceRequestValidator().Validate(request);
 

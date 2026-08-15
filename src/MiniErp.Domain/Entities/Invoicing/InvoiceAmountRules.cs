@@ -52,8 +52,33 @@ public static class InvoiceAmountRules
             HasPrecision(total, MoneyMaximumExclusive, MoneyScale);
     }
 
+    public static bool TryCalculate(
+        int? count,
+        decimal? weight,
+        decimal price,
+        out decimal quantity,
+        out decimal total)
+    {
+        if (!count.HasValue || !weight.HasValue)
+        {
+            quantity = 0m;
+            total = 0m;
+            return false;
+        }
+
+        return TryCalculate(
+            count.Value,
+            weight.Value,
+            price,
+            out quantity,
+            out total);
+    }
+
     public static bool IsValidMoney(decimal value) =>
         HasPrecision(value, MoneyMaximumExclusive, MoneyScale);
+
+    public static bool IsValidQuantity(decimal value) =>
+        HasPrecision(value, QuantityMaximumExclusive, QuantityScale);
 
     private static bool HasPrecision(
         decimal value,

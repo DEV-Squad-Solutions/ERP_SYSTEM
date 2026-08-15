@@ -157,7 +157,6 @@ public sealed class BusinessPartnerIntegrityServiceTests
         CurrencyCode currency,
         string name = "Partner One") =>
         new(
-            "BP-1",
             name,
             null,
             null,
@@ -277,12 +276,14 @@ public sealed class BusinessPartnerIntegrityServiceTests
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
                     BusinessPartnerId INTEGER NULL,
+                    CashboxTransferId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );
 
                 CREATE TABLE Invoices (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    ContentType INTEGER NOT NULL DEFAULT 1,
                     BusinessPartnerId INTEGER NOT NULL,
                     IsDeleted INTEGER NOT NULL
                 );

@@ -32,7 +32,10 @@ public sealed class DriverTripCostServiceTests
                 TripNumber: "TR-2",
                 HasCost: true));
 
-        Assert.Equal(1, Assert.Single(withoutCost.Value.Items).DriverTripId);
+        var withoutCostRow = Assert.Single(withoutCost.Value.Items);
+        Assert.Equal(1, withoutCostRow.DriverTripId);
+        Assert.Equal(1, withoutCostRow.BusinessPartnerId);
+        Assert.Equal("Customer One", withoutCostRow.BusinessPartnerName);
         Assert.Equal(2, Assert.Single(withCost.Value.Items).DriverTripId);
     }
 
@@ -69,8 +72,11 @@ public sealed class DriverTripCostServiceTests
             ]));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(120m, result.Value.Items.Single(
-            item => item.DriverTripId == 1).Cost);
+        var updatedFirstTrip = result.Value.Items.Single(
+            item => item.DriverTripId == 1);
+        Assert.Equal(120m, updatedFirstTrip.Cost);
+        Assert.Equal(1, updatedFirstTrip.BusinessPartnerId);
+        Assert.Equal("Customer One", updatedFirstTrip.BusinessPartnerName);
         Assert.Null(result.Value.Items.Single(
             item => item.DriverTripId == 2).Cost);
         Assert.Equal(

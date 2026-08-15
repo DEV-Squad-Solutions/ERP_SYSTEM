@@ -55,16 +55,6 @@ public sealed class StockOpeningBalanceRequestValidator
         RuleFor(request => request.StoreId)
             .GreaterThan(0);
 
-        RuleFor(request => request.DocumentNumber)
-            .NotEmpty();
-
-        RuleFor(request => request.DocumentNumber)
-            .MaximumLength(StockOpeningBalanceRequest.DocumentNumberMaximumLength)
-            .When(request =>
-                request.DocumentNumber is not null &&
-                request.DocumentNumber.Trim().Length >
-                StockOpeningBalanceRequest.DocumentNumberMaximumLength);
-
         RuleFor(request => request.DocumentDate)
             .Must(date => date != default)
             .WithMessage("تاريخ المستند مطلوب.");
@@ -107,16 +97,6 @@ public sealed class StockOpeningBalanceUpdateRequestValidator
     {
         RuleFor(request => request.StoreId)
             .GreaterThan(0);
-
-        RuleFor(request => request.DocumentNumber)
-            .NotEmpty();
-
-        RuleFor(request => request.DocumentNumber)
-            .MaximumLength(StockOpeningBalanceRequest.DocumentNumberMaximumLength)
-            .When(request =>
-                request.DocumentNumber is not null &&
-                request.DocumentNumber.Trim().Length >
-                StockOpeningBalanceRequest.DocumentNumberMaximumLength);
 
         RuleFor(request => request.DocumentDate)
             .Must(date => date != default)

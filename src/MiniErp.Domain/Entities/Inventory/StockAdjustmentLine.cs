@@ -26,6 +26,7 @@ public sealed class StockAdjustmentLine : AuditableEntity
 
     public decimal Quantity { get; set; }
 
-    public string? Reason { get; set; }
+    public decimal? UnitCost { get; set; }
 
+    public string? Reason { get; set; }
 }

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.StockOpeningBalances.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.StockOpeningBalances;
 
@@ -54,6 +55,14 @@ public sealed class StockOpeningBalancesController(
             request,
             cancellationToken);
 
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<StockOpeningBalancesRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
+
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -76,6 +85,13 @@ public sealed class StockOpeningBalancesController(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<StockOpeningBalancesRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 
@@ -90,6 +106,13 @@ public sealed class StockOpeningBalancesController(
         var result = await stockOpeningBalanceService.DeleteAsync(
             id,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<StockOpeningBalancesRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

@@ -21,8 +21,16 @@ public sealed class StoreServiceTests
             { "InvoiceProductStore", true },
             { "StockOpeningBalance", false },
             { "StockOpeningBalance", true },
+            { "StockAdjustment", false },
+            { "StockAdjustment", true },
+            { "InventoryCount", false },
+            { "InventoryCount", true },
             { "ItemMovement", false },
             { "ItemMovement", true },
+            { "StockTransferSource", false },
+            { "StockTransferSource", true },
+            { "StockTransferDestination", false },
+            { "StockTransferDestination", true },
             { "InvoiceContainerStore", false },
             { "InvoiceContainerStore", true },
             { "ContainerMovement", false },
@@ -43,14 +51,15 @@ public sealed class StoreServiceTests
 
         var result = await service.AddAsync(
             new StoreRequest(
-                " NEW-PRODUCT ",
                 " New Product Store ",
                 " Main Address ",
                 false,
                 null));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("NEW-PRODUCT", result.Value.Code);
+        Assert.Matches(
+            "^STR-[0-9]{4,}$",
+            result.Value.Code);
         Assert.Equal("New Product Store", result.Value.Name);
         Assert.Equal("Main Address", result.Value.Address);
         Assert.False(result.Value.IsContainerStore);
@@ -65,7 +74,6 @@ public sealed class StoreServiceTests
 
         var result = await service.AddAsync(
             new StoreRequest(
-                "CONT-NEW",
                 "New Container Store",
                 null,
                 true,
@@ -85,7 +93,6 @@ public sealed class StoreServiceTests
 
         var result = await service.AddAsync(
             new StoreRequest(
-                "CONT-OTHER",
                 "Other Company Partner Store",
                 null,
                 true,
@@ -103,7 +110,6 @@ public sealed class StoreServiceTests
 
         var result = await service.AddAsync(
             new StoreRequest(
-                "CONT-INACTIVE",
                 "Inactive Partner Store",
                 null,
                 true,
@@ -121,7 +127,6 @@ public sealed class StoreServiceTests
 
         var result = await service.AddAsync(
             new StoreRequest(
-                "CONT-SECOND",
                 "Second Container Store",
                 null,
                 true,
@@ -151,7 +156,7 @@ public sealed class StoreServiceTests
     }
 
     [Fact]
-    public async Task Update_RejectsNormalizedDuplicateCode()
+    public async Task Update_PreservesTheStoredCode()
     {
         await using var database = await StoreTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
@@ -159,14 +164,13 @@ public sealed class StoreServiceTests
         var result = await service.UpdateAsync(
             14,
             new StoreRequest(
-                " PROD-1 ",
                 "Unused Product Store",
                 null,
                 false,
                 null));
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("Stores.CodeExists", result.Error.Code);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("PROD-UNUSED", result.Value.Code);
     }
 
     [Theory]
@@ -182,17 +186,19 @@ public sealed class StoreServiceTests
         var changesProductStoreRole = dependency is
             "InvoiceProductStore" or
             "StockOpeningBalance" or
-            "ItemMovement";
+            "StockAdjustment" or
+            "InventoryCount" or
+            "ItemMovement" or
+            "StockTransferSource" or
+            "StockTransferDestination";
         var storeId = changesProductStoreRole ? 10 : 11;
         var request = changesProductStoreRole
             ? new StoreRequest(
-                "PROD-1",
                 "Product Store",
                 null,
                 true,
                 2)
             : new StoreRequest(
-                "CONT-1",
                 "Partner One Container Store",
                 null,
                 true,
@@ -218,7 +224,6 @@ public sealed class StoreServiceTests
         var result = await service.UpdateAsync(
             11,
             new StoreRequest(
-                "CONT-1",
                 "Partner One Container Store",
                 null,
                 false,
@@ -242,7 +247,6 @@ public sealed class StoreServiceTests
         var result = await service.UpdateAsync(
             11,
             new StoreRequest(
-                "CONT-1",
                 "Partner One Container Store",
                 null,
                 true,
@@ -261,7 +265,6 @@ public sealed class StoreServiceTests
         var result = await service.UpdateAsync(
             14,
             new StoreRequest(
-                "PROD-UNUSED",
                 "Unused Product Store",
                 null,
                 true,
@@ -281,7 +284,6 @@ public sealed class StoreServiceTests
         var result = await service.UpdateAsync(
             11,
             new StoreRequest(
-                "CONT-1",
                 "Partner One Container Store",
                 null,
                 true,
@@ -361,12 +363,42 @@ public sealed class StoreServiceTests
                              Id, CompanyId, StoreId, IsDeleted)
                          VALUES (1, 1, 10, {deletedValue});
                          """),
+                "StockAdjustment" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockAdjustments (
+                             Id, CompanyId, StoreId, IsDeleted)
+                         VALUES (1, 1, 10, {deletedValue});
+                         """),
+                "InventoryCount" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO InventoryCounts (
+                             Id, CompanyId, StoreId, IsDeleted)
+                         VALUES (1, 1, 10, {deletedValue});
+                         """),
                 "ItemMovement" =>
                     Context.Database.ExecuteSqlInterpolatedAsync(
                         $"""
                          INSERT INTO ItemMovements (
                              Id, CompanyId, StoreId, IsDeleted)
                          VALUES (1, 1, 10, {deletedValue});
+                         """),
+                "StockTransferSource" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockTransfers (
+                             Id, CompanyId, SourceStoreId,
+                             DestinationStoreId, IsDeleted)
+                         VALUES (1, 1, 10, 14, {deletedValue});
+                         """),
+                "StockTransferDestination" =>
+                    Context.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                         INSERT INTO StockTransfers (
+                             Id, CompanyId, SourceStoreId,
+                             DestinationStoreId, IsDeleted)
+                         VALUES (1, 1, 14, 10, {deletedValue});
                          """),
                 "ContainerMovement" =>
                     Context.Database.ExecuteSqlInterpolatedAsync(
@@ -474,6 +506,7 @@ public sealed class StoreServiceTests
                 CREATE TABLE Invoices (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    ContentType INTEGER NOT NULL DEFAULT 1,
                     StoreId INTEGER NOT NULL,
                     ContainerStoreId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
@@ -486,10 +519,32 @@ public sealed class StoreServiceTests
                     IsDeleted INTEGER NOT NULL
                 );
 
+                CREATE TABLE StockAdjustments (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE InventoryCounts (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    StoreId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
                 CREATE TABLE ItemMovements (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
                     StoreId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE StockTransfers (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    SourceStoreId INTEGER NOT NULL,
+                    DestinationStoreId INTEGER NOT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
 

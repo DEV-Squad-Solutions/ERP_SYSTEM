@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.PartnerOpeningBalances.Jobs;
+using MiniErp.Api.Features.ExchangeRates.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.PartnerOpeningBalances;
 
@@ -54,6 +56,24 @@ public sealed class PartnerOpeningBalancesController(
             request,
             cancellationToken);
 
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            TryEnqueueRealtime<PartnerOpeningBalancesRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+            if (request.ExchangeRate.HasValue)
+            {
+                TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
+                    "Updated",
+                    $"{result.Value.Currency}:{result.Value.DocumentDate}",
+                    realtime => job => job.ExecuteAsync(realtime),
+                    operationId: operationId);
+            }
+        }
+
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
@@ -76,6 +96,23 @@ public sealed class PartnerOpeningBalancesController(
             id,
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            TryEnqueueRealtime<PartnerOpeningBalancesRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+            if (request.ExchangeRate.HasValue)
+            {
+                TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
+                    "Updated",
+                    $"{result.Value.Currency}:{result.Value.DocumentDate}",
+                    realtime => job => job.ExecuteAsync(realtime),
+                    operationId: operationId);
+            }
+        }
         return this.ToActionResult(result);
     }
 
@@ -91,6 +128,13 @@ public sealed class PartnerOpeningBalancesController(
         var result = await partnerOpeningBalanceService.DeleteAsync(
             id,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<PartnerOpeningBalancesRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

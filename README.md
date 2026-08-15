@@ -68,26 +68,42 @@ User create and update requests accept a `roles` array, for example
 assignments are included in newly issued access tokens, so the affected user must
 log in again after an administrator updates their roles.
 
-## React client
+## React test client
 
-The separate `G:/test/miniErp/client` project contains a responsive React/Vite
-ERP client. Successful login and company selection open a company-scoped
-workspace with sidebar CRUD screens for Companies, Users, Business Partners,
-Drivers, Stores, Item Units, and Items. Tenant-owned tables display their
-`CompanyId` so the selected-company filter is visible during development.
+The separate `F:/client/client` project is a responsive React/Vite test client
+used to exercise backend contracts. It is not the production frontend.
+Successful login and company selection open a company-scoped workspace with
+CRUD screens and reports.
 
 ```powershell
-cd G:/test/miniErp/client
+cd F:/client/client
 npm install
 npm run dev
 ```
 
 The client targets `https://localhost:7067/api/v1` by default. Override it with `VITE_API_BASE_URL` or edit the API URL on the login screen. Companies and Users require the `Admin` role; non-admin users receive read-only catalog screens.
 
-The living backend-to-frontend handoff is maintained at
-`E:\Shaban Documents\Shaban\miniErp backend\FRONTEND_INTEGRATION_GUIDE.md`.
-It separates implemented contracts from planned work and must be updated and
-checked against generated Swagger after every backend feature step.
+## Realtime updates
+
+Successful mutation endpoints enqueue a feature-owned Hangfire job only after
+the feature service has saved and committed its database work. Enqueue and job
+failures are non-critical: they are logged/retried and never change the result
+of an already committed CRUD operation.
+
+Jobs send `ReceiveEntityChanged` to the authenticated `company:{companyId}`
+SignalR group with only `eventId`, `resource`, `action`, `entityId`, and
+`occurredAtUtc`. The prior `entityChanged` event is also sent temporarily for
+existing clients. No realtime path broadcasts with `Clients.All`.
+
+Company and user administration events use the narrower company/Admin role
+group. Features that can persist a requested exchange rate as part of their
+own transaction also enqueue an ExchangeRates invalidation after that parent
+operation commits.
+
+Hangfire uses the default SQL Server connection. Each realtime job retries five
+times and then remains failed for operational inspection. The old custom
+realtime Outbox is removed by a forward migration that refuses to drop its
+table while any undispatched row remains.
 
 ## Swagger
 

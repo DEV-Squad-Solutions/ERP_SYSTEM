@@ -1,9 +1,12 @@
+using System.Data;
+using static MiniErp.Application.Features.Cashboxes.CashboxErrors;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Cashboxes;
+using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Infrastructure.Persistence;
 
@@ -12,7 +15,9 @@ namespace MiniErp.Infrastructure.Services.Cashboxes;
 public sealed class CashboxService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    IExchangeRateResolver exchangeRateResolver,
+    TimeProvider timeProvider)
     : ICashboxService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -97,8 +102,40 @@ public sealed class CashboxService(
         CashboxRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
         var cashbox = request.Adapt<Cashbox>();
         cashbox.CompanyId = companyId;
+        cashbox.Code = await EntityIdentifierGenerator.GenerateUniqueAsync(
+            dbContext,
+            prefix: "CBX",
+            companyId: companyId,
+            existingIdentifiers: dbContext.Cashboxes
+                .IgnoreQueryFilters()
+                .Where(entity => entity.CompanyId == companyId)
+                .Select(entity => entity.Code),
+            cancellationToken);
+
+        var openingDate = request.OpeningBalanceDate ??
+            DateOnly.FromDateTime(
+                timeProvider.GetUtcNow().UtcDateTime);
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            cashbox.Currency,
+            openingDate,
+            request.OpeningExchangeRate,
+            cancellationToken);
+        if (exchangeRateResult.IsFailure)
+        {
+            return Result<CashboxResponse>.Failure(
+                exchangeRateResult.Error);
+        }
+        cashbox.ApplyOpeningExchangeRate(
+            openingDate,
+            exchangeRateResult.Value.ExchangeRateId,
+            exchangeRateResult.Value.Rate);
 
         var duplicateError = await FindDuplicateAsync(
             cashbox,
@@ -115,6 +152,7 @@ public sealed class CashboxService(
         var response = await ProjectResponseQuery(cashbox.Id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Result<CashboxResponse>.Success(response);
     }
 
@@ -132,6 +170,11 @@ public sealed class CashboxService(
         {
             return Result<CashboxResponse>.Failure(RowVersionRequired());
         }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var cashbox = await dbContext.Cashboxes.FirstOrDefaultAsync(
             entity =>
@@ -167,10 +210,29 @@ public sealed class CashboxService(
                 OpeningOrCurrencyChangeNotAllowed());
         }
 
+        var openingDate = request.OpeningBalanceDate ??
+            cashbox.OpeningBalanceDate;
+        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+            request.Currency,
+            openingDate,
+            request.OpeningExchangeRate,
+            cancellationToken);
+        if (exchangeRateResult.IsFailure)
+        {
+            return Result<CashboxResponse>.Failure(
+                exchangeRateResult.Error);
+        }
+
         var entry = dbContext.Entry(cashbox);
         entry.Property(entity => entity.RowVersion).OriginalValue =
             request.RowVersion;
+        var code = cashbox.Code;
         request.Adapt(cashbox);
+        cashbox.Code = code;
+        cashbox.ApplyOpeningExchangeRate(
+            openingDate,
+            exchangeRateResult.Value.ExchangeRateId,
+            exchangeRateResult.Value.Rate);
 
         try
         {
@@ -185,6 +247,7 @@ public sealed class CashboxService(
         var response = await ProjectResponseQuery(id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Result<CashboxResponse>.Success(response);
     }
 
@@ -230,7 +293,6 @@ public sealed class CashboxService(
         int? excludedId,
         CancellationToken cancellationToken)
     {
-        var normalizedCode = cashbox.Code.ToUpperInvariant();
         var normalizedName = cashbox.Name.ToUpperInvariant();
 
         var duplicate = await dbContext.Cashboxes
@@ -238,13 +300,8 @@ public sealed class CashboxService(
             .Where(entity =>
                 entity.CompanyId == companyId &&
                 (!excludedId.HasValue || entity.Id != excludedId.Value) &&
-                (entity.Code.ToUpper() == normalizedCode ||
-                 entity.Name.ToUpper() == normalizedName))
-            .Select(entity => new
-            {
-                entity.Code,
-                entity.Name
-            })
+                entity.Name.ToUpper() == normalizedName)
+            .Select(entity => entity.Name)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (duplicate is null)
@@ -252,18 +309,7 @@ public sealed class CashboxService(
             return null;
         }
 
-        return string.Equals(
-                duplicate.Code,
-                cashbox.Code,
-                StringComparison.OrdinalIgnoreCase)
-            ? Error.Conflict(
-                "Cashboxes.CodeExists",
-                $"كود صندوق النقدية '{cashbox.Code}' مستخدم بالفعل.",
-                nameof(CashboxRequest.Code))
-            : Error.Conflict(
-                "Cashboxes.NameExists",
-                $"اسم صندوق النقدية '{cashbox.Name}' مستخدم بالفعل.",
-                nameof(CashboxRequest.Name));
+        return NameExists(cashbox.Name);
     }
 
     private async Task<bool> HasVouchersAsync(
@@ -277,34 +323,4 @@ public sealed class CashboxService(
                     voucher.CashboxId == cashboxId,
                 cancellationToken);
 
-    private static Error InvalidId() =>
-        Error.Validation(
-            "Cashboxes.InvalidId",
-            "يجب أن يكون رقم صندوق النقدية أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "Cashboxes.NotFound",
-            $"لم يتم العثور على صندوق النقدية رقم {id}.");
-
-    private static Error RowVersionRequired() =>
-        Error.Validation(
-            "Cashboxes.RowVersionRequired",
-            "يجب إرسال إصدار صندوق النقدية الحالي للتعديل.",
-            nameof(CashboxUpdateRequest.RowVersion));
-
-    private static Error Concurrency() =>
-        Error.Conflict(
-            "Cashboxes.Concurrency",
-            "تم تعديل صندوق النقدية بواسطة مستخدم آخر. أعد تحميل البيانات ثم حاول مرة أخرى.");
-
-    private static Error HasVouchers() =>
-        Error.Conflict(
-            "Cashboxes.HasVouchers",
-            "لا يمكن حذف صندوق النقدية لارتباطه بسندات نقدية حالية أو تاريخية. يمكن إلغاء تنشيطه بدلاً من ذلك.");
-
-    private static Error OpeningOrCurrencyChangeNotAllowed() =>
-        Error.Conflict(
-            "Cashboxes.OpeningOrCurrencyChangeNotAllowed",
-            "لا يمكن تغيير الرصيد الافتتاحي أو العملة بعد إنشاء سندات على صندوق النقدية.");
 }

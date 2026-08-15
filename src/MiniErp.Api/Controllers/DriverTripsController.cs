@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.DriverTrips.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.DriverTrips;
 
@@ -41,6 +42,13 @@ public sealed class DriverTripsController(
         var result = await driverTripService.UpdateCostsAsync(
             request,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<DriverTripsRealtimeJob>(
+                "Updated",
+                "bulk",
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 }

@@ -1,4 +1,5 @@
 using FluentValidation;
+using MiniErp.Domain.Entities.Companies;
 
 namespace MiniErp.Application.Features.Cashboxes;
 
@@ -11,10 +12,6 @@ public sealed class CashboxRequestValidator : AbstractValidator<CashboxRequest>
 
     private void AddRules()
     {
-        RuleFor(request => request.Code)
-            .NotEmpty()
-            .MaximumLength(CashboxRequest.CodeMaximumLength);
-
         RuleFor(request => request.Name)
             .NotEmpty()
             .MaximumLength(CashboxRequest.NameMaximumLength);
@@ -24,6 +21,12 @@ public sealed class CashboxRequestValidator : AbstractValidator<CashboxRequest>
 
         RuleFor(request => request.OpeningBalance)
             .PrecisionScale(18, 2, ignoreTrailingZeros: true);
+
+        RuleFor(request => request.OpeningExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف الرصيد الافتتاحي أكبر من صفر.");
 
         RuleFor(request => request.Notes)
             .MaximumLength(CashboxRequest.NotesMaximumLength);
@@ -35,10 +38,6 @@ public sealed class CashboxUpdateRequestValidator
 {
     public CashboxUpdateRequestValidator()
     {
-        RuleFor(request => request.Code)
-            .NotEmpty()
-            .MaximumLength(CashboxRequest.CodeMaximumLength);
-
         RuleFor(request => request.Name)
             .NotEmpty()
             .MaximumLength(CashboxRequest.NameMaximumLength);
@@ -48,6 +47,12 @@ public sealed class CashboxUpdateRequestValidator
 
         RuleFor(request => request.OpeningBalance)
             .PrecisionScale(18, 2, ignoreTrailingZeros: true);
+
+        RuleFor(request => request.OpeningExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف الرصيد الافتتاحي أكبر من صفر.");
 
         RuleFor(request => request.Notes)
             .MaximumLength(CashboxRequest.NotesMaximumLength);

@@ -5,6 +5,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
 using MiniErp.Infrastructure.Services.Cashboxes;
+using MiniErp.Infrastructure.Services.CashboxTransfers;
 using MiniErp.Infrastructure.Services.CashMovementTypes;
 using MiniErp.Infrastructure.Services.CashVouchers;
 using MiniErp.Infrastructure.Services.DriverTrips;
@@ -63,7 +64,9 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
         new(
             context ?? Context,
             new PaginationService(),
-            new TestCurrentCompanyContext(companyId));
+            new TestCurrentCompanyContext(companyId),
+            new MiniErp.Tests.TestExchangeRateResolver(),
+            TimeProvider.System);
 
     public CashMovementTypeService CreateMovementTypeService(
         int companyId,
@@ -73,6 +76,16 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             new PaginationService(),
             new TestCurrentCompanyContext(companyId));
 
+    public CashboxTransferService CreateCashboxTransferService(
+        int companyId,
+        ApplicationDbContext? context = null) =>
+        new(
+            context ?? Context,
+            new PaginationService(),
+            new TestCurrentCompanyContext(companyId),
+            new MiniErp.Tests.TestExchangeRateResolver(),
+            TimeProvider.System);
+
     public CashVoucherService CreateVoucherService(
         int companyId,
         ApplicationDbContext? context = null) =>
@@ -80,6 +93,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             context ?? Context,
             new PaginationService(),
             new TestCurrentCompanyContext(companyId),
+            new MiniErp.Tests.TestExchangeRateResolver(),
             TimeProvider.System);
 
     public DriverTripService CreateDriverTripService(
@@ -125,6 +139,13 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 DeletedOn TEXT NULL,
                 DeletedByPc TEXT NULL,
                 IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE TABLE CompanySettings (
+                CompanyId INTEGER NOT NULL PRIMARY KEY,
+                BaseCurrency INTEGER NOT NULL DEFAULT 1,
+                StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
             );
 
             CREATE TABLE BusinessPartners (
@@ -177,6 +198,91 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,
                 InvoiceNumber TEXT NOT NULL,
+                PartnerInvoiceNo TEXT NULL,
+                InvoiceType INTEGER NOT NULL DEFAULT 1,
+                ContentType INTEGER NOT NULL DEFAULT 1,
+                IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE TABLE Stores (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                BusinessPartnerId INTEGER NULL,
+                Code TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                Address TEXT NULL,
+                IsContainerStore INTEGER NOT NULL DEFAULT 0,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE TABLE Containers (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                Code TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                Description TEXT NULL,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE TABLE StoreContainers (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                StoreId INTEGER NOT NULL,
+                ContainerId INTEGER NOT NULL,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE TABLE ContainerMovements (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                BusinessPartnerId INTEGER NOT NULL,
+                ContainerStoreId INTEGER NOT NULL,
+                ContainerId INTEGER NOT NULL,
+                InvoiceId INTEGER NOT NULL,
+                InvoiceNumber TEXT NOT NULL,
+                MovementDate TEXT NOT NULL,
+                OutgoingUnits INTEGER NOT NULL,
+                IncomingUnits INTEGER NOT NULL,
+                Description TEXT NULL,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
                 IsDeleted INTEGER NOT NULL
             );
 
@@ -187,8 +293,11 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 DocumentNumber TEXT NOT NULL,
                 DocumentDate TEXT NOT NULL,
                 Currency INTEGER NOT NULL,
+                ExchangeRateId INTEGER NULL,
+                ExchangeRate NUMERIC NOT NULL DEFAULT 1,
                 BalanceType INTEGER NOT NULL,
                 Amount NUMERIC NOT NULL,
+                BaseAmount NUMERIC NOT NULL DEFAULT 0,
                 Notes TEXT NULL,
                 RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
                 CreatedById TEXT NOT NULL,
@@ -210,6 +319,10 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Name TEXT NOT NULL COLLATE NOCASE,
                 Currency INTEGER NOT NULL,
                 OpeningBalance NUMERIC NOT NULL,
+                OpeningBalanceDate TEXT NOT NULL DEFAULT '2026-01-01',
+                OpeningExchangeRateId INTEGER NULL,
+                OpeningExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                BaseOpeningBalance NUMERIC NOT NULL DEFAULT 0,
                 IsActive INTEGER NOT NULL DEFAULT 1,
                 Notes TEXT NULL,
                 RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
@@ -237,6 +350,10 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Direction INTEGER NOT NULL,
                 PartnerEffect INTEGER NOT NULL,
                 IsActive INTEGER NOT NULL DEFAULT 1,
+                IsDefaultForSales INTEGER NOT NULL DEFAULT 0,
+                IsDefaultForPurchase INTEGER NOT NULL DEFAULT 0,
+                IsDefaultForSalesReturn INTEGER NOT NULL DEFAULT 0,
+                IsDefaultForPurchaseReturn INTEGER NOT NULL DEFAULT 0,
                 Notes TEXT NULL,
                 RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
                 CreatedById TEXT NOT NULL,
@@ -248,12 +365,37 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 DeletedById TEXT NULL,
                 DeletedOn TEXT NULL,
                 DeletedByPc TEXT NULL,
-                IsDeleted INTEGER NOT NULL
+                IsDeleted INTEGER NOT NULL,
+                CONSTRAINT CK_CashMovementTypes_InvoiceDefaults
+                    CHECK (
+                        ((IsDefaultForSales = 0 AND
+                          IsDefaultForPurchaseReturn = 0) OR
+                         (IsActive = 1 AND Direction = 1 AND PartnerEffect = 2))
+                        AND
+                        ((IsDefaultForPurchase = 0 AND
+                          IsDefaultForSalesReturn = 0) OR
+                         (IsActive = 1 AND Direction = 2 AND PartnerEffect = 1)))
             );
 
             CREATE UNIQUE INDEX UX_CashMovementTypes_Company_Direction_Name
             ON CashMovementTypes (CompanyId, Direction, Name)
             WHERE IsDeleted = 0;
+
+            CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForSales
+            ON CashMovementTypes (CompanyId, IsDefaultForSales)
+            WHERE IsDeleted = 0 AND IsDefaultForSales = 1;
+
+            CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForPurchase
+            ON CashMovementTypes (CompanyId, IsDefaultForPurchase)
+            WHERE IsDeleted = 0 AND IsDefaultForPurchase = 1;
+
+            CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForSalesReturn
+            ON CashMovementTypes (CompanyId, IsDefaultForSalesReturn)
+            WHERE IsDeleted = 0 AND IsDefaultForSalesReturn = 1;
+
+            CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForPurchaseReturn
+            ON CashMovementTypes (CompanyId, IsDefaultForPurchaseReturn)
+            WHERE IsDeleted = 0 AND IsDefaultForPurchaseReturn = 1;
 
             CREATE TABLE DriverTrips (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -281,14 +423,45 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 IsDeleted INTEGER NOT NULL
             );
 
+            CREATE TABLE CashboxTransfers (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                TransferNumber TEXT NOT NULL COLLATE NOCASE,
+                TransferDate TEXT NOT NULL,
+                SourceCashboxId INTEGER NOT NULL,
+                DestinationCashboxId INTEGER NOT NULL,
+                Description TEXT NULL,
+                Notes TEXT NULL,
+                LastModifiedAt TEXT NOT NULL,
+                RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL,
+                CONSTRAINT CK_CashboxTransfers_DifferentCashboxes CHECK (
+                    SourceCashboxId <> DestinationCashboxId)
+            );
+
+            CREATE UNIQUE INDEX IX_CashboxTransfers_Company_Number
+            ON CashboxTransfers (CompanyId, TransferNumber)
+            WHERE IsDeleted = 0;
+
             CREATE TABLE CashVouchers (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,
+                InvoiceId INTEGER NULL,
+                CashboxTransferId INTEGER NULL,
                 VoucherNumber TEXT NOT NULL COLLATE NOCASE,
                 VoucherDate TEXT NOT NULL,
                 Direction INTEGER NOT NULL,
-                CashboxId INTEGER NOT NULL,
-                CashMovementTypeId INTEGER NOT NULL,
+                CashboxId INTEGER NULL,
+                CashMovementTypeId INTEGER NULL,
                 PartyType INTEGER NOT NULL,
                 BusinessPartnerId INTEGER NULL,
                 DriverId INTEGER NULL,
@@ -296,6 +469,9 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 ExternalPartyName TEXT NULL,
                 Amount NUMERIC NOT NULL,
                 Currency INTEGER NOT NULL,
+                ExchangeRateId INTEGER NULL,
+                ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                BaseAmount NUMERIC NOT NULL DEFAULT 0,
                 ReferenceNumber TEXT NULL,
                 Description TEXT NULL,
                 Notes TEXT NULL,
@@ -310,12 +486,49 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 DeletedById TEXT NULL,
                 DeletedOn TEXT NULL,
                 DeletedByPc TEXT NULL,
-                IsDeleted INTEGER NOT NULL
+                IsDeleted INTEGER NOT NULL,
+                CONSTRAINT CK_CashVouchers_PostingReferencesTogether CHECK (
+                    CashMovementTypeId IS NULL OR CashboxId IS NOT NULL),
+                CONSTRAINT CK_CashVouchers_TransferShape CHECK (
+                    CashboxTransferId IS NULL OR
+                    (CashboxId IS NOT NULL AND
+                     CashMovementTypeId IS NULL AND
+                     InvoiceId IS NULL AND PartyType = 1))
             );
 
             CREATE INDEX IX_CashVouchers_Company_Number
             ON CashVouchers (CompanyId, VoucherNumber)
             WHERE IsDeleted = 0;
+
+            CREATE UNIQUE INDEX IX_CashVouchers_Company_Transfer_Direction
+            ON CashVouchers (CompanyId, CashboxTransferId, Direction)
+            WHERE CashboxTransferId IS NOT NULL AND IsDeleted = 0;
+
+            CREATE TABLE InvoicePayments (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                InvoiceId INTEGER NOT NULL,
+                CashVoucherId INTEGER NOT NULL,
+                InvoiceCurrency INTEGER NOT NULL,
+                AppliedAmount NUMERIC NOT NULL,
+                CashboxCurrency INTEGER NOT NULL,
+                CashboxAmount NUMERIC NOT NULL,
+                InvoiceToBaseRate NUMERIC NOT NULL,
+                CashboxToBaseRate NUMERIC NOT NULL,
+                AppliedBaseAmount NUMERIC NOT NULL,
+                CashboxBaseAmount NUMERIC NOT NULL,
+                RealizedExchangeDifference NUMERIC NOT NULL,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
 
             CREATE TABLE BusinessPartnerMovements (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -328,6 +541,9 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Currency INTEGER NOT NULL,
                 Debit NUMERIC NOT NULL,
                 Credit NUMERIC NOT NULL,
+                ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                BaseDebit NUMERIC NOT NULL DEFAULT 0,
+                BaseCredit NUMERIC NOT NULL DEFAULT 0,
                 Description TEXT NULL,
                 CreatedById TEXT NOT NULL,
                 CreatedOn TEXT NOT NULL,
@@ -366,6 +582,13 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 WHERE Id = NEW.Id;
             END;
 
+            CREATE TRIGGER AdvanceCashboxTransferRowVersion
+            AFTER UPDATE ON CashboxTransfers
+            BEGIN
+                UPDATE CashboxTransfers SET RowVersion = randomblob(8)
+                WHERE Id = NEW.Id;
+            END;
+
             CREATE TRIGGER AdvanceDriverTripRowVersion
             AFTER UPDATE ON DriverTrips
             BEGIN
@@ -399,6 +622,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 (3, 2, 'BP-3', 'Other Company Partner', 1, 10000, 1,
                  'test', '2026-01-01', 'test', 0),
                 (4, 1, 'BP-4', 'Inactive Partner', 1, 10000, 0,
+                 'test', '2026-01-01', 'test', 0),
+                (5, 1, 'BP-USD', 'USD Partner', 2, 10000, 1,
                  'test', '2026-01-01', 'test', 0);
 
             INSERT INTO Drivers (
@@ -412,11 +637,55 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 (3, 2, 'DRV-3', 'Other Company Driver', 'LIC-3', 1,
                  'test', '2026-01-01', 'test', 0);
 
-            INSERT INTO Invoices (Id, CompanyId, InvoiceNumber, IsDeleted)
+            INSERT INTO Invoices (
+                Id, CompanyId, InvoiceNumber, InvoiceType, IsDeleted)
             VALUES
-                (1, 1, 'INV-1', 0),
-                (2, 1, 'INV-2', 0),
-                (3, 2, 'INV-3', 0);
+                (1, 1, 'INV-1', 1, 0),
+                (2, 1, 'INV-2', 2, 0),
+                (3, 2, 'INV-3', 1, 0);
+
+            INSERT INTO Stores (
+                Id, CompanyId, BusinessPartnerId, Code, Name, Address,
+                IsContainerStore, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 1, 'CSTORE-1', 'Customer One Containers',
+                 'Container yard', 1, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (2, 2, 3, 'CSTORE-OTHER', 'Other Company Containers',
+                 NULL, 1, 1,
+                 'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO Containers (
+                Id, CompanyId, Code, Name, Description, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 'CONT-1', 'Large Crate', 'Large reusable crate', 1,
+                 'test', '2026-01-01', 'test', 0),
+                (2, 1, 'CONT-2', 'Old Crate', 'Historical crate', 0,
+                 'test', '2026-01-01', 'test', 0),
+                (3, 1, 'CONT-3', 'Spare Crate', 'No movements', 1,
+                 'test', '2026-01-01', 'test', 0),
+                (4, 2, 'CONT-4', 'Other Company Crate', NULL, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (5, 1, 'CONT-5', 'Archived Crate',
+                 'Historical assignment without movements', 0,
+                 'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO StoreContainers (
+                Id, CompanyId, StoreId, ContainerId, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 1, 1, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (2, 1, 1, 2, 0,
+                 'test', '2026-01-01', 'test', 0),
+                (3, 1, 1, 3, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (4, 2, 2, 4, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (5, 1, 1, 5, 0,
+                 'test', '2026-01-01', 'test', 0);
 
             INSERT INTO Cashboxes (
                 Id, CompanyId, Code, Name, Currency, OpeningBalance, IsActive,
@@ -429,23 +698,31 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 (3, 1, 'INACTIVE', 'Inactive Cashbox', 1, 500, 0,
                  'test', '2026-01-01', 'test', 0),
                 (4, 2, 'MAIN', 'Other Company Cashbox', 1, 1000, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (5, 1, 'USD', 'USD Cashbox', 2, 100, 1,
                  'test', '2026-01-01', 'test', 0);
 
             INSERT INTO CashMovementTypes (
                 Id, CompanyId, Name, Direction, PartnerEffect, IsActive,
+                IsDefaultForSales, IsDefaultForPurchase,
+                IsDefaultForSalesReturn, IsDefaultForPurchaseReturn,
                 CreatedById, CreatedOn, CreatedByPc, IsDeleted)
             VALUES
-                (1, 1, 'Customer Collection', 1, 2, 1,
+                (1, 1, 'Customer Collection', 1, 2, 1, 1, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (2, 1, 'Supplier Payment', 2, 1, 1,
+                (2, 1, 'Supplier Payment', 2, 1, 1, 0, 1, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (3, 1, 'Other Receipt', 1, 0, 1,
+                (3, 1, 'Other Receipt', 1, 0, 1, 0, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (4, 1, 'Driver Advance', 2, 0, 1,
+                (4, 1, 'Driver Advance', 2, 0, 1, 0, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (5, 1, 'Inactive Payment', 2, 0, 0,
+                (5, 1, 'Inactive Payment', 2, 0, 0, 0, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (6, 2, 'Other Receipt', 1, 0, 1,
+                (6, 2, 'Other Receipt', 1, 0, 1, 0, 0, 0, 0,
+                 'test', '2026-01-01', 'test', 0),
+                (7, 1, 'Supplier Refund', 1, 2, 1, 0, 0, 0, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (8, 1, 'Customer Refund', 2, 1, 1, 0, 0, 1, 0,
                  'test', '2026-01-01', 'test', 0);
 
             INSERT INTO DriverTrips (

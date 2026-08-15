@@ -8,10 +8,10 @@ public sealed record CashVoucherResponse(
     string VoucherNumber,
     DateOnly VoucherDate,
     CashDirection Direction,
-    int CashboxId,
-    string CashboxName,
-    int CashMovementTypeId,
-    string CashMovementTypeName,
+    int? CashboxId,
+    string? CashboxName,
+    int? CashMovementTypeId,
+    string? CashMovementTypeName,
     CashPartyType PartyType,
     int? BusinessPartnerId,
     string? BusinessPartnerName,
@@ -22,7 +22,27 @@ public sealed record CashVoucherResponse(
     string? ExternalPartyName,
     decimal Amount,
     CurrencyCode Currency,
+    CurrencyCode BaseCurrency,
+    decimal ExchangeRate,
+    decimal BaseAmount,
     string? ReferenceNumber,
     string? Description,
     string? Notes,
-    byte[] RowVersion);
+    byte[] RowVersion)
+{
+    public bool IsDraft { get; init; }
+
+    public int? InvoiceId { get; init; }
+
+    public int? CashboxTransferId { get; init; }
+
+    public string? InvoiceNumber { get; init; }
+
+    public decimal? AppliedInvoiceAmount { get; init; }
+
+    public CurrencyCode? AppliedInvoiceCurrency { get; init; }
+
+    public decimal? AppliedBaseAmount { get; init; }
+
+    public decimal? RealizedExchangeDifference { get; init; }
+}

@@ -16,13 +16,21 @@ public sealed class InvoiceLine : AuditableEntity
 
     public Invoice Invoice { get; set; } = null!;
 
-    public int ItemId { get; set; }
+    public int? ItemId { get; set; }
 
-    public Item Item { get; set; } = null!;
+    public Item? Item { get; set; }
 
-    public int ItemUnitId { get; set; }
+    public string? ItemName { get; set; }
 
-    public ItemUnit ItemUnit { get; set; } = null!;
+    public int? ItemUnitId { get; set; }
+
+    public ItemUnit? ItemUnit { get; set; }
+
+    public int? SourceInvoiceLineId { get; set; }
+
+    public InvoiceLine? SourceInvoiceLine { get; set; }
+
+    public decimal? ReturnUnitCost { get; set; }
 
     public int Count { get; set; }
 
@@ -33,6 +41,10 @@ public sealed class InvoiceLine : AuditableEntity
     public decimal Price { get; set; }
 
     public decimal Total { get; private set; }
+
+    public decimal BaseUnitPrice { get; private set; }
+
+    public decimal BaseTotal { get; private set; }
 
     public string? Notes { get; set; }
 
@@ -51,5 +63,15 @@ public sealed class InvoiceLine : AuditableEntity
 
         Quantity = quantity;
         Total = total;
+    }
+
+    public void ApplyExchangeRate(decimal exchangeRate)
+    {
+        BaseUnitPrice = ExchangeRateRules.ConvertToBase(
+            Price,
+            exchangeRate);
+        BaseTotal = ExchangeRateRules.ConvertToBase(
+            Total,
+            exchangeRate);
     }
 }

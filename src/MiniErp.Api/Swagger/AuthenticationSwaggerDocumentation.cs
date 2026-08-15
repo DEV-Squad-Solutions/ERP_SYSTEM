@@ -1,10 +1,12 @@
+using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
 using MiniErp.Api.Controllers;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace MiniErp.Api.Swagger;
 
-public sealed class AuthenticationSwaggerDocumentation : IOperationFilter
+public sealed class AuthenticationSwaggerDocumentation(
+    IConfiguration configuration) : IOperationFilter
 {
     public void Apply(
         OpenApiOperation operation,
@@ -56,5 +58,34 @@ public sealed class AuthenticationSwaggerDocumentation : IOperationFilter
         operation.Summary = documentation.Item1;
         operation.Description = documentation.Item2;
         operation.OperationId = $"Authentication_{context.MethodInfo.Name}";
+
+        if (context.MethodInfo.Name == nameof(AuthController.Login))
+        {
+            ApplySeededLoginExample(operation);
+        }
+    }
+
+    private void ApplySeededLoginExample(OpenApiOperation operation)
+    {
+        if (!configuration.GetValue("Seed:Enabled", false))
+        {
+            return;
+        }
+
+        var password = configuration["Seed:Password"];
+        var content = operation.RequestBody?.Content;
+        if (string.IsNullOrWhiteSpace(password) ||
+            content is null ||
+            !content.TryGetValue("application/json", out var mediaType) ||
+            mediaType is null)
+        {
+            return;
+        }
+
+        mediaType.Example = new JsonObject
+        {
+            ["userName"] = "admin",
+            ["password"] = password
+        };
     }
 }

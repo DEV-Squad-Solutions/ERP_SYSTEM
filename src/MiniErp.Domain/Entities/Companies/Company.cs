@@ -15,4 +15,8 @@ public sealed class Company : AuditableEntity
     public string TaxNumber { get; set; } = string.Empty;
 
     public string ManagerName { get; set; } = string.Empty;
+
+    public byte[] RowVersion { get; private set; } = [];
+
+    public CompanySettings? Settings { get; set; }
 }

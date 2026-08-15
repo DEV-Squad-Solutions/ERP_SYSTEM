@@ -1,4 +1,5 @@
 using Mapster;
+using static MiniErp.Application.Features.Containers.ContainerErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
@@ -94,14 +95,15 @@ public sealed class ContainerService(
     {
         var container = request.Adapt<Container>();
         container.CompanyId = companyId;
-
-        if (await ActiveCodeExistsAsync(
-                container,
-                excludedId: null,
-                cancellationToken))
-        {
-            return Result<ContainerResponse>.Failure(CodeExists(container.Code));
-        }
+        container.Code = await EntityIdentifierGenerator.GenerateUniqueAsync(
+            dbContext,
+            prefix: "CNT",
+            companyId: companyId,
+            existingIdentifiers: dbContext.Containers
+                .IgnoreQueryFilters()
+                .Where(entity => entity.CompanyId == companyId)
+                .Select(entity => entity.Code),
+            cancellationToken);
 
         dbContext.Containers.Add(container);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -128,18 +130,9 @@ public sealed class ContainerService(
             return Result<ContainerResponse>.Failure(NotFound(id));
         }
 
-        var normalizedContainer = request.Adapt<Container>();
-        normalizedContainer.CompanyId = companyId;
-        if (await ActiveCodeExistsAsync(
-                normalizedContainer,
-                id,
-                cancellationToken))
-        {
-            return Result<ContainerResponse>.Failure(
-                CodeExists(normalizedContainer.Code));
-        }
-
+        var code = container.Code;
         request.Adapt(container);
+        container.Code = code;
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<ContainerResponse>.Success(
@@ -182,38 +175,4 @@ public sealed class ContainerService(
         return Result.Success();
     }
 
-    private Task<bool> ActiveCodeExistsAsync(
-        Container container,
-        int? excludedId,
-        CancellationToken cancellationToken) =>
-        container.IsActive
-            ? dbContext.Containers.AsNoTracking().AnyAsync(
-                entity =>
-                    entity.CompanyId == companyId &&
-                    entity.IsActive &&
-                    entity.Code == container.Code &&
-                    (!excludedId.HasValue || entity.Id != excludedId.Value),
-                cancellationToken)
-            : Task.FromResult(false);
-
-    private static Error InvalidId() =>
-        Error.Validation(
-            "Containers.InvalidId",
-            "يجب أن يكون رقم العبوة أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "Containers.NotFound",
-            $"لم يتم العثور على العبوة رقم {id}.");
-
-    private static Error CodeExists(string code) =>
-        Error.Conflict(
-            "Containers.CodeExists",
-            $"كود العبوة '{code}' مستخدم بالفعل في عبوة نشطة.",
-            nameof(ContainerRequest.Code));
-
-    private static Error HasStoreAssignments() =>
-        Error.Conflict(
-            "Containers.HasStoreAssignments",
-            "لا يمكن حذف العبوة لارتباطها بمخزن عبوات حالي أو تاريخي.");
 }

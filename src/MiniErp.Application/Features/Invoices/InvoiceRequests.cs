@@ -3,11 +3,15 @@ using MiniErp.Domain.Enums;
 namespace MiniErp.Application.Features.Invoices;
 
 public sealed record InvoiceLineRequest(
-    int ItemId,
-    int Count,
-    decimal Weight,
+    int? ItemId,
+    int? Count,
+    decimal? Weight,
     decimal Price,
-    string? Notes);
+    string? Notes,
+    int? SourceInvoiceLineId = null,
+    decimal? ReturnUnitCost = null,
+    decimal? Quantity = null,
+    string? ItemName = null);
 
 public sealed record InvoiceContainerLineRequest(
     int ContainerId,
@@ -17,11 +21,20 @@ public sealed record InvoiceContainerLineRequest(
 public sealed record InvoiceRequest(
     string InvoiceNumber,
     InvoiceType InvoiceType,
+    int? ItemsCategoryId,
+    InvoiceContentType ContentType,
     PaymentTerm PaymentTerm,
     DateOnly InvoiceDate,
     DateOnly? DueDate,
-    int BusinessPartnerId,
     int StoreId,
+    int BusinessPartnerId,
+    string? PartnerInvoiceNo,
+    int? CashboxId,
+    decimal? ExchangeRate,
+    decimal? CashboxExchangeRate,
+    decimal WBWeight,
+    decimal WBScaleDifference,
+    decimal WBDiscount,
     int? ContainerStoreId,
     int? CountryId,
     int? DriverId,
@@ -34,10 +47,13 @@ public sealed record InvoiceRequest(
     decimal PaidAmount,
     string? Notes,
     IReadOnlyList<InvoiceLineRequest> Lines,
-    IReadOnlyList<InvoiceContainerLineRequest> ContainerLines
+    IReadOnlyList<InvoiceContainerLineRequest> ContainerLines,
+    decimal? WBTotal = null
     )
 {
     public const int InvoiceNumberMaximumLength = 100;
+
+    public const int PartnerInvoiceNoMaximumLength = 100;
 
     public const int ExportInvoiceCodeMaximumLength = 100;
 
@@ -72,4 +88,14 @@ public sealed record InvoiceUpdateRequest(
     string? Notes,
     IReadOnlyList<InvoiceLineRequest> Lines,
     IReadOnlyList<InvoiceContainerLineRequest> ContainerLines,
-    byte[]? RowVersion);
+    byte[]? RowVersion,
+    string? PartnerInvoiceNo = null,
+    int? CashboxId = null,
+    InvoiceContentType ContentType = InvoiceContentType.Items,
+    decimal? ExchangeRate = null,
+    decimal? CashboxExchangeRate = null,
+    decimal WBWeight = 0m,
+    decimal WBScaleDifference = 0m,
+    decimal WBDiscount = 0m,
+    int? ItemsCategoryId = null,
+    decimal? WBTotal = null);

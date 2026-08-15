@@ -20,7 +20,7 @@ public sealed class DriverTripsSwaggerDocumentation : IOperationFilter
             nameof(DriverTripsController.GetCostEntry) => (
                 "Get DriverTrip cost-entry rows",
                 SwaggerOperationDescription.Create(
-                    "Returns invoice-created trips for later operational cost entry.",
+                    "Returns invoice-created trips for later operational cost entry. Each row includes the invoice customer in `businessPartnerId` and `businessPartnerName`.",
                     "Optional search, date range, driverId, invoiceNumber, tripNumber, hasCost, pageNumber, and pageSize filters.",
                     "Trip numbers use TR-{DriverTripId}. Cost is operational and does not change cashbox, partner, or invoice values.",
                     "Other-company and deleted trips are excluded.")),

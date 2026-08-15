@@ -1,4 +1,5 @@
 using System.Globalization;
+using static MiniErp.Application.Features.Authentication.AuthenticationErrors;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -119,10 +120,7 @@ public sealed class AuthenticationService(
                 cancellationToken);
         if (!hasCompanyAccess)
         {
-            return Result<TokenResponse>.Failure(
-                Error.Forbidden(
-                    "Authentication.CompanyAccessDenied",
-                    "لا يملك المستخدم صلاحية الوصول إلى الشركة المحددة."));
+            return Result<TokenResponse>.Failure(CompanyAccessDenied());
         }
 
         return await CreateTokenPairAsync(
@@ -419,16 +417,10 @@ public sealed class AuthenticationService(
             SHA256.HashData(Encoding.UTF8.GetBytes(refreshToken)));
 
     private static Result<LoginResponse> InvalidCredentials() =>
-        Result<LoginResponse>.Failure(
-            Error.Unauthorized(
-                "Authentication.InvalidCredentials",
-                "اسم المستخدم أو كلمة المرور غير صحيحة."));
+        Result<LoginResponse>.Failure(InvalidCredentialsError());
 
     private static Result<TokenResponse> InvalidRefreshToken() =>
-        Result<TokenResponse>.Failure(
-            Error.Unauthorized(
-                "Authentication.InvalidRefreshToken",
-                "رمز التحديث غير صالح أو منتهي الصلاحية."));
+        Result<TokenResponse>.Failure(InvalidRefreshTokenError());
 
     private static Result<TokenResponse> InvalidCompanySelectionToken() =>
         Result<TokenResponse>.Failure(InvalidCompanySelectionTokenError());
@@ -437,16 +429,6 @@ public sealed class AuthenticationService(
         InvalidCompanySelectionTokenData() =>
         Result<CompanySelectionTokenData>.Failure(
             InvalidCompanySelectionTokenError());
-
-    private static Error InvalidCompanySelectionTokenError() =>
-        Error.Unauthorized(
-            "Authentication.InvalidCompanySelectionToken",
-            "رمز اختيار الشركة غير صالح أو منتهي الصلاحية.");
-
-    private static Error NoCompanyAccess() =>
-        Error.Forbidden(
-            "Authentication.NoCompanyAccess",
-            "المستخدم غير مرتبط بأي شركة نشطة.");
 
     private sealed record CompanySelectionTokenData(
         Guid UserId,

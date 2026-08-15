@@ -1,31 +1,30 @@
 using MiniErp.Application.Common.Results;
+using static MiniErp.Application.Features.Invoices.InvoiceErrors;
+using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Enums;
 
 namespace MiniErp.Infrastructure.Services.Invoices;
 
 public sealed partial class InvoiceService
 {
-    private static Error InvalidId() =>
-        Error.Validation(
-            "Invoices.InvalidId",
-            "يجب أن يكون رقم الفاتورة أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "Invoices.NotFound",
-            $"لم يتم العثور على الفاتورة رقم {id}.");
-
-    private static Error Concurrency() =>
-        Error.Conflict(
-            "Invoices.Concurrency",
-            "تم تعديل الفاتورة بواسطة مستخدم آخر. أعد تحميل الفاتورة ثم حاول مرة أخرى.");
-
-    private static Error DriverTripHasCashVouchers() =>
-        Error.Conflict(
-            "Invoices.DriverTripHasCashVouchers",
-            "لا يمكن تعديل الفاتورة أو حذفها لأن رحلة السائق المرتبطة بها مستخدمة في سندات نقدية حالية أو تاريخية.");
-
     private sealed record PreparedInvoice(
         CurrencyCode Currency,
-        IReadOnlyDictionary<int, int> ItemUnitIds);
+        IReadOnlyDictionary<int, int> ItemUnitIds,
+        IReadOnlyDictionary<int, PreparedReturnSourceLine> ReturnSourceLines,
+        decimal? ReturnDiscountAmount);
+
+    private sealed record PreparedReturnSourceLine(
+        int SourceInvoiceLineId,
+        int SourceInvoiceId,
+        decimal UnitPrice);
+
+    private sealed record PreparedReturnSources(
+        IReadOnlyDictionary<int, PreparedReturnSourceLine> Lines,
+        decimal? DiscountAmount)
+    {
+        public static PreparedReturnSources Empty { get; } =
+            new(
+                Lines: new Dictionary<int, PreparedReturnSourceLine>(),
+                DiscountAmount: null);
+    }
 }

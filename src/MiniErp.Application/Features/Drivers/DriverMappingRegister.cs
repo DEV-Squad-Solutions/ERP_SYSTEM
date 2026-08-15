@@ -8,7 +8,7 @@ public sealed class DriverMappingRegister : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.ForType<DriverRequest, Driver>()
-            .Map(driver => driver.Code, request => request.Code.Trim())
+            .Ignore(driver => driver.Code)
             .Map(driver => driver.Name, request => request.Name.Trim())
             .Map(
                 driver => driver.PhoneNumber,

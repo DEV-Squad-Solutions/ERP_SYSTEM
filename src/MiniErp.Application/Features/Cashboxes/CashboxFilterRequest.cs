@@ -7,4 +7,7 @@ public sealed record CashboxFilterRequest(
     string? Code = null,
     string? Name = null,
     CurrencyCode? Currency = null,
-    bool? IsActive = null);
+    bool? IsActive = null)
+{
+    public const int CodeMaximumLength = 50;
+}

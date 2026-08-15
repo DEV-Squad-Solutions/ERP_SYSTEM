@@ -45,6 +45,13 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
                     "A bearer token containing one `company_id` and route `id` for the business partner.",
                     "`id` must be greater than zero.",
                     "Invalid IDs return 400. Missing, deleted, and other-company partners return 404 without revealing tenant data. A partner without an active container Store also returns 404.")),
+            nameof(BusinessPartnersController.GetItemReport) => (
+                "Get item movements for a business partner",
+                SwaggerOperationDescription.Create(
+                    "Returns sales and purchase invoice movements with optional business-partner and item filters. The report is company-scoped and read-only.",
+                    "A bearer token containing one `company_id`. Optional query fields are `businessPartnerId`, `itemId`, `countryId`, `search`, `movementType`, `fromDate`, and `toDate`.",
+                    "When `businessPartnerId` is supplied, it must be positive and company-owned; when omitted, all business partners are included. When `itemId` is omitted, all items are included; when supplied, it must be positive. `movementType` accepts `Sales` or `Purchase`; and the start date cannot be after the end date. Search matches invoice number, partner invoice number, or notes. Every movement returns the persisted invoice-line count, weight, calculated quantity, unit price, and total.",
+                    "Uses the same values as the invoice line: `quantity = count * weight` and `totalAmount = quantity * unitPrice`. The reported calculated values are read from the persisted invoice line, including the invoice money rounding. Sales and purchase returns are not included.")),
             nameof(BusinessPartnersController.Create) => (
                 "Create a business partner",
                 SwaggerOperationDescription.Create(

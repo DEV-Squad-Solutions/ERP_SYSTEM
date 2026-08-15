@@ -1,0 +1,14 @@
+# Local build and scratch output
+artifacts/
+output/
+tmp/
+src/MiniErp.Api/tmp/
+.codex/
+AGENTS.md
+
+# Machine-specific deployment settings
+**/*.pubxml.user
+
+# Entity Framework generated metadata (keep the authored migration files)
+**/Migrations/*.Designer.cs
+**/Migrations/*ModelSnapshot.cs

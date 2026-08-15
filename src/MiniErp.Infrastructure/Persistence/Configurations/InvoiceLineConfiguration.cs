@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
 
 namespace MiniErp.Infrastructure.Persistence.Configurations;
@@ -49,11 +50,19 @@ public sealed class InvoiceLineConfiguration
         builder.Property(line => line.InvoiceId)
             .IsRequired();
 
-        builder.Property(line => line.ItemId)
-            .IsRequired();
+        builder.Property(line => line.ItemId);
 
-        builder.Property(line => line.ItemUnitId)
-            .IsRequired();
+        builder.Property(line => line.ItemName)
+            .HasMaxLength(200);
+
+        builder.Property(line => line.ItemUnitId);
+
+        builder.Property(line => line.SourceInvoiceLineId);
+
+        builder.Property(line => line.ReturnUnitCost)
+            .HasPrecision(
+                InventoryCostRules.UnitCostPrecision,
+                InventoryCostRules.UnitCostScale);
 
         builder.Property(line => line.Count)
             .IsRequired();
@@ -82,6 +91,20 @@ public sealed class InvoiceLineConfiguration
                 InvoiceAmountRules.MoneyScale)
             .IsRequired();
 
+        builder.Property(line => line.BaseUnitPrice)
+            .HasPrecision(
+                InventoryCostRules.UnitCostPrecision,
+                InventoryCostRules.UnitCostScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
+        builder.Property(line => line.BaseTotal)
+            .HasPrecision(
+                InventoryCostRules.ValuePrecision,
+                InventoryCostRules.ValueScale)
+            .HasDefaultValue(0m)
+            .IsRequired();
+
         builder.Property(line => line.Notes)
             .HasMaxLength(1_000);
 
@@ -102,6 +125,7 @@ public sealed class InvoiceLineConfiguration
                 item.CompanyId,
                 item.Id
             })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(line => line.ItemUnit)
@@ -116,7 +140,29 @@ public sealed class InvoiceLineConfiguration
                 unit.CompanyId,
                 unit.Id
             })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(line => line.SourceInvoiceLine)
+            .WithMany()
+            .HasForeignKey(line => new
+            {
+                line.CompanyId,
+                line.SourceInvoiceLineId
+            })
+            .HasPrincipalKey(source => new
+            {
+                source.CompanyId,
+                source.Id
+            })
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(line => new
+        {
+            line.CompanyId,
+            line.SourceInvoiceLineId
+        });
 
         builder.HasIndex(line => new
         {
@@ -125,6 +171,6 @@ public sealed class InvoiceLineConfiguration
             line.ItemId
         })
             .IsUnique()
-            .HasFilter("[IsDeleted] = 0");
+            .HasFilter("[IsDeleted] = 0 AND [ItemId] IS NOT NULL");
     }
 }

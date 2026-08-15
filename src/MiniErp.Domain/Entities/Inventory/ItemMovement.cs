@@ -37,6 +37,60 @@ public sealed class ItemMovement : AuditableEntity
 
     public decimal QuantityOut { get; set; }
 
+    public InventoryCostStatus CostStatus { get; private set; } =
+        InventoryCostStatus.Final;
+
+    public decimal PendingCostQuantity { get; private set; }
+
+    public decimal? UnitCost { get; private set; }
+
+    public decimal TotalCost { get; private set; }
+
+    public decimal QuantityAfter { get; private set; }
+
+    public decimal AverageCostAfter { get; private set; }
+
+    public decimal InventoryValueAfter { get; private set; }
+
     public string? Description { get; set; }
 
+    public ICollection<InventoryCostAllocation> OutboundCostAllocations
+    {
+        get;
+        set;
+    } = [];
+
+    public ICollection<InventoryCostAllocation> InboundCostAllocations
+    {
+        get;
+        set;
+    } = [];
+
+    public void ApplyCostSnapshot(
+        InventoryCostStatus costStatus,
+        decimal pendingCostQuantity,
+        decimal? unitCost,
+        decimal totalCost,
+        decimal quantityAfter,
+        decimal averageCostAfter,
+        decimal inventoryValueAfter)
+    {
+        CostStatus = costStatus;
+        PendingCostQuantity =
+            InventoryCostRules.RoundQuantity(pendingCostQuantity);
+        UnitCost = unitCost.HasValue
+            ? InventoryCostRules.RoundUnitCost(unitCost.Value)
+            : null;
+        TotalCost = InventoryCostRules.RoundValue(totalCost);
+        QuantityAfter = InventoryCostRules.RoundQuantity(quantityAfter);
+        AverageCostAfter =
+            InventoryCostRules.RoundUnitCost(averageCostAfter);
+        InventoryValueAfter =
+            InventoryCostRules.RoundValue(inventoryValueAfter);
+    }
+
+    public void SetTransferUnitCost(decimal unitCost)
+    {
+        UnitCost = InventoryCostRules.RoundUnitCost(unitCost);
+    }
 }

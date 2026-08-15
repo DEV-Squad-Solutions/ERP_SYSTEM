@@ -73,58 +73,57 @@ public sealed class ContainerServiceTests
 
         var result = await service.AddAsync(
             new ContainerRequest(
-                "  NEW  ",
                 "  New Container  ",
                 "  Description  "));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value.CompanyId);
-        Assert.Equal("NEW", result.Value.Code);
+        Assert.Matches(
+            "^CNT-[0-9]{4,}$",
+            result.Value.Code);
         Assert.Equal("New Container", result.Value.Name);
         Assert.Equal("Description", result.Value.Description);
     }
 
     [Fact]
-    public async Task Add_RejectsDuplicateActiveCode()
+    public async Task Add_GeneratesAUniqueCode()
     {
         await using var database = await ContainerTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
 
         var result = await service.AddAsync(
             new ContainerRequest(
-                "  BOX  ",
                 "Another Container",
                 null));
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("Containers.CodeExists", result.Error.Code);
+        Assert.True(result.IsSuccess);
+        Assert.NotEqual("BOX", result.Value.Code);
     }
 
     [Fact]
-    public async Task InactiveDuplicateCanBeCreatedButCannotBeReactivated()
+    public async Task Update_ReactivatesAndPreservesTheGeneratedCode()
     {
         await using var database = await ContainerTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
 
         var addResult = await service.AddAsync(
             new ContainerRequest(
-                "BOX",
                 "Inactive Duplicate",
                 null,
                 IsActive: false));
 
         Assert.True(addResult.IsSuccess);
+        var generatedCode = addResult.Value.Code;
 
         var updateResult = await service.UpdateAsync(
             addResult.Value.Id,
             new ContainerRequest(
-                "BOX",
                 "Inactive Duplicate",
                 null,
                 IsActive: true));
 
-        Assert.True(updateResult.IsFailure);
-        Assert.Equal("Containers.CodeExists", updateResult.Error.Code);
+        Assert.True(updateResult.IsSuccess);
+        Assert.Equal(generatedCode, updateResult.Value.Code);
     }
 
     [Fact]
@@ -160,45 +159,12 @@ public sealed class ContainerServiceTests
     {
         var validator = new ContainerRequestValidator();
         var request = new ContainerRequest(
-            $"  {new string('C', 50)}  ",
             $"  {new string('N', 200)}  ",
             $"  {new string('D', 1_000)}  ");
 
         var result = await validator.ValidateAsync(request);
 
         Assert.True(result.IsValid);
-    }
-
-    [Fact]
-    public async Task Validator_UsesSharedMaximumLengthRuleForTrimmedValue()
-    {
-        var validator = new ContainerRequestValidator();
-        var request = new ContainerRequest(
-            $"  {new string('C', 51)}  ",
-            "Container",
-            null);
-
-        var result = await validator.ValidateAsync(request);
-
-        var error = Assert.Single(result.Errors);
-        Assert.Equal(nameof(ContainerRequest.Code), error.PropertyName);
-        Assert.Equal("MaximumLengthValidator", error.ErrorCode);
-    }
-
-    [Fact]
-    public async Task Validator_ReturnsOneRequiredErrorForWhitespaceCode()
-    {
-        var validator = new ContainerRequestValidator();
-        var request = new ContainerRequest(
-            "   ",
-            "Container",
-            null);
-
-        var result = await validator.ValidateAsync(request);
-
-        var error = Assert.Single(result.Errors);
-        Assert.Equal(nameof(ContainerRequest.Code), error.PropertyName);
-        Assert.Equal("NotEmptyValidator", error.ErrorCode);
     }
 
     private sealed class ContainerTestDatabase : IAsyncDisposable

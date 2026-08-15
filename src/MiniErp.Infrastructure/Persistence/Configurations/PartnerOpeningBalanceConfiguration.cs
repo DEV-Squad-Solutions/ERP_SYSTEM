@@ -41,6 +41,15 @@ public sealed class PartnerOpeningBalanceConfiguration
             .HasConversion<int>()
             .IsRequired();
 
+        builder.Property(balance => balance.ExchangeRateId);
+
+        builder.Property(balance => balance.ExchangeRate)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.RatePrecision,
+                Domain.Entities.Companies.ExchangeRateRules.RateScale)
+            .HasDefaultValue(1m)
+            .IsRequired();
+
         builder.Property(balance => balance.BalanceType)
             .HasConversion<int>()
             .IsRequired();
@@ -49,6 +58,13 @@ public sealed class PartnerOpeningBalanceConfiguration
             .HasPrecision(
                 PartnerOpeningBalanceAmountRules.MoneyPrecision,
                 PartnerOpeningBalanceAmountRules.MoneyScale)
+            .IsRequired();
+
+        builder.Property(balance => balance.BaseAmount)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountPrecision,
+                Domain.Entities.Companies.ExchangeRateRules.BaseAmountScale)
+            .HasDefaultValue(0m)
             .IsRequired();
 
         builder.Property(balance => balance.Notes)
@@ -68,6 +84,21 @@ public sealed class PartnerOpeningBalanceConfiguration
         builder.HasOne(balance => balance.Company)
             .WithMany()
             .HasForeignKey(balance => balance.CompanyId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(balance => balance.ExchangeRateRecord)
+            .WithMany()
+            .HasForeignKey(balance => new
+            {
+                balance.CompanyId,
+                balance.ExchangeRateId
+            })
+            .HasPrincipalKey(rate => new
+            {
+                rate.CompanyId,
+                rate.Id
+            })
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(balance => balance.BusinessPartner)

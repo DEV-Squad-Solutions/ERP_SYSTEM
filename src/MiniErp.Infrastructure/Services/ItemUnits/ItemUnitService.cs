@@ -1,4 +1,5 @@
 using Mapster;
+using static MiniErp.Application.Features.ItemUnits.ItemUnitErrors;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
@@ -94,11 +95,7 @@ public sealed class ItemUnitService(
 
         if (nameExists)
         {
-            return Result<ItemUnitResponse>.Failure(
-                Error.Conflict(
-                    "ItemUnits.NameExists",
-                    $"وحدة الصنف '{itemUnit.Name}' موجودة بالفعل.",
-                    nameof(ItemUnitRequest.Name)));
+            return Result<ItemUnitResponse>.Failure(NameExists(itemUnit.Name));
         }
 
         dbContext.ItemUnits.Add(itemUnit);
@@ -136,11 +133,7 @@ public sealed class ItemUnitService(
 
         if (nameExists)
         {
-            return Result<ItemUnitResponse>.Failure(
-                Error.Conflict(
-                    "ItemUnits.NameExists",
-                    $"وحدة الصنف '{normalizedItemUnit.Name}' موجودة بالفعل.",
-                    nameof(ItemUnitRequest.Name)));
+            return Result<ItemUnitResponse>.Failure(NameExists(normalizedItemUnit.Name));
         }
 
         request.Adapt(itemUnit);
@@ -188,6 +181,27 @@ public sealed class ItemUnitService(
                         line.CompanyId == companyId &&
                         line.ItemUnitId == id,
                     cancellationToken) ||
+            await dbContext.StockAdjustmentLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.ItemUnitId == id,
+                    cancellationToken) ||
+            await dbContext.StockTransferLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.ItemUnitId == id,
+                    cancellationToken) ||
+            await dbContext.InventoryCountLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.ItemUnitId == id,
+                    cancellationToken) ||
             await dbContext.ItemMovements
                 .IgnoreQueryFilters()
                 .AnyAsync(
@@ -198,10 +212,7 @@ public sealed class ItemUnitService(
 
         if (isInUse)
         {
-            return Result.Failure(
-                Error.Conflict(
-                    "ItemUnits.InUse",
-                    "لا يمكن حذف وحدة الصنف لارتباطها بأصناف أو مستندات أو حركات حالية أو تاريخية."));
+            return Result.Failure(InUse());
         }
 
         itemUnit.IsActive = false;
@@ -211,11 +222,4 @@ public sealed class ItemUnitService(
         return Result.Success();
     }
 
-    private static Error InvalidId() =>
-        Error.Validation("ItemUnits.InvalidId", "يجب أن يكون رقم وحدة الصنف أكبر من صفر.");
-
-    private static Error NotFound(int id) =>
-        Error.NotFound(
-            "ItemUnits.NotFound",
-            $"لم يتم العثور على وحدة الصنف رقم {id}.");
 }

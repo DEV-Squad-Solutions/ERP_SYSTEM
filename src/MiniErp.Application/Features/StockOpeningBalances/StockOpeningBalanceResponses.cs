@@ -1,3 +1,5 @@
+using MiniErp.Domain.Enums;
+
 namespace MiniErp.Application.Features.StockOpeningBalances;
 
 public sealed record StockOpeningBalanceLineResponse(
@@ -14,7 +16,20 @@ public sealed record StockOpeningBalanceLineResponse(
     decimal Quantity,
     decimal Price,
     decimal Total,
-    string? Notes);
+    string? Notes)
+{
+    public InventoryCostStatus? CostStatus { get; init; }
+
+    public decimal? UnitCost { get; init; }
+
+    public decimal InventoryTotalCost { get; init; }
+
+    public decimal QuantityAfter { get; init; }
+
+    public decimal AverageCostAfter { get; init; }
+
+    public decimal InventoryValueAfter { get; init; }
+}
 
 public sealed record StockOpeningBalanceListResponse(
     int Id,
