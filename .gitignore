@@ -7,8 +7,4 @@ client/dist/
 client/.env.local
 client/*.tsbuildinfo
 /client/
-.codex/
-artifacts
-
-# Graphify generated output
-graphify-out/
+graphify-out
