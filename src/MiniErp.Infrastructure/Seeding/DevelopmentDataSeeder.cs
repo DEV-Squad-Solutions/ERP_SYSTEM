@@ -9,9 +9,11 @@ using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Containers;
+using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Logistics;
+using MiniErp.Domain.Entities.Payroll;
 using MiniErp.Domain.Entities.ReferenceData;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Identity;
@@ -253,6 +255,32 @@ public static class DevelopmentDataSeeder
                 dbContext,
                 company,
                 cancellationToken);
+
+            //await SeedEmployeesAsync(
+                //dbContext, 
+                //company, 
+                //cancellationToken);
+
+            //await SeedAttendanceAsync(
+            //    dbContext, 
+            //    company, 
+            //    cancellationToken);
+
+            //await SeedEmployeeTransactionsAsync(
+            //    dbContext, 
+            //    company, 
+            //    cancellationToken);
+
+            //await SeedPayrollPeriodsAsync(
+            //    dbContext, 
+            //    company, 
+            //    cancellationToken);
+
+            //await SeedPayrollEntriesAsync(
+            //    dbContext, 
+            //    company, 
+            //    cancellationToken);
+
         }
     }
 
@@ -1902,6 +1930,173 @@ public static class DevelopmentDataSeeder
         throw new InvalidOperationException(
             $"Identity seed failed while {operation}: {errors}");
     }
+    private static async Task SeedEmployeesAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var existingEmployeeCodes = await dbContext.Employees
+            .IgnoreQueryFilters()
+            .Where(emp => emp.CompanyId == company.Id && emp.Code.StartsWith("EMP-"))
+            .Select(emp => emp.Code)
+            .ToHashSetAsync(cancellationToken);
+
+        var createdOn = DateTime.UtcNow;
+        var createdByPc = Environment.MachineName;
+
+        // Using Bogus to generate diverse employee types based on your HR needs
+        var employeeMonthlyFaker = new Faker<Employee>("en")
+            .RuleFor(e => e.Name, f => f.Name.FirstName())
+            .RuleFor(e => e.Email, f => f.Internet.Email())
+            .RuleFor(e => e.PhoneNumber, f => f.Phone.PhoneNumber("010########"))
+            .RuleFor(e => e.MonthlySalary, f => f.Finance.Amount(3000, 15000))
+            .RuleFor(e => e.Type, EmployeeType.Monthly)// Assuming an enum or string for employee type (e.g., Daily/Monthly wage)
+            .RuleFor(e => e.IsActive, _ => true)
+            .RuleFor(e => e.CreatedById, _ => SeedActor)
+            .RuleFor(e => e.CreatedByPc, _ => createdByPc)
+            .RuleFor(e => e.CreatedOn, _ => createdOn)
+            .UseSeed(20260801 + company.Id);
+        var employeeDailyFaker = new Faker<Employee>("en")
+            .RuleFor(e => e.Name, f => f.Name.FirstName())
+            .RuleFor(e => e.Email, f => f.Internet.Email())
+            .RuleFor(e => e.PhoneNumber, f => f.Phone.PhoneNumber("010########"))
+            .RuleFor(e => e.DailySalary, f => f.Finance.Amount(100, 500))
+            .RuleFor(e => e.Type, EmployeeType.Daily)// Assuming an enum or string for employee type (e.g., Daily/Monthly wage)
+            .RuleFor(e => e.IsActive, _ => true)
+            .RuleFor(e => e.CreatedById, _ => SeedActor)
+            .RuleFor(e => e.CreatedByPc, _ => createdByPc)
+            .RuleFor(e => e.CreatedOn, _ => createdOn)
+            .UseSeed(20260801 + company.Id);
+
+        var generatedEmployees = employeeMonthlyFaker.Generate(5).Concat(employeeDailyFaker.Generate(5)); // Seed 10 employees per company
+
+        foreach (var employee in generatedEmployees)
+        {
+            if (existingEmployeeCodes.Contains(employee.Code))
+            {
+                continue;
+            }
+
+            dbContext.Employees.Add(employee);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedAttendanceAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var employees = await dbContext.Employees
+            .Where(e => e.CompanyId == company.Id && e.IsActive)
+            .Select(e => e.Id)
+            .ToListAsync(cancellationToken);
+
+        if (employees.Count == 0) return;
+
+        var targetDate = new DateOnly(2026, 7, 25); // Example specific date
+        var existingAttendance = await dbContext.EmployeeAttendances
+            .IgnoreQueryFilters()
+            .Where(a => a.CompanyId == company.Id && a.WorkDate == targetDate)
+            .AnyAsync(cancellationToken);
+
+        if (existingAttendance) return;
+
+        var createdOn = DateTime.UtcNow;
+        var createdByPc = Environment.MachineName;
+
+        foreach (var employeeId in employees)
+        {
+            dbContext.EmployeeAttendances.Add(new EmployeeAttendance
+            {
+                CompanyId = company.Id,
+                EmployeeId = employeeId,
+                WorkDate = targetDate,
+                CheckIn = new TimeOnly(8, 0, 0), // 8:00 AM
+                CheckOut = new TimeOnly(16, 30, 0), // 4:30 PM
+                CreatedById = SeedActor,
+                CreatedByPc = createdByPc,
+                CreatedOn = createdOn
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedEmployeeTransactionsAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var employees = await dbContext.Employees
+            .Where(e => e.CompanyId == company.Id && e.IsActive)
+            .Take(5) // Just seed transactions for the first 5 employees
+            .Select(e => e.Id)
+            .ToListAsync(cancellationToken);
+
+        if (employees.Count == 0) return;
+
+        var existingTransactions = await dbContext.EmployeeTransactions
+            .IgnoreQueryFilters()
+            .Where(t => t.CompanyId == company.Id && t.Notes != null && t.Notes.Contains("Seed transaction"))
+            .AnyAsync(cancellationToken);
+
+        if (existingTransactions) return;
+
+        var createdOn = DateTime.UtcNow;
+        var createdByPc = Environment.MachineName;
+        var transactionDate = new DateOnly(2026, 7, 20);
+
+        foreach (var employeeId in employees)
+        {
+            dbContext.EmployeeTransactions.Add(new EmployeeTransaction
+            {
+                CompanyId = company.Id,
+                EmployeeId = employeeId,
+                TransactionDate = transactionDate,
+                Amount = 500m,
+                Type = EmployeeTransactionType.Credit,
+                Notes = "Seed transaction - Performance Bonus",
+                CreatedById = SeedActor,
+                CreatedByPc = createdByPc,
+                CreatedOn = createdOn
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedPayrollPeriodsAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var periodCode = "PR-2026-07";
+        var existingPeriod = await dbContext.PayrollPeriods
+            .IgnoreQueryFilters()
+            .Where(p => p.CompanyId == company.Id && p.Code == periodCode)
+            .AnyAsync(cancellationToken);
+
+        if (existingPeriod) return;
+
+        dbContext.PayrollPeriods.Add(new PayrollPeriod
+        {
+            CompanyId = company.Id,
+            Code = periodCode,
+            Name = "July 2026",
+            StartDate = new DateOnly(2026, 7, 1),
+            EndDate = new DateOnly(2026, 7, 31),
+            Status=PayrollPeriodStatus.Draft,
+            CreatedById = SeedActor,
+            CreatedByPc = Environment.MachineName,
+            CreatedOn = DateTime.UtcNow
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    
 
     private sealed record SeedUser(
         string UserName,
