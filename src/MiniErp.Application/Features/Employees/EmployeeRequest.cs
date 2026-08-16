@@ -17,7 +17,6 @@ namespace MiniErp.Application.Features.Employees
         bool IsActive = true
     );
     public record EmployeeCreateRequest(
-        int EmployeesId,
         string Name,
         string? JobTitle,
         string? PhoneNumber,

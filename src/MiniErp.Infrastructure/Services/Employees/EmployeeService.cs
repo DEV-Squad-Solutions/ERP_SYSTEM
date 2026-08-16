@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
@@ -124,9 +124,9 @@ namespace MiniErp.Infrastructure.Services.Employees
                 Email = !string.IsNullOrWhiteSpace(request.Email) ? request.Email.Trim() : null,
                 Address = !string.IsNullOrWhiteSpace(request.Address) ? request.Address.Trim() : null,
                 Type = request.Type,
-                DailySalary = (int)request.Type==0 ? request.Salary : null,
-                MonthlySalary = (int)request.Type== 1 ? request.Salary : null,
-                RequiredWorkingDaysPerMonth = (int)request.Type == 1 ? request.RequiredWorkingDaysPerMonth : null,    
+                DailySalary = request.Type == EmployeeType.Daily ? request.Salary : null,
+                MonthlySalary = request.Type == EmployeeType.Monthly ? request.Salary : null,
+                RequiredWorkingDaysPerMonth = request.Type == EmployeeType.Monthly ? request.RequiredWorkingDaysPerMonth : null,
                 IsActive = request.IsActive
             };
 
@@ -181,8 +181,10 @@ namespace MiniErp.Infrastructure.Services.Employees
             employee.Email = string.IsNullOrWhiteSpace(request.Email) ? employee.Email : request.Email.Trim();
             employee.Address = string.IsNullOrWhiteSpace(request.Address) ? employee.Address : request.Address.Trim();
             employee.Type = request.Type;
-            employee.DailySalary = request.Type.ToString() == "Daily" ? request.Salary : employee.DailySalary;
-            employee.MonthlySalary = request.Type.ToString() == "Monthly" ? request.Salary : employee.MonthlySalary;
+            // Clear the opposing salary field to satisfy CK_Employees_SalaryType constraint
+            employee.DailySalary = request.Type == EmployeeType.Daily ? request.Salary : null;
+            employee.MonthlySalary = request.Type == EmployeeType.Monthly ? request.Salary : null;
+            employee.RequiredWorkingDaysPerMonth = request.Type == EmployeeType.Monthly ? request.RequiredWorkingDaysPerMonth : null;
 
             dbContext.Employees.Update(employee).State = Microsoft.EntityFrameworkCore.EntityState.Modified;
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -223,16 +225,18 @@ namespace MiniErp.Infrastructure.Services.Employees
                         "Employee.NotFound",
                         "لم يتم العثور على الموظف المطلوب."));
             }
-            if(!employeedata.Item2.Any()||employeedata.Item2 is null)
+            // Only fail if the employee has attendance records (cannot delete then)
+            if (employeedata.Item2 is not null && employeedata.Item2.Any())
             {
                 return Result.Failure(
                     Error.Conflict(
                         "Employee.HasAttendanceRecords",
-                        "لا يوجد يحتوي على سجلات حضور لهذ الموظف."));
+                        "لا يمكن حذف الموظف لوجود سجلات حضور مرتبطة به."));
             }
 
             dbContext.Employees.Remove(employeedata.Item1);
-            dbContext.EmployeeAttendances.RemoveRange(employeedata.Item2);
+            if (employeedata.Item2 is not null)
+                dbContext.EmployeeAttendances.RemoveRange(employeedata.Item2);
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return Result.Success();

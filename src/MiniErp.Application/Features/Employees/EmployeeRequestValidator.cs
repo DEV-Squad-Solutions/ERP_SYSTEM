@@ -34,9 +34,9 @@ namespace MiniErp.Application.Features.Employees
                 .PrecisionScale(18, 2, ignoreTrailingZeros: true)
                     .WithMessage("يجب ألا يتجاوز الراتب منزلتين عشريتين.");
 
-            RuleFor(x => x.RequiredWorkingDaysPerMonth)
-                .GreaterThan(0).WithMessage("يجب أن يكون عدد أيام العمل المطلوبة أكبر من صفر.")
-                .When(x => x.RequiredWorkingDaysPerMonth.HasValue);
+            //RuleFor(x => x.RequiredWorkingDaysPerMonth)
+                //.GreaterThan(0).WithMessage("يجب أن يكون عدد أيام العمل المطلوبة أكبر من صفر.")
+                //.When(x => x.RequiredWorkingDaysPerMonth.HasValue);
         }
     }
 

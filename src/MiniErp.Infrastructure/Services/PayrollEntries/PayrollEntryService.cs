@@ -14,7 +14,6 @@ public sealed partial class PayrollEntryService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
-    TimeProvider timeProvider,
     IEmployeeTransactionService employeeTransactionService)
     : IPayrollEntryService, IScopedService
 {

@@ -1,4 +1,4 @@
-﻿using MiniErp.Application.Common.Results;
+using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Employees;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Invoicing;
@@ -48,26 +48,27 @@ namespace MiniErp.Infrastructure.Services.Employees
         }
 
         private async Task<Error?> ValidateAddAsync(EmployeeCreateRequest request, CancellationToken cancellationToken)
-        {  
-            var PhoneNumberExists = await dbContext.Employees
-                .AnyAsync(e => e.CompanyId == campanyId && e.PhoneNumber == request.PhoneNumber, cancellationToken);
-
-            if (PhoneNumberExists)
+        {
+            if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
             {
-                return Error.Conflict(
-                    "Employee.CodeAlreadyExists",
-                    "رقم الهاتف للموظف موجود بالفعل لموظف آخر.",
-                    nameof(request.PhoneNumber));
+                var phoneExists = await dbContext.Employees
+                    .AnyAsync(e => e.CompanyId == campanyId && e.PhoneNumber == request.PhoneNumber.Trim(), cancellationToken);
+                if (phoneExists)
+                    return Error.Conflict(
+                        "Employee.PhoneAlreadyExists",
+                        "رقم الهاتف مستخدم بالفعل لموظف آخر.",
+                        nameof(request.PhoneNumber));
             }
-            var EmailExists = await dbContext.Employees
-                .AnyAsync(e => e.CompanyId == campanyId && e.Email == request.Email, cancellationToken);
 
-            if (EmailExists)
+            if (!string.IsNullOrWhiteSpace(request.Email))
             {
-                return Error.Conflict(
-                    "Employee.CodeAlreadyExists",
-                    "البريد الإلكتروني للموظف موجود بالفعل لموظف آخر.",
-                    nameof(request.Email));
+                var emailExists = await dbContext.Employees
+                    .AnyAsync(e => e.CompanyId == campanyId && e.Email == request.Email.Trim().ToLower(), cancellationToken);
+                if (emailExists)
+                    return Error.Conflict(
+                        "Employee.EmailAlreadyExists",
+                        "البريد الإلكتروني مستخدم بالفعل لموظف آخر.",
+                        nameof(request.Email));
             }
 
             return null;
@@ -75,27 +76,27 @@ namespace MiniErp.Infrastructure.Services.Employees
 
         private async Task<Error?> ValidateUpdateAsync(int id, EmployeeUpdateRequest request, CancellationToken cancellationToken)
         {
-            var PhoneNumberExists = await dbContext.Employees
-                .AnyAsync(e => e.CompanyId == campanyId && e.PhoneNumber == request.PhoneNumber && e.Id != id, cancellationToken);
-
-            if (PhoneNumberExists)
+            if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
             {
-                return Error.Conflict(
-                    "Employee.CodeAlreadyExists",
-                    "رقم الهاتف للموظف موجود بالفعل لموظف آخر.",
-                    nameof(request.PhoneNumber));
-            }
-            var EmailExists = await dbContext.Employees
-                .AnyAsync(e => e.CompanyId == campanyId && e.Email == request.Email && e.Id != id, cancellationToken);
-
-            if (EmailExists)
-            {
-                return Error.Conflict(
-                    "Employee.CodeAlreadyExists",
-                    "البريد الإلكتروني للموظف موجود بالفعل لموظف آخر.",
-                    nameof(request.Email));
+                var phoneExists = await dbContext.Employees
+                    .AnyAsync(e => e.CompanyId == campanyId && e.PhoneNumber == request.PhoneNumber.Trim() && e.Id != id, cancellationToken);
+                if (phoneExists)
+                    return Error.Conflict(
+                        "Employee.PhoneAlreadyExists",
+                        "رقم الهاتف مستخدم بالفعل لموظف آخر.",
+                        nameof(request.PhoneNumber));
             }
 
+            if (!string.IsNullOrWhiteSpace(request.Email))
+            {
+                var emailExists = await dbContext.Employees
+                    .AnyAsync(e => e.CompanyId == campanyId && e.Email == request.Email.Trim().ToLower() && e.Id != id, cancellationToken);
+                if (emailExists)
+                    return Error.Conflict(
+                        "Employee.EmailAlreadyExists",
+                        "البريد الإلكتروني مستخدم بالفعل لموظف آخر.",
+                        nameof(request.Email));
+            }
 
             return null;
         }
