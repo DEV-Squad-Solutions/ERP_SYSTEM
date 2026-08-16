@@ -35,11 +35,11 @@ public sealed class CountryServiceTests
             });
 
         Assert.True(result.IsSuccess);
-        Assert.Equal([1, 2], result.Value.Items.Select(item => item.Id));
+        Assert.Equal([3, 1, 2], result.Value.Items.Select(item => item.Id));
     }
 
     [Fact]
-    public async Task GetSelect_ReturnsOnlyActiveCountries()
+    public async Task GetSelect_ReturnsOnlyActiveCountriesWithArabicNames()
     {
         await using var database = await CountryTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -47,9 +47,32 @@ public sealed class CountryServiceTests
         var result = await service.GetSelectAsync();
 
         Assert.True(result.IsSuccess);
-        var country = Assert.Single(result.Value);
-        Assert.Equal(1, country.Id);
-        Assert.Equal("Active Country", country.Name);
+        Assert.Equal([3, 1], result.Value.Select(country => country.Id));
+        Assert.Equal(["ألف", "باء"], result.Value.Select(country => country.Name));
+    }
+
+    [Fact]
+    public async Task GetAll_FiltersArabicNameAndEnglishNameSeparately()
+    {
+        await using var database = await CountryTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var pagination = new PaginationRequest
+        {
+            PageNumber = 1,
+            PageSize = 20
+        };
+
+        var arabicResult = await service.GetAllAsync(
+            pagination,
+            new CountryFilterRequest(Name: "ألف"));
+        var englishResult = await service.GetAllAsync(
+            pagination,
+            new CountryFilterRequest(EnglishName: "Zulu"));
+
+        Assert.True(arabicResult.IsSuccess);
+        Assert.Equal(3, Assert.Single(arabicResult.Value.Items).Id);
+        Assert.True(englishResult.IsSuccess);
+        Assert.Equal(3, Assert.Single(englishResult.Value.Items).Id);
     }
 
     [Fact]
@@ -60,15 +83,15 @@ public sealed class CountryServiceTests
 
         var result = await service.AddAsync(
             new CountryRequest(
-                "  New Country  ",
-                "  دولة جديدة  "));
+                "  دولة جديدة  ",
+                "  New Country  "));
 
         Assert.True(result.IsSuccess);
         Assert.Matches(
             "^CTR-[0-9]{4,}$",
             result.Value.Code);
-        Assert.Equal("New Country", result.Value.Name);
-        Assert.Equal("دولة جديدة", result.Value.ArabicName);
+        Assert.Equal("دولة جديدة", result.Value.Name);
+        Assert.Equal("New Country", result.Value.EnglishName);
     }
 
     [Fact]
@@ -79,8 +102,8 @@ public sealed class CountryServiceTests
 
         var result = await service.AddAsync(
             new CountryRequest(
-                "Another Country",
-                "دولة أخرى"));
+                "دولة أخرى",
+                "Another Country"));
 
         Assert.True(result.IsSuccess);
         Assert.NotEqual("EG", result.Value.Code);
@@ -94,8 +117,8 @@ public sealed class CountryServiceTests
 
         var addResult = await service.AddAsync(
             new CountryRequest(
-                "Inactive Duplicate",
                 "دولة غير نشطة",
+                "Inactive Duplicate",
                 IsActive: false));
 
         Assert.True(addResult.IsSuccess);
@@ -104,8 +127,8 @@ public sealed class CountryServiceTests
         var updateResult = await service.UpdateAsync(
             addResult.Value.Id,
             new CountryRequest(
-                "Inactive Duplicate",
                 "دولة غير نشطة",
+                "Inactive Duplicate",
                 IsActive: true));
 
         Assert.True(updateResult.IsSuccess);
@@ -148,8 +171,8 @@ public sealed class CountryServiceTests
     {
         var validator = new CountryRequestValidator();
         var request = new CountryRequest(
-            $"  {new string('N', 200)}  ",
-            $"  {new string('ع', 200)}  ");
+            $"  {new string('ع', 200)}  ",
+            $"  {new string('N', 200)}  ");
 
         var result = await validator.ValidateAsync(request);
 
@@ -225,7 +248,7 @@ public sealed class CountryServiceTests
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     Code TEXT NOT NULL,
                     Name TEXT NOT NULL,
-                    ArabicName TEXT NOT NULL,
+                    EnglishName TEXT NOT NULL,
                     IsActive INTEGER NOT NULL,
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
@@ -258,15 +281,21 @@ public sealed class CountryServiceTests
                 CreateCountry(
                     id: 1,
                     code: "EG",
-                    name: "Active Country",
-                    arabicName: "دولة نشطة",
+                    name: "باء",
+                    englishName: "Active Country",
                     isActive: true),
                 CreateCountry(
                     id: 2,
                     code: "OLD",
-                    name: "Inactive Country",
-                    arabicName: "دولة غير نشطة",
-                    isActive: false));
+                    name: "جيم",
+                    englishName: "Inactive Country",
+                    isActive: false),
+                CreateCountry(
+                    id: 3,
+                    code: "AA",
+                    name: "ألف",
+                    englishName: "Zulu Country",
+                    isActive: true));
             await context.SaveChangesAsync();
             context.ChangeTracker.Clear();
         }
@@ -275,14 +304,14 @@ public sealed class CountryServiceTests
             int id,
             string code,
             string name,
-            string arabicName,
+            string englishName,
             bool isActive) =>
             new()
             {
                 Id = id,
                 Code = code,
                 Name = name,
-                ArabicName = arabicName,
+                EnglishName = englishName,
                 IsActive = isActive
             };
     }

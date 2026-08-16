@@ -173,7 +173,7 @@ public sealed partial class InvoiceQueryService(
                 (invoice.Country != null &&
                  (invoice.Country.Code.Contains(search) ||
                   invoice.Country.Name.Contains(search) ||
-                  invoice.Country.ArabicName.Contains(search))) ||
+                  invoice.Country.EnglishName.Contains(search))) ||
                 (invoice.ItemsCategory != null &&
                  invoice.ItemsCategory.Name.Contains(search)) ||
                 (invoice.Driver != null &&

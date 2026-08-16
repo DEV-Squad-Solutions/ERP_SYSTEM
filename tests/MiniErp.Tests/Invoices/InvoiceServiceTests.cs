@@ -4122,6 +4122,24 @@ public sealed class InvoiceServiceTests
         Assert.Equal("FILTER-PURCHASE-002", invoice.InvoiceNumber);
     }
 
+    [Theory]
+    [InlineData("مصر")]
+    [InlineData("Egypt")]
+    public async Task GetAll_SearchMatchesArabicAndEnglishCountryNames(
+        string search)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await SeedInvoiceFilterDataAsync(database);
+
+        var result = await database.CreateQueryService().GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest(),
+            new InvoiceFilterRequest { Search = search });
+
+        Assert.True(result.IsSuccess);
+        var invoice = Assert.Single(result.Value.Items);
+        Assert.Equal("FILTER-SALES-001", invoice.InvoiceNumber);
+    }
+
     [Fact]
     public async Task GetAll_ReturnsSummaryForTheCompleteFilteredResult()
     {
@@ -4632,8 +4650,8 @@ public sealed class InvoiceServiceTests
         {
             Id = 5,
             Code = "EG",
-            Name = "Egypt",
-            ArabicName = "مصر"
+            Name = "مصر",
+            EnglishName = "Egypt"
         };
         var invoice = new Invoice
         {
@@ -5298,8 +5316,8 @@ public sealed class InvoiceServiceTests
         await database.Context.Database.ExecuteSqlRawAsync(
             """
             INSERT INTO Countries (
-                Id, Code, Name, ArabicName, IsActive, IsDeleted)
-            VALUES (1, 'EG', 'Egypt', 'مصر', 1, 0);
+                Id, Code, Name, EnglishName, IsActive, IsDeleted)
+            VALUES (1, 'EG', 'مصر', 'Egypt', 1, 0);
             """);
 
         var service = database.CreateService();
@@ -5694,7 +5712,7 @@ public sealed class InvoiceServiceTests
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     Code TEXT NOT NULL,
                     Name TEXT NOT NULL,
-                    ArabicName TEXT NOT NULL,
+                    EnglishName TEXT NOT NULL,
                     IsActive INTEGER NOT NULL,
                     IsDeleted INTEGER NOT NULL
                 );

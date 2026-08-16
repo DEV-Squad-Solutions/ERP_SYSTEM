@@ -2,5 +2,5 @@ namespace MiniErp.Application.Features.Countries;
 
 public sealed record CountryRequest(
     string Name,
-    string ArabicName,
+    string EnglishName,
     bool IsActive = true);

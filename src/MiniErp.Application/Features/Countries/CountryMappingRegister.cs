@@ -11,7 +11,7 @@ public sealed class CountryMappingRegister : IRegister
             .Ignore(country => country.Code)
             .Map(country => country.Name, request => request.Name.Trim())
             .Map(
-                country => country.ArabicName,
-                request => request.ArabicName.Trim());
+                country => country.EnglishName,
+                request => request.EnglishName.Trim());
     }
 }

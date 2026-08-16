@@ -10,7 +10,7 @@ public sealed class Country : AuditableEntity
 
     public string Name { get; set; } = string.Empty;
 
-    public string ArabicName { get; set; } = string.Empty;
+    public string EnglishName { get; set; } = string.Empty;
 
     public bool IsActive { get; set; } = true;
 }

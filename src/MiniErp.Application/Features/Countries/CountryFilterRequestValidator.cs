@@ -9,6 +9,6 @@ public sealed class CountryFilterRequestValidator : AbstractValidator<CountryFil
         RuleFor(filter => filter.Search).MaximumLength(200);
         RuleFor(filter => filter.Code).MaximumLength(50);
         RuleFor(filter => filter.Name).MaximumLength(200);
-        RuleFor(filter => filter.ArabicName).MaximumLength(200);
+        RuleFor(filter => filter.EnglishName).MaximumLength(200);
     }
 }

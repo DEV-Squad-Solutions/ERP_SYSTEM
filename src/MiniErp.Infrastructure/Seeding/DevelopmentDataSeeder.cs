@@ -97,10 +97,10 @@ public static class DevelopmentDataSeeder
 
     private static readonly SeedCountry[] DefaultCountries =
     [
-        new("EG", "Egypt", "\u0645\u0635\u0631"),
-        new("SA", "Saudi Arabia", "\u0627\u0644\u0633\u0639\u0648\u062f\u064a\u0629"),
-        new("AE", "United Arab Emirates", "\u0627\u0644\u0625\u0645\u0627\u0631\u0627\u062a"),
-        new("US", "United States", "\u0627\u0644\u0648\u0644\u0627\u064a\u0627\u062a \u0627\u0644\u0645\u062a\u062d\u062f\u0629")
+        new("EG", "\u0645\u0635\u0631", "Egypt"),
+        new("SA", "\u0627\u0644\u0633\u0639\u0648\u062f\u064a\u0629", "Saudi Arabia"),
+        new("AE", "\u0627\u0644\u0625\u0645\u0627\u0631\u0627\u062a", "United Arab Emirates"),
+        new("US", "\u0627\u0644\u0648\u0644\u0627\u064a\u0627\u062a \u0627\u0644\u0645\u062a\u062d\u062f\u0629", "United States")
     ];
 
     private static readonly SeedContainer[] DefaultContainers =
@@ -311,7 +311,7 @@ public static class DevelopmentDataSeeder
             {
                 Code = seedCountry.Code,
                 Name = seedCountry.Name,
-                ArabicName = seedCountry.ArabicName,
+                EnglishName = seedCountry.EnglishName,
                 IsActive = true,
                 CreatedById = SeedActor,
                 CreatedByPc = createdByPc,
@@ -2120,7 +2120,7 @@ public static class DevelopmentDataSeeder
     private sealed record SeedCountry(
         string Code,
         string Name,
-        string ArabicName);
+        string EnglishName);
 
     private sealed record SeedContainer(
         string Code,

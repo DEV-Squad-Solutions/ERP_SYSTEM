@@ -27,7 +27,7 @@ public sealed class CountryService(
                 string.IsNullOrWhiteSpace(filters.Search) ||
                 country.Code.Contains(filters.Search.Trim()) ||
                 country.Name.Contains(filters.Search.Trim()) ||
-                country.ArabicName.Contains(filters.Search.Trim()))
+                country.EnglishName.Contains(filters.Search.Trim()))
             .Where(country =>
                 string.IsNullOrWhiteSpace(filters.Code) ||
                 country.Code.Contains(filters.Code.Trim()))
@@ -35,8 +35,8 @@ public sealed class CountryService(
                 string.IsNullOrWhiteSpace(filters.Name) ||
                 country.Name.Contains(filters.Name.Trim()))
             .Where(country =>
-                string.IsNullOrWhiteSpace(filters.ArabicName) ||
-                country.ArabicName.Contains(filters.ArabicName.Trim()))
+                string.IsNullOrWhiteSpace(filters.EnglishName) ||
+                country.EnglishName.Contains(filters.EnglishName.Trim()))
             .Where(country =>
                 !filters.IsActive.HasValue ||
                 country.IsActive == filters.IsActive.Value)
@@ -55,7 +55,7 @@ public sealed class CountryService(
         var response = await dbContext.Countries
             .AsNoTracking()
             .Where(country => country.IsActive)
-            .OrderBy(country => country.ArabicName)
+            .OrderBy(country => country.Name)
             .ThenBy(country => country.Id)
             .ProjectToType<SelectResponse>()
             .ToListAsync(cancellationToken);
