@@ -1782,14 +1782,14 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task Add_MainAndActualDriversPersistsBothRoles()
+    public async Task Add_ActualDriverTextPersistsOnInvoiceAndTrip()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var request = CreateRequest(
             InvoiceType.SalesReturn,
             driverId: 1) with
         {
-            ActualDriverId = 2
+            ActualDriverId = "  Driver 2  "
         };
 
         var result = await database.CreateService().AddAsync(request);
@@ -1797,7 +1797,7 @@ public sealed class InvoiceServiceTests
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value.DriverId);
         Assert.Equal("Driver 1", result.Value.DriverName);
-        Assert.Equal(2, result.Value.ActualDriverId);
+        Assert.Equal("Driver 2", result.Value.ActualDriverId);
         Assert.Equal("Driver 2", result.Value.ActualDriverName);
 
         var invoice = await database.Context.Invoices
@@ -1807,9 +1807,18 @@ public sealed class InvoiceServiceTests
             .AsNoTracking()
             .SingleAsync();
         Assert.Equal(1, invoice.DriverId);
-        Assert.Equal(2, invoice.ActualDriverId);
+        Assert.Equal("Driver 2", invoice.ActualDriverId);
         Assert.Equal(1, trip.DriverId);
-        Assert.Equal(2, trip.ActualDriverId);
+        Assert.Equal("Driver 2", trip.ActualDriverId);
+
+        var searchResult = await database.CreateQueryService().GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest(),
+            new InvoiceFilterRequest
+            {
+                Search = "Driver 2"
+            });
+        Assert.True(searchResult.IsSuccess);
+        Assert.Equal(result.Value.Id, Assert.Single(searchResult.Value.Items).Id);
     }
 
     [Fact]
@@ -1818,7 +1827,7 @@ public sealed class InvoiceServiceTests
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var request = CreateRequest(InvoiceType.SalesReturn) with
         {
-            ActualDriverId = 2
+            ActualDriverId = "Driver 2"
         };
 
         var result = await database.CreateService().AddAsync(request);
@@ -1828,49 +1837,46 @@ public sealed class InvoiceServiceTests
         Assert.Equal(0, await database.Context.Invoices.CountAsync());
     }
 
-    [Theory]
-    [InlineData(999, "Invoices.ActualDriverNotFound")]
-    [InlineData(3, "Invoices.ActualDriverInactive")]
-    [InlineData(4, "Invoices.ActualDriverNotFound")]
-    public async Task Add_RejectsInvalidActualDriver(
-        int actualDriverId,
-        string expectedError)
+    [Fact]
+    public async Task Add_DoesNotRequireActualDriverToExistInDriverCatalog()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var request = CreateRequest(
             InvoiceType.SalesReturn,
             driverId: 1) with
         {
-            ActualDriverId = actualDriverId
+            ActualDriverId = "Driver outside catalog"
         };
 
         var result = await database.CreateService().AddAsync(request);
 
-        Assert.True(result.IsFailure);
-        Assert.Equal(expectedError, result.Error.Code);
-        Assert.Equal(0, await database.Context.Invoices.CountAsync());
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Driver outside catalog", result.Value.ActualDriverId);
+        Assert.Equal(
+            "Driver outside catalog",
+            (await database.Context.Invoices.SingleAsync()).ActualDriverId);
     }
 
     [Fact]
-    public async Task Add_SameMainAndActualDriverNormalizesActualDriverToNull()
+    public async Task Add_NumericActualDriverTextIsPreserved()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var request = CreateRequest(
             InvoiceType.SalesReturn,
             driverId: 1) with
         {
-            ActualDriverId = 1
+            ActualDriverId = "1"
         };
 
         var result = await database.CreateService().AddAsync(request);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value.DriverId);
-        Assert.Null(result.Value.ActualDriverId);
+        Assert.Equal("1", result.Value.ActualDriverId);
         var trip = await database.Context.DriverTrips
             .AsNoTracking()
             .SingleAsync();
-        Assert.Null(trip.ActualDriverId);
+        Assert.Equal("1", trip.ActualDriverId);
     }
 
     [Fact]
@@ -1881,7 +1887,7 @@ public sealed class InvoiceServiceTests
             InvoiceType.SalesReturn,
             driverId: 1) with
         {
-            ActualDriverId = 2,
+            ActualDriverId = "Driver 2",
             UsesExternalDriver = true,
             ExternalDriverName = "External Driver"
         };
@@ -1931,7 +1937,7 @@ public sealed class InvoiceServiceTests
                 InvoiceType.SalesReturn,
                 driverId: 1) with
             {
-                ActualDriverId = 2
+                ActualDriverId = "Initial Driver"
             })).Value;
 
         var changed = await service.UpdateAsync(
@@ -1941,7 +1947,7 @@ public sealed class InvoiceServiceTests
                 [new InvoiceLineRequest(1, 2, 1m, 10m, null)]) with
             {
                 DriverId = 2,
-                ActualDriverId = 1
+                ActualDriverId = "Replacement Driver"
             });
 
         Assert.True(changed.IsSuccess);
@@ -1950,7 +1956,7 @@ public sealed class InvoiceServiceTests
             .AsNoTracking()
             .SingleAsync();
         Assert.Equal(2, changedTrip.DriverId);
-        Assert.Equal(1, changedTrip.ActualDriverId);
+        Assert.Equal("Replacement Driver", changedTrip.ActualDriverId);
 
         database.Context.ChangeTracker.Clear();
         var cleared = await service.UpdateAsync(
@@ -4602,14 +4608,6 @@ public sealed class InvoiceServiceTests
             Weight = 2m,
             Price = 5m
         };
-        var actualDriver = new Driver
-        {
-            Id = 2,
-            CompanyId = 7,
-            Code = "DRV-2",
-            Name = "Actual Driver",
-            LicenseNumber = "LIC-2"
-        };
         var responsibleDriver = new Driver
         {
             Id = 1,
@@ -4650,7 +4648,7 @@ public sealed class InvoiceServiceTests
             Store = store,
             Country = country,
             Driver = responsibleDriver,
-            ActualDriver = actualDriver,
+            ActualDriverId = "Original actual driver",
             Lines = [line]
         };
         typeof(Invoice)
@@ -4669,7 +4667,7 @@ public sealed class InvoiceServiceTests
             null,
             null,
             1,
-            2,
+            "  Updated actual driver  ",
             false,
             "   ",
             "  VEH-2  ",
@@ -4691,7 +4689,7 @@ public sealed class InvoiceServiceTests
         Assert.Equal(3m, invoice.DiscountAmount);
         Assert.Equal(4m, invoice.PaidAmount);
         Assert.Equal(1, invoice.DriverId);
-        Assert.Equal(2, invoice.ActualDriverId);
+        Assert.Equal("Updated actual driver", invoice.ActualDriverId);
         Assert.Equal("EXT-2", invoice.ExportInvoiceCode);
         Assert.Null(invoice.ExternalDriverName);
         Assert.Equal("VEH-2", invoice.VehicleNumber);
@@ -4700,7 +4698,6 @@ public sealed class InvoiceServiceTests
         Assert.Same(store, invoice.Store);
         Assert.Same(country, invoice.Country);
         Assert.Same(responsibleDriver, invoice.Driver);
-        Assert.Same(actualDriver, invoice.ActualDriver);
         Assert.Same(line, Assert.Single(invoice.Lines));
         Assert.Equal(rowVersion, invoice.RowVersion);
         Assert.Equal("creator", invoice.CreatedById);
@@ -4723,7 +4720,7 @@ public sealed class InvoiceServiceTests
             paidAmount: 17m) with
         {
             InvoiceNumber = "  INV-MAP  ",
-            ActualDriverId = 2,
+            ActualDriverId = "  Actual Driver  ",
             ExportInvoiceCode = "  EXT-1  ",
             ExternalDriverName = "   ",
             VehicleNumber = "  VEH-1  ",
@@ -4745,7 +4742,7 @@ public sealed class InvoiceServiceTests
         Assert.Equal(request.StoreId, invoice.StoreId);
         Assert.Equal(request.ContainerStoreId, invoice.ContainerStoreId);
         Assert.Equal(1, invoice.DriverId);
-        Assert.Equal(2, invoice.ActualDriverId);
+        Assert.Equal("Actual Driver", invoice.ActualDriverId);
         Assert.Equal(3m, invoice.DiscountAmount);
         Assert.Equal(17m, invoice.PaidAmount);
         Assert.Equal("EXT-1", invoice.ExportInvoiceCode);
@@ -4853,15 +4850,7 @@ public sealed class InvoiceServiceTests
                 Name = "Responsible Driver",
                 LicenseNumber = "LIC-1"
             },
-            ActualDriverId = 2,
-            ActualDriver = new Driver
-            {
-                Id = 2,
-                CompanyId = 1,
-                Code = "DRV-2",
-                Name = "Actual Driver",
-                LicenseNumber = "LIC-2"
-            },
+            ActualDriverId = "Actual Driver",
             DiscountAmount = 2m,
             PaidAmount = 4m,
             Lines = [secondLine, firstLine],
@@ -4975,6 +4964,26 @@ public sealed class InvoiceServiceTests
             result.Errors,
             error =>
                 error.PropertyName == nameof(InvoiceRequest.InvoiceNumber));
+    }
+
+    [Fact]
+    public void CreateValidator_RejectsActualDriverTextOverMaximumLength()
+    {
+        var request = CreateRequest(
+            InvoiceType.SalesReturn,
+            driverId: 1) with
+        {
+            ActualDriverId = new string(
+                'D',
+                InvoiceRequest.ActualDriverIdMaximumLength + 1)
+        };
+
+        var result = new InvoiceRequestValidator().Validate(request);
+
+        Assert.Contains(
+            result.Errors,
+            error =>
+                error.PropertyName == nameof(InvoiceRequest.ActualDriverId));
     }
 
     [Fact]
@@ -5781,7 +5790,7 @@ public sealed class InvoiceServiceTests
                     ExchangeRateId INTEGER NULL,
                     ExchangeRate NUMERIC NOT NULL DEFAULT 1,
                     DriverId INTEGER NULL,
-                    ActualDriverId INTEGER NULL,
+                    ActualDriverId TEXT NULL,
                     UsesExternalDriver INTEGER NOT NULL DEFAULT 0,
                     ExternalDriverName TEXT NULL,
                     VehicleNumber TEXT NULL,
@@ -5998,7 +6007,7 @@ public sealed class InvoiceServiceTests
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
                     DriverId INTEGER NOT NULL,
-                    ActualDriverId INTEGER NULL,
+                    ActualDriverId TEXT NULL,
                     InvoiceId INTEGER NOT NULL,
                     BusinessPartnerId INTEGER NOT NULL,
                     InvoiceNumber TEXT NOT NULL,

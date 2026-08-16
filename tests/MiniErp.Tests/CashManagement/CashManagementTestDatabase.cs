@@ -401,7 +401,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,
                 DriverId INTEGER NOT NULL,
-                ActualDriverId INTEGER NULL,
+                ActualDriverId TEXT NULL,
                 InvoiceId INTEGER NOT NULL,
                 BusinessPartnerId INTEGER NOT NULL,
                 InvoiceNumber TEXT NOT NULL,

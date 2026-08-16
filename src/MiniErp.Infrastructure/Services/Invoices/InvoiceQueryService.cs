@@ -179,9 +179,8 @@ public sealed partial class InvoiceQueryService(
                 (invoice.Driver != null &&
                  (invoice.Driver.Code.Contains(search) ||
                   invoice.Driver.Name.Contains(search))) ||
-                (invoice.ActualDriver != null &&
-                 (invoice.ActualDriver.Code.Contains(search) ||
-                  invoice.ActualDriver.Name.Contains(search))) ||
+                (invoice.ActualDriverId != null &&
+                 invoice.ActualDriverId.Contains(search)) ||
                 (invoice.ExternalDriverName != null &&
                  invoice.ExternalDriverName.Contains(search)) ||
                 (invoice.VehicleNumber != null &&

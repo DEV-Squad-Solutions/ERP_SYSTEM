@@ -66,8 +66,7 @@ public sealed class Invoice : AuditableEntity
     public int? DriverId { get; set; }
     public Driver? Driver { get; set; }
 
-    public int? ActualDriverId { get; set; }
-    public Driver? ActualDriver { get; set; }
+    public string? ActualDriverId { get; set; }
 
     public bool UsesExternalDriver { get; set; }
     public string? ExternalDriverName { get; set; }

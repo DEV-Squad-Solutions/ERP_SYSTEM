@@ -28,11 +28,8 @@ public sealed class DriverTripConfiguration : AuditableEntityConfiguration<Drive
         builder.Property(trip => trip.DriverId)
             .IsRequired();
 
-        builder.HasIndex(trip => new
-        {
-            trip.CompanyId,
-            trip.ActualDriverId
-        });
+        builder.Property(trip => trip.ActualDriverId)
+            .HasMaxLength(200);
 
         builder.Property(trip => trip.InvoiceId)
             .IsRequired();
@@ -97,21 +94,6 @@ public sealed class DriverTripConfiguration : AuditableEntityConfiguration<Drive
                 driver.CompanyId,
                 driver.Id
             })
-            .OnDelete(DeleteBehavior.Restrict);
-
-        builder.HasOne(trip => trip.ActualDriver)
-            .WithMany()
-            .HasForeignKey(trip => new
-            {
-                trip.CompanyId,
-                trip.ActualDriverId
-            })
-            .HasPrincipalKey(driver => new
-            {
-                driver.CompanyId,
-                driver.Id
-            })
-            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(trip => trip.Invoice)

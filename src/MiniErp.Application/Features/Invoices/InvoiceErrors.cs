@@ -274,7 +274,7 @@ public static class InvoiceErrors
     public static Error ExternalDriverWithActualDriver() =>
         Error.Validation(
             "Invoices.ExternalDriverWithActualDriver",
-            "لا يمكن اختيار سائق داخلي مع سائق خارجي.",
+            "لا يمكن إرسال السائق الفعلي مع وضع السائق الخارجي.",
             nameof(InvoiceRequest.ActualDriverId));
 
     public static Error ExternalDriverNameRequired() =>
@@ -294,18 +294,6 @@ public static class InvoiceErrors
             "Invoices.DriverInactive",
             "السائق الرئيسي غير نشط.",
             nameof(InvoiceRequest.DriverId));
-
-    public static Error ActualDriverNotFound(int id) =>
-        Error.NotFound(
-            "Invoices.ActualDriverNotFound",
-            $"السائق الفعلي رقم {id} غير موجود.",
-            nameof(InvoiceRequest.ActualDriverId));
-
-    public static Error ActualDriverInactive() =>
-        Error.Conflict(
-            "Invoices.ActualDriverInactive",
-            "السائق الفعلي غير نشط.",
-            nameof(InvoiceRequest.ActualDriverId));
 
     public static Error ContainerLinesNotAllowed() =>
         Error.Conflict(

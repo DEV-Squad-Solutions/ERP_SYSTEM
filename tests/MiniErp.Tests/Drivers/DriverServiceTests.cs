@@ -209,37 +209,35 @@ public sealed class DriverServiceTests
     }
 
     [Fact]
-    public async Task Delete_WhenDriverIsAnInvoiceActualDriver_BlocksDeletion()
+    public async Task Delete_WhenTextMatchesInvoiceActualDriver_DoesNotCreateDependency()
     {
         await using var database = await DriverTestDatabase.CreateAsync();
         await database.AddInvoiceAsync(
             companyId: 1,
             driverId: 1,
             isDeleted: false,
-            actualDriverId: 2);
+            actualDriverId: "2");
 
         var result = await database.CreateService(companyId: 1).DeleteAsync(2);
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("Drivers.HasDependencies", result.Error.Code);
-        Assert.False((await database.GetDriverAsync(2)).IsDeleted);
+        Assert.True(result.IsSuccess);
+        Assert.True((await database.GetDriverAsync(2)).IsDeleted);
     }
 
     [Fact]
-    public async Task Delete_WhenDriverIsATripActualDriver_BlocksDeletion()
+    public async Task Delete_WhenTextMatchesTripActualDriver_DoesNotCreateDependency()
     {
         await using var database = await DriverTestDatabase.CreateAsync();
         await database.AddDriverTripAsync(
             companyId: 1,
             driverId: 1,
             isDeleted: false,
-            actualDriverId: 2);
+            actualDriverId: "2");
 
         var result = await database.CreateService(companyId: 1).DeleteAsync(2);
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("Drivers.HasDependencies", result.Error.Code);
-        Assert.False((await database.GetDriverAsync(2)).IsDeleted);
+        Assert.True(result.IsSuccess);
+        Assert.True((await database.GetDriverAsync(2)).IsDeleted);
     }
 
     [Fact]
@@ -357,7 +355,7 @@ public sealed class DriverServiceTests
             int companyId,
             int driverId,
             bool isDeleted,
-            int? actualDriverId = null) =>
+            string? actualDriverId = null) =>
             Context.Database.ExecuteSqlInterpolatedAsync(
                 $"""
                  INSERT INTO Invoices (
@@ -370,7 +368,7 @@ public sealed class DriverServiceTests
             int companyId,
             int driverId,
             bool isDeleted,
-            int? actualDriverId = null) =>
+            string? actualDriverId = null) =>
             Context.Database.ExecuteSqlInterpolatedAsync(
                 $"""
                  INSERT INTO DriverTrips (
@@ -443,7 +441,7 @@ public sealed class DriverServiceTests
                     CompanyId INTEGER NOT NULL,
                     ContentType INTEGER NOT NULL DEFAULT 1,
                     DriverId INTEGER NULL,
-                    ActualDriverId INTEGER NULL,
+                    ActualDriverId TEXT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
 
@@ -451,7 +449,7 @@ public sealed class DriverServiceTests
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
                     DriverId INTEGER NOT NULL,
-                    ActualDriverId INTEGER NULL,
+                    ActualDriverId TEXT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
 

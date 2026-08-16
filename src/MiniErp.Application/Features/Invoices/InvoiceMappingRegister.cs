@@ -62,6 +62,9 @@ public sealed class InvoiceMappingRegister : IRegister
                 invoice => invoice.ExternalDriverName,
                 request => Normalize(request.ExternalDriverName))
             .Map(
+                invoice => invoice.ActualDriverId,
+                request => Normalize(request.ActualDriverId))
+            .Map(
                 invoice => invoice.VehicleNumber,
                 request => Normalize(request.VehicleNumber))
             .Map(
@@ -102,6 +105,9 @@ public sealed class InvoiceMappingRegister : IRegister
             .Map(
                 invoice => invoice.ExternalDriverName,
                 request => Normalize(request.ExternalDriverName))
+            .Map(
+                invoice => invoice.ActualDriverId,
+                request => Normalize(request.ActualDriverId))
             .Map(
                 invoice => invoice.VehicleNumber,
                 request => Normalize(request.VehicleNumber))
@@ -152,9 +158,7 @@ public sealed class InvoiceMappingRegister : IRegister
                 invoice => invoice.Driver == null ? null : invoice.Driver.Name)
             .Map(
                 response => response.ActualDriverName,
-                invoice => invoice.ActualDriver == null
-                    ? null
-                    : invoice.ActualDriver.Name)
+                invoice => invoice.ActualDriverId)
             .Map(
                 response => response.BaseCurrency,
                 invoice => invoice.Company == null ||
@@ -280,9 +284,7 @@ public sealed class InvoiceMappingRegister : IRegister
                 invoice => invoice.Driver == null ? null : invoice.Driver.Name)
             .Map(
                 response => response.ActualDriverName,
-                invoice => invoice.ActualDriver == null
-                    ? null
-                    : invoice.ActualDriver.Name)
+                invoice => invoice.ActualDriverId)
             .Map(
                 response => response.BaseCurrency,
                 invoice => invoice.Company == null ||

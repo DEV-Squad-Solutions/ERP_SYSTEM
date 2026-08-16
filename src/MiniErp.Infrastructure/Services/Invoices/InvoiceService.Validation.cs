@@ -310,7 +310,7 @@ public sealed partial class InvoiceService
 
         NormalizeDriverValues(invoice);
 
-        if (invoice.ActualDriverId.HasValue &&
+        if (invoice.ActualDriverId is not null &&
             !invoice.DriverId.HasValue)
         {
             return Failure(
@@ -318,7 +318,7 @@ public sealed partial class InvoiceService
         }
 
         if (invoice.UsesExternalDriver &&
-            invoice.ActualDriverId.HasValue)
+            invoice.ActualDriverId is not null)
         {
             return Failure(
                 ExternalDriverWithActualDriver());
@@ -355,31 +355,6 @@ public sealed partial class InvoiceService
             {
                 return Failure(
                     DriverInactive());
-            }
-        }
-
-        if (invoice.ActualDriverId is int actualDriverId)
-        {
-            var actualDriver = await dbContext.Drivers
-                .AsNoTracking()
-                .Where(candidate =>
-                    candidate.CompanyId == companyId &&
-                    candidate.Id == actualDriverId)
-                .Select(candidate => new
-                {
-                    candidate.IsActive
-                })
-                .FirstOrDefaultAsync(cancellationToken);
-            if (actualDriver is null)
-            {
-                return Failure(
-                    ActualDriverNotFound(actualDriverId));
-            }
-
-            if (!actualDriver.IsActive)
-            {
-                return Failure(
-                    ActualDriverInactive());
             }
         }
 
@@ -965,11 +940,6 @@ public sealed partial class InvoiceService
 
     private static void NormalizeDriverValues(Invoice invoice)
     {
-        if (invoice.ActualDriverId == invoice.DriverId)
-        {
-            invoice.ActualDriverId = null;
-        }
-
         if (!invoice.UsesExternalDriver)
         {
             invoice.ExternalDriverName = null;
