@@ -55,7 +55,7 @@ public sealed class CountryService(
         var response = await dbContext.Countries
             .AsNoTracking()
             .Where(country => country.IsActive)
-            .OrderBy(country => country.Name)
+            .OrderBy(country => country.ArabicName)
             .ThenBy(country => country.Id)
             .ProjectToType<SelectResponse>()
             .ToListAsync(cancellationToken);
