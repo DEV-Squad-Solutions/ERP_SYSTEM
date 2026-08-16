@@ -1334,7 +1334,8 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasDefaultValue(1);
 
                     b.Property<int>("StockBalanceCheckMode")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
 
                     b.HasKey("CompanyId");
 

@@ -1857,7 +1857,7 @@ public static class DevelopmentDataSeeder
             {
                 CompanyId = companyId,
                 BaseCurrency = CurrencyCode.EGP,
-                StockBalanceCheckMode = StockBalanceCheckMode.DateCheck
+                StockBalanceCheckMode = StockBalanceCheckMode.None
             });
         }
 
