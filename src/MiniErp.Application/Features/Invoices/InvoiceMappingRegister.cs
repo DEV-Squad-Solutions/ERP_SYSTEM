@@ -62,8 +62,8 @@ public sealed class InvoiceMappingRegister : IRegister
                 invoice => invoice.ExternalDriverName,
                 request => Normalize(request.ExternalDriverName))
             .Map(
-                invoice => invoice.ActualDriverId,
-                request => Normalize(request.ActualDriverId))
+                invoice => invoice.ActualDriverName,
+                request => Normalize(request.ActualDriverName))
             .Map(
                 invoice => invoice.VehicleNumber,
                 request => Normalize(request.VehicleNumber))
@@ -106,8 +106,8 @@ public sealed class InvoiceMappingRegister : IRegister
                 invoice => invoice.ExternalDriverName,
                 request => Normalize(request.ExternalDriverName))
             .Map(
-                invoice => invoice.ActualDriverId,
-                request => Normalize(request.ActualDriverId))
+                invoice => invoice.ActualDriverName,
+                request => Normalize(request.ActualDriverName))
             .Map(
                 invoice => invoice.VehicleNumber,
                 request => Normalize(request.VehicleNumber))
@@ -158,7 +158,7 @@ public sealed class InvoiceMappingRegister : IRegister
                 invoice => invoice.Driver == null ? null : invoice.Driver.Name)
             .Map(
                 response => response.ActualDriverName,
-                invoice => invoice.ActualDriverId)
+                invoice => invoice.ActualDriverName)
             .Map(
                 response => response.BaseCurrency,
                 invoice => invoice.Company == null ||
@@ -284,7 +284,7 @@ public sealed class InvoiceMappingRegister : IRegister
                 invoice => invoice.Driver == null ? null : invoice.Driver.Name)
             .Map(
                 response => response.ActualDriverName,
-                invoice => invoice.ActualDriverId)
+                invoice => invoice.ActualDriverName)
             .Map(
                 response => response.BaseCurrency,
                 invoice => invoice.Company == null ||

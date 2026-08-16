@@ -38,7 +38,7 @@ public sealed record InvoiceRequest(
     int? ContainerStoreId,
     int? CountryId,
     int? DriverId,
-    string? ActualDriverId,
+    string? ActualDriverName,
     bool UsesExternalDriver,
     string? ExternalDriverName,
     string? VehicleNumber,
@@ -59,7 +59,7 @@ public sealed record InvoiceRequest(
 
     public const int ExternalDriverNameMaximumLength = 200;
 
-    public const int ActualDriverIdMaximumLength = 200;
+    public const int ActualDriverNameMaximumLength = 200;
 
     public const int VehicleNumberMaximumLength = 100;
 
@@ -80,7 +80,7 @@ public sealed record InvoiceUpdateRequest(
     int? ContainerStoreId,
     int? CountryId,
     int? DriverId,
-    string? ActualDriverId,
+    string? ActualDriverName,
     bool UsesExternalDriver,
     string? ExternalDriverName,
     string? VehicleNumber,

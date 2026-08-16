@@ -28,7 +28,7 @@ public sealed class DriverTripConfiguration : AuditableEntityConfiguration<Drive
         builder.Property(trip => trip.DriverId)
             .IsRequired();
 
-        builder.Property(trip => trip.ActualDriverId)
+        builder.Property(trip => trip.ActualDriverName)
             .HasMaxLength(200);
 
         builder.Property(trip => trip.InvoiceId)

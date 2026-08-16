@@ -275,7 +275,7 @@ public static class InvoiceErrors
         Error.Validation(
             "Invoices.ExternalDriverWithActualDriver",
             "لا يمكن إرسال السائق الفعلي مع وضع السائق الخارجي.",
-            nameof(InvoiceRequest.ActualDriverId));
+            nameof(InvoiceRequest.ActualDriverName));
 
     public static Error ExternalDriverNameRequired() =>
         Error.Validation(

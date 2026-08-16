@@ -244,13 +244,13 @@ internal static class InvoiceValidationRules
             .GreaterThan(0)
             .When(request => request.DriverId.HasValue);
 
-        validator.RuleFor(request => request.ActualDriverId)
-            .MaximumLength(InvoiceRequest.ActualDriverIdMaximumLength);
+        validator.RuleFor(request => request.ActualDriverName)
+            .MaximumLength(InvoiceRequest.ActualDriverNameMaximumLength);
 
         validator.RuleFor(request => request.DriverId)
             .NotNull()
             .When(request =>
-                !string.IsNullOrWhiteSpace(request.ActualDriverId))
+                !string.IsNullOrWhiteSpace(request.ActualDriverName))
             .WithMessage("يجب تحديد السائق الرئيسي قبل السائق الفعلي.");
 
         validator.RuleFor(request => request.DueDate)
@@ -332,7 +332,7 @@ internal static class InvoiceValidationRules
             .When(request => request.UsesExternalDriver)
             .WithMessage("اسم السائق الخارجي مطلوب.");
 
-        validator.RuleFor(request => request.ActualDriverId)
+        validator.RuleFor(request => request.ActualDriverName)
             .Must(string.IsNullOrWhiteSpace)
             .When(request => request.UsesExternalDriver)
             .WithMessage("لا يمكن إرسال السائق الفعلي مع وضع السائق الخارجي.");
@@ -382,13 +382,13 @@ internal static class InvoiceValidationRules
             .GreaterThan(0)
             .When(request => request.DriverId.HasValue);
 
-        validator.RuleFor(request => request.ActualDriverId)
-            .MaximumLength(InvoiceRequest.ActualDriverIdMaximumLength);
+        validator.RuleFor(request => request.ActualDriverName)
+            .MaximumLength(InvoiceRequest.ActualDriverNameMaximumLength);
 
         validator.RuleFor(request => request.DriverId)
             .NotNull()
             .When(request =>
-                !string.IsNullOrWhiteSpace(request.ActualDriverId))
+                !string.IsNullOrWhiteSpace(request.ActualDriverName))
             .WithMessage("يجب تحديد السائق الرئيسي قبل السائق الفعلي.");
 
         validator.RuleFor(request => request.DueDate)
@@ -470,7 +470,7 @@ internal static class InvoiceValidationRules
             .When(request => request.UsesExternalDriver)
             .WithMessage("اسم السائق الخارجي مطلوب.");
 
-        validator.RuleFor(request => request.ActualDriverId)
+        validator.RuleFor(request => request.ActualDriverName)
             .Must(string.IsNullOrWhiteSpace)
             .When(request => request.UsesExternalDriver)
             .WithMessage("لا يمكن إرسال السائق الفعلي مع وضع السائق الخارجي.");

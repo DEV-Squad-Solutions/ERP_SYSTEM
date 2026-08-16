@@ -84,7 +84,7 @@ public sealed class InvoiceConfiguration : AuditableEntityConfiguration<Invoice>
         builder.Property(invoice => invoice.ExternalDriverName)
             .HasMaxLength(200);
 
-        builder.Property(invoice => invoice.ActualDriverId)
+        builder.Property(invoice => invoice.ActualDriverName)
             .HasMaxLength(200);
 
         builder.Property(invoice => invoice.VehicleNumber)

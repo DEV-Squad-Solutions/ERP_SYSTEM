@@ -79,9 +79,9 @@ public sealed partial class InvoiceService
                 {
                     CompanyId = companyId,
                     DriverId = invoice.DriverId.Value,
-                    ActualDriverId = invoice.UsesExternalDriver
+                    ActualDriverName = invoice.UsesExternalDriver
                         ? null
-                        : invoice.ActualDriverId,
+                        : invoice.ActualDriverName,
                     InvoiceId = invoice.Id,
                     BusinessPartnerId = invoice.BusinessPartnerId,
                     InvoiceNumber = invoice.InvoiceNumber,

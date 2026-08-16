@@ -310,7 +310,7 @@ public sealed partial class InvoiceService
 
         NormalizeDriverValues(invoice);
 
-        if (invoice.ActualDriverId is not null &&
+        if (invoice.ActualDriverName is not null &&
             !invoice.DriverId.HasValue)
         {
             return Failure(
@@ -318,7 +318,7 @@ public sealed partial class InvoiceService
         }
 
         if (invoice.UsesExternalDriver &&
-            invoice.ActualDriverId is not null)
+            invoice.ActualDriverName is not null)
         {
             return Failure(
                 ExternalDriverWithActualDriver());

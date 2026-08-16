@@ -216,7 +216,7 @@ public sealed class DriverServiceTests
             companyId: 1,
             driverId: 1,
             isDeleted: false,
-            actualDriverId: "2");
+            actualDriverName: "2");
 
         var result = await database.CreateService(companyId: 1).DeleteAsync(2);
 
@@ -232,7 +232,7 @@ public sealed class DriverServiceTests
             companyId: 1,
             driverId: 1,
             isDeleted: false,
-            actualDriverId: "2");
+            actualDriverName: "2");
 
         var result = await database.CreateService(companyId: 1).DeleteAsync(2);
 
@@ -355,26 +355,26 @@ public sealed class DriverServiceTests
             int companyId,
             int driverId,
             bool isDeleted,
-            string? actualDriverId = null) =>
+            string? actualDriverName = null) =>
             Context.Database.ExecuteSqlInterpolatedAsync(
                 $"""
                  INSERT INTO Invoices (
-                     Id, CompanyId, DriverId, ActualDriverId, IsDeleted)
+                     Id, CompanyId, DriverId, ActualDriverName, IsDeleted)
                  VALUES (
-                     100, {companyId}, {driverId}, {actualDriverId}, {isDeleted})
+                     100, {companyId}, {driverId}, {actualDriverName}, {isDeleted})
                  """);
 
         public Task AddDriverTripAsync(
             int companyId,
             int driverId,
             bool isDeleted,
-            string? actualDriverId = null) =>
+            string? actualDriverName = null) =>
             Context.Database.ExecuteSqlInterpolatedAsync(
                 $"""
                  INSERT INTO DriverTrips (
-                     Id, CompanyId, DriverId, ActualDriverId, IsDeleted)
+                     Id, CompanyId, DriverId, ActualDriverName, IsDeleted)
                  VALUES (
-                     100, {companyId}, {driverId}, {actualDriverId}, {isDeleted})
+                     100, {companyId}, {driverId}, {actualDriverName}, {isDeleted})
                  """);
 
         public async Task<Driver> GetDriverAsync(int driverId)
@@ -441,7 +441,7 @@ public sealed class DriverServiceTests
                     CompanyId INTEGER NOT NULL,
                     ContentType INTEGER NOT NULL DEFAULT 1,
                     DriverId INTEGER NULL,
-                    ActualDriverId TEXT NULL,
+                    ActualDriverName TEXT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
 
@@ -449,7 +449,7 @@ public sealed class DriverServiceTests
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
                     DriverId INTEGER NOT NULL,
-                    ActualDriverId TEXT NULL,
+                    ActualDriverName TEXT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
 
