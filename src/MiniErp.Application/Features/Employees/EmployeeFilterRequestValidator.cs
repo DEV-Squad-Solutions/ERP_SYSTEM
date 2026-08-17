@@ -24,9 +24,9 @@ namespace MiniErp.Application.Features.Employees
                 .GreaterThanOrEqualTo(0)
                 .PrecisionScale(18, 2, ignoreTrailingZeros: true)
                 .GreaterThanOrEqualTo(x => x.MinSalary ?? decimal.MinValue);
-            RuleFor(x => x.Type)
+            RuleFor(x => x.EmployeeType)
                 .IsInEnum()
-                .When(x => x.Type.HasValue);
+                .When(x => x.EmployeeType.HasValue);
         }
     }
 }

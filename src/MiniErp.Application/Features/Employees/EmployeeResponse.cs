@@ -20,6 +20,7 @@ namespace MiniErp.Application.Features.Employees
     );
 
     public record EmployeeListResponse(
+        int Id,
         string Code,
         string Name,
         string? JobTitle,
@@ -35,7 +36,7 @@ namespace MiniErp.Application.Features.Employees
 
 
     public record EmployeeResponse(
-        int EmployeeId,
+        int Id,
         string Code,
         string Name,
         string? JobTitle,

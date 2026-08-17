@@ -63,17 +63,14 @@ namespace MiniErp.Application.Features.Employees
                 .MaximumLength(500).WithMessage("يجب ألا يزيد العنوان عن 500 حرف.");
 
             RuleFor(x => x.Type)
-                .IsInEnum().WithMessage("نوع الموظف غير صالح، القيم المقبولة: 0 (يومي) أو 1 (شهري).");
+                .IsInEnum().WithMessage("نوع الموظف غير صالح، القيم المقبولة: Daily أو Monthly.");
 
             RuleFor(x => x.Salary)
-                .NotNull().WithMessage("الراتب مطلوب.")
                 .GreaterThan(0).WithMessage("يجب أن يكون الراتب أكبر من صفر.")
                 .PrecisionScale(18, 2, ignoreTrailingZeros: true)
                     .WithMessage("يجب ألا يتجاوز الراتب منزلتين عشريتين.");
 
-            // RequiredWorkingDaysPerMonth is required and validated only for Monthly employees
             RuleFor(x => x.RequiredWorkingDaysPerMonth)
-                .NotNull().WithMessage("عدد أيام العمل المطلوبة شهريًا مطلوب للموظف الشهري.")
                 .GreaterThan(0).WithMessage("يجب أن يكون عدد أيام العمل المطلوبة أكبر من صفر.")
                 .When(x => x.Type == EmployeeType.Monthly);
         }

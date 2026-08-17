@@ -29,7 +29,7 @@ namespace MiniErp.Infrastructure.Services.Employees
                     "Employee.JobTitleTooLong",
                     "يجب ألا يزيد المسمى الوظيفي للموظف عن 200 حرف."
                     , nameof(filters.JobTitle));
-            if (filters.MinSalary < 0)
+            if (filters.    MinSalary < 0)
                 return Error.Validation(
                     "Employee.MinSalaryNegative",
                     "يجب ألا يكون الحد الأدنى للراتب للموظف سالبًا."
@@ -39,16 +39,31 @@ namespace MiniErp.Infrastructure.Services.Employees
                     "Employee.MaxSalaryNegative",
                     "يجب ألا يكون الحد الأعلى للراتب للموظف سالبًا."
                     , nameof(filters.MaxSalary));
-            if (filters.Type is not null && !Enum.IsDefined(typeof(EmployeeType), filters.Type.Value))
+            if (filters.EmployeeType is not null && !Enum.IsDefined(typeof(EmployeeType), filters.EmployeeType.Value))
                 return Error.Validation(
                     "Employee.InvalidType",
                     "نوع الموظف المحدد غير صالح."
-                    , nameof(filters.Type));
+                    , nameof(filters.EmployeeType));
             return null;
         }
 
         private async Task<Error?> ValidateAddAsync(EmployeeCreateRequest request, CancellationToken cancellationToken)
         {
+            if(request==null)
+                return Error.Validation(
+                    "Employee.InvalidRequest",
+                    "طلب إنشاء موظف غير صالح."
+                    , nameof(request));
+            if(string.IsNullOrWhiteSpace(request.Name))
+                return Error.Validation(
+                    "Employee.InvalidName",
+                    "اسم الموظف غير صالح."
+                    , nameof(request.Name));
+            if (!Enum.IsDefined(typeof(EmployeeType), request.Type))
+                return Error.Validation(
+                    "Employee.InvalidType",
+                    "نوع الموظف المحدد غير صالح."
+                    , nameof(request.Type));
             if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
             {
                 var phoneExists = await dbContext.Employees

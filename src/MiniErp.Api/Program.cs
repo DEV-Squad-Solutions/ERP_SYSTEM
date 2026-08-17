@@ -41,7 +41,7 @@ builder.Services
         options.JsonSerializerOptions.Converters.Add(
             new JsonStringEnumConverter(
                 namingPolicy: null,
-                allowIntegerValues: false)));
+                allowIntegerValues: true)));
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(
