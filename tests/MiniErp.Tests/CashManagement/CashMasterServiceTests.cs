@@ -116,6 +116,7 @@ public sealed class CashMasterServiceTests
             new CashMovementTypeRequest(
                 " customer collection ",
                 CashDirection.Receipt,
+                CashMovementClassification.PartnerSettlement,
                 ForPartner: true,
                 IsActive: true,
                 IsDefaultForSales: false,
@@ -135,7 +136,8 @@ public sealed class CashMasterServiceTests
             3,
             new CashMovementTypeUpdateRequest(
                 movementType.Value.Name,
-                CashDirection.Payment,
+                movementType.Value.Direction,
+                CashMovementClassification.Revenue,
                 ForPartner: false,
                 IsActive: true,
                 IsDefaultForSales: false,
@@ -164,10 +166,12 @@ public sealed class CashMasterServiceTests
         var partnerReceipts = await service.GetSelectAsync(
             new CashMovementTypeSelectRequest(
                 CashDirection.Receipt,
+                Classification: null,
                 ForPartner: true));
         var generalPayments = await service.GetSelectAsync(
             new CashMovementTypeSelectRequest(
                 CashDirection.Payment,
+                Classification: null,
                 ForPartner: false));
 
         Assert.All(
@@ -185,6 +189,50 @@ public sealed class CashMasterServiceTests
     }
 
     [Fact]
+    public async Task MovementType_ModelRequiresClassification()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var entityType = database.Context.Model.FindEntityType(
+            typeof(MiniErp.Domain.Entities.CashManagement.CashMovementType));
+        var property = entityType!.FindProperty("Classification");
+
+        Assert.NotNull(property);
+        Assert.False(property.IsNullable);
+        Assert.Equal(typeof(CashMovementClassification), property.ClrType);
+    }
+
+    [Fact]
+    public async Task MovementType_ListAndSelectFilterClassification()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateMovementTypeService(companyId: 1);
+
+        var list = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashMovementTypeFilterRequest(
+                Classification: CashMovementClassification.Other,
+                IsActive: true));
+        var select = await service.GetSelectAsync(
+            new CashMovementTypeSelectRequest(
+                Classification: CashMovementClassification.Other));
+
+        Assert.True(list.IsSuccess);
+        Assert.All(list.Value.Items, item =>
+            Assert.Equal(CashMovementClassification.Other,
+                item.Classification));
+        Assert.Equal(2, list.Value.Items.Count);
+        Assert.All(select.Value, item =>
+        {
+            Assert.Equal(CashMovementClassification.Other,
+                item.Classification);
+            Assert.False(item.ForPartner);
+        });
+        Assert.DoesNotContain(select.Value, item => item.Id == 6);
+    }
+
+    [Fact]
     public async Task MovementType_NewInvoiceDefaultReplacesExactInvoiceTypeOnly()
     {
         await using var database =
@@ -195,6 +243,7 @@ public sealed class CashMasterServiceTests
             new CashMovementTypeRequest(
                 "Alternative Collection",
                 CashDirection.Receipt,
+                CashMovementClassification.PartnerSettlement,
                 ForPartner: true,
                 IsActive: true,
                 IsDefaultForSales: true,
@@ -266,6 +315,7 @@ public sealed class CashMasterServiceTests
             new CashMovementTypeRequest(
                 $"Derived {direction} {forPartner}",
                 direction,
+                CashMovementClassification.Other,
                 forPartner,
                 IsActive: true,
                 IsDefaultForSales: false,

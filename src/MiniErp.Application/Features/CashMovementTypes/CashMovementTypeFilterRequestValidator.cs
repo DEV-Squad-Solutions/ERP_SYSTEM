@@ -13,6 +13,9 @@ public sealed class CashMovementTypeFilterRequestValidator
         RuleFor(filter => filter.Direction)
             .IsInEnum()
             .When(filter => filter.Direction.HasValue);
+        RuleFor(filter => filter.Classification)
+            .IsInEnum()
+            .When(filter => filter.Classification.HasValue);
     }
 }
 
@@ -24,5 +27,8 @@ public sealed class CashMovementTypeSelectRequestValidator
         RuleFor(filter => filter.Direction)
             .IsInEnum()
             .When(filter => filter.Direction.HasValue);
+        RuleFor(filter => filter.Classification)
+            .IsInEnum()
+            .When(filter => filter.Classification.HasValue);
     }
 }

@@ -16,6 +16,14 @@ public sealed class CashMovementTypeRequestValidator
         RuleFor(request => request.Direction)
             .IsInEnum();
 
+        RuleFor(request => request.Classification)
+            .IsInEnum()
+            .Must((request, classification) =>
+                classification != CashMovementClassification.PartnerSettlement ||
+                request.ForPartner)
+            .WithMessage(
+                "تسوية العميل أو المورد يجب أن تكون مرتبطة بعميل أو مورد.");
+
         AddInvoiceDefaultRules(
             request => request.IsDefaultForSales,
             request => request.ForPartner,
@@ -61,6 +69,7 @@ public sealed class CashMovementTypeRequestValidator
             selector,
             forPartner,
             isActive,
+            request => request.Classification,
             direction,
             expectedDirection,
             invoiceTypeName);
@@ -77,6 +86,14 @@ public sealed class CashMovementTypeUpdateRequestValidator
 
         RuleFor(request => request.Direction)
             .IsInEnum();
+
+        RuleFor(request => request.Classification)
+            .IsInEnum()
+            .Must((request, classification) =>
+                classification != CashMovementClassification.PartnerSettlement ||
+                request.ForPartner)
+            .WithMessage(
+                "تسوية العميل أو المورد يجب أن تكون مرتبطة بعميل أو مورد.");
 
         AddInvoiceDefaultRules(
             request => request.IsDefaultForSales,
@@ -129,6 +146,7 @@ public sealed class CashMovementTypeUpdateRequestValidator
             selector,
             forPartner,
             isActive,
+            request => request.Classification,
             direction,
             expectedDirection,
             invoiceTypeName);
@@ -141,6 +159,7 @@ internal static class CashMovementTypeDefaultValidation
         Expression<Func<TRequest, bool>> selector,
         Func<TRequest, bool> forPartner,
         Func<TRequest, bool> isActive,
+        Func<TRequest, CashMovementClassification> classification,
         Func<TRequest, CashDirection> direction,
         CashDirection expectedDirection,
         string invoiceTypeName)
@@ -149,6 +168,13 @@ internal static class CashMovementTypeDefaultValidation
             .Must((request, isDefault) => !isDefault || forPartner(request))
             .WithMessage(
                 $"الحركة الافتراضية لفاتورة {invoiceTypeName} يجب أن تكون حركة عميل أو مورد.");
+
+        validator.RuleFor(selector)
+            .Must((request, isDefault) =>
+                !isDefault || classification(request) ==
+                CashMovementClassification.PartnerSettlement)
+            .WithMessage(
+                $"الحركة الافتراضية لفاتورة {invoiceTypeName} يجب أن تكون من تصنيف تسوية عميل أو مورد.");
 
         validator.RuleFor(selector)
             .Must((request, isDefault) => !isDefault || isActive(request))
@@ -163,4 +189,5 @@ internal static class CashMovementTypeDefaultValidation
                     ? $"الحركة الافتراضية لفاتورة {invoiceTypeName} يجب أن تكون قبضًا."
                     : $"الحركة الافتراضية لفاتورة {invoiceTypeName} يجب أن تكون صرفًا.");
     }
+
 }

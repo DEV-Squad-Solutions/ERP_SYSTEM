@@ -61,6 +61,14 @@ public sealed class EnumSchemaDocumentationFilter : ISchemaFilter
                    "requires externalPartyName.";
         }
 
+        if (enumType == typeof(CashMovementClassification))
+        {
+            return "PartnerSettlement is a customer or supplier settlement " +
+                   "and requires forPartner=true. Expense, Revenue, and Other " +
+                   "are direction-neutral and may optionally be linked to a " +
+                   "customer or supplier.";
+        }
+
         return null;
     }
 }

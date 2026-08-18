@@ -44,6 +44,12 @@ public sealed class CashMovementTypeMappingRegister : IRegister
                 response => response.ForPartner,
                 movementType =>
                     movementType.PartnerEffect != PartnerAccountEffect.None);
+
+        config.ForType<CashMovementType, CashMovementTypeSelectResponse>()
+            .Map(
+                response => response.ForPartner,
+                movementType =>
+                    movementType.PartnerEffect != PartnerAccountEffect.None);
     }
 
     private static string? Normalize(string? value) =>

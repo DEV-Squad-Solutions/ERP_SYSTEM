@@ -12,6 +12,7 @@ public sealed record CashVoucherResponse(
     string? CashboxName,
     int? CashMovementTypeId,
     string? CashMovementTypeName,
+    CashMovementClassification? Classification,
     CashPartyType PartyType,
     int? BusinessPartnerId,
     string? BusinessPartnerName,

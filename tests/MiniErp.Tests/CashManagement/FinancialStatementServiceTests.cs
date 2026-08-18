@@ -77,6 +77,45 @@ public sealed class FinancialStatementServiceTests
     }
 
     [Fact]
+    public async Task CashboxStatementFiltersByMovementClassification()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var paymentType = await database.Context.CashMovementTypes
+            .SingleAsync(type => type.Id == 4);
+        paymentType.Classification = CashMovementClassification.Expense;
+        await database.Context.SaveChangesAsync();
+
+        var vouchers = database.CreateVoucherService(companyId: 1);
+        await AddVoucherAsync(vouchers,
+            CreateGeneralVoucher(
+                "CV-OTHER",
+                new DateOnly(2026, 7, 22),
+                CashDirection.Receipt,
+                3,
+                25m));
+        var expense = await AddVoucherAsync(vouchers,
+            CreateGeneralVoucher(
+                "CV-EXPENSE",
+                new DateOnly(2026, 7, 23),
+                CashDirection.Payment,
+                4,
+                10m));
+
+        var result = await database.CreateStatementService(1)
+            .GetCashboxStatementAsync(
+                Page(),
+                new CashboxStatementFilterRequest(
+                    CashboxId: 1,
+                    Classification: CashMovementClassification.Expense));
+
+        var item = Assert.Single(result.Value.Items);
+        Assert.Equal(expense.Value.Id, item.CashVoucherId);
+        Assert.Equal(10m, result.Value.Summary.TotalPayments);
+        Assert.Equal(0m, result.Value.Summary.TotalReceipts);
+    }
+
+    [Fact]
     public async Task ForeignCurrencyCashboxStatementReturnsAllCurrencyDetails()
     {
         await using var database =

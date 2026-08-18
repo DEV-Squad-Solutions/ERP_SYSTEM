@@ -6076,6 +6076,7 @@ public sealed class InvoiceServiceTests
                     CompanyId INTEGER NOT NULL,
                     Name TEXT NOT NULL,
                     Direction INTEGER NOT NULL,
+                    Classification INTEGER NOT NULL,
                     PartnerEffect INTEGER NOT NULL,
                     IsActive INTEGER NOT NULL DEFAULT 1,
                     IsDefaultForSales INTEGER NOT NULL DEFAULT 0,
@@ -6098,11 +6099,15 @@ public sealed class InvoiceServiceTests
                         CHECK (
                             ((IsDefaultForSales = 0 AND
                               IsDefaultForPurchaseReturn = 0) OR
-                             (IsActive = 1 AND Direction = 1 AND PartnerEffect = 2))
+                             (IsActive = 1 AND Direction = 1 AND Classification = 1 AND PartnerEffect = 2))
                             AND
                             ((IsDefaultForPurchase = 0 AND
                               IsDefaultForSalesReturn = 0) OR
-                             (IsActive = 1 AND Direction = 2 AND PartnerEffect = 1)))
+                             (IsActive = 1 AND Direction = 2 AND Classification = 1 AND PartnerEffect = 1))),
+                    CONSTRAINT CK_CashMovementTypes_Classification
+                        CHECK (Classification IN (1, 2, 3, 4)),
+                    CONSTRAINT CK_CashMovementTypes_PartnerSettlement
+                        CHECK (Classification <> 1 OR PartnerEffect <> 0)
                 );
 
                 CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForSales
@@ -6285,18 +6290,18 @@ public sealed class InvoiceServiceTests
                      'test', '2026-01-01', 'test', 0);
 
                 INSERT INTO CashMovementTypes (
-                    Id, CompanyId, Name, Direction, PartnerEffect, IsActive,
+                    Id, CompanyId, Name, Direction, Classification, PartnerEffect, IsActive,
                     IsDefaultForSales, IsDefaultForPurchase,
                     IsDefaultForSalesReturn, IsDefaultForPurchaseReturn,
                     CreatedById, CreatedOn, CreatedByPc, IsDeleted)
                 VALUES
-                    (1, 1, 'Customer Collection', 1, 2, 1, 1, 0, 0, 0,
+                    (1, 1, 'Customer Collection', 1, 1, 2, 1, 1, 0, 0, 0,
                      'test', '2026-01-01', 'test', 0),
-                    (2, 1, 'Supplier Payment', 2, 1, 1, 0, 1, 0, 0,
+                    (2, 1, 'Supplier Payment', 2, 1, 1, 1, 0, 1, 0, 0,
                      'test', '2026-01-01', 'test', 0),
-                    (3, 1, 'Customer Refund', 2, 1, 1, 0, 0, 1, 0,
+                    (3, 1, 'Customer Refund', 2, 1, 1, 1, 0, 0, 1, 0,
                      'test', '2026-01-01', 'test', 0),
-                    (4, 1, 'Supplier Refund', 1, 2, 1, 0, 0, 0, 1,
+                    (4, 1, 'Supplier Refund', 1, 1, 2, 1, 0, 0, 0, 1,
                      'test', '2026-01-01', 'test', 0);
 
                 INSERT INTO StockOpeningBalances (

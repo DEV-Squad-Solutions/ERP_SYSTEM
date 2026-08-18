@@ -21,7 +21,7 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
                 "Get paginated cash vouchers",
                 SwaggerOperationDescription.Create(
                     "Returns active manual and invoice-generated Receipt and Payment vouchers for the selected company. InvoiceId and InvoiceNumber identify generated payment vouchers.",
-                    "Optional search, voucherNumber, direction, cashboxId, cashMovementTypeId, partyType, businessPartnerId, driverId, driverTripId, isDraft, fromDate, toDate, pageNumber, and pageSize filters.",
+                    "Optional search, voucherNumber, direction, cashboxId, cashMovementTypeId, classification, partyType, businessPartnerId, driverId, driverTripId, isDraft, fromDate, toDate, pageNumber, and pageSize filters.",
                     "Search covers voucher, cashbox, movement type, party, trip invoice, reference, and description display values.",
                     "Deleted and other-company vouchers are excluded.")),
             nameof(CashVouchersController.GetById) => (

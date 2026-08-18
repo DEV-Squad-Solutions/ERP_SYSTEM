@@ -46,6 +46,9 @@ public sealed class CashMovementTypeService(
                 !filters.Direction.HasValue ||
                 movementType.Direction == filters.Direction.Value)
             .Where(movementType =>
+                !filters.Classification.HasValue ||
+                movementType.Classification == filters.Classification.Value)
+            .Where(movementType =>
                 !filters.ForPartner.HasValue ||
                 (movementType.PartnerEffect != PartnerAccountEffect.None) ==
                 filters.ForPartner.Value)
@@ -79,6 +82,9 @@ public sealed class CashMovementTypeService(
             .Where(movementType =>
                 !filters.Direction.HasValue ||
                 movementType.Direction == filters.Direction.Value)
+            .Where(movementType =>
+                !filters.Classification.HasValue ||
+                movementType.Classification == filters.Classification.Value)
             .Where(movementType =>
                 !filters.ForPartner.HasValue ||
                 (filters.ForPartner.Value
@@ -203,6 +209,7 @@ public sealed class CashMovementTypeService(
         }
 
         if ((movementType.Direction != request.Direction ||
+             movementType.Classification != request.Classification ||
              (movementType.PartnerEffect != PartnerAccountEffect.None) !=
              request.ForPartner) &&
             await HasVouchersAsync(id, cancellationToken))

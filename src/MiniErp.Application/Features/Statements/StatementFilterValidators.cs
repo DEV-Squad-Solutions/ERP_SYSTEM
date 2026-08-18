@@ -15,6 +15,9 @@ public sealed class CashboxStatementFilterRequestValidator
         RuleFor(filter => filter.CashMovementTypeId)
             .GreaterThan(0)
             .When(filter => filter.CashMovementTypeId.HasValue);
+        RuleFor(filter => filter.Classification)
+            .IsInEnum()
+            .When(filter => filter.Classification.HasValue);
         RuleFor(filter => filter.PartyType)
             .IsInEnum()
             .When(filter => filter.PartyType.HasValue);
@@ -60,6 +63,9 @@ public sealed class PartnerStatementFilterRequestValidator
         RuleFor(filter => filter.CashMovementTypeId)
             .GreaterThan(0)
             .When(filter => filter.CashMovementTypeId.HasValue);
+        RuleFor(filter => filter.Classification)
+            .IsInEnum()
+            .When(filter => filter.Classification.HasValue);
         RuleFor(filter => filter.ToDate)
             .GreaterThanOrEqualTo(filter => filter.FromDate)
             .When(filter =>
@@ -83,6 +89,9 @@ public sealed class DriverStatementFilterRequestValidator
         RuleFor(filter => filter.CashMovementTypeId)
             .GreaterThan(0)
             .When(filter => filter.CashMovementTypeId.HasValue);
+        RuleFor(filter => filter.Classification)
+            .IsInEnum()
+            .When(filter => filter.Classification.HasValue);
         RuleFor(filter => filter.DriverTripId)
             .GreaterThan(0)
             .When(filter => filter.DriverTripId.HasValue);

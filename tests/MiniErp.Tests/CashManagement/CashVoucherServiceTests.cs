@@ -48,6 +48,39 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
+    public async Task Voucher_ListFiltersAndReturnsDerivedClassification()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+
+        var other = await AddVoucherAsync(service,
+            CreateRequest(
+                "CV-OTHER",
+                CashDirection.Receipt,
+                movementTypeId: 3,
+                amount: 20m));
+        var settlement = await AddVoucherAsync(service,
+            CreatePartnerRequest(
+                "CV-SETTLEMENT",
+                CashDirection.Receipt,
+                movementTypeId: 1,
+                partnerId: 1,
+                amount: 10m));
+        var result = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashVoucherFilterRequest(
+                Classification: CashMovementClassification.Other));
+
+        Assert.True(other.IsSuccess);
+        Assert.True(settlement.IsSuccess);
+        var voucher = Assert.Single(result.Value.Items);
+        Assert.Equal(other.Value.Id, voucher.Id);
+        Assert.Equal(CashMovementClassification.Other,
+            voucher.Classification);
+    }
+
+    [Fact]
     public async Task ReceiptAndPaymentSupportForeignCurrencyCashbox()
     {
         await using var database =
@@ -119,6 +152,7 @@ public sealed class CashVoucherServiceTests
         Assert.Matches("^RCV-[0-9]{4,}$", result.Value.VoucherNumber);
         Assert.Equal(1, result.Value.CashboxId);
         Assert.Null(result.Value.CashMovementTypeId);
+        Assert.Null(result.Value.Classification);
         Assert.Equal(
             "Collected before posting details",
             result.Value.Description);

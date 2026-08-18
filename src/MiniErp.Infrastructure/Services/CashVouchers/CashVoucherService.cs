@@ -77,6 +77,11 @@ public sealed class CashVoucherService(
                 voucher.CashMovementTypeId ==
                 filters.CashMovementTypeId.Value)
             .Where(voucher =>
+                !filters.Classification.HasValue ||
+                (voucher.CashMovementType != null &&
+                 voucher.CashMovementType.Classification ==
+                 filters.Classification.Value))
+            .Where(voucher =>
                 !filters.PartyType.HasValue ||
                 voucher.PartyType == filters.PartyType.Value)
             .Where(voucher =>

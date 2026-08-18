@@ -621,6 +621,7 @@ public sealed class CompanyServiceTests
                 CREATE TABLE CashMovementTypes (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    Classification INTEGER NOT NULL DEFAULT 4,
                     IsDeleted INTEGER NOT NULL
                 );
 

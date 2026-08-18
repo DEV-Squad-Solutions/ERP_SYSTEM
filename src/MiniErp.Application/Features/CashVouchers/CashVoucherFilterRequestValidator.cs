@@ -19,6 +19,9 @@ public sealed class CashVoucherFilterRequestValidator
         RuleFor(filter => filter.CashMovementTypeId)
             .GreaterThan(0)
             .When(filter => filter.CashMovementTypeId.HasValue);
+        RuleFor(filter => filter.Classification)
+            .IsInEnum()
+            .When(filter => filter.Classification.HasValue);
         RuleFor(filter => filter.PartyType)
             .IsInEnum()
             .When(filter => filter.PartyType.HasValue);

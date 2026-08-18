@@ -113,6 +113,11 @@ public sealed partial class FinancialStatementService(
                 voucher.CashMovementTypeId ==
                 filters.CashMovementTypeId.Value)
             .Where(voucher =>
+                !filters.Classification.HasValue ||
+                (voucher.CashMovementType != null &&
+                 voucher.CashMovementType.Classification ==
+                 filters.Classification.Value))
+            .Where(voucher =>
                 !filters.PartyType.HasValue ||
                 voucher.PartyType == filters.PartyType.Value)
             .Where(voucher =>
@@ -377,6 +382,9 @@ public sealed partial class FinancialStatementService(
                 row.CashMovementTypeId ==
                 filters.CashMovementTypeId.Value)
             .Where(row =>
+                !filters.Classification.HasValue ||
+                row.Classification == filters.Classification.Value)
+            .Where(row =>
                 string.IsNullOrEmpty(search) ||
                 row.DocumentNumber.Contains(search) ||
                 (row.Description != null &&
@@ -541,6 +549,9 @@ public sealed partial class FinancialStatementService(
                 row.CashMovementTypeId ==
                 filters.CashMovementTypeId.Value)
             .Where(row =>
+                !filters.Classification.HasValue ||
+                row.Classification == filters.Classification.Value)
+            .Where(row =>
                 !filters.DriverTripId.HasValue ||
                 row.DriverTripId == filters.DriverTripId.Value)
             .Where(row =>
@@ -694,7 +705,11 @@ public sealed partial class FinancialStatementService(
                     : null,
                 CashMovementTypeId = movement.CashVoucherId.HasValue
                     ? movement.CashVoucher!.CashMovementTypeId
-                    : null
+                    : null,
+                Classification = movement.CashVoucherId.HasValue &&
+                    movement.CashVoucher!.CashMovementType != null
+                        ? movement.CashVoucher.CashMovementType.Classification
+                        : null
             });
 
         var openingBalances = dbContext.PartnerOpeningBalances
@@ -729,7 +744,8 @@ public sealed partial class FinancialStatementService(
                     ? balance.BaseAmount
                     : 0m,
                 ReferenceNumber = null,
-                CashMovementTypeId = null
+                CashMovementTypeId = null,
+                Classification = null
             });
 
         return movements.Concat(openingBalances);
@@ -772,7 +788,8 @@ public sealed partial class FinancialStatementService(
                 CashboxName = voucher.Cashbox!.Name,
                 ReferenceNumber = voucher.ReferenceNumber,
                 Direction = voucher.Direction,
-                CashMovementTypeId = voucher.CashMovementTypeId
+                CashMovementTypeId = voucher.CashMovementTypeId,
+                Classification = voucher.CashMovementType!.Classification
             });
 
         var trips = dbContext.DriverTrips
@@ -799,7 +816,8 @@ public sealed partial class FinancialStatementService(
                 CashboxName = null,
                 ReferenceNumber = null,
                 Direction = null,
-                CashMovementTypeId = null
+                CashMovementTypeId = null,
+                Classification = null
             });
 
         return vouchers.Concat(trips);
@@ -895,6 +913,7 @@ public sealed partial class FinancialStatementService(
         public decimal BaseCredit { get; init; }
         public string? ReferenceNumber { get; init; }
         public int? CashMovementTypeId { get; init; }
+        public CashMovementClassification? Classification { get; init; }
     }
 
     private sealed class DriverStatementRaw
@@ -917,5 +936,6 @@ public sealed partial class FinancialStatementService(
         public string? ReferenceNumber { get; init; }
         public CashDirection? Direction { get; init; }
         public int? CashMovementTypeId { get; init; }
+        public CashMovementClassification? Classification { get; init; }
     }
 }

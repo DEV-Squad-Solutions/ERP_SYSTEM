@@ -31,6 +31,7 @@ public static class ArabicValidationConfiguration
             ["BusinessPartnerId"] = "العميل أو المورد",
             ["CashboxId"] = "صندوق النقدية",
             ["CashMovementTypeId"] = "نوع الحركة النقدية",
+            ["Classification"] = "تصنيف الحركة النقدية",
             ["Code"] = "الكود",
             ["CommercialRegister"] = "السجل التجاري",
             ["CompanyId"] = "الشركة",

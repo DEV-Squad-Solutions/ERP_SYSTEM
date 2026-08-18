@@ -72,6 +72,12 @@ public sealed class CashVoucherMappingRegister : IRegister
                     ? null
                     : voucher.CashMovementType.Name)
             .Map(
+                response => response.Classification,
+                voucher => voucher.CashMovementType == null
+                    ? null
+                    : (Domain.Enums.CashMovementClassification?)
+                        voucher.CashMovementType.Classification)
+            .Map(
                 response => response.IsDraft,
                 voucher => !voucher.CashboxId.HasValue ||
                     (!voucher.CashMovementTypeId.HasValue &&

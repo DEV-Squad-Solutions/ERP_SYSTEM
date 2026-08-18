@@ -16,6 +16,8 @@ public sealed class CashMovementType : AuditableEntity
 
     public CashDirection Direction { get; set; }
 
+    public CashMovementClassification Classification { get; set; }
+
     public PartnerAccountEffect PartnerEffect { get; set; }
 
     public bool IsActive { get; set; } = true;
