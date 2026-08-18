@@ -55,9 +55,8 @@ public sealed class CashMovementTypeService(
             .Where(movementType =>
                 !filters.IsActive.HasValue ||
                 movementType.IsActive == filters.IsActive.Value)
-            .OrderBy(movementType => movementType.Direction)
-            .ThenBy(movementType => movementType.Name)
-            .ThenBy(movementType => movementType.Id);
+            .OrderByDescending(movementType => movementType.CreatedOn)
+            .ThenByDescending(movementType => movementType.Id);
 
         return await paginationService.PaginateAsync<
             CashMovementType,

@@ -51,8 +51,8 @@ public sealed class UserService(
             .Where(user =>
                 string.IsNullOrWhiteSpace(filters.LastName) ||
                 user.LastName.Contains(filters.LastName.Trim()))
-            .OrderBy(user => user.UserName)
-            .ThenBy(user => user.Id);
+            .OrderByDescending(user => user.CreatedOn)
+            .ThenByDescending(user => user.Id);
         var totalCount = await query.CountAsync(cancellationToken);
         var offset = (long)(pagination.PageNumber - 1) * pagination.PageSize;
 

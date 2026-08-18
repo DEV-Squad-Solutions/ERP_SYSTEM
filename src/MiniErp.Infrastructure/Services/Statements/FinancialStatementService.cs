@@ -131,6 +131,9 @@ public sealed partial class FinancialStatementService(
                 !filters.DriverTripId.HasValue ||
                 voucher.DriverTripId == filters.DriverTripId.Value)
             .Where(voucher =>
+                !filters.EmployeeId.HasValue ||
+                voucher.EmployeeId == filters.EmployeeId.Value)
+            .Where(voucher =>
                 string.IsNullOrEmpty(voucherNumber) ||
                 voucher.VoucherNumber.Contains(voucherNumber))
             .Where(voucher =>
@@ -142,6 +145,9 @@ public sealed partial class FinancialStatementService(
                  voucher.BusinessPartner.Name.Contains(search)) ||
                 (voucher.Driver != null &&
                  voucher.Driver.Name.Contains(search)) ||
+                (voucher.Employee != null &&
+                 (voucher.Employee.Code.Contains(search) ||
+                  voucher.Employee.Name.Contains(search))) ||
                 (voucher.ExternalPartyName != null &&
                  voucher.ExternalPartyName.Contains(search)) ||
                 (voucher.ReferenceNumber != null &&
@@ -228,7 +234,9 @@ public sealed partial class FinancialStatementService(
                         ? voucher.BusinessPartner.Name
                         : voucher.Driver != null
                             ? voucher.Driver.Name
-                            : voucher.ExternalPartyName,
+                            : voucher.Employee != null
+                                ? voucher.Employee.Name
+                                : voucher.ExternalPartyName,
                     Currency = voucher.Currency,
                     ExchangeRate = voucher.ExchangeRate,
                     ReceiptAmount =

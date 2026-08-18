@@ -98,6 +98,11 @@ public sealed class CashVoucherMappingRegister : IRegister
                     ? null
                     : voucher.DriverTrip.InvoiceNumber)
             .Map(
+                response => response.EmployeeName,
+                voucher => voucher.Employee == null
+                    ? null
+                    : voucher.Employee.Name)
+            .Map(
                 response => response.InvoiceNumber,
                 voucher => voucher.Invoice == null
                     ? null

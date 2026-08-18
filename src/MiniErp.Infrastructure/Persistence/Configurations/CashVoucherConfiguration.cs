@@ -23,20 +23,26 @@ public sealed class CashVoucherConfiguration
                     "[Direction] IN (1, 2)");
                 table.HasCheckConstraint(
                     "CK_CashVouchers_PartyType",
-                    "[PartyType] IN (1, 2, 3, 4)");
+                    "[PartyType] IN (1, 2, 3, 4, 5)");
                 table.HasCheckConstraint(
                     "CK_CashVouchers_PartyShape",
                     "([PartyType] = 1 AND [BusinessPartnerId] IS NULL AND " +
                     "[DriverId] IS NULL AND [DriverTripId] IS NULL AND " +
+                    "[EmployeeId] IS NULL AND " +
                     "[ExternalPartyName] IS NULL) OR " +
                     "([PartyType] = 2 AND [BusinessPartnerId] IS NOT NULL AND " +
                     "[DriverId] IS NULL AND [DriverTripId] IS NULL AND " +
+                    "[EmployeeId] IS NULL AND " +
                     "[ExternalPartyName] IS NULL) OR " +
                     "([PartyType] = 3 AND [BusinessPartnerId] IS NULL AND " +
-                    "[DriverId] IS NOT NULL AND [ExternalPartyName] IS NULL) OR " +
+                    "[DriverId] IS NOT NULL AND [EmployeeId] IS NULL AND " +
+                    "[ExternalPartyName] IS NULL) OR " +
                     "([PartyType] = 4 AND [BusinessPartnerId] IS NULL AND " +
                     "[DriverId] IS NULL AND [DriverTripId] IS NULL AND " +
-                    "[ExternalPartyName] IS NOT NULL)");
+                    "[EmployeeId] IS NULL AND [ExternalPartyName] IS NOT NULL) OR " +
+                    "([PartyType] = 5 AND [BusinessPartnerId] IS NULL AND " +
+                    "[DriverId] IS NULL AND [DriverTripId] IS NULL AND " +
+                    "[EmployeeId] IS NOT NULL AND [ExternalPartyName] IS NULL)");
                 table.HasCheckConstraint(
                     "CK_CashVouchers_PostingReferencesTogether",
                     "[CashMovementTypeId] IS NULL OR [CashboxId] IS NOT NULL");
@@ -190,6 +196,14 @@ public sealed class CashVoucherConfiguration
             voucher.Id
         });
 
+        builder.HasIndex(voucher => new
+        {
+            voucher.CompanyId,
+            voucher.EmployeeId,
+            voucher.VoucherDate,
+            voucher.Id
+        });
+
         builder.HasOne(voucher => voucher.Company)
             .WithMany()
             .HasForeignKey(voucher => voucher.CompanyId)
@@ -302,6 +316,21 @@ public sealed class CashVoucherConfiguration
             {
                 trip.CompanyId,
                 trip.Id
+            })
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(voucher => voucher.Employee)
+            .WithMany()
+            .HasForeignKey(voucher => new
+            {
+                voucher.CompanyId,
+                voucher.EmployeeId
+            })
+            .HasPrincipalKey(employee => new
+            {
+                employee.CompanyId,
+                employee.Id
             })
             .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);

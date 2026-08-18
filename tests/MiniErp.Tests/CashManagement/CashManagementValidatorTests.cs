@@ -128,17 +128,19 @@ public sealed class CashManagementValidatorTests
     }
 
     [Theory]
-    [InlineData(CashPartyType.None, null, null, null, null)]
-    [InlineData(CashPartyType.Partner, 1, null, null, null)]
-    [InlineData(CashPartyType.Driver, null, 1, null, null)]
-    [InlineData(CashPartyType.Driver, null, 1, 1, null)]
-    [InlineData(CashPartyType.Other, null, null, null, "Outside party")]
+    [InlineData(CashPartyType.None, null, null, null, null, null)]
+    [InlineData(CashPartyType.Partner, 1, null, null, null, null)]
+    [InlineData(CashPartyType.Driver, null, 1, null, null, null)]
+    [InlineData(CashPartyType.Driver, null, 1, 1, null, null)]
+    [InlineData(CashPartyType.Other, null, null, null, "Outside party", null)]
+    [InlineData(CashPartyType.Employee, null, null, null, null, 1)]
     public void CashVoucherUpdateValidator_AcceptsEveryValidPartyShape(
         CashPartyType partyType,
         int? partnerId,
         int? driverId,
         int? tripId,
-        string? externalPartyName)
+        string? externalPartyName,
+        int? employeeId)
     {
         var validator = new CashVoucherUpdateRequestValidator();
         var result = validator.Validate(
@@ -147,7 +149,8 @@ public sealed class CashManagementValidatorTests
                 partnerId,
                 driverId,
                 tripId,
-                externalPartyName));
+                externalPartyName,
+                employeeId));
 
         Assert.True(result.IsValid);
     }
@@ -171,7 +174,10 @@ public sealed class CashManagementValidatorTests
                 null,
                 null,
                 null,
-                new byte[8]));
+                new byte[8])
+            {
+                EmployeeId = 1
+            });
 
         Assert.Contains(
             result.Errors,
@@ -193,6 +199,11 @@ public sealed class CashManagementValidatorTests
             error =>
                 error.PropertyName ==
                 nameof(CashVoucherUpdateRequest.ExternalPartyName));
+        Assert.Contains(
+            result.Errors,
+            error =>
+                error.PropertyName ==
+                nameof(CashVoucherUpdateRequest.EmployeeId));
         Assert.Contains(
             result.Errors,
             error => error.PropertyName ==
@@ -349,7 +360,8 @@ public sealed class CashManagementValidatorTests
         int? partnerId,
         int? driverId,
         int? tripId,
-        string? externalPartyName) =>
+        string? externalPartyName,
+        int? employeeId = null) =>
         new(
             new DateOnly(2026, 7, 27),
             CashDirection.Receipt,
@@ -364,5 +376,8 @@ public sealed class CashManagementValidatorTests
             null,
             null,
             null,
-            new byte[8]);
+            new byte[8])
+        {
+            EmployeeId = employeeId
+        };
 }

@@ -58,8 +58,7 @@ public sealed class EmployeeAttendanceService(
 
         var orderedQuery = query
             .OrderByDescending(a => a.WorkDate)
-            .ThenBy(a => a.Employee.Name)
-            .ThenBy(a => a.Id);
+            .ThenByDescending(a => a.Id);
 
         var pageResult = await paginationService.PaginateAsync<
             Domain.Entities.Employees.EmployeeAttendance,

@@ -40,8 +40,8 @@ public sealed class ItemsCategoryService(
             .Where(category =>
                 !filters.IsActive.HasValue ||
                 category.IsActive == filters.IsActive.Value)
-            .OrderBy(category => category.Name)
-            .ThenBy(category => category.Id);
+            .OrderByDescending(category => category.CreatedOn)
+            .ThenByDescending(category => category.Id);
 
         return await paginationService.PaginateAsync<
             ItemsCategory,

@@ -21,8 +21,8 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
                 "Get paginated cash vouchers",
                 SwaggerOperationDescription.Create(
                     "Returns active manual and invoice-generated Receipt and Payment vouchers for the selected company. InvoiceId and InvoiceNumber identify generated payment vouchers.",
-                    "Optional search, voucherNumber, direction, cashboxId, cashMovementTypeId, classification, partyType, businessPartnerId, driverId, driverTripId, isDraft, fromDate, toDate, pageNumber, and pageSize filters.",
-                    "Search covers voucher, cashbox, movement type, party, trip invoice, reference, and description display values.",
+                    "Optional search, voucherNumber, direction, cashboxId, cashMovementTypeId, classification, partyType, businessPartnerId, driverId, driverTripId, employeeId, isDraft, fromDate, toDate, pageNumber, and pageSize filters.",
+                    "Search covers voucher, cashbox, movement type, partner, driver, employee, trip invoice, external party, reference, and description display values.",
                     "Deleted and other-company vouchers are excluded.")),
             nameof(CashVouchersController.GetById) => (
                 "Get a cash voucher",
@@ -42,7 +42,7 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
                 "Update a cash voucher",
                 SwaggerOperationDescription.Create(
                     "Admin only. Replaces a manual draft or completed voucher and all derived effects, including its base-currency snapshot, atomically.",
-                    "All completion fields plus the original base64 rowVersion. Voucher number is server-generated, immutable, and is not sent.",
+                    "All completion fields plus the original base64 rowVersion. Party shapes are exclusive: Partner requires businessPartnerId, Driver requires driverId, Employee requires employeeId, Other requires externalPartyName, and None uses no party field. Voucher number is server-generated, immutable, and is not sent.",
                     "An active cashbox and matching active movement type are required. For a foreign-currency cashbox, send exchangeRate or omit it to use the registered rate for the voucher date. The old effects are removed and the completed effects are applied exactly once.",
                     "A stale token returns CashVouchers.Concurrency. An invoice-generated voucher returns CashVouchers.InvoiceGeneratedReadOnly and must be changed through its invoice.")),
             nameof(CashVouchersController.Delete) => (

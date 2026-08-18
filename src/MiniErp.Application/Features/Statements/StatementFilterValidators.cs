@@ -30,6 +30,9 @@ public sealed class CashboxStatementFilterRequestValidator
         RuleFor(filter => filter.DriverTripId)
             .GreaterThan(0)
             .When(filter => filter.DriverTripId.HasValue);
+        RuleFor(filter => filter.EmployeeId)
+            .GreaterThan(0)
+            .When(filter => filter.EmployeeId.HasValue);
         RuleFor(filter => filter.VoucherNumber).MaximumLength(100);
     }
 

@@ -1,6 +1,7 @@
 using MiniErp.Domain.Common.Entities;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Logistics;
 using MiniErp.Domain.Enums;
@@ -50,6 +51,10 @@ public sealed class CashVoucher : AuditableEntity
     public int? DriverTripId { get; set; }
 
     public DriverTrip? DriverTrip { get; set; }
+
+    public int? EmployeeId { get; set; }
+
+    public Employee? Employee { get; set; }
 
     public string? ExternalPartyName { get; set; }
 

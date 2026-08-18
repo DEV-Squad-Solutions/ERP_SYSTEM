@@ -58,7 +58,7 @@ public sealed class EnumSchemaDocumentationFilter : ISchemaFilter
             return "Controls the party fields shown by the frontend: None uses " +
                    "no party field; Partner requires businessPartnerId; Driver " +
                    "requires driverId and allows an optional driverTripId; Other " +
-                   "requires externalPartyName.";
+                   "requires externalPartyName; Employee requires employeeId.";
         }
 
         if (enumType == typeof(CashMovementClassification))

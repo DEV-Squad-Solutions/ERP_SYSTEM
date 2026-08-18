@@ -34,6 +34,9 @@ public sealed class CashVoucherFilterRequestValidator
         RuleFor(filter => filter.DriverTripId)
             .GreaterThan(0)
             .When(filter => filter.DriverTripId.HasValue);
+        RuleFor(filter => filter.EmployeeId)
+            .GreaterThan(0)
+            .When(filter => filter.EmployeeId.HasValue);
         RuleFor(filter => filter.ToDate)
             .GreaterThanOrEqualTo(filter => filter.FromDate)
             .When(filter =>

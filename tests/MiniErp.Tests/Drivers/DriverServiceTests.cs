@@ -26,22 +26,31 @@ public sealed class DriverServiceTests
     }
 
     [Fact]
-    public async Task GetAll_ReturnsOnlyCurrentCompanyDriversInStableOrder()
+    public async Task GetAll_ReturnsNewestCurrentCompanyDriversFirst()
     {
         await using var database = await DriverTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
 
-        var result = await service.GetAllAsync(
+        var firstPage = await service.GetAllAsync(
             new PaginationRequest
             {
                 PageNumber = 1,
-                PageSize = 20
+                PageSize = 2
+            });
+        var secondPage = await service.GetAllAsync(
+            new PaginationRequest
+            {
+                PageNumber = 2,
+                PageSize = 2
             });
 
-        Assert.True(result.IsSuccess);
+        Assert.True(firstPage.IsSuccess);
+        Assert.True(secondPage.IsSuccess);
         Assert.Equal(
-            [1, 3, 2, 5],
-            result.Value.Items.Select(driver => driver.Id));
+            [5, 3, 2, 1],
+            firstPage.Value.Items
+                .Concat(secondPage.Value.Items)
+                .Select(driver => driver.Id));
     }
 
     [Fact]
@@ -533,7 +542,10 @@ public sealed class DriverServiceTests
                 NationalId = nationalId,
                 LicenseNumber = licenseNumber,
                 LicenseExpiryDate = licenseExpiryDate,
-                IsActive = isActive
+                IsActive = isActive,
+                CreatedOn = id is 3 or 5
+                    ? new DateTime(2026, 7, 3, 12, 0, 0, DateTimeKind.Utc)
+                    : new DateTime(2026, 7, id, 12, 0, 0, DateTimeKind.Utc)
             };
     }
 

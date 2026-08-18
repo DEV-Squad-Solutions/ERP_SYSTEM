@@ -37,6 +37,10 @@ public sealed record CashVoucherResponse(
 
     public int? CashboxTransferId { get; init; }
 
+    public int? EmployeeId { get; init; }
+
+    public string? EmployeeName { get; init; }
+
     public string? InvoiceNumber { get; init; }
 
     public decimal? AppliedInvoiceAmount { get; init; }

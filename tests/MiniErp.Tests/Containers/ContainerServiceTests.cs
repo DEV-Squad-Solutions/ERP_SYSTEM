@@ -23,7 +23,7 @@ public sealed class ContainerServiceTests
     }
 
     [Fact]
-    public async Task GetAll_ReturnsCurrentCompanyActiveAndInactiveContainers()
+    public async Task GetAll_ReturnsNewestCurrentCompanyContainersFirst()
     {
         await using var database = await ContainerTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
@@ -36,7 +36,7 @@ public sealed class ContainerServiceTests
             });
 
         Assert.True(result.IsSuccess);
-        Assert.Equal([1, 2], result.Value.Items.Select(item => item.Id));
+        Assert.Equal([2, 1], result.Value.Items.Select(item => item.Id));
     }
 
     [Fact]

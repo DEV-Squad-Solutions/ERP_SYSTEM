@@ -14,7 +14,8 @@ public sealed record CashboxStatementFilterRequest(
     int? BusinessPartnerId = null,
     int? DriverId = null,
     int? DriverTripId = null,
-    string? VoucherNumber = null);
+    string? VoucherNumber = null,
+    int? EmployeeId = null);
 
 public sealed record PartnerStatementFilterRequest(
     int BusinessPartnerId,

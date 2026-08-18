@@ -22,7 +22,7 @@ public sealed class CountryServiceTests
     }
 
     [Fact]
-    public async Task GetAll_ReturnsGlobalActiveAndInactiveCountries()
+    public async Task GetAll_ReturnsNewestGlobalActiveAndInactiveCountriesFirst()
     {
         await using var database = await CountryTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -35,7 +35,7 @@ public sealed class CountryServiceTests
             });
 
         Assert.True(result.IsSuccess);
-        Assert.Equal([3, 1, 2], result.Value.Items.Select(item => item.Id));
+        Assert.Equal([3, 2, 1], result.Value.Items.Select(item => item.Id));
     }
 
     [Fact]

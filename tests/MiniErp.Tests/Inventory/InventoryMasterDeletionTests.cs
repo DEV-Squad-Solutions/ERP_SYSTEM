@@ -88,7 +88,7 @@ public sealed class InventoryMasterDeletionTests
         };
 
     [Fact]
-    public async Task GetAllItems_ReturnsOnlyCurrentCompanyItems()
+    public async Task GetAllItems_ReturnsNewestCurrentCompanyItemsFirst()
     {
         await using var database = await InventoryDeletionDatabase.CreateAsync();
         var service = database.CreateItemService(companyId: 1);
@@ -101,7 +101,7 @@ public sealed class InventoryMasterDeletionTests
             });
 
         Assert.True(result.IsSuccess);
-        Assert.Equal([1, 2, 4], result.Value.Items.Select(item => item.Id));
+        Assert.Equal([4, 2, 1], result.Value.Items.Select(item => item.Id));
     }
 
     [Fact]
@@ -234,7 +234,7 @@ public sealed class InventoryMasterDeletionTests
     }
 
     [Fact]
-    public async Task GetAllItemUnits_ReturnsOnlyCurrentCompanyUnits()
+    public async Task GetAllItemUnits_ReturnsNewestCurrentCompanyUnitsFirst()
     {
         await using var database = await InventoryDeletionDatabase.CreateAsync();
         var service = database.CreateItemUnitService(companyId: 1);
@@ -247,7 +247,7 @@ public sealed class InventoryMasterDeletionTests
             });
 
         Assert.True(result.IsSuccess);
-        Assert.Equal([2, 5, 1, 3], result.Value.Items.Select(unit => unit.Id));
+        Assert.Equal([5, 3, 2, 1], result.Value.Items.Select(unit => unit.Id));
     }
 
     [Fact]

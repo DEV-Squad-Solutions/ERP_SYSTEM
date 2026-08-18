@@ -10,9 +10,9 @@ using Microsoft.Extensions.Options;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Authentication;
 using MiniErp.Application.Common.Mappings;
+using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Users;
-using MiniErp.Domain.Entities.Companies;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Identity;
 using MiniErp.Infrastructure.Persistence;
@@ -32,6 +32,32 @@ public sealed class UserServiceTests
     {
         MappingConfiguration.Register(
             typeof(InfrastructureAssemblyMarker).Assembly);
+    }
+
+    [Fact]
+    public async Task GetAll_ReturnsNewestUsersFirst_WithDescendingIdTieBreak()
+    {
+        await using var database = await UserTestDatabase.CreateAsync();
+        var service = database.CreateService(AdminId);
+
+        var created = await service.AddAsync(
+            new UserCreateRequest(
+                "newest-user",
+                "newest-user@example.com",
+                "Newest",
+                "User",
+                null,
+                "P@ssword123",
+                [ApplicationRoles.User],
+                [1]));
+        var result = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 });
+
+        Assert.True(created.IsSuccess);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(
+            [created.Value.Id, UserId, AdminId],
+            result.Value.Items.Select(user => user.Id));
     }
 
     [Fact]
@@ -453,10 +479,20 @@ public sealed class UserServiceTests
             await CreateRoleAsync(roleManager, ApplicationRoles.Admin);
             await CreateRoleAsync(roleManager, ApplicationRoles.User);
 
-            context.Companies.AddRange(
-                CreateCompany(1, "Company One"),
-                CreateCompany(2, "Company Two"));
-            await context.SaveChangesAsync();
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO Companies
+                    (Id, Name, Address, CommercialRegister, TaxNumber,
+                     ManagerName, RowVersion, CreatedById, CreatedOn,
+                     CreatedByPc, IsDeleted)
+                VALUES
+                    (1, 'Company One', 'Company One Address', 'CR-1',
+                     'TAX-1', 'Company One Manager', X'01', 'test',
+                     '2000-01-01', 'test', 0),
+                    (2, 'Company Two', 'Company Two Address', 'CR-2',
+                     'TAX-2', 'Company Two Manager', X'02', 'test',
+                     '2000-01-01', 'test', 0);
+                """);
 
             await CreateUserAsync(
                 context,
@@ -464,14 +500,16 @@ public sealed class UserServiceTests
                 AdminId,
                 "admin-user",
                 "admin-user@example.com",
-                ApplicationRoles.Admin);
+                ApplicationRoles.Admin,
+                new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc));
             await CreateUserAsync(
                 context,
                 userManager,
                 UserId,
                 "standard-user",
                 "standard-user@example.com",
-                ApplicationRoles.User);
+                ApplicationRoles.User,
+                new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc));
             context.ChangeTracker.Clear();
         }
 
@@ -494,7 +532,8 @@ public sealed class UserServiceTests
             Guid id,
             string userName,
             string email,
-            string role)
+            string role,
+            DateTime createdOn)
         {
             var user = new ApplicationUser
             {
@@ -502,6 +541,7 @@ public sealed class UserServiceTests
                 UserName = userName,
                 Email = email,
                 EmailConfirmed = true,
+                CreatedOn = createdOn,
                 FirstName = userName,
                 LastName = "Test",
                 ProfileImage = string.Empty
@@ -520,16 +560,6 @@ public sealed class UserServiceTests
             await context.SaveChangesAsync();
         }
 
-        private static Company CreateCompany(int id, string name) =>
-            new()
-            {
-                Id = id,
-                Name = name,
-                Address = $"{name} Address",
-                CommercialRegister = $"CR-{id}",
-                TaxNumber = $"TAX-{id}",
-                ManagerName = $"{name} Manager"
-            };
     }
 
     private sealed class TestUserManager(

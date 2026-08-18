@@ -403,6 +403,52 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
+    public async Task EmployeeVoucherPersistsDisplayAndSupportsFiltersAndSearch()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+
+        var result = await AddVoucherAsync(
+            service,
+            CreateEmployeeRequest(employeeId: 1, amount: 75m));
+        var byEmployee = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashVoucherFilterRequest(EmployeeId: 1));
+        var bySearch = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashVoucherFilterRequest(Search: "EMP-1"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CashPartyType.Employee, result.Value.PartyType);
+        Assert.Equal(1, result.Value.EmployeeId);
+        Assert.Equal("Employee One", result.Value.EmployeeName);
+        Assert.Equal(result.Value.Id, Assert.Single(byEmployee.Value.Items).Id);
+        Assert.Equal(result.Value.Id, Assert.Single(bySearch.Value.Items).Id);
+        Assert.Null(result.Value.BusinessPartnerId);
+        Assert.Null(result.Value.DriverId);
+        Assert.Null(result.Value.ExternalPartyName);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(999)]
+    public async Task EmployeeVoucherRejectsInactiveCrossCompanyAndMissingEmployee(
+        int employeeId)
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+
+        var result = await AddVoucherAsync(
+            service,
+            CreateEmployeeRequest(employeeId, amount: 10m));
+
+        Assert.Equal("CashVouchers.EmployeeNotFound", result.Error.Code);
+    }
+
+    [Fact]
     public async Task UpdateMovesFullEffectBetweenCashboxesWithoutDuplication()
     {
         await using var database =
@@ -691,6 +737,27 @@ public sealed class CashVoucherServiceTests
             null,
             null);
 
+    private static VoucherTestRequest CreateEmployeeRequest(
+        int employeeId,
+        decimal amount) =>
+        new(
+            new DateOnly(2026, 7, 27),
+            CashDirection.Payment,
+            1,
+            4,
+            CashPartyType.Employee,
+            null,
+            null,
+            null,
+            null,
+            amount,
+            null,
+            "Employee payment",
+            null)
+        {
+            EmployeeId = employeeId
+        };
+
     private static CashVoucherUpdateRequest ToUpdateRequest(
         CashVoucherResponse original,
         int? cashboxId = null,
@@ -709,7 +776,10 @@ public sealed class CashVoucherServiceTests
             original.ReferenceNumber,
             original.Description,
             original.Notes,
-            original.RowVersion);
+            original.RowVersion)
+        {
+            EmployeeId = original.EmployeeId
+        };
 
     private static async Task<Result<CashVoucherResponse>> AddVoucherAsync(
         ICashVoucherService service,
@@ -744,7 +814,10 @@ public sealed class CashVoucherServiceTests
                 request.Description,
                 request.Notes,
                 draft.Value.RowVersion,
-                request.ExchangeRate));
+                request.ExchangeRate)
+            {
+                EmployeeId = request.EmployeeId
+            });
     }
 
     private sealed record VoucherTestRequest(
@@ -761,5 +834,8 @@ public sealed class CashVoucherServiceTests
         string? ReferenceNumber,
         string? Description,
         string? Notes,
-        decimal? ExchangeRate = null);
+        decimal? ExchangeRate = null)
+    {
+        public int? EmployeeId { get; init; }
+    }
 }

@@ -46,8 +46,8 @@ public sealed class ItemService(
             .Where(item =>
                 !filters.IsActive.HasValue ||
                 item.IsActive == filters.IsActive.Value)
-            .OrderBy(item => item.Name)
-            .ThenBy(item => item.Id);
+            .OrderByDescending(item => item.CreatedOn)
+            .ThenByDescending(item => item.Id);
 
         return await paginationService.PaginateAsync<Item, ItemResponse>(
             query,

@@ -40,8 +40,8 @@ public sealed class CountryService(
             .Where(country =>
                 !filters.IsActive.HasValue ||
                 country.IsActive == filters.IsActive.Value)
-            .OrderBy(country => country.Name)
-            .ThenBy(country => country.Id);
+            .OrderByDescending(country => country.CreatedOn)
+            .ThenByDescending(country => country.Id);
 
         return await paginationService.PaginateAsync<Country, CountryResponse>(
             query,

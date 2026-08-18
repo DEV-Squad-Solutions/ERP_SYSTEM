@@ -116,6 +116,31 @@ public sealed class FinancialStatementServiceTests
     }
 
     [Fact]
+    public async Task CashboxStatementFiltersAndDisplaysEmployeeParty()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var employeeVoucher = await AddVoucherAsync(
+            database.CreateVoucherService(companyId: 1),
+            CreateEmployeeVoucher(employeeId: 1, amount: 30m));
+
+        var result = await database.CreateStatementService(1)
+            .GetCashboxStatementAsync(
+                Page(),
+                new CashboxStatementFilterRequest(
+                    CashboxId: 1,
+                    Search: "EMP-1",
+                    PartyType: CashPartyType.Employee,
+                    EmployeeId: 1));
+
+        Assert.True(employeeVoucher.IsSuccess);
+        var item = Assert.Single(result.Value.Items);
+        Assert.Equal(employeeVoucher.Value.Id, item.CashVoucherId);
+        Assert.Equal("Employee One", item.PartyName);
+        Assert.Equal(30m, result.Value.Summary.TotalPayments);
+    }
+
+    [Fact]
     public async Task ForeignCurrencyCashboxStatementReturnsAllCurrencyDetails()
     {
         await using var database =
@@ -781,6 +806,27 @@ public sealed class FinancialStatementServiceTests
             number,
             null);
 
+    private static VoucherTestRequest CreateEmployeeVoucher(
+        int employeeId,
+        decimal amount) =>
+        new(
+            new DateOnly(2026, 7, 24),
+            CashDirection.Payment,
+            1,
+            4,
+            CashPartyType.Employee,
+            null,
+            null,
+            null,
+            null,
+            amount,
+            "REF-EMPLOYEE",
+            "Employee payment",
+            null)
+        {
+            EmployeeId = employeeId
+        };
+
     private static async Task<Result<CashVoucherResponse>> AddVoucherAsync(
         ICashVoucherService service,
         VoucherTestRequest request)
@@ -813,7 +859,10 @@ public sealed class FinancialStatementServiceTests
                 request.ReferenceNumber,
                 request.Description,
                 request.Notes,
-                draft.Value.RowVersion));
+                draft.Value.RowVersion)
+            {
+                EmployeeId = request.EmployeeId
+            });
     }
 
     private sealed record VoucherTestRequest(
@@ -829,5 +878,8 @@ public sealed class FinancialStatementServiceTests
         decimal Amount,
         string? ReferenceNumber,
         string? Description,
-        string? Notes);
+        string? Notes)
+    {
+        public int? EmployeeId { get; init; }
+    }
 }

@@ -36,8 +36,7 @@ public sealed partial class PayrollEntryService
 
         return baseQuery
             .OrderByDescending(e => e.EndDate)
-            .ThenBy(e => e.EmployeeName)
-            .ThenBy(e => e.Id);
+            .ThenByDescending(e => e.Id);
     }
 
     private async Task<AttendanceSummary> GetAttendanceSummaryAsync(
