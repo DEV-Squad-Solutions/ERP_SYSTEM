@@ -4,9 +4,11 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
+using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Application.Features.PartnerItemReports;
+using MiniErp.Application.Features.ProfitabilityReports;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Containers;
@@ -22,6 +24,7 @@ using MiniErp.Infrastructure.Services.Inventory;
 using MiniErp.Infrastructure.Services.Invoices;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.PartnerItemReports;
+using MiniErp.Infrastructure.Services.ProfitabilityReports;
 
 namespace MiniErp.Tests.Invoices;
 
@@ -981,6 +984,233 @@ public sealed class InvoiceServiceTests
         Assert.Equal(0m, returnMovement.PendingCostQuantity);
         Assert.Equal(12m, returnMovement.UnitCost);
         Assert.Equal(12m, returnMovement.TotalCost);
+    }
+
+    [Fact]
+    public async Task ProfitabilityReport_NetsReturnsAndAllocatesInvoiceDiscount()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var invoiceService = database.CreateService();
+        var purchase = await invoiceService.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(1, 10, 1m, 10m, null),
+                    new InvoiceLineRequest(2, 10, 1m, 20m, null)
+                ]));
+        Assert.True(purchase.IsSuccess, purchase.Error.Description);
+        var saleResult = await invoiceService.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                discountAmount: 10m,
+                lines:
+                [
+                    new InvoiceLineRequest(1, 2, 1m, 30m, null),
+                    new InvoiceLineRequest(2, 1, 1m, 40m, null)
+                ]));
+        Assert.True(saleResult.IsSuccess, saleResult.Error.Description);
+        var sale = saleResult.Value;
+        var returnResult = await invoiceService.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 1,
+                        Weight: 1m,
+                        Price: 999m,
+                        Notes: null,
+                        SourceInvoiceLineId: sale.Lines.Single(line =>
+                            line.ItemId == 1).Id)
+                ]));
+        Assert.True(returnResult.IsSuccess, returnResult.Error.Description);
+
+        var reportService = database.CreateProfitabilityReportService();
+        var invoiceReport = await reportService.GetInvoicesAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new ProfitabilityReportFilterRequest());
+
+        Assert.True(invoiceReport.IsSuccess, invoiceReport.Error.Description);
+        Assert.Equal(CurrencyCode.EGP, invoiceReport.Value.BaseCurrency);
+        Assert.Equal(1, invoiceReport.Value.TotalCount);
+        Assert.Equal(90m, invoiceReport.Value.Summary.SalesRevenue);
+        Assert.Equal(40m, invoiceReport.Value.Summary.SalesCost);
+        Assert.Equal(30m, invoiceReport.Value.Summary.ReturnRevenue);
+        Assert.Equal(10m, invoiceReport.Value.Summary.ReturnCost);
+        Assert.Equal(60m, invoiceReport.Value.Summary.NetRevenue);
+        Assert.Equal(30m, invoiceReport.Value.Summary.RecognizedCost);
+        Assert.Equal(30m, invoiceReport.Value.Summary.GrossProfit);
+        Assert.Equal(50m, invoiceReport.Value.Summary.GrossMarginPercentage);
+        Assert.Equal(0, invoiceReport.Value.Summary.PendingLineCount);
+
+        var saleProfit = Assert.Single(invoiceReport.Value.Invoices);
+        Assert.Equal(InvoiceType.Sales, saleProfit.InvoiceType);
+        Assert.Equal(70m, saleProfit.GrossRevenue);
+        Assert.Equal(10m, saleProfit.DiscountAmount);
+        Assert.Equal(60m, saleProfit.NetRevenue);
+        Assert.Equal(30m, saleProfit.RecognizedCost);
+        Assert.Equal(30m, saleProfit.GrossProfit);
+        Assert.Null(
+            typeof(InvoiceProfitabilityListItemResponse)
+                .GetProperty("Lines"));
+
+        var saleDetails = await reportService.GetInvoiceDetailsAsync(
+            sale.Id);
+        Assert.True(saleDetails.IsSuccess, saleDetails.Error.Description);
+        Assert.Equal(60m, saleDetails.Value.NetRevenue);
+        Assert.Equal(30m, saleDetails.Value.RecognizedCost);
+        Assert.Equal(30m, saleDetails.Value.GrossProfit);
+        Assert.Equal(3, saleDetails.Value.Lines.Count);
+        Assert.Equal(
+            54m,
+            saleDetails.Value.Lines.Single(line =>
+                line.ItemId == 1 &&
+                line.InvoiceType == InvoiceType.Sales).NetRevenue);
+        Assert.Equal(
+            36m,
+            saleDetails.Value.Lines.Single(line =>
+                line.ItemId == 2).NetRevenue);
+        var returnedItem = saleDetails.Value.Lines.Single(line =>
+            line.InvoiceType == InvoiceType.SalesReturn);
+        Assert.Equal(-1m, returnedItem.Quantity);
+        Assert.Equal(-30m, returnedItem.NetRevenue);
+        Assert.Equal(-10m, returnedItem.RecognizedCost);
+        Assert.Equal(-20m, returnedItem.GrossProfit);
+
+        var returnDetails = await reportService.GetInvoiceDetailsAsync(
+            returnResult.Value.Id);
+        Assert.True(returnDetails.IsFailure);
+        Assert.Equal(
+            "ProfitabilityReport.InvoiceNotFound",
+            returnDetails.Error.Code);
+
+        var itemReport = await reportService.GetItemsAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new ProfitabilityReportFilterRequest());
+        Assert.True(itemReport.IsSuccess, itemReport.Error.Description);
+        Assert.Equal(2, itemReport.Value.TotalCount);
+        Assert.Equal([2, 1], itemReport.Value.Items
+            .Select(item => item.ItemId));
+        var firstItem = itemReport.Value.Items.Single(item =>
+            item.ItemId == 1);
+        Assert.Equal(2m, firstItem.SalesQuantity);
+        Assert.Equal(1m, firstItem.ReturnQuantity);
+        Assert.Equal(1m, firstItem.NetQuantity);
+        Assert.Equal(54m, firstItem.SalesRevenue);
+        Assert.Equal(30m, firstItem.ReturnRevenue);
+        Assert.Equal(24m, firstItem.NetRevenue);
+        Assert.Equal(20m, firstItem.SalesCost);
+        Assert.Equal(10m, firstItem.ReturnCost);
+        Assert.Equal(10m, firstItem.RecognizedCost);
+        Assert.Equal(14m, firstItem.GrossProfit);
+        Assert.Equal(2, firstItem.InvoiceCount);
+        Assert.Equal(2, firstItem.LineCount);
+        Assert.Equal(0, firstItem.PendingLineCount);
+
+        var purchaseDetails = await reportService.GetInvoiceDetailsAsync(
+            purchase.Value.Id);
+        Assert.True(purchaseDetails.IsFailure);
+        Assert.Equal(
+            "ProfitabilityReport.InvoiceNotFound",
+            purchaseDetails.Error.Code);
+
+        var netItemInvoice = await reportService.GetInvoicesAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 1 },
+            new ProfitabilityReportFilterRequest(
+                IncludeReturns: false,
+                ItemId: 1));
+
+        Assert.True(
+            netItemInvoice.IsSuccess,
+            netItemInvoice.Error.Description);
+        Assert.True(netItemInvoice.Value.IncludeReturns);
+        Assert.Equal(1, netItemInvoice.Value.TotalCount);
+        Assert.Equal(1, netItemInvoice.Value.TotalPages);
+        var filteredInvoice = Assert.Single(
+            netItemInvoice.Value.Invoices);
+        Assert.Equal(24m, filteredInvoice.NetRevenue);
+        Assert.Equal(10m, filteredInvoice.RecognizedCost);
+        Assert.Equal(14m, filteredInvoice.GrossProfit);
+        Assert.Equal(24m, netItemInvoice.Value.Summary.NetRevenue);
+        Assert.Equal(2, netItemInvoice.Value.Summary.InvoiceCount);
+        Assert.Equal(1, netItemInvoice.Value.Summary.ItemCount);
+
+        var filteredItemReport = await reportService.GetItemsAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new ProfitabilityReportFilterRequest(
+                IncludeReturns: false,
+                ItemId: 1));
+        Assert.True(
+            filteredItemReport.IsSuccess,
+            filteredItemReport.Error.Description);
+        Assert.True(filteredItemReport.Value.IncludeReturns);
+        var filteredItem = Assert.Single(
+            filteredItemReport.Value.Items);
+        Assert.Equal(1m, filteredItem.NetQuantity);
+        Assert.Equal(24m, filteredItem.NetRevenue);
+        Assert.Equal(10m, filteredItem.RecognizedCost);
+        Assert.Equal(14m, filteredItem.GrossProfit);
+    }
+
+    [Fact]
+    public async Task ProfitabilityReport_DoesNotPresentPendingCostAsFinalProfit()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            $"INSERT INTO CompanySettings (CompanyId, StockBalanceCheckMode) VALUES (1, {(int)StockBalanceCheckMode.None});");
+        var invoiceService = database.CreateService();
+        var sale = await invoiceService.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 30m, null)]));
+        Assert.True(sale.IsSuccess, sale.Error.Description);
+
+        var report = await database.CreateProfitabilityReportService()
+            .GetInvoicesAsync(
+                new PaginationRequest { PageNumber = 1, PageSize = 20 },
+                new ProfitabilityReportFilterRequest());
+
+        Assert.True(report.IsSuccess, report.Error.Description);
+        var invoice = Assert.Single(report.Value.Invoices);
+        Assert.Equal(InventoryCostStatus.Pending, invoice.CostStatus);
+        Assert.Equal(2m, invoice.PendingCostQuantity);
+        Assert.Equal(0m, invoice.RecognizedCost);
+        Assert.Null(invoice.GrossProfit);
+        Assert.Null(invoice.GrossMarginPercentage);
+        Assert.Null(report.Value.Summary.GrossProfit);
+        Assert.Equal(60m, report.Value.Summary.PendingRevenue);
+        Assert.Equal(2m, report.Value.Summary.PendingCostQuantity);
+        Assert.Equal(1, report.Value.Summary.PendingInvoiceCount);
+        Assert.Equal(1, report.Value.Summary.PendingLineCount);
+
+        var itemReport = await database.CreateProfitabilityReportService()
+            .GetItemsAsync(
+                new PaginationRequest { PageNumber = 1, PageSize = 20 },
+                new ProfitabilityReportFilterRequest());
+        Assert.True(itemReport.IsSuccess, itemReport.Error.Description);
+        var item = Assert.Single(itemReport.Value.Items);
+        Assert.Equal(InventoryCostStatus.Pending, item.CostStatus);
+        Assert.Equal(2m, item.PendingCostQuantity);
+        Assert.Equal(1, item.PendingLineCount);
+        Assert.Null(item.GrossProfit);
+        Assert.Null(item.GrossMarginPercentage);
+
+        var details = await database.CreateProfitabilityReportService()
+            .GetInvoiceDetailsAsync(sale.Value.Id);
+        Assert.True(details.IsSuccess, details.Error.Description);
+        var pendingLine = Assert.Single(details.Value.Lines);
+        Assert.Equal(InventoryCostStatus.Pending, pendingLine.CostStatus);
+        Assert.Null(pendingLine.GrossProfit);
     }
 
     [Fact]
@@ -5700,6 +5930,10 @@ public sealed class InvoiceServiceTests
                     TimeProvider.System));
 
         public PartnerItemReportService CreatePartnerItemReportService() =>
+            new(Context, new TestCurrentCompanyContext(1));
+
+        public ProfitabilityReportService
+            CreateProfitabilityReportService() =>
             new(Context, new TestCurrentCompanyContext(1));
 
         public async ValueTask DisposeAsync()
