@@ -295,7 +295,56 @@ public sealed class InventoryCostingService(
             .ToListAsync(cancellationToken);
         dbContext.InventoryCostAllocations.RemoveRange(allocations);
 
+        var initialAllocations = new List<InventoryCostAllocation>();
+        var initialReplay = await ReplayTimelineAsync(
+            movements,
+            new Dictionary<int, decimal>(),
+            initialAllocations,
+            cancellationToken);
+        if (initialReplay.Error is not null)
+        {
+            return initialReplay.Error;
+        }
+
+        var sourceCostOverrides = BuildSalesReturnSourceCostOverrides(
+            initialReplay.PendingSalesReturns);
+        if (sourceCostOverrides.Count == 0)
+        {
+            dbContext.InventoryCostAllocations.AddRange(initialAllocations);
+            balance.Apply(
+                initialReplay.Quantity,
+                initialReplay.AverageCost,
+                initialReplay.InventoryValue);
+            return null;
+        }
+
+        var finalAllocations = new List<InventoryCostAllocation>();
+        var finalReplay = await ReplayTimelineAsync(
+            movements,
+            sourceCostOverrides,
+            finalAllocations,
+            cancellationToken);
+        if (finalReplay.Error is not null)
+        {
+            return finalReplay.Error;
+        }
+
+        dbContext.InventoryCostAllocations.AddRange(finalAllocations);
+        balance.Apply(
+            finalReplay.Quantity,
+            finalReplay.AverageCost,
+            finalReplay.InventoryValue);
+        return null;
+    }
+
+    private async Task<TimelineReplayResult> ReplayTimelineAsync(
+        IReadOnlyList<ItemMovement> movements,
+        IReadOnlyDictionary<int, decimal> salesReturnSourceCostOverrides,
+        ICollection<InventoryCostAllocation> allocations,
+        CancellationToken cancellationToken)
+    {
         var pending = new Queue<PendingOutbound>();
+        var pendingSalesReturns = new List<PendingSalesReturn>();
         var quantity = 0m;
         var averageCost = 0m;
         var inventoryValue = 0m;
@@ -309,16 +358,33 @@ public sealed class InventoryCostingService(
                     movements,
                     quantity,
                     averageCost,
+                    salesReturnSourceCostOverrides,
                     cancellationToken);
                 if (sourceCostResult.Error is not null)
                 {
-                    return sourceCostResult.Error;
+                    return TimelineReplayResult.Failure(
+                        sourceCostResult.Error);
+                }
+
+                if (sourceCostResult.PendingSourceMovement is not null)
+                {
+                    ProcessPendingInbound(
+                        movement,
+                        ref quantity,
+                        ref averageCost,
+                        ref inventoryValue);
+                    pendingSalesReturns.Add(new PendingSalesReturn(
+                        Movement: movement,
+                        SourceMovement:
+                            sourceCostResult.PendingSourceMovement));
+                    continue;
                 }
 
                 ProcessInbound(
                     movement,
                     sourceCostResult.UnitCost,
                     pending,
+                    allocations,
                     ref quantity,
                     ref averageCost,
                     ref inventoryValue);
@@ -333,8 +399,11 @@ public sealed class InventoryCostingService(
                 ref inventoryValue);
         }
 
-        balance.Apply(quantity, averageCost, inventoryValue);
-        return null;
+        return TimelineReplayResult.Success(
+            Quantity: quantity,
+            AverageCost: averageCost,
+            InventoryValue: inventoryValue,
+            PendingSalesReturns: pendingSalesReturns);
     }
 
     private async Task<InboundCostResult> ResolveInboundUnitCostAsync(
@@ -342,6 +411,7 @@ public sealed class InventoryCostingService(
         IReadOnlyCollection<ItemMovement> timeline,
         decimal quantityBefore,
         decimal averageCostBefore,
+        IReadOnlyDictionary<int, decimal> salesReturnSourceCostOverrides,
         CancellationToken cancellationToken)
     {
         switch (movement.MovementType)
@@ -401,13 +471,27 @@ public sealed class InventoryCostingService(
                             candidate.ItemId == movement.ItemId);
 
                         if (sourceMovement is null ||
-                            !ComesBefore(sourceMovement, movement) ||
-                            sourceMovement.CostStatus is
+                            !ComesBefore(sourceMovement, movement))
+                        {
+                            return InboundCostResult.Failure(
+                                InvalidSalesReturnSource());
+                        }
+
+                        if (salesReturnSourceCostOverrides.TryGetValue(
+                                sourceMovement.Id,
+                                out var sourceCostOverride))
+                        {
+                            return InboundCostResult.Success(
+                                sourceCostOverride);
+                        }
+
+                        if (sourceMovement.CostStatus is
                                 InventoryCostStatus.Pending or
                                 InventoryCostStatus.PartiallyCosted ||
                             !sourceMovement.UnitCost.HasValue)
                         {
-                            return InboundCostResult.Failure(SalesReturnSourceCostPending());
+                            return InboundCostResult.Pending(
+                                sourceMovement);
                         }
 
                         return InboundCostResult.Success(
@@ -485,6 +569,7 @@ public sealed class InventoryCostingService(
         ItemMovement movement,
         decimal unitCost,
         Queue<PendingOutbound> pending,
+        ICollection<InventoryCostAllocation> allocations,
         ref decimal quantity,
         ref decimal averageCost,
         ref decimal inventoryValue)
@@ -505,7 +590,7 @@ public sealed class InventoryCostingService(
             allocatedQuantity =
                 InventoryCostRules.RoundQuantity(allocatedQuantity);
 
-            dbContext.InventoryCostAllocations.Add(
+            allocations.Add(
                 InventoryCostAllocation.Create(
                     companyId,
                     movement.StoreId,
@@ -566,6 +651,85 @@ public sealed class InventoryCostingService(
             quantity,
             averageCost,
             inventoryValue);
+    }
+
+    private static void ProcessPendingInbound(
+        ItemMovement movement,
+        ref decimal quantity,
+        ref decimal averageCost,
+        ref decimal inventoryValue)
+    {
+        var inboundQuantity =
+            InventoryCostRules.RoundQuantity(movement.QuantityIn);
+        var quantityBefore = quantity;
+        quantity = InventoryCostRules.RoundQuantity(
+            quantityBefore + inboundQuantity);
+
+        if (quantity <= 0m || quantityBefore <= 0m)
+        {
+            averageCost = 0m;
+            inventoryValue = 0m;
+        }
+        else
+        {
+            averageCost = InventoryCostRules.CalculateAverage(
+                inventoryValue,
+                quantity);
+        }
+
+        movement.ApplyCostSnapshot(
+            InventoryCostStatus.Pending,
+            inboundQuantity,
+            unitCost: null,
+            totalCost: 0m,
+            quantityAfter: quantity,
+            averageCostAfter: averageCost,
+            inventoryValueAfter: inventoryValue);
+    }
+
+    private static IReadOnlyDictionary<int, decimal>
+        BuildSalesReturnSourceCostOverrides(
+            IReadOnlyCollection<PendingSalesReturn> pendingSalesReturns)
+    {
+        var overrides = new Dictionary<int, decimal>();
+
+        foreach (var group in pendingSalesReturns.GroupBy(
+                     pendingReturn => pendingReturn.SourceMovement.Id))
+        {
+            var sourceMovement = group.First().SourceMovement;
+            if (sourceMovement.UnitCost.HasValue &&
+                sourceMovement.CostStatus is
+                    InventoryCostStatus.Final or
+                    InventoryCostStatus.Revalued)
+            {
+                overrides[sourceMovement.Id] =
+                    sourceMovement.UnitCost.Value;
+                continue;
+            }
+
+            var returnedQuantity = InventoryCostRules.RoundQuantity(
+                group.Sum(pendingReturn =>
+                    pendingReturn.Movement.QuantityIn));
+            if (sourceMovement.PendingCostQuantity > returnedQuantity)
+            {
+                continue;
+            }
+
+            var costedQuantity = InventoryCostRules.RoundQuantity(
+                sourceMovement.QuantityOut -
+                sourceMovement.PendingCostQuantity);
+            if (costedQuantity <= 0m)
+            {
+                continue;
+            }
+
+            overrides[sourceMovement.Id] =
+                InventoryCostRules.CalculateAverage(
+                    sourceMovement.TotalCost,
+                    costedQuantity);
+        }
+
+        return overrides;
     }
 
     private static void ProcessOutbound(
@@ -688,12 +852,58 @@ public sealed class InventoryCostingService(
 
     private sealed record InboundCostResult(
         decimal UnitCost,
-        Error? Error)
+        Error? Error,
+        ItemMovement? PendingSourceMovement)
     {
         public static InboundCostResult Success(decimal unitCost) =>
-            new(unitCost, null);
+            new(
+                UnitCost: unitCost,
+                Error: null,
+                PendingSourceMovement: null);
 
         public static InboundCostResult Failure(Error error) =>
-            new(0m, error);
+            new(
+                UnitCost: 0m,
+                Error: error,
+                PendingSourceMovement: null);
+
+        public static InboundCostResult Pending(
+            ItemMovement sourceMovement) =>
+            new(
+                UnitCost: 0m,
+                Error: null,
+                PendingSourceMovement: sourceMovement);
+    }
+
+    private sealed record PendingSalesReturn(
+        ItemMovement Movement,
+        ItemMovement SourceMovement);
+
+    private sealed record TimelineReplayResult(
+        decimal Quantity,
+        decimal AverageCost,
+        decimal InventoryValue,
+        IReadOnlyCollection<PendingSalesReturn> PendingSalesReturns,
+        Error? Error)
+    {
+        public static TimelineReplayResult Success(
+            decimal Quantity,
+            decimal AverageCost,
+            decimal InventoryValue,
+            IReadOnlyCollection<PendingSalesReturn> PendingSalesReturns) =>
+            new(
+                Quantity: Quantity,
+                AverageCost: AverageCost,
+                InventoryValue: InventoryValue,
+                PendingSalesReturns: PendingSalesReturns,
+                Error: null);
+
+        public static TimelineReplayResult Failure(Error error) =>
+            new(
+                Quantity: 0m,
+                AverageCost: 0m,
+                InventoryValue: 0m,
+                PendingSalesReturns: [],
+                Error: error);
     }
 }

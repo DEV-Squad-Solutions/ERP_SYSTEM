@@ -110,6 +110,71 @@ public sealed class CountryServiceTests
     }
 
     [Fact]
+    public async Task Add_RejectsDuplicateNormalizedNameOfActiveCountry()
+    {
+        await using var database = await CountryTestDatabase.CreateAsync();
+        var service = database.CreateService();
+
+        var result = await service.AddAsync(
+            new CountryRequest(
+                "  باء  ",
+                "Another English Name"));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Countries.NameExists", result.Error.Code);
+        Assert.Equal(nameof(CountryRequest.Name), result.Error.FieldName);
+    }
+
+    [Fact]
+    public async Task Add_AllowsNameOfInactiveCountry()
+    {
+        await using var database = await CountryTestDatabase.CreateAsync();
+        var service = database.CreateService();
+
+        var result = await service.AddAsync(
+            new CountryRequest(
+                "جيم",
+                "Replacement Country"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("جيم", result.Value.Name);
+    }
+
+    [Fact]
+    public async Task Update_RejectsAnotherCountryName()
+    {
+        await using var database = await CountryTestDatabase.CreateAsync();
+        var service = database.CreateService();
+
+        var result = await service.UpdateAsync(
+            2,
+            new CountryRequest(
+                "  باء  ",
+                "Updated English Name"));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Countries.NameExists", result.Error.Code);
+        Assert.Equal(nameof(CountryRequest.Name), result.Error.FieldName);
+    }
+
+    [Fact]
+    public async Task Add_AllowsNameOfSoftDeletedCountry()
+    {
+        await using var database = await CountryTestDatabase.CreateAsync();
+        var service = database.CreateService();
+
+        var deleteResult = await service.DeleteAsync(2);
+        var addResult = await service.AddAsync(
+            new CountryRequest(
+                "جيم",
+                "Replacement Country"));
+
+        Assert.True(deleteResult.IsSuccess);
+        Assert.True(addResult.IsSuccess);
+        Assert.Equal("جيم", addResult.Value.Name);
+    }
+
+    [Fact]
     public async Task Update_ReactivatesAndPreservesTheGeneratedCode()
     {
         await using var database = await CountryTestDatabase.CreateAsync();
@@ -264,6 +329,10 @@ public sealed class CountryServiceTests
 
                 CREATE UNIQUE INDEX UX_Countries_Code_Active
                 ON Countries (Code)
+                WHERE IsActive = 1 AND IsDeleted = 0;
+
+                CREATE UNIQUE INDEX UX_Countries_Name_Active
+                ON Countries (Name)
                 WHERE IsActive = 1 AND IsDeleted = 0;
 
                 CREATE TABLE Invoices (

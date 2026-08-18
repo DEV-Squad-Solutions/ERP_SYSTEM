@@ -627,6 +627,9 @@ public sealed class InvoiceServiceTests
         Assert.Equal(3m, line.ReturnedQuantity);
         Assert.Equal(7m, line.AvailableQuantity);
         Assert.Equal(10m, line.UnitPrice);
+        Assert.Equal(InventoryCostStatus.Final, line.CostStatus);
+        Assert.Equal(0m, line.PendingCostQuantity);
+        Assert.Equal(10m, line.UnitCost);
     }
 
     [Fact]
@@ -873,7 +876,7 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task LinkedSalesReturn_RejectsPendingSourceSale()
+    public async Task LinkedSalesReturn_PersistsPendingCostAndRevaluesLater()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         await database.Context.Database.ExecuteSqlRawAsync(
@@ -884,6 +887,29 @@ public sealed class InvoiceServiceTests
                 InvoiceType.Sales,
                 storeId: 2,
                 lines: [new InvoiceLineRequest(1, 2, 1m, 30m, null)]))).Value;
+
+        var queryService = database.CreateQueryService();
+        var sourcePreview = await queryService.GetReturnSourcesAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new InvoiceReturnSourceFilterRequest(
+                BusinessPartnerId: sale.BusinessPartnerId,
+                StoreId: sale.StoreId,
+                ReturnType: InvoiceReturnType.SalesReturn,
+                AsOfDate: sale.InvoiceDate));
+        Assert.True(
+            sourcePreview.IsSuccess,
+            sourcePreview.Error.Description);
+        var pendingSourceLine = Assert.Single(
+            Assert.Single(sourcePreview.Value.Items).Lines);
+        Assert.Equal(
+            InventoryCostStatus.Pending,
+            pendingSourceLine.CostStatus);
+        Assert.Equal(2m, pendingSourceLine.PendingCostQuantity);
+        Assert.Null(pendingSourceLine.UnitCost);
 
         var result = await service.AddAsync(
             CreateRequest(
@@ -900,14 +926,61 @@ public sealed class InvoiceServiceTests
                         sale.Lines.Single().Id)
                 ]));
 
-        Assert.True(result.IsFailure);
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(2, await database.Context.Invoices.CountAsync());
+        var pendingReturnLine = Assert.Single(result.Value.Lines);
+        Assert.Equal(InventoryCostStatus.Pending, pendingReturnLine.CostStatus);
+        Assert.Equal(1m, pendingReturnLine.PendingCostQuantity);
+        Assert.Null(pendingReturnLine.UnitCost);
+
+        database.Context.ChangeTracker.Clear();
+        var persistedPendingReturn = await database.Context.ItemMovements
+            .AsNoTracking()
+            .SingleAsync(movement =>
+                movement.MovementType == ItemMovementType.SalesReturn &&
+                movement.ReferenceId == result.Value.Id);
         Assert.Equal(
-            "Inventory.SalesReturnSourceCostPending",
-            result.Error.Code);
-        Assert.Equal(
-            "لا يمكن احتساب تكلفة مرتجع البيع لأن حركة البيع الأصلية لم تكتمل تكلفتها بعد.",
-            result.Error.Description);
-        Assert.Equal(1, await database.Context.Invoices.CountAsync());
+            InventoryCostStatus.Pending,
+            persistedPendingReturn.CostStatus);
+        Assert.Equal(1m, persistedPendingReturn.PendingCostQuantity);
+        Assert.Null(persistedPendingReturn.UnitCost);
+        Assert.Equal(0m, persistedPendingReturn.TotalCost);
+
+        var purchaseResult = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 1,
+                        Weight: 1m,
+                        Price: 12m,
+                        Notes: null)
+                ]));
+
+        Assert.True(purchaseResult.IsSuccess, purchaseResult.Error.Description);
+        database.Context.ChangeTracker.Clear();
+
+        var sourceMovement = await database.Context.ItemMovements
+            .AsNoTracking()
+            .SingleAsync(movement =>
+                movement.MovementType == ItemMovementType.Sales &&
+                movement.ReferenceId == sale.Id);
+        var returnMovement = await database.Context.ItemMovements
+            .AsNoTracking()
+            .SingleAsync(movement =>
+                movement.MovementType == ItemMovementType.SalesReturn &&
+                movement.ReferenceId == result.Value.Id);
+
+        Assert.Equal(InventoryCostStatus.Revalued, sourceMovement.CostStatus);
+        Assert.Equal(12m, sourceMovement.UnitCost);
+        Assert.Equal(24m, sourceMovement.TotalCost);
+        Assert.Equal(InventoryCostStatus.Final, returnMovement.CostStatus);
+        Assert.Equal(0m, returnMovement.PendingCostQuantity);
+        Assert.Equal(12m, returnMovement.UnitCost);
+        Assert.Equal(12m, returnMovement.TotalCost);
     }
 
     [Fact]
@@ -6139,6 +6212,7 @@ public sealed class InvoiceServiceTests
                     PartyType INTEGER NOT NULL,
                     BusinessPartnerId INTEGER NULL,
                     DriverId INTEGER NULL,
+                    EmployeeId INTEGER NULL,
                     DriverTripId INTEGER NULL,
                     ExternalPartyName TEXT NULL,
                     Amount NUMERIC NOT NULL,
