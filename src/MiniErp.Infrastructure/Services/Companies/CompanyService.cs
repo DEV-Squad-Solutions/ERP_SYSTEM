@@ -118,7 +118,7 @@ public sealed class CompanyService(
         {
             BaseCurrency = request.BaseCurrency ?? CurrencyCode.EGP,
             StockBalanceCheckMode = request.StockBalanceCheckMode ??
-                StockBalanceCheckMode.DateCheck
+                StockBalanceCheckMode.None
         };
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -202,7 +202,7 @@ public sealed class CompanyService(
                 CompanyId = id,
                 BaseCurrency = request.BaseCurrency ?? CurrencyCode.EGP,
                 StockBalanceCheckMode = request.StockBalanceCheckMode ??
-                    StockBalanceCheckMode.DateCheck
+                    StockBalanceCheckMode.None
             };
             dbContext.CompanySettings.Add(settings);
         }

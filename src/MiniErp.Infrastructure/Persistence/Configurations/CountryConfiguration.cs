@@ -32,7 +32,7 @@ public sealed class CountryConfiguration
 
         builder.HasIndex(country => country.Name);
 
-        builder.Property(country => country.ArabicName)
+        builder.Property(country => country.EnglishName)
             .HasMaxLength(200)
             .IsRequired();
 

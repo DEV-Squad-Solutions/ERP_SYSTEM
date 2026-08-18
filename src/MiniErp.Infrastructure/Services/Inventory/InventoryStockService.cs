@@ -456,7 +456,7 @@ public sealed class InventoryStockService(
             .Where(settings => settings.CompanyId == companyId)
             .Select(settings => (StockBalanceCheckMode?)settings.StockBalanceCheckMode)
             .SingleOrDefaultAsync(cancellationToken) ??
-            StockBalanceCheckMode.DateCheck;
+            StockBalanceCheckMode.None;
         return balanceCheckMode.Value;
     }
 

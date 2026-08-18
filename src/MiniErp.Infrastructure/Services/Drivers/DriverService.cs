@@ -201,16 +201,14 @@ public sealed class DriverService(
             .AnyAsync(
                 invoice =>
                     invoice.CompanyId == companyId &&
-                    (invoice.DriverId == id ||
-                     invoice.ActualDriverId == id),
+                    invoice.DriverId == id,
                 cancellationToken) ||
             await dbContext.DriverTrips
                 .IgnoreQueryFilters()
                 .AnyAsync(
-                    trip =>
-                        trip.CompanyId == companyId &&
-                        (trip.DriverId == id ||
-                         trip.ActualDriverId == id),
+                trip =>
+                    trip.CompanyId == companyId &&
+                    trip.DriverId == id,
                     cancellationToken) ||
             await dbContext.CashVouchers
                 .IgnoreQueryFilters()

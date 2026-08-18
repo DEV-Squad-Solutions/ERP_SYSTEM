@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using MiniErp.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using MiniErp.Infrastructure.Persistence;
 namespace MiniErp.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260816113257_modifyActualDriverId")]
+    partial class modifyActualDriverId
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1797,6 +1800,8 @@ namespace MiniErp.Infrastructure.Migrations
                         {
                             t.HasCheckConstraint("CK_Employees_RequiredWorkingDays", "[RequiredWorkingDaysPerMonth] IS NULL OR ([RequiredWorkingDaysPerMonth] >= 1 AND [RequiredWorkingDaysPerMonth] <= 31)");
 
+                            t.HasCheckConstraint("CK_Employees_SalaryType", "([Type] = 0 AND [DailySalary] IS NOT NULL AND [MonthlySalary] IS NULL) OR ([Type] = 1 AND [MonthlySalary] IS NOT NULL AND [DailySalary] IS NULL)");
+
                             t.HasCheckConstraint("CK_Employees_Salary_NonNegative", "([DailySalary] IS NULL OR [DailySalary] >= 0) AND ([MonthlySalary] IS NULL OR [MonthlySalary] >= 0)");
                         });
                 });
@@ -3104,7 +3109,7 @@ namespace MiniErp.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("ActualDriverName")
+                    b.Property<string>("ActualDriverId")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
@@ -3747,7 +3752,7 @@ namespace MiniErp.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("ActualDriverName")
+                    b.Property<string>("ActualDriverId")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
@@ -4145,6 +4150,11 @@ namespace MiniErp.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("ArabicName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -4173,11 +4183,6 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.Property<DateTime?>("DeletedOn")
                         .HasColumnType("datetime2");
-
-                    b.Property<string>("EnglishName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");

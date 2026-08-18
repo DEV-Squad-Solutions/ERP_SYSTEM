@@ -4,5 +4,5 @@ public sealed record CountryFilterRequest(
     string? Search = null,
     string? Code = null,
     string? Name = null,
-    string? ArabicName = null,
+    string? EnglishName = null,
     bool? IsActive = null);

@@ -4,5 +4,5 @@ public sealed record CountryResponse(
     int Id,
     string Code,
     string Name,
-    string ArabicName,
+    string EnglishName,
     bool IsActive);
