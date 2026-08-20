@@ -7,6 +7,7 @@ namespace MiniErp.Application.Features.PayrollEntries
     int? EmployeeId = null,
     DateOnly? StartDate = null,
     DateOnly? EndDate = null,
+    bool? IsTakeSalary = null,
     EmployeeType? EmployeeType = null,
     string? Search = null);
 

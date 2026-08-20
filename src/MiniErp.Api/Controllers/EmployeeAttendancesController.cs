@@ -83,7 +83,7 @@ public sealed class EmployeeAttendancesController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Update(
         int id,
-        EmployeeAttendanceRequest request,
+        EmployeeAttendanceUpdateRequest request,
         CancellationToken cancellationToken)
     {
         var result = await employeeAttendanceService.UpdateAsync(

@@ -64,7 +64,7 @@ namespace MiniErp.Infrastructure.Services.Employees
                     "Employee.InvalidName",
                     "يجب ألا يكون اسم الموظف فارغًا."
                     , nameof(request.Name));
-            if (request.Type == null || !Enum.IsDefined(typeof(EmployeeType), request.Type))
+            if (!Enum.IsDefined(typeof(EmployeeType), request.Type))
                 return Error.Validation(
                     "Employee.InvalidType",
                     "يجب إدخال نوع الموظف أو النوع المحدد غير صالح."
@@ -125,7 +125,7 @@ namespace MiniErp.Infrastructure.Services.Employees
                     "Employee.InvalidName",
                     "يجب ألا يكون اسم الموظف فارغًا."
                     , nameof(request.Name));
-            if (!Enum.IsDefined(typeof(EmployeeType), request.Type))
+            if (request.Type.HasValue && !Enum.IsDefined(typeof(EmployeeType), request.Type.Value))
                 return Error.Validation(
                     "Employee.InvalidType",
                     "يجب إدخال نوع الموظف أو النوع المحدد غير صالح."
