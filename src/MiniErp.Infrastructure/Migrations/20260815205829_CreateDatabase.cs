@@ -314,7 +314,7 @@ namespace MiniErp.Infrastructure.Migrations
                 {
                     CompanyId = table.Column<int>(type: "int", nullable: false),
                     BaseCurrency = table.Column<int>(type: "int", nullable: false, defaultValue: 1),
-                    StockBalanceCheckMode = table.Column<int>(type: "int", nullable: false)
+                    StockBalanceCheckMode = table.Column<int>(type: "int", nullable: false, defaultValue: 0)
                 },
                 constraints: table =>
                 {

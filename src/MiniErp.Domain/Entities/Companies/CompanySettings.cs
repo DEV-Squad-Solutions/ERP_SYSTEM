@@ -9,7 +9,7 @@ public sealed class CompanySettings
     public CurrencyCode BaseCurrency { get; set; } = CurrencyCode.EGP;
 
     public StockBalanceCheckMode StockBalanceCheckMode { get; set; } =
-        StockBalanceCheckMode.DateCheck;
+        StockBalanceCheckMode.None;
 
     public Company Company { get; set; } = null!;
 }

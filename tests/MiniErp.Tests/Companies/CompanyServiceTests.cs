@@ -47,7 +47,7 @@ public sealed class CompanyServiceTests
         Assert.Equal("CR-NEW", result.Value.CommercialRegister);
         Assert.Equal("TAX-NEW", result.Value.TaxNumber);
         Assert.Equal("New Manager", result.Value.ManagerName);
-        Assert.Equal(StockBalanceCheckMode.DateCheck, result.Value.StockBalanceCheckMode);
+        Assert.Equal(StockBalanceCheckMode.None, result.Value.StockBalanceCheckMode);
 
         var assignment = await database.Context.UserCompanies
             .AsNoTracking()
@@ -560,7 +560,7 @@ public sealed class CompanyServiceTests
                 CREATE TABLE CompanySettings (
                     CompanyId INTEGER NOT NULL PRIMARY KEY,
                     BaseCurrency INTEGER NOT NULL DEFAULT 1,
-                    StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
+                    StockBalanceCheckMode INTEGER NOT NULL DEFAULT 0,
                     FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
                 );
 

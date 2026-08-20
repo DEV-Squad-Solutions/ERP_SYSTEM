@@ -70,7 +70,10 @@ builder.Services.AddHangfire(configuration => configuration
         hangfireConnectionString,
         new SqlServerStorageOptions
         {
-            PrepareSchemaIfNecessary = false,
+            // Hangfire owns its infrastructure schema separately from the
+            // application EF migrations. Create/update it when the server
+            // starts, even when application migrations are disabled.
+            PrepareSchemaIfNecessary = true,
             TryAutoDetectSchemaDependentOptions = false,
             DisableGlobalLocks = true,
             QueuePollInterval = TimeSpan.FromSeconds(15),

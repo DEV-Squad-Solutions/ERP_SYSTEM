@@ -20,6 +20,7 @@ public sealed class CompanySettingsConfiguration
 
         builder.Property(settings => settings.StockBalanceCheckMode)
             .HasConversion<int>()
+            .HasDefaultValue(Domain.Enums.StockBalanceCheckMode.None)
             .IsRequired();
 
         builder.HasOne(settings => settings.Company)

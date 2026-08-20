@@ -26,7 +26,7 @@ public static class ArabicValidationConfiguration
             ["RowVersion"] = "إصدار السجل",
             ["Address"] = "العنوان",
             ["Amount"] = "المبلغ",
-            ["ArabicName"] = "الاسم بالعربية",
+            ["EnglishName"] = "الاسم بالإنجليزية",
             ["BalanceType"] = "نوع رصيد الشريك",
             ["BusinessPartnerId"] = "العميل أو المورد",
             ["CashboxId"] = "صندوق النقدية",

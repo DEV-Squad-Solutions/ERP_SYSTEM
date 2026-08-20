@@ -15,13 +15,13 @@ public sealed class CountryRequestValidator : AbstractValidator<CountryRequest>
                 request.Name is not null &&
                 request.Name.Trim().Length > 200);
 
-        RuleFor(request => request.ArabicName)
+        RuleFor(request => request.EnglishName)
             .NotEmpty();
 
-        RuleFor(request => request.ArabicName)
+        RuleFor(request => request.EnglishName)
             .MaximumLength(200)
             .When(request =>
-                request.ArabicName is not null &&
-                request.ArabicName.Trim().Length > 200);
+                request.EnglishName is not null &&
+                request.EnglishName.Trim().Length > 200);
     }
 }
