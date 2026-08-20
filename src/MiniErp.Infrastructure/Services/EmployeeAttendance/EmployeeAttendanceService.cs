@@ -1,14 +1,16 @@
+using Azure.Core;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.EmployeeAttendance;
+using MiniErp.Application.Features.Employees;
 using MiniErp.Domain.Entities.Employees;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.EmployeeAttendance;
 
-public sealed class EmployeeAttendanceService(
+public  sealed partial class EmployeeAttendanceService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext)
@@ -22,11 +24,15 @@ public sealed class EmployeeAttendanceService(
         CancellationToken cancellationToken = default)
     {
         filters ??= new EmployeeAttendanceFilterRequest();
+        var validationError = ValidateFilters(filters, cancellationToken);
+        if (validationError is not null)
+        {
+            return Result<PagedResponse<EmployeeAttendanceResponse>>.Failure(validationError);
+        }
 
         var query = dbContext.EmployeeAttendances
             .AsNoTracking()
             .Where(a => a.CompanyId == companyId);
-            //.Include(a => a.Employee);
 
         if (filters.EmployeeId.HasValue)
         {
@@ -121,6 +127,11 @@ public sealed class EmployeeAttendanceService(
         EmployeeAttendanceRequest request,
         CancellationToken cancellationToken = default)
     {
+        var validationError = ValidateAddAsync(request, cancellationToken);
+        if (validationError != null)
+        {
+            return Result<EmployeeAttendanceResponse>.Failure(validationError);
+        }
         var employee = await dbContext.Employees
             .FirstOrDefaultAsync(e => e.Id == request.EmployeeId && e.CompanyId == companyId, cancellationToken);
 
@@ -171,9 +182,14 @@ public sealed class EmployeeAttendanceService(
 
     public async Task<Result<EmployeeAttendanceResponse>> UpdateAsync(
         int id,
-        EmployeeAttendanceRequest request,
+        EmployeeAttendanceUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
+        var validationError = ValidateUpdateAsync(request, cancellationToken);
+        if (validationError != null)
+        {
+            return Result<EmployeeAttendanceResponse>.Failure(validationError);
+        }
         var attendance = await dbContext.EmployeeAttendances
             .FirstOrDefaultAsync(a => a.Id == id && a.CompanyId == companyId, cancellationToken);
 
@@ -200,14 +216,14 @@ public sealed class EmployeeAttendanceService(
         }
 
         attendance.EmployeeId = request.EmployeeId;
-        attendance.Status = request.Status;
+        attendance.Status = request.Status ?? attendance.Status;
         attendance.WorkDate = request.WorkDate;
-        attendance.CheckIn = request.CheckIn;
-        attendance.CheckOut = request.CheckOut;
+        attendance.CheckIn = request.CheckIn ?? attendance.CheckIn;
+        attendance.CheckOut = request.CheckOut ?? attendance.CheckOut;
         attendance.WorkHours = CalculateWorkHours(request.CheckIn, request.CheckOut);
-        attendance.WorkDayRatio = request.WorkDayRatio;
-        attendance.WorkOverTimeRatio = request.WorkOverTimeRatio;
-        attendance.WorkDaysDeductionRatio = request.WorkDaysDeductionRatio;
+        attendance.WorkDayRatio = request.WorkDayRatio ?? attendance.WorkDayRatio;
+        attendance.WorkOverTimeRatio = request.WorkOverTimeRatio ?? attendance.WorkOverTimeRatio;
+        attendance.WorkDaysDeductionRatio = request.WorkDaysDeductionRatio ?? attendance.WorkDaysDeductionRatio;
         attendance.WorkLocation = string.IsNullOrWhiteSpace(request.WorkLocation) ? null : request.WorkLocation.Trim();
         attendance.Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
 

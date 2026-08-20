@@ -153,10 +153,12 @@ namespace MiniErp.Infrastructure.Services.Employees
 
         public async Task<Result<EmployeeResponse>> UpdateAsync(int id, EmployeeUpdateRequest request, CancellationToken cancellationToken = default)
         {   
-            if (id <= 0)
-        {
-            return Result<EmployeeResponse>.Failure(InvalidId());
-        }
+            var validationError = await ValidateUpdateAsync(id, request, cancellationToken);
+            if (validationError is not null)
+            {
+                return Result<EmployeeResponse>.Failure(validationError);
+            }
+
             var employee = await dbContext.Employees
                 .FirstOrDefaultAsync(e => e.Id == id && e.CompanyId == campanyId, cancellationToken);
 
@@ -169,11 +171,6 @@ namespace MiniErp.Infrastructure.Services.Employees
             }
             await using var transaction = await dbContext.Database.BeginTransactionAsync(
                 cancellationToken);
-            var validationError = await ValidateUpdateAsync(id, request, cancellationToken);
-            if (validationError is not null)
-            {
-                return Result<EmployeeResponse>.Failure(validationError);
-            }
 
             employee.Name = string.IsNullOrWhiteSpace(request.Name) ? employee.Name : request.Name.Trim();
             employee.JobTitle = string.IsNullOrWhiteSpace(request.JobTitle) ? employee.JobTitle : request.JobTitle.Trim();

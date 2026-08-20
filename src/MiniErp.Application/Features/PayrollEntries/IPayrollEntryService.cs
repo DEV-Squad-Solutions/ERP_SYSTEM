@@ -15,7 +15,7 @@ public interface IPayrollEntryService
         CancellationToken cancellationToken = default);
 
     Task<Result<PayrollEntryResponse>> AddAsync(
-        PayrollEntryRequest request,
+        PayrollEntryCreateRequest request,
         CancellationToken cancellationToken = default);
 
     Task<Result<PayrollEntryResponse>> PaySalaryAsync(

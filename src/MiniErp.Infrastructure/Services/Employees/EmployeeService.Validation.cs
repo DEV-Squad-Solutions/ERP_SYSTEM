@@ -14,6 +14,11 @@ namespace MiniErp.Infrastructure.Services.Employees
     {
         private static Error? ValidateFilters(EmployeeFilterRequest filters)
         {
+            if (!string.IsNullOrWhiteSpace(filters.Search) && filters.Search.Length > 100)
+                return Error.Validation(
+                    "Employee.SearchTooLong",
+                    "عبارة البحث طويلة جدًا."
+                    , nameof(filters.Search));
             if (filters.Code?.Trim().Length > 50)
                 return Error.Validation(
                     "Employee.CodeTooLong",
@@ -57,12 +62,12 @@ namespace MiniErp.Infrastructure.Services.Employees
             if(string.IsNullOrWhiteSpace(request.Name))
                 return Error.Validation(
                     "Employee.InvalidName",
-                    "اسم الموظف غير صالح."
+                    "يجب ألا يكون اسم الموظف فارغًا."
                     , nameof(request.Name));
-            if (!Enum.IsDefined(typeof(EmployeeType), request.Type))
+            if (request.Type == null || !Enum.IsDefined(typeof(EmployeeType), request.Type))
                 return Error.Validation(
                     "Employee.InvalidType",
-                    "نوع الموظف المحدد غير صالح."
+                    "يجب إدخال نوع الموظف أو النوع المحدد غير صالح."
                     , nameof(request.Type));
             if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
             {
@@ -85,16 +90,50 @@ namespace MiniErp.Infrastructure.Services.Employees
                         "البريد الإلكتروني مستخدم بالفعل لموظف آخر.",
                         nameof(request.Email));
             }
-
+            if(request.Salary.HasValue && request.Salary.Value < 0)
+                return Error.Validation(
+                    "Employee.NegativeSalary",
+                    "يجب ألا يكون راتب الموظف سالبًا."
+                    , nameof(request.Salary));
+            if(!string.IsNullOrWhiteSpace(request.JobTitle) && request.JobTitle.Trim().Length > 200)
+                return Error.Validation(
+                    "Employee.JobTitleTooLong",
+                    "يجب ألا يزيد المسمى الوظيفي للموظف عن 200 حرف."
+                    , nameof(request.JobTitle));
+            if(request.RequiredWorkingDaysPerMonth!=null && request.RequiredWorkingDaysPerMonth > 0&& request.RequiredWorkingDaysPerMonth <= 31)
+                return Error.Validation(
+                    "Employee.RequiredWorkingDaysPerMonthTooLong",
+                    "يجب ألا يزيد عدد أيام العمل المطلوبة لكل شهر عن 0."
+                    , nameof(request.RequiredWorkingDaysPerMonth));
             return null;
         }
 
         private async Task<Error?> ValidateUpdateAsync(int id, EmployeeUpdateRequest request, CancellationToken cancellationToken)
         {
+            if (request == null)
+                return Error.Validation(
+                    "Employee.InvalidRequest",
+                    "طلب إنشاء موظف غير صالح."
+                    , nameof(request));
+            if(id <= 0)
+                return Error.Validation(
+                    "Employee.InvalidId",
+                    "معرف الموظف غير صالح."
+                    , nameof(id));
+            if (!string.IsNullOrWhiteSpace(request.Name))
+                return Error.Validation(
+                    "Employee.InvalidName",
+                    "يجب ألا يكون اسم الموظف فارغًا."
+                    , nameof(request.Name));
+            if (!Enum.IsDefined(typeof(EmployeeType), request.Type))
+                return Error.Validation(
+                    "Employee.InvalidType",
+                    "يجب إدخال نوع الموظف أو النوع المحدد غير صالح."
+                    , nameof(request.Type));
             if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
             {
                 var phoneExists = await dbContext.Employees
-                    .AnyAsync(e => e.CompanyId == campanyId && e.PhoneNumber == request.PhoneNumber.Trim() && e.Id != id, cancellationToken);
+                    .AnyAsync(e => e.CompanyId == campanyId && e.PhoneNumber == request.PhoneNumber.Trim(), cancellationToken);
                 if (phoneExists)
                     return Error.Conflict(
                         "Employee.PhoneAlreadyExists",
@@ -105,13 +144,28 @@ namespace MiniErp.Infrastructure.Services.Employees
             if (!string.IsNullOrWhiteSpace(request.Email))
             {
                 var emailExists = await dbContext.Employees
-                    .AnyAsync(e => e.CompanyId == campanyId && e.Email == request.Email.Trim().ToLower() && e.Id != id, cancellationToken);
+                    .AnyAsync(e => e.CompanyId == campanyId && e.Email == request.Email.Trim().ToLower(), cancellationToken);
                 if (emailExists)
                     return Error.Conflict(
                         "Employee.EmailAlreadyExists",
                         "البريد الإلكتروني مستخدم بالفعل لموظف آخر.",
                         nameof(request.Email));
             }
+            if (request.Salary.HasValue && request.Salary.Value < 0)
+                return Error.Validation(
+                    "Employee.NegativeSalary",
+                    "يجب ألا يكون راتب الموظف سالبًا."
+                    , nameof(request.Salary));
+            if (!string.IsNullOrWhiteSpace(request.JobTitle) && request.JobTitle.Trim().Length > 200)
+                return Error.Validation(
+                    "Employee.JobTitleTooLong",
+                    "يجب ألا يزيد المسمى الوظيفي للموظف عن 200 حرف."
+                    , nameof(request.JobTitle));
+            if (request.RequiredWorkingDaysPerMonth != null && request.RequiredWorkingDaysPerMonth > 0 && request.RequiredWorkingDaysPerMonth < 31)
+                return Error.Validation(
+                    "Employee.RequiredWorkingDaysPerMonthTooLong",
+                    "يجب ألا يزيد عدد أيام العمل المطلوبة لكل شهر عن 30."
+                    , nameof(request.RequiredWorkingDaysPerMonth));
 
             return null;
         }
