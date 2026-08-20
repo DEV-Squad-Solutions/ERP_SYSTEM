@@ -53,8 +53,8 @@ public sealed class CashboxService(
             .Where(cashbox =>
                 !filters.IsActive.HasValue ||
                 cashbox.IsActive == filters.IsActive.Value)
-            .OrderBy(cashbox => cashbox.Name)
-            .ThenBy(cashbox => cashbox.Id);
+            .OrderByDescending(cashbox => cashbox.CreatedOn)
+            .ThenByDescending(cashbox => cashbox.Id);
 
         return await paginationService.PaginateAsync<
             Cashbox,

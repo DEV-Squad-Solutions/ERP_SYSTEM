@@ -83,7 +83,6 @@ public sealed class ExchangeRateService(
                 !filters.Source.HasValue ||
                 rate.Source == filters.Source.Value)
             .OrderByDescending(rate => rate.RateDate)
-            .ThenBy(rate => rate.Currency)
             .ThenByDescending(rate => rate.Id);
 
         return await paginationService.PaginateAsync<

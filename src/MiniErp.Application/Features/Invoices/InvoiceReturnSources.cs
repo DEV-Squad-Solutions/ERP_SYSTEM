@@ -29,7 +29,10 @@ public sealed record InvoiceReturnSourceLineResponse(
     decimal ReturnedQuantity,
     decimal AvailableQuantity,
     decimal UnitPrice,
-    decimal OriginalTotal);
+    decimal OriginalTotal,
+    InventoryCostStatus CostStatus,
+    decimal PendingCostQuantity,
+    decimal? UnitCost);
 
 public sealed record InvoiceReturnSourceResponse(
     int InvoiceId,

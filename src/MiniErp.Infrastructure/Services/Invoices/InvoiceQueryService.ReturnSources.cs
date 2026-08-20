@@ -32,6 +32,10 @@ public sealed partial class InvoiceQueryService
         var sourceType = filters.ReturnType == InvoiceReturnType.SalesReturn
             ? InvoiceType.Sales
             : InvoiceType.Purchase;
+        var sourceMovementType =
+            filters.ReturnType == InvoiceReturnType.SalesReturn
+                ? ItemMovementType.Sales
+                : ItemMovementType.Purchase;
         var returnType = filters.ReturnType == InvoiceReturnType.SalesReturn
             ? InvoiceType.SalesReturn
             : InvoiceType.PurchaseReturn;
@@ -131,7 +135,33 @@ public sealed partial class InvoiceQueryService
                         .Sum(returnLine =>
                             (decimal?)returnLine.Quantity) ?? 0m,
                     UnitPrice = sourceLine.Price,
-                    OriginalTotal = sourceLine.Total
+                    OriginalTotal = sourceLine.Total,
+                    CostStatus = dbContext.ItemMovements
+                        .Where(movement =>
+                            movement.CompanyId == companyId &&
+                            movement.MovementType == sourceMovementType &&
+                            movement.ReferenceId == sourceLine.InvoiceId &&
+                            movement.ItemId == sourceLine.ItemId)
+                        .Select(movement =>
+                            (InventoryCostStatus?)movement.CostStatus)
+                        .SingleOrDefault(),
+                    PendingCostQuantity = dbContext.ItemMovements
+                        .Where(movement =>
+                            movement.CompanyId == companyId &&
+                            movement.MovementType == sourceMovementType &&
+                            movement.ReferenceId == sourceLine.InvoiceId &&
+                            movement.ItemId == sourceLine.ItemId)
+                        .Select(movement =>
+                            (decimal?)movement.PendingCostQuantity)
+                        .SingleOrDefault(),
+                    UnitCost = dbContext.ItemMovements
+                        .Where(movement =>
+                            movement.CompanyId == companyId &&
+                            movement.MovementType == sourceMovementType &&
+                            movement.ReferenceId == sourceLine.InvoiceId &&
+                            movement.ItemId == sourceLine.ItemId)
+                        .Select(movement => movement.UnitCost)
+                        .SingleOrDefault()
                 })
                 .OrderBy(sourceLine => sourceLine.InvoiceId)
                 .ThenBy(sourceLine => sourceLine.SourceInvoiceLineId)
@@ -156,7 +186,12 @@ public sealed partial class InvoiceQueryService
                         AvailableQuantity:
                             line.OriginalQuantity - line.ReturnedQuantity,
                         UnitPrice: line.UnitPrice,
-                        OriginalTotal: line.OriginalTotal))
+                        OriginalTotal: line.OriginalTotal,
+                        CostStatus:
+                            line.CostStatus ?? InventoryCostStatus.Pending,
+                        PendingCostQuantity:
+                            line.PendingCostQuantity ?? line.OriginalQuantity,
+                        UnitCost: line.UnitCost))
                     .ToArray());
 
         var items = invoices

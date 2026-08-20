@@ -49,7 +49,7 @@ public sealed class EmployeesController(
     }
 
     [Authorize(Roles = "Admin")]
-    [HttpPost("Create")]
+    [HttpPost]
     [ProducesResponseType<EmployeeResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Create(
@@ -64,7 +64,7 @@ public sealed class EmployeesController(
             ? this.ToProblem(result.Error)
             : CreatedAtAction(
                 nameof(GetById),
-                new { id = result.Value },
+                new { id = result.Value.Id },
                 result.Value);
     }
 

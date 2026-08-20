@@ -49,8 +49,8 @@ public sealed class CompanyService(
             .Where(company =>
                 string.IsNullOrWhiteSpace(filters.ManagerName) ||
                 company.ManagerName.Contains(filters.ManagerName.Trim()))
-            .OrderBy(company => company.Name)
-            .ThenBy(company => company.Id);
+            .OrderByDescending(company => company.CreatedOn)
+            .ThenByDescending(company => company.Id);
 
         return await paginationService.PaginateAsync<Company, CompanyResponse>(
             query,

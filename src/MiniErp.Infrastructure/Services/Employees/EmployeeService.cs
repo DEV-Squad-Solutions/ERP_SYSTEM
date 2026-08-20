@@ -180,7 +180,7 @@ namespace MiniErp.Infrastructure.Services.Employees
             employee.PhoneNumber = string.IsNullOrWhiteSpace(request.PhoneNumber) ? employee.PhoneNumber : request.PhoneNumber.Trim();
             employee.Email = string.IsNullOrWhiteSpace(request.Email) ? employee.Email : request.Email.Trim();
             employee.Address = string.IsNullOrWhiteSpace(request.Address) ? employee.Address : request.Address.Trim();
-            employee.Type = request.Type;
+            employee.Type = request.Type ?? employee.Type;
             // Clear the opposing salary field to satisfy CK_Employees_SalaryType constraint
             employee.DailySalary = request.Type == EmployeeType.Daily ? request.Salary : null;
             employee.MonthlySalary = request.Type == EmployeeType.Monthly ? request.Salary : null;

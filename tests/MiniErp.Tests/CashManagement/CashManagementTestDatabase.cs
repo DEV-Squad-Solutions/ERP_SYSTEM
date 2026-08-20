@@ -194,6 +194,33 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 IsDeleted INTEGER NOT NULL
             );
 
+            CREATE TABLE Employees (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                Code TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                JobTitle TEXT NULL,
+                PhoneNumber TEXT NULL,
+                Email TEXT NULL,
+                Address TEXT NULL,
+                Type INTEGER NOT NULL,
+                DailySalary NUMERIC NULL,
+                MonthlySalary NUMERIC NULL,
+                RequiredWorkingDaysPerMonth INTEGER NULL,
+                LastDayOfReceivingSalary TEXT NULL,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
             CREATE TABLE Invoices (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,
@@ -348,6 +375,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 CompanyId INTEGER NOT NULL,
                 Name TEXT NOT NULL COLLATE NOCASE,
                 Direction INTEGER NOT NULL,
+                Classification INTEGER NOT NULL,
                 PartnerEffect INTEGER NOT NULL,
                 IsActive INTEGER NOT NULL DEFAULT 1,
                 IsDefaultForSales INTEGER NOT NULL DEFAULT 0,
@@ -370,11 +398,15 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                     CHECK (
                         ((IsDefaultForSales = 0 AND
                           IsDefaultForPurchaseReturn = 0) OR
-                         (IsActive = 1 AND Direction = 1 AND PartnerEffect = 2))
+                         (IsActive = 1 AND Direction = 1 AND Classification = 1 AND PartnerEffect = 2))
                         AND
                         ((IsDefaultForPurchase = 0 AND
                           IsDefaultForSalesReturn = 0) OR
-                         (IsActive = 1 AND Direction = 2 AND PartnerEffect = 1)))
+                         (IsActive = 1 AND Direction = 2 AND Classification = 1 AND PartnerEffect = 1))),
+                CONSTRAINT CK_CashMovementTypes_Classification
+                    CHECK (Classification IN (1, 2, 3, 4)),
+                CONSTRAINT CK_CashMovementTypes_PartnerSettlement
+                    CHECK (Classification <> 1 OR PartnerEffect <> 0)
             );
 
             CREATE UNIQUE INDEX UX_CashMovementTypes_Company_Direction_Name
@@ -466,6 +498,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 BusinessPartnerId INTEGER NULL,
                 DriverId INTEGER NULL,
                 DriverTripId INTEGER NULL,
+                EmployeeId INTEGER NULL,
                 ExternalPartyName TEXT NULL,
                 Amount NUMERIC NOT NULL,
                 Currency INTEGER NOT NULL,
@@ -637,6 +670,17 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 (3, 2, 'DRV-3', 'Other Company Driver', 'LIC-3', 1,
                  'test', '2026-01-01', 'test', 0);
 
+            INSERT INTO Employees (
+                Id, CompanyId, Code, Name, Type, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 'EMP-1', 'Employee One', 1, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (2, 1, 'EMP-2', 'Inactive Employee', 1, 0,
+                 'test', '2026-01-01', 'test', 0),
+                (3, 2, 'EMP-3', 'Other Company Employee', 1, 1,
+                 'test', '2026-01-01', 'test', 0);
+
             INSERT INTO Invoices (
                 Id, CompanyId, InvoiceNumber, InvoiceType, IsDeleted)
             VALUES
@@ -703,26 +747,26 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                  'test', '2026-01-01', 'test', 0);
 
             INSERT INTO CashMovementTypes (
-                Id, CompanyId, Name, Direction, PartnerEffect, IsActive,
+                Id, CompanyId, Name, Direction, Classification, PartnerEffect, IsActive,
                 IsDefaultForSales, IsDefaultForPurchase,
                 IsDefaultForSalesReturn, IsDefaultForPurchaseReturn,
                 CreatedById, CreatedOn, CreatedByPc, IsDeleted)
             VALUES
-                (1, 1, 'Customer Collection', 1, 2, 1, 1, 0, 0, 0,
+                (1, 1, 'Customer Collection', 1, 1, 2, 1, 1, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (2, 1, 'Supplier Payment', 2, 1, 1, 0, 1, 0, 0,
+                (2, 1, 'Supplier Payment', 2, 1, 1, 1, 0, 1, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (3, 1, 'Other Receipt', 1, 0, 1, 0, 0, 0, 0,
+                (3, 1, 'Other Receipt', 1, 4, 0, 1, 0, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (4, 1, 'Driver Advance', 2, 0, 1, 0, 0, 0, 0,
+                (4, 1, 'Driver Advance', 2, 4, 0, 1, 0, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (5, 1, 'Inactive Payment', 2, 0, 0, 0, 0, 0, 0,
+                (5, 1, 'Inactive Payment', 2, 4, 0, 0, 0, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (6, 2, 'Other Receipt', 1, 0, 1, 0, 0, 0, 0,
+                (6, 2, 'Other Receipt', 1, 4, 0, 1, 0, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0),
-                (7, 1, 'Supplier Refund', 1, 2, 1, 0, 0, 0, 1,
+                (7, 1, 'Supplier Refund', 1, 1, 2, 1, 0, 0, 0, 1,
                  'test', '2026-01-01', 'test', 0),
-                (8, 1, 'Customer Refund', 2, 1, 1, 0, 0, 1, 0,
+                (8, 1, 'Customer Refund', 2, 1, 1, 1, 0, 0, 1, 0,
                  'test', '2026-01-01', 'test', 0);
 
             INSERT INTO DriverTrips (

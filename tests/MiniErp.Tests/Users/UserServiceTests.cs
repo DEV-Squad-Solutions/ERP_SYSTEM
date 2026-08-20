@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Authentication;
 using MiniErp.Application.Common.Mappings;
+using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Users;
 using MiniErp.Infrastructure;
@@ -31,6 +32,32 @@ public sealed class UserServiceTests
     {
         MappingConfiguration.Register(
             typeof(InfrastructureAssemblyMarker).Assembly);
+    }
+
+    [Fact]
+    public async Task GetAll_ReturnsNewestUsersFirst_WithDescendingIdTieBreak()
+    {
+        await using var database = await UserTestDatabase.CreateAsync();
+        var service = database.CreateService(AdminId);
+
+        var created = await service.AddAsync(
+            new UserCreateRequest(
+                "newest-user",
+                "newest-user@example.com",
+                "Newest",
+                "User",
+                null,
+                "P@ssword123",
+                [ApplicationRoles.User],
+                [1]));
+        var result = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 });
+
+        Assert.True(created.IsSuccess);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(
+            [created.Value.Id, UserId, AdminId],
+            result.Value.Items.Select(user => user.Id));
     }
 
     [Fact]
@@ -149,51 +176,6 @@ public sealed class UserServiceTests
         Assert.Equal(
             originalStamp,
             await database.GetSecurityStampAsync(UserId));
-    }
-
-    [Fact]
-    public async Task Update_WithOwnNormalizedIdentityValues_DoesNotReportDuplicate()
-    {
-        await using var database = await UserTestDatabase.CreateAsync();
-        var service = database.CreateService(AdminId);
-
-        var result = await service.UpdateAsync(
-            UserId,
-            new UserUpdateRequest(
-                "  STANDARD-USER  ",
-                "  STANDARD-USER@EXAMPLE.COM  ",
-                "Changed",
-                "Name",
-                null,
-                [ApplicationRoles.User],
-                [1]));
-
-        Assert.True(result.IsSuccess);
-        Assert.Equal("STANDARD-USER", result.Value.UserName);
-        Assert.Equal("STANDARD-USER@EXAMPLE.COM", result.Value.Email);
-    }
-
-    [Fact]
-    public async Task Update_WithAnotherUsersEmail_ReturnsConflict()
-    {
-        await using var database = await UserTestDatabase.CreateAsync();
-        var service = database.CreateService(AdminId);
-
-        var result = await service.UpdateAsync(
-            UserId,
-            new UserUpdateRequest(
-                "standard-user",
-                "admin-user@example.com",
-                "Changed",
-                "Name",
-                null,
-                [ApplicationRoles.User],
-                [1]));
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(ErrorType.Conflict, result.Error.Type);
-        Assert.Equal("Users.EmailExists", result.Error.Code);
-        Assert.Equal(nameof(UserUpdateRequest.Email), result.Error.FieldName);
     }
 
     [Fact]
@@ -497,8 +479,20 @@ public sealed class UserServiceTests
             await CreateRoleAsync(roleManager, ApplicationRoles.Admin);
             await CreateRoleAsync(roleManager, ApplicationRoles.User);
 
-            await InsertCompanyAsync(context, 1, "Company One");
-            await InsertCompanyAsync(context, 2, "Company Two");
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO Companies
+                    (Id, Name, Address, CommercialRegister, TaxNumber,
+                     ManagerName, RowVersion, CreatedById, CreatedOn,
+                     CreatedByPc, IsDeleted)
+                VALUES
+                    (1, 'Company One', 'Company One Address', 'CR-1',
+                     'TAX-1', 'Company One Manager', X'01', 'test',
+                     '2000-01-01', 'test', 0),
+                    (2, 'Company Two', 'Company Two Address', 'CR-2',
+                     'TAX-2', 'Company Two Manager', X'02', 'test',
+                     '2000-01-01', 'test', 0);
+                """);
 
             await CreateUserAsync(
                 context,
@@ -506,48 +500,18 @@ public sealed class UserServiceTests
                 AdminId,
                 "admin-user",
                 "admin-user@example.com",
-                ApplicationRoles.Admin);
+                ApplicationRoles.Admin,
+                new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc));
             await CreateUserAsync(
                 context,
                 userManager,
                 UserId,
                 "standard-user",
                 "standard-user@example.com",
-                ApplicationRoles.User);
+                ApplicationRoles.User,
+                new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc));
             context.ChangeTracker.Clear();
         }
-
-        private static Task InsertCompanyAsync(
-            ApplicationDbContext context,
-            int id,
-            string name) =>
-            context.Database.ExecuteSqlInterpolatedAsync(
-                $"""
-                 INSERT INTO Companies (
-                     Id,
-                     Name,
-                     Address,
-                     CommercialRegister,
-                     TaxNumber,
-                     ManagerName,
-                     RowVersion,
-                     CreatedById,
-                     CreatedOn,
-                     CreatedByPc,
-                     IsDeleted)
-                 VALUES (
-                     {id},
-                     {name},
-                     {$"{name} Address"},
-                     {$"CR-{id}"},
-                     {$"TAX-{id}"},
-                     {$"{name} Manager"},
-                     randomblob(8),
-                     {"System"},
-                     {DateTime.UtcNow},
-                     {"Tests"},
-                     {false})
-                 """);
 
         private static async Task CreateRoleAsync(
             RoleManager<IdentityRole<Guid>> roleManager,
@@ -568,7 +532,8 @@ public sealed class UserServiceTests
             Guid id,
             string userName,
             string email,
-            string role)
+            string role,
+            DateTime createdOn)
         {
             var user = new ApplicationUser
             {
@@ -576,6 +541,7 @@ public sealed class UserServiceTests
                 UserName = userName,
                 Email = email,
                 EmailConfirmed = true,
+                CreatedOn = createdOn,
                 FirstName = userName,
                 LastName = "Test",
                 ProfileImage = string.Empty

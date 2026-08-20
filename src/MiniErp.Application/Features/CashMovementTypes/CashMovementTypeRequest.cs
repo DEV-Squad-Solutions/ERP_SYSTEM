@@ -5,6 +5,7 @@ namespace MiniErp.Application.Features.CashMovementTypes;
 public sealed record CashMovementTypeRequest(
     string Name,
     CashDirection Direction,
+    CashMovementClassification Classification,
     bool ForPartner,
     bool IsActive,
     bool IsDefaultForSales,
@@ -21,6 +22,7 @@ public sealed record CashMovementTypeRequest(
 public sealed record CashMovementTypeUpdateRequest(
     string Name,
     CashDirection Direction,
+    CashMovementClassification Classification,
     bool ForPartner,
     bool IsActive,
     bool IsDefaultForSales,

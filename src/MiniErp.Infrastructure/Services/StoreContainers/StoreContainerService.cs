@@ -42,9 +42,8 @@ public sealed class StoreContainerService(
             .Where(assignment =>
                 !filters.IsActive.HasValue ||
                 assignment.IsActive == filters.IsActive.Value)
-            .OrderBy(assignment => assignment.Store.Name)
-            .ThenBy(assignment => assignment.Container.Name)
-            .ThenBy(assignment => assignment.Id);
+            .OrderByDescending(assignment => assignment.CreatedOn)
+            .ThenByDescending(assignment => assignment.Id);
 
         return await paginationService.PaginateAsync<
             StoreContainer,

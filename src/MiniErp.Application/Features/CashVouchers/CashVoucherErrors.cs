@@ -101,6 +101,12 @@ public static class CashVoucherErrors
             $"لم يتم العثور على رحلة رقم {id} تخص السائق المحدد.",
             nameof(CashVoucherUpdateRequest.DriverTripId));
 
+    public static Error EmployeeNotFound(int? id) =>
+        Error.NotFound(
+            "CashVouchers.EmployeeNotFound",
+            $"لم يتم العثور على الموظف رقم {id}.",
+            nameof(CashVoucherUpdateRequest.EmployeeId));
+
     public static Error PostingReferencesMustBeTogether() =>
         Error.Validation(
             "CashVouchers.PostingReferencesMustBeTogether",

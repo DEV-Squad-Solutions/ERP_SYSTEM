@@ -4,9 +4,11 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
+using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Application.Features.PartnerItemReports;
+using MiniErp.Application.Features.ProfitabilityReports;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Containers;
@@ -22,6 +24,7 @@ using MiniErp.Infrastructure.Services.Inventory;
 using MiniErp.Infrastructure.Services.Invoices;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.PartnerItemReports;
+using MiniErp.Infrastructure.Services.ProfitabilityReports;
 
 namespace MiniErp.Tests.Invoices;
 
@@ -627,6 +630,9 @@ public sealed class InvoiceServiceTests
         Assert.Equal(3m, line.ReturnedQuantity);
         Assert.Equal(7m, line.AvailableQuantity);
         Assert.Equal(10m, line.UnitPrice);
+        Assert.Equal(InventoryCostStatus.Final, line.CostStatus);
+        Assert.Equal(0m, line.PendingCostQuantity);
+        Assert.Equal(10m, line.UnitCost);
     }
 
     [Fact]
@@ -873,7 +879,7 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task LinkedSalesReturn_RejectsPendingSourceSale()
+    public async Task LinkedSalesReturn_PersistsPendingCostAndRevaluesLater()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         await database.Context.Database.ExecuteSqlRawAsync(
@@ -884,6 +890,29 @@ public sealed class InvoiceServiceTests
                 InvoiceType.Sales,
                 storeId: 2,
                 lines: [new InvoiceLineRequest(1, 2, 1m, 30m, null)]))).Value;
+
+        var queryService = database.CreateQueryService();
+        var sourcePreview = await queryService.GetReturnSourcesAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new InvoiceReturnSourceFilterRequest(
+                BusinessPartnerId: sale.BusinessPartnerId,
+                StoreId: sale.StoreId,
+                ReturnType: InvoiceReturnType.SalesReturn,
+                AsOfDate: sale.InvoiceDate));
+        Assert.True(
+            sourcePreview.IsSuccess,
+            sourcePreview.Error.Description);
+        var pendingSourceLine = Assert.Single(
+            Assert.Single(sourcePreview.Value.Items).Lines);
+        Assert.Equal(
+            InventoryCostStatus.Pending,
+            pendingSourceLine.CostStatus);
+        Assert.Equal(2m, pendingSourceLine.PendingCostQuantity);
+        Assert.Null(pendingSourceLine.UnitCost);
 
         var result = await service.AddAsync(
             CreateRequest(
@@ -900,14 +929,288 @@ public sealed class InvoiceServiceTests
                         sale.Lines.Single().Id)
                 ]));
 
-        Assert.True(result.IsFailure);
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(2, await database.Context.Invoices.CountAsync());
+        var pendingReturnLine = Assert.Single(result.Value.Lines);
+        Assert.Equal(InventoryCostStatus.Pending, pendingReturnLine.CostStatus);
+        Assert.Equal(1m, pendingReturnLine.PendingCostQuantity);
+        Assert.Null(pendingReturnLine.UnitCost);
+
+        database.Context.ChangeTracker.Clear();
+        var persistedPendingReturn = await database.Context.ItemMovements
+            .AsNoTracking()
+            .SingleAsync(movement =>
+                movement.MovementType == ItemMovementType.SalesReturn &&
+                movement.ReferenceId == result.Value.Id);
         Assert.Equal(
-            "Inventory.SalesReturnSourceCostPending",
-            result.Error.Code);
+            InventoryCostStatus.Pending,
+            persistedPendingReturn.CostStatus);
+        Assert.Equal(1m, persistedPendingReturn.PendingCostQuantity);
+        Assert.Null(persistedPendingReturn.UnitCost);
+        Assert.Equal(0m, persistedPendingReturn.TotalCost);
+
+        var purchaseResult = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 1,
+                        Weight: 1m,
+                        Price: 12m,
+                        Notes: null)
+                ]));
+
+        Assert.True(purchaseResult.IsSuccess, purchaseResult.Error.Description);
+        database.Context.ChangeTracker.Clear();
+
+        var sourceMovement = await database.Context.ItemMovements
+            .AsNoTracking()
+            .SingleAsync(movement =>
+                movement.MovementType == ItemMovementType.Sales &&
+                movement.ReferenceId == sale.Id);
+        var returnMovement = await database.Context.ItemMovements
+            .AsNoTracking()
+            .SingleAsync(movement =>
+                movement.MovementType == ItemMovementType.SalesReturn &&
+                movement.ReferenceId == result.Value.Id);
+
+        Assert.Equal(InventoryCostStatus.Revalued, sourceMovement.CostStatus);
+        Assert.Equal(12m, sourceMovement.UnitCost);
+        Assert.Equal(24m, sourceMovement.TotalCost);
+        Assert.Equal(InventoryCostStatus.Final, returnMovement.CostStatus);
+        Assert.Equal(0m, returnMovement.PendingCostQuantity);
+        Assert.Equal(12m, returnMovement.UnitCost);
+        Assert.Equal(12m, returnMovement.TotalCost);
+    }
+
+    [Fact]
+    public async Task ProfitabilityReport_NetsReturnsAndAllocatesInvoiceDiscount()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var invoiceService = database.CreateService();
+        var purchase = await invoiceService.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(1, 10, 1m, 10m, null),
+                    new InvoiceLineRequest(2, 10, 1m, 20m, null)
+                ]));
+        Assert.True(purchase.IsSuccess, purchase.Error.Description);
+        var saleResult = await invoiceService.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                discountAmount: 10m,
+                lines:
+                [
+                    new InvoiceLineRequest(1, 2, 1m, 30m, null),
+                    new InvoiceLineRequest(2, 1, 1m, 40m, null)
+                ]));
+        Assert.True(saleResult.IsSuccess, saleResult.Error.Description);
+        var sale = saleResult.Value;
+        var returnResult = await invoiceService.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 1,
+                        Weight: 1m,
+                        Price: 999m,
+                        Notes: null,
+                        SourceInvoiceLineId: sale.Lines.Single(line =>
+                            line.ItemId == 1).Id)
+                ]));
+        Assert.True(returnResult.IsSuccess, returnResult.Error.Description);
+
+        var reportService = database.CreateProfitabilityReportService();
+        var invoiceReport = await reportService.GetInvoicesAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new ProfitabilityReportFilterRequest());
+
+        Assert.True(invoiceReport.IsSuccess, invoiceReport.Error.Description);
+        Assert.Equal(CurrencyCode.EGP, invoiceReport.Value.BaseCurrency);
+        Assert.Equal(1, invoiceReport.Value.TotalCount);
+        Assert.Equal(90m, invoiceReport.Value.Summary.SalesRevenue);
+        Assert.Equal(40m, invoiceReport.Value.Summary.SalesCost);
+        Assert.Equal(30m, invoiceReport.Value.Summary.ReturnRevenue);
+        Assert.Equal(10m, invoiceReport.Value.Summary.ReturnCost);
+        Assert.Equal(60m, invoiceReport.Value.Summary.NetRevenue);
+        Assert.Equal(30m, invoiceReport.Value.Summary.RecognizedCost);
+        Assert.Equal(30m, invoiceReport.Value.Summary.GrossProfit);
+        Assert.Equal(50m, invoiceReport.Value.Summary.GrossMarginPercentage);
+        Assert.Equal(0, invoiceReport.Value.Summary.PendingLineCount);
+
+        var saleProfit = Assert.Single(invoiceReport.Value.Invoices);
+        Assert.Equal(InvoiceType.Sales, saleProfit.InvoiceType);
+        Assert.Equal(70m, saleProfit.GrossRevenue);
+        Assert.Equal(10m, saleProfit.DiscountAmount);
+        Assert.Equal(60m, saleProfit.NetRevenue);
+        Assert.Equal(30m, saleProfit.RecognizedCost);
+        Assert.Equal(30m, saleProfit.GrossProfit);
+        Assert.Null(
+            typeof(InvoiceProfitabilityListItemResponse)
+                .GetProperty("Lines"));
+
+        var saleDetails = await reportService.GetInvoiceDetailsAsync(
+            sale.Id);
+        Assert.True(saleDetails.IsSuccess, saleDetails.Error.Description);
+        Assert.Equal(60m, saleDetails.Value.NetRevenue);
+        Assert.Equal(30m, saleDetails.Value.RecognizedCost);
+        Assert.Equal(30m, saleDetails.Value.GrossProfit);
+        Assert.Equal(3, saleDetails.Value.Lines.Count);
         Assert.Equal(
-            "لا يمكن احتساب تكلفة مرتجع البيع لأن حركة البيع الأصلية لم تكتمل تكلفتها بعد.",
-            result.Error.Description);
-        Assert.Equal(1, await database.Context.Invoices.CountAsync());
+            54m,
+            saleDetails.Value.Lines.Single(line =>
+                line.ItemId == 1 &&
+                line.InvoiceType == InvoiceType.Sales).NetRevenue);
+        Assert.Equal(
+            36m,
+            saleDetails.Value.Lines.Single(line =>
+                line.ItemId == 2).NetRevenue);
+        var returnedItem = saleDetails.Value.Lines.Single(line =>
+            line.InvoiceType == InvoiceType.SalesReturn);
+        Assert.Equal(-1m, returnedItem.Quantity);
+        Assert.Equal(-30m, returnedItem.NetRevenue);
+        Assert.Equal(-10m, returnedItem.RecognizedCost);
+        Assert.Equal(-20m, returnedItem.GrossProfit);
+
+        var returnDetails = await reportService.GetInvoiceDetailsAsync(
+            returnResult.Value.Id);
+        Assert.True(returnDetails.IsFailure);
+        Assert.Equal(
+            "ProfitabilityReport.InvoiceNotFound",
+            returnDetails.Error.Code);
+
+        var itemReport = await reportService.GetItemsAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new ProfitabilityReportFilterRequest());
+        Assert.True(itemReport.IsSuccess, itemReport.Error.Description);
+        Assert.Equal(2, itemReport.Value.TotalCount);
+        Assert.Equal([2, 1], itemReport.Value.Items
+            .Select(item => item.ItemId));
+        var firstItem = itemReport.Value.Items.Single(item =>
+            item.ItemId == 1);
+        Assert.Equal(2m, firstItem.SalesQuantity);
+        Assert.Equal(1m, firstItem.ReturnQuantity);
+        Assert.Equal(1m, firstItem.NetQuantity);
+        Assert.Equal(54m, firstItem.SalesRevenue);
+        Assert.Equal(30m, firstItem.ReturnRevenue);
+        Assert.Equal(24m, firstItem.NetRevenue);
+        Assert.Equal(20m, firstItem.SalesCost);
+        Assert.Equal(10m, firstItem.ReturnCost);
+        Assert.Equal(10m, firstItem.RecognizedCost);
+        Assert.Equal(14m, firstItem.GrossProfit);
+        Assert.Equal(2, firstItem.InvoiceCount);
+        Assert.Equal(2, firstItem.LineCount);
+        Assert.Equal(0, firstItem.PendingLineCount);
+
+        var purchaseDetails = await reportService.GetInvoiceDetailsAsync(
+            purchase.Value.Id);
+        Assert.True(purchaseDetails.IsFailure);
+        Assert.Equal(
+            "ProfitabilityReport.InvoiceNotFound",
+            purchaseDetails.Error.Code);
+
+        var netItemInvoice = await reportService.GetInvoicesAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 1 },
+            new ProfitabilityReportFilterRequest(
+                IncludeReturns: false,
+                ItemId: 1));
+
+        Assert.True(
+            netItemInvoice.IsSuccess,
+            netItemInvoice.Error.Description);
+        Assert.True(netItemInvoice.Value.IncludeReturns);
+        Assert.Equal(1, netItemInvoice.Value.TotalCount);
+        Assert.Equal(1, netItemInvoice.Value.TotalPages);
+        var filteredInvoice = Assert.Single(
+            netItemInvoice.Value.Invoices);
+        Assert.Equal(24m, filteredInvoice.NetRevenue);
+        Assert.Equal(10m, filteredInvoice.RecognizedCost);
+        Assert.Equal(14m, filteredInvoice.GrossProfit);
+        Assert.Equal(24m, netItemInvoice.Value.Summary.NetRevenue);
+        Assert.Equal(2, netItemInvoice.Value.Summary.InvoiceCount);
+        Assert.Equal(1, netItemInvoice.Value.Summary.ItemCount);
+
+        var filteredItemReport = await reportService.GetItemsAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new ProfitabilityReportFilterRequest(
+                IncludeReturns: false,
+                ItemId: 1));
+        Assert.True(
+            filteredItemReport.IsSuccess,
+            filteredItemReport.Error.Description);
+        Assert.True(filteredItemReport.Value.IncludeReturns);
+        var filteredItem = Assert.Single(
+            filteredItemReport.Value.Items);
+        Assert.Equal(1m, filteredItem.NetQuantity);
+        Assert.Equal(24m, filteredItem.NetRevenue);
+        Assert.Equal(10m, filteredItem.RecognizedCost);
+        Assert.Equal(14m, filteredItem.GrossProfit);
+    }
+
+    [Fact]
+    public async Task ProfitabilityReport_DoesNotPresentPendingCostAsFinalProfit()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            $"INSERT INTO CompanySettings (CompanyId, StockBalanceCheckMode) VALUES (1, {(int)StockBalanceCheckMode.None});");
+        var invoiceService = database.CreateService();
+        var sale = await invoiceService.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 30m, null)]));
+        Assert.True(sale.IsSuccess, sale.Error.Description);
+
+        var report = await database.CreateProfitabilityReportService()
+            .GetInvoicesAsync(
+                new PaginationRequest { PageNumber = 1, PageSize = 20 },
+                new ProfitabilityReportFilterRequest());
+
+        Assert.True(report.IsSuccess, report.Error.Description);
+        var invoice = Assert.Single(report.Value.Invoices);
+        Assert.Equal(InventoryCostStatus.Pending, invoice.CostStatus);
+        Assert.Equal(2m, invoice.PendingCostQuantity);
+        Assert.Equal(0m, invoice.RecognizedCost);
+        Assert.Null(invoice.GrossProfit);
+        Assert.Null(invoice.GrossMarginPercentage);
+        Assert.Null(report.Value.Summary.GrossProfit);
+        Assert.Equal(60m, report.Value.Summary.PendingRevenue);
+        Assert.Equal(2m, report.Value.Summary.PendingCostQuantity);
+        Assert.Equal(1, report.Value.Summary.PendingInvoiceCount);
+        Assert.Equal(1, report.Value.Summary.PendingLineCount);
+
+        var itemReport = await database.CreateProfitabilityReportService()
+            .GetItemsAsync(
+                new PaginationRequest { PageNumber = 1, PageSize = 20 },
+                new ProfitabilityReportFilterRequest());
+        Assert.True(itemReport.IsSuccess, itemReport.Error.Description);
+        var item = Assert.Single(itemReport.Value.Items);
+        Assert.Equal(InventoryCostStatus.Pending, item.CostStatus);
+        Assert.Equal(2m, item.PendingCostQuantity);
+        Assert.Equal(1, item.PendingLineCount);
+        Assert.Null(item.GrossProfit);
+        Assert.Null(item.GrossMarginPercentage);
+
+        var details = await database.CreateProfitabilityReportService()
+            .GetInvoiceDetailsAsync(sale.Value.Id);
+        Assert.True(details.IsSuccess, details.Error.Description);
+        var pendingLine = Assert.Single(details.Value.Lines);
+        Assert.Equal(InventoryCostStatus.Pending, pendingLine.CostStatus);
+        Assert.Null(pendingLine.GrossProfit);
     }
 
     [Fact]
@@ -5629,6 +5932,10 @@ public sealed class InvoiceServiceTests
         public PartnerItemReportService CreatePartnerItemReportService() =>
             new(Context, new TestCurrentCompanyContext(1));
 
+        public ProfitabilityReportService
+            CreateProfitabilityReportService() =>
+            new(Context, new TestCurrentCompanyContext(1));
+
         public async ValueTask DisposeAsync()
         {
             await Context.DisposeAsync();
@@ -6076,6 +6383,7 @@ public sealed class InvoiceServiceTests
                     CompanyId INTEGER NOT NULL,
                     Name TEXT NOT NULL,
                     Direction INTEGER NOT NULL,
+                    Classification INTEGER NOT NULL,
                     PartnerEffect INTEGER NOT NULL,
                     IsActive INTEGER NOT NULL DEFAULT 1,
                     IsDefaultForSales INTEGER NOT NULL DEFAULT 0,
@@ -6098,11 +6406,15 @@ public sealed class InvoiceServiceTests
                         CHECK (
                             ((IsDefaultForSales = 0 AND
                               IsDefaultForPurchaseReturn = 0) OR
-                             (IsActive = 1 AND Direction = 1 AND PartnerEffect = 2))
+                             (IsActive = 1 AND Direction = 1 AND Classification = 1 AND PartnerEffect = 2))
                             AND
                             ((IsDefaultForPurchase = 0 AND
                               IsDefaultForSalesReturn = 0) OR
-                             (IsActive = 1 AND Direction = 2 AND PartnerEffect = 1)))
+                             (IsActive = 1 AND Direction = 2 AND Classification = 1 AND PartnerEffect = 1))),
+                    CONSTRAINT CK_CashMovementTypes_Classification
+                        CHECK (Classification IN (1, 2, 3, 4)),
+                    CONSTRAINT CK_CashMovementTypes_PartnerSettlement
+                        CHECK (Classification <> 1 OR PartnerEffect <> 0)
                 );
 
                 CREATE UNIQUE INDEX IX_CashMovementTypes_Company_DefaultForSales
@@ -6134,6 +6446,7 @@ public sealed class InvoiceServiceTests
                     PartyType INTEGER NOT NULL,
                     BusinessPartnerId INTEGER NULL,
                     DriverId INTEGER NULL,
+                    EmployeeId INTEGER NULL,
                     DriverTripId INTEGER NULL,
                     ExternalPartyName TEXT NULL,
                     Amount NUMERIC NOT NULL,
@@ -6285,18 +6598,18 @@ public sealed class InvoiceServiceTests
                      'test', '2026-01-01', 'test', 0);
 
                 INSERT INTO CashMovementTypes (
-                    Id, CompanyId, Name, Direction, PartnerEffect, IsActive,
+                    Id, CompanyId, Name, Direction, Classification, PartnerEffect, IsActive,
                     IsDefaultForSales, IsDefaultForPurchase,
                     IsDefaultForSalesReturn, IsDefaultForPurchaseReturn,
                     CreatedById, CreatedOn, CreatedByPc, IsDeleted)
                 VALUES
-                    (1, 1, 'Customer Collection', 1, 2, 1, 1, 0, 0, 0,
+                    (1, 1, 'Customer Collection', 1, 1, 2, 1, 1, 0, 0, 0,
                      'test', '2026-01-01', 'test', 0),
-                    (2, 1, 'Supplier Payment', 2, 1, 1, 0, 1, 0, 0,
+                    (2, 1, 'Supplier Payment', 2, 1, 1, 1, 0, 1, 0, 0,
                      'test', '2026-01-01', 'test', 0),
-                    (3, 1, 'Customer Refund', 2, 1, 1, 0, 0, 1, 0,
+                    (3, 1, 'Customer Refund', 2, 1, 1, 1, 0, 0, 1, 0,
                      'test', '2026-01-01', 'test', 0),
-                    (4, 1, 'Supplier Refund', 1, 2, 1, 0, 0, 0, 1,
+                    (4, 1, 'Supplier Refund', 1, 1, 2, 1, 0, 0, 0, 1,
                      'test', '2026-01-01', 'test', 0);
 
                 INSERT INTO StockOpeningBalances (

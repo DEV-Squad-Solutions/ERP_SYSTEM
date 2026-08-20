@@ -48,8 +48,8 @@ public sealed class StoreService(
             .Where(store =>
                 !filters.IsActive.HasValue ||
                 store.IsActive == filters.IsActive.Value)
-            .OrderBy(store => store.Name)
-            .ThenBy(store => store.Id);
+            .OrderByDescending(store => store.CreatedOn)
+            .ThenByDescending(store => store.Id);
 
         return await paginationService.PaginateAsync<Store, StoreResponse>(
             query,

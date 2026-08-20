@@ -66,6 +66,28 @@ public sealed class ExchangeRateServiceTests
     }
 
     [Fact]
+    public async Task GetAll_ReturnsNewestRateDateFirst_WithDescendingIdTieBreak()
+    {
+        await using var database = await ExchangeRateTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO ExchangeRates
+                (Id, CompanyId, Currency, RateDate, Rate, Source, Notes,
+                 LastModifiedAt, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (4, 1, 4, '2026-01-02', 60, 1, 'Same-date tie',
+                 '2026-01-02', 'test', '2026-01-02', 'test', 0);
+            """);
+        var service = database.CreateService(1);
+
+        var result = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal([4, 2, 1], result.Value.Items.Select(rate => rate.Id));
+    }
+
+    [Fact]
     public async Task Resolve_UsesDedicatedResolverAndMapsEveryField()
     {
         await using var database = await ExchangeRateTestDatabase.CreateAsync();

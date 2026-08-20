@@ -8,13 +8,15 @@ public sealed record CashVoucherFilterRequest(
     CashDirection? Direction = null,
     int? CashboxId = null,
     int? CashMovementTypeId = null,
+    CashMovementClassification? Classification = null,
     CashPartyType? PartyType = null,
     int? BusinessPartnerId = null,
     int? DriverId = null,
     int? DriverTripId = null,
     bool? IsDraft = null,
     DateOnly? FromDate = null,
-    DateOnly? ToDate = null)
+    DateOnly? ToDate = null,
+    int? EmployeeId = null)
 {
     public const int VoucherNumberMaximumLength = 100;
 }

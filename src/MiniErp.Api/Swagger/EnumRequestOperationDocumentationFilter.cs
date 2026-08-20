@@ -40,7 +40,7 @@ public sealed class EnumRequestOperationDocumentationFilter : IOperationFilter
         var documentation =
             "**Enum request values**\n\n" +
             string.Join("\n", lines) +
-            "\n\nSend enum names as JSON strings; numeric values are documentation references only.";
+            "\n\nSend enum names as JSON strings (for example, \"Monthly\") or the documented numeric value (for example, 1).";
 
         operation.Description = string.IsNullOrWhiteSpace(operation.Description)
             ? documentation

@@ -12,7 +12,7 @@ namespace MiniErp.Application.Features.Employees
         string? JobTitle=null,
         decimal? MinSalary=null,
         decimal? MaxSalary=null,
-        EmployeeType? Type=null
+        EmployeeType? EmployeeType = null
     );
 
 }

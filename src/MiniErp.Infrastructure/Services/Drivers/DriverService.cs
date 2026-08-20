@@ -63,8 +63,8 @@ public sealed class DriverService(
                 !filters.LicenseExpiryTo.HasValue ||
                 (driver.LicenseExpiryDate.HasValue &&
                  driver.LicenseExpiryDate.Value <= filters.LicenseExpiryTo.Value))
-            .OrderBy(driver => driver.Name)
-            .ThenBy(driver => driver.Id);
+            .OrderByDescending(driver => driver.CreatedOn)
+            .ThenByDescending(driver => driver.Id);
 
         return await paginationService.PaginateAsync<Driver, DriverResponse>(
             query,

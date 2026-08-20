@@ -40,8 +40,8 @@ public sealed class CountryService(
             .Where(country =>
                 !filters.IsActive.HasValue ||
                 country.IsActive == filters.IsActive.Value)
-            .OrderBy(country => country.Name)
-            .ThenBy(country => country.Id);
+            .OrderByDescending(country => country.CreatedOn)
+            .ThenByDescending(country => country.Id);
 
         return await paginationService.PaginateAsync<Country, CountryResponse>(
             query,
@@ -88,6 +88,15 @@ public sealed class CountryService(
         CancellationToken cancellationToken = default)
     {
         var country = request.Adapt<Country>();
+        if (await NameExistsAsync(
+                country.Name,
+                country.IsActive,
+                excludedId: null,
+                cancellationToken))
+        {
+            return Result<CountryResponse>.Failure(NameExists(country.Name));
+        }
+
         country.Code = await EntityIdentifierGenerator.GenerateUniqueAsync(
             dbContext,
             prefix: "CTR",
@@ -98,7 +107,15 @@ public sealed class CountryService(
             cancellationToken);
 
         dbContext.Countries.Add(country);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsNameConflict(exception))
+        {
+            dbContext.Entry(country).State = EntityState.Detached;
+            return Result<CountryResponse>.Failure(NameExists(country.Name));
+        }
 
         return Result<CountryResponse>.Success(country.Adapt<CountryResponse>());
     }
@@ -121,10 +138,28 @@ public sealed class CountryService(
             return Result<CountryResponse>.Failure(NotFound(id));
         }
 
+        var normalizedName = request.Name.Trim();
+        if (await NameExistsAsync(
+                normalizedName,
+                request.IsActive,
+                excludedId: id,
+                cancellationToken))
+        {
+            return Result<CountryResponse>.Failure(NameExists(normalizedName));
+        }
+
         var code = country.Code;
         request.Adapt(country);
         country.Code = code;
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsNameConflict(exception))
+        {
+            dbContext.ChangeTracker.Clear();
+            return Result<CountryResponse>.Failure(NameExists(normalizedName));
+        }
 
         return Result<CountryResponse>.Success(country.Adapt<CountryResponse>());
     }
@@ -163,6 +198,40 @@ public sealed class CountryService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
+    }
+
+    private Task<bool> NameExistsAsync(
+        string name,
+        bool isActive,
+        int? excludedId,
+        CancellationToken cancellationToken)
+    {
+        if (!isActive)
+        {
+            return Task.FromResult(false);
+        }
+
+        var normalizedName = name.Trim().ToUpperInvariant();
+
+        return dbContext.Countries
+            .AsNoTracking()
+            .AnyAsync(
+                country =>
+                    country.IsActive &&
+                    (!excludedId.HasValue || country.Id != excludedId.Value) &&
+                    country.Name.ToUpper() == normalizedName,
+                cancellationToken);
+    }
+
+    private static bool IsNameConflict(DbUpdateException exception)
+    {
+        var message = exception.ToString();
+        return message.Contains(
+                   "UX_Countries_Name_Active",
+                   StringComparison.OrdinalIgnoreCase) ||
+            message.Contains(
+                "UNIQUE constraint failed: Countries.Name",
+                StringComparison.OrdinalIgnoreCase);
     }
 
 }

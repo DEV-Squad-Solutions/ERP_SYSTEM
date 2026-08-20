@@ -22,7 +22,7 @@ public sealed class ItemsCategoryServiceTests
     }
 
     [Fact]
-    public async Task GetAllAndSelect_EnforceTenantAndActiveRules()
+    public async Task GetAllAndSelect_EnforceOrderingTenantAndActiveRules()
     {
         await using var database = await CategoryTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
@@ -36,7 +36,7 @@ public sealed class ItemsCategoryServiceTests
         var select = await service.GetSelectAsync();
 
         Assert.True(page.IsSuccess);
-        Assert.Equal([1, 2], page.Value.Items.Select(item => item.Id));
+        Assert.Equal([2, 1], page.Value.Items.Select(item => item.Id));
         Assert.True(select.IsSuccess);
         Assert.Equal([1], select.Value.Select(item => item.Id));
     }

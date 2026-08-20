@@ -22,14 +22,22 @@ public sealed class CashMovementTypeConfiguration
                     "CK_CashMovementTypes_PartnerEffect",
                     "[PartnerEffect] IN (0, 1, 2)");
                 table.HasCheckConstraint(
+                    "CK_CashMovementTypes_Classification",
+                    "[Classification] IN (1, 2, 3, 4)");
+                table.HasCheckConstraint(
+                    "CK_CashMovementTypes_PartnerSettlement",
+                    "[Classification] <> 1 OR [PartnerEffect] <> 0");
+                table.HasCheckConstraint(
                     "CK_CashMovementTypes_InvoiceDefaults",
                     "(([IsDefaultForSales] = 0 AND " +
                     "[IsDefaultForPurchaseReturn] = 0) OR " +
                     "([IsActive] = 1 AND [Direction] = 1 AND " +
+                    "[Classification] = 1 AND " +
                     "[PartnerEffect] = 2)) AND " +
                     "(([IsDefaultForPurchase] = 0 AND " +
                     "[IsDefaultForSalesReturn] = 0) OR " +
                     "([IsActive] = 1 AND [Direction] = 2 AND " +
+                    "[Classification] = 1 AND " +
                     "[PartnerEffect] = 1))");
             });
 
@@ -52,6 +60,10 @@ public sealed class CashMovementTypeConfiguration
             .IsRequired();
 
         builder.Property(movementType => movementType.Direction)
+            .HasConversion<int>()
+            .IsRequired();
+
+        builder.Property(movementType => movementType.Classification)
             .HasConversion<int>()
             .IsRequired();
 
@@ -85,6 +97,16 @@ public sealed class CashMovementTypeConfiguration
         builder.Property(movementType => movementType.RowVersion)
             .IsRowVersion()
             .IsRequired();
+
+        builder.HasIndex(movementType => new
+        {
+            movementType.CompanyId,
+            movementType.Classification,
+            movementType.Direction,
+            movementType.IsActive,
+            movementType.Name,
+            movementType.Id
+        });
 
         builder.HasIndex(movementType => new
         {

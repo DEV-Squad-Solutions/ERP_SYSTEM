@@ -1,3 +1,4 @@
+using Azure.Core;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Features.Employees;
 using MiniErp.Application.Features.Invoices;
@@ -31,8 +32,7 @@ namespace MiniErp.Infrastructure.Services.Employees
                     employee.Address.Contains(search) ||
                     employee.Type.ToString().Contains(search) ||
                     employee.JobTitle != null &&
-                    employee.JobTitle.Contains(search) ||
-                    employee.Type.ToString().Contains(search)
+                    employee.JobTitle.Contains(search)                     
                     );
             }
             var name = filters.Name?.Trim();
@@ -68,11 +68,10 @@ namespace MiniErp.Infrastructure.Services.Employees
                 employee.MonthlySalary.HasValue && 
                 employee.MonthlySalary.Value <= filters.MaxSalary.Value);
             }
-
-            if (filters.Type.HasValue)
+            if (filters.EmployeeType.HasValue)
             {
-                query = query.Where(employee => 
-                employee.Type == filters.Type.Value);  
+                query = query.Where(employee =>
+                    employee.Type == filters.EmployeeType.Value);
             }
 
             return query;

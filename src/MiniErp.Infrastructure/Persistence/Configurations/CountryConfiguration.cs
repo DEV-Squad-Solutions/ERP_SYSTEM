@@ -30,7 +30,10 @@ public sealed class CountryConfiguration
             .HasMaxLength(200)
             .IsRequired();
 
-        builder.HasIndex(country => country.Name);
+        builder.HasIndex(country => country.Name)
+            .IsUnique()
+            .HasDatabaseName("UX_Countries_Name_Active")
+            .HasFilter("[IsActive] = 1 AND [IsDeleted] = 0");
 
         builder.Property(country => country.EnglishName)
             .HasMaxLength(200)

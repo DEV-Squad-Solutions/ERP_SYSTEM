@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
 using MiniErp.Application.Common.Models;
+using MiniErp.Application.Features.ProfitabilityReports;
 using MiniErp.Application.Features.Statements;
 
 namespace MiniErp.Api.Controllers;
@@ -9,7 +10,8 @@ namespace MiniErp.Api.Controllers;
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
 public sealed class StatementsController(
-    IFinancialStatementService statementService)
+    IFinancialStatementService statementService,
+    IProfitabilityReportService profitabilityReportService)
     : ApiControllerBase
 {
     [HttpGet("cashbox")]
@@ -70,6 +72,51 @@ public sealed class StatementsController(
         CancellationToken cancellationToken)
     {
         var result = await statementService.GetContainerStoreStatementAsync(
+            pagination,
+            filters,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [HttpGet("profitability/invoices")]
+    [ProducesResponseType<InvoiceProfitabilityListResponse>(
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetInvoiceProfitability(
+        [FromQuery] PaginationRequest pagination,
+        [FromQuery] ProfitabilityReportFilterRequest filters,
+        CancellationToken cancellationToken)
+    {
+        var result = await profitabilityReportService.GetInvoicesAsync(
+            pagination,
+            filters,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [HttpGet("profitability/invoices/{invoiceId:int}")]
+    [ProducesResponseType<InvoiceProfitabilityResponse>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetInvoiceProfitabilityDetails(
+        int invoiceId,
+        CancellationToken cancellationToken)
+    {
+        var result = await profitabilityReportService
+            .GetInvoiceDetailsAsync(
+                invoiceId,
+                cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [HttpGet("profitability/items")]
+    [ProducesResponseType<ItemProfitabilityListResponse>(
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetItemProfitability(
+        [FromQuery] PaginationRequest pagination,
+        [FromQuery] ProfitabilityReportFilterRequest filters,
+        CancellationToken cancellationToken)
+    {
+        var result = await profitabilityReportService.GetItemsAsync(
             pagination,
             filters,
             cancellationToken);

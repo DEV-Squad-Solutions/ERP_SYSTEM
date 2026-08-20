@@ -70,12 +70,6 @@ public static class InventoryErrors
             "مرجع حركة البيع الأصلية غير صالح لاحتساب تكلفة مرتجع البيع.",
             "sourceInvoiceLineId");
 
-    public static Error SalesReturnSourceCostPending() =>
-        Error.Conflict(
-            "Inventory.SalesReturnSourceCostPending",
-            "لا يمكن احتساب تكلفة مرتجع البيع لأن حركة البيع الأصلية لم تكتمل تكلفتها بعد.",
-            "sourceInvoiceLineId");
-
     public static Error ReturnUnitCostRequired() =>
         Error.Validation(
             "Inventory.ReturnUnitCostRequired",

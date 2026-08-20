@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
 using MiniErp.Domain.Enums;
 using Swashbuckle.AspNetCore.SwaggerGen;
@@ -17,9 +18,18 @@ public sealed class EnumSchemaDocumentationFilter : ISchemaFilter
             return;
         }
 
+        var enumNames = Enum.GetNames(enumType);
+        openApiSchema.Type = JsonSchemaType.String;
+        openApiSchema.Format = null;
+        openApiSchema.Enum = enumNames
+            .Select(name => JsonValue.Create(name))
+            .Cast<JsonNode>()
+            .ToList();
+        openApiSchema.Example = JsonValue.Create(enumNames[0]);
+
         var enumDocumentation =
-            $"Accepted JSON names: {EnumDocumentationFormatter.FormatValues(enumType)}. " +
-            "Send the name; numeric values are documentation references only.";
+            $"Accepted values: {EnumDocumentationFormatter.FormatValues(enumType)}. " +
+            "Send the enum name as a JSON string or the documented numeric value.";
         var businessMeaning = GetBusinessMeaning(enumType);
         if (businessMeaning is not null)
         {
@@ -48,7 +58,15 @@ public sealed class EnumSchemaDocumentationFilter : ISchemaFilter
             return "Controls the party fields shown by the frontend: None uses " +
                    "no party field; Partner requires businessPartnerId; Driver " +
                    "requires driverId and allows an optional driverTripId; Other " +
-                   "requires externalPartyName.";
+                   "requires externalPartyName; Employee requires employeeId.";
+        }
+
+        if (enumType == typeof(CashMovementClassification))
+        {
+            return "PartnerSettlement is a customer or supplier settlement " +
+                   "and requires forPartner=true. Expense, Revenue, and Other " +
+                   "are direction-neutral and may optionally be linked to a " +
+                   "customer or supplier.";
         }
 
         return null;

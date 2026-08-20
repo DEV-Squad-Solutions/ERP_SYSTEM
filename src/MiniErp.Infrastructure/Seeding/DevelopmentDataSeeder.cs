@@ -1502,6 +1502,7 @@ public static class DevelopmentDataSeeder
             {
                 Name = "Customer Collection",
                 Direction = CashDirection.Receipt,
+                Classification = CashMovementClassification.PartnerSettlement,
                 PartnerEffect = PartnerAccountEffect.Credit,
                 DefaultInvoiceType = (InvoiceType?)InvoiceType.Sales
             },
@@ -1509,6 +1510,7 @@ public static class DevelopmentDataSeeder
             {
                 Name = "Supplier Refund",
                 Direction = CashDirection.Receipt,
+                Classification = CashMovementClassification.PartnerSettlement,
                 PartnerEffect = PartnerAccountEffect.Credit,
                 DefaultInvoiceType = (InvoiceType?)InvoiceType.PurchaseReturn
             },
@@ -1516,6 +1518,7 @@ public static class DevelopmentDataSeeder
             {
                 Name = "Other Receipt",
                 Direction = CashDirection.Receipt,
+                Classification = CashMovementClassification.Other,
                 PartnerEffect = PartnerAccountEffect.None,
                 DefaultInvoiceType = (InvoiceType?)null
             },
@@ -1523,6 +1526,7 @@ public static class DevelopmentDataSeeder
             {
                 Name = "Supplier Payment",
                 Direction = CashDirection.Payment,
+                Classification = CashMovementClassification.PartnerSettlement,
                 PartnerEffect = PartnerAccountEffect.Debit,
                 DefaultInvoiceType = (InvoiceType?)InvoiceType.Purchase
             },
@@ -1530,6 +1534,7 @@ public static class DevelopmentDataSeeder
             {
                 Name = "Customer Refund",
                 Direction = CashDirection.Payment,
+                Classification = CashMovementClassification.PartnerSettlement,
                 PartnerEffect = PartnerAccountEffect.Debit,
                 DefaultInvoiceType = (InvoiceType?)InvoiceType.SalesReturn
             },
@@ -1537,6 +1542,7 @@ public static class DevelopmentDataSeeder
             {
                 Name = "Driver Advance",
                 Direction = CashDirection.Payment,
+                Classification = CashMovementClassification.Other,
                 PartnerEffect = PartnerAccountEffect.None,
                 DefaultInvoiceType = (InvoiceType?)null
             },
@@ -1544,6 +1550,7 @@ public static class DevelopmentDataSeeder
             {
                 Name = "Other Payment",
                 Direction = CashDirection.Payment,
+                Classification = CashMovementClassification.Other,
                 PartnerEffect = PartnerAccountEffect.None,
                 DefaultInvoiceType = (InvoiceType?)null
             }
@@ -1580,6 +1587,7 @@ public static class DevelopmentDataSeeder
                 CompanyId = company.Id,
                 Name = seed.Name,
                 Direction = seed.Direction,
+                Classification = seed.Classification,
                 PartnerEffect = seed.PartnerEffect,
                 IsActive = true,
                 Notes = "Development seed movement type"

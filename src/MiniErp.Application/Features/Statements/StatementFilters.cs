@@ -9,11 +9,13 @@ public sealed record CashboxStatementFilterRequest(
     DateOnly? ToDate = null,
     CashDirection? Direction = null,
     int? CashMovementTypeId = null,
+    CashMovementClassification? Classification = null,
     CashPartyType? PartyType = null,
     int? BusinessPartnerId = null,
     int? DriverId = null,
     int? DriverTripId = null,
-    string? VoucherNumber = null);
+    string? VoucherNumber = null,
+    int? EmployeeId = null);
 
 public sealed record PartnerStatementFilterRequest(
     int BusinessPartnerId,
@@ -22,7 +24,8 @@ public sealed record PartnerStatementFilterRequest(
     DateOnly? ToDate = null,
     PartnerStatementSourceType? SourceType = null,
     BusinessPartnerMovementType? MovementType = null,
-    int? CashMovementTypeId = null);
+    int? CashMovementTypeId = null,
+    CashMovementClassification? Classification = null);
 
 public sealed record DriverStatementFilterRequest(
     int DriverId,
@@ -31,6 +34,7 @@ public sealed record DriverStatementFilterRequest(
     DateOnly? ToDate = null,
     CashDirection? Direction = null,
     int? CashMovementTypeId = null,
+    CashMovementClassification? Classification = null,
     int? DriverTripId = null,
     string? InvoiceNumber = null,
     bool? TransactionsWithoutTrip = null,

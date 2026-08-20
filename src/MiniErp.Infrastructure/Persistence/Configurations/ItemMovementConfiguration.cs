@@ -33,8 +33,10 @@ public sealed class ItemMovementConfiguration
                     "[QuantityAfter] > 0 OR " +
                     "([AverageCostAfter] = 0 AND [InventoryValueAfter] = 0)");
                 table.HasCheckConstraint(
-                    "CK_ItemMovements_PendingWithinOutbound",
-                    "[PendingCostQuantity] <= [QuantityOut]");
+                    "CK_ItemMovements_PendingWithinMovement",
+                    "[PendingCostQuantity] <= CASE " +
+                    "WHEN [QuantityIn] > 0 THEN [QuantityIn] " +
+                    "ELSE [QuantityOut] END");
             });
         builder.HasKey(movement => movement.Id);
 

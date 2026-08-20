@@ -42,8 +42,8 @@ public sealed class ContainerService(
             .Where(container =>
                 !filters.IsActive.HasValue ||
                 container.IsActive == filters.IsActive.Value)
-            .OrderBy(container => container.Name)
-            .ThenBy(container => container.Id);
+            .OrderByDescending(container => container.CreatedOn)
+            .ThenByDescending(container => container.Id);
 
         return await paginationService.PaginateAsync<Container, ContainerResponse>(
             query,

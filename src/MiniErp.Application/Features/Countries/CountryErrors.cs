@@ -4,6 +4,12 @@ namespace MiniErp.Application.Features.Countries;
 
 public static class CountryErrors
 {
+    public static Error NameExists(string name) =>
+        Error.Conflict(
+            "Countries.NameExists",
+            $"اسم الدولة '{name}' موجود بالفعل.",
+            nameof(CountryRequest.Name));
+
     public static Error InvalidId() =>
         Error.Validation(
             "Countries.InvalidId",

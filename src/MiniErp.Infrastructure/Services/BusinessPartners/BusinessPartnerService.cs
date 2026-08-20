@@ -31,8 +31,8 @@ public sealed class BusinessPartnerService(
             .AsNoTracking()
             .Where(partner => partner.CompanyId == companyId),
             filters)
-            .OrderBy(partner => partner.Name)
-            .ThenBy(partner => partner.Id);
+            .OrderByDescending(partner => partner.CreatedOn)
+            .ThenByDescending(partner => partner.Id);
 
         var pageResult = await paginationService.PaginateAsync<
             BusinessPartner,

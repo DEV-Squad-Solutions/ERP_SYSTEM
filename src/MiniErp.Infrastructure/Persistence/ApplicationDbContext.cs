@@ -134,6 +134,14 @@ public sealed class ApplicationDbContext
 
         builder.Entity<ApplicationUser>(entity =>
         {
+            entity.Property(user => user.CreatedOn)
+                .HasDefaultValueSql(
+                    isSqlite ? "CURRENT_TIMESTAMP" : "SYSUTCDATETIME()")
+                .IsRequired();
+
+            entity.HasIndex(user => new { user.CreatedOn, user.Id })
+                .IsDescending(true, true);
+
             entity.Property(user => user.FirstName)
                 .HasMaxLength(100)
                 .IsRequired();

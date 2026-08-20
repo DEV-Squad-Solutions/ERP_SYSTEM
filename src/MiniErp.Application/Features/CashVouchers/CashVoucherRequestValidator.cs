@@ -78,6 +78,14 @@ public sealed class CashVoucherUpdateRequestValidator
             .Null()
             .When(request => request.PartyType != CashPartyType.Driver);
 
+        RuleFor(request => request.EmployeeId)
+            .NotNull()
+            .GreaterThan(0)
+            .When(request => request.PartyType == CashPartyType.Employee);
+        RuleFor(request => request.EmployeeId)
+            .Null()
+            .When(request => request.PartyType != CashPartyType.Employee);
+
         RuleFor(request => request.ExternalPartyName)
             .NotEmpty()
             .MaximumLength(

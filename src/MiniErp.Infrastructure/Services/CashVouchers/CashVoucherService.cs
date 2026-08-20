@@ -53,6 +53,9 @@ public sealed class CashVoucherService(
                   voucher.Driver.Name.Contains(search))) ||
                 (voucher.DriverTrip != null &&
                  voucher.DriverTrip.InvoiceNumber.Contains(search)) ||
+                (voucher.Employee != null &&
+                 (voucher.Employee.Code.Contains(search) ||
+                  voucher.Employee.Name.Contains(search))) ||
                 (voucher.Invoice != null &&
                  (voucher.Invoice.InvoiceNumber.Contains(search) ||
                   (voucher.Invoice.PartnerInvoiceNo != null &&
@@ -77,6 +80,11 @@ public sealed class CashVoucherService(
                 voucher.CashMovementTypeId ==
                 filters.CashMovementTypeId.Value)
             .Where(voucher =>
+                !filters.Classification.HasValue ||
+                (voucher.CashMovementType != null &&
+                 voucher.CashMovementType.Classification ==
+                 filters.Classification.Value))
+            .Where(voucher =>
                 !filters.PartyType.HasValue ||
                 voucher.PartyType == filters.PartyType.Value)
             .Where(voucher =>
@@ -89,6 +97,9 @@ public sealed class CashVoucherService(
             .Where(voucher =>
                 !filters.DriverTripId.HasValue ||
                 voucher.DriverTripId == filters.DriverTripId.Value)
+            .Where(voucher =>
+                !filters.EmployeeId.HasValue ||
+                voucher.EmployeeId == filters.EmployeeId.Value)
             .Where(voucher =>
                 !filters.IsDraft.HasValue ||
                 filters.IsDraft.Value ==
@@ -487,6 +498,23 @@ public sealed class CashVoucherService(
             }
         }
 
+        if (partyType == CashPartyType.Employee)
+        {
+            var employeeExists = await dbContext.Employees
+                .AsNoTracking()
+                .AnyAsync(
+                    employee =>
+                        employee.CompanyId == companyId &&
+                        employee.Id == request.EmployeeId &&
+                        employee.IsActive,
+                    cancellationToken);
+            if (!employeeExists)
+            {
+                return Result<VoucherPreparation>.Failure(
+                    EmployeeNotFound(request.EmployeeId));
+            }
+        }
+
         var balanceError = await ValidateFinalBalancesAsync(
             currentVoucher,
             cashboxId,
@@ -670,6 +698,7 @@ public sealed class CashVoucherService(
         voucher.BusinessPartnerId = null;
         voucher.DriverId = null;
         voucher.DriverTripId = null;
+        voucher.EmployeeId = null;
         voucher.ExternalPartyName = null;
 
         voucher.Currency = await dbContext.CompanySettings

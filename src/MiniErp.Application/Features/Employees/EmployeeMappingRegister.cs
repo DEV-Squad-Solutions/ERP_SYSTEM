@@ -9,6 +9,8 @@ public sealed class EmployeeMappingRegister : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.ForType<Employee, EmployeeListResponse>()
-            .Map(dest => dest.Salary, src => src.Type == EmployeeType.Monthly ? (src.MonthlySalary ?? 0) : (src.DailySalary ?? 0));
+            .Map(dest => dest.EmployeeType, src => src.Type)
+            .Map(dest => dest.Salary, src => src.Type == EmployeeType.Monthly ? (src.MonthlySalary ?? 0) : (src.DailySalary ?? 0))
+            .Map(dest => dest.LastDayOfReceivingSalary, src => src.LastDayOfReceivingSalary ?? default);
     }
 }

@@ -39,5 +39,5 @@ public static class CashMovementTypeErrors
     public static Error UsedSemanticsChangeNotAllowed() =>
         Error.Conflict(
             "CashMovementTypes.UsedSemanticsChangeNotAllowed",
-            "لا يمكن تغيير اتجاه أو أثر نوع الحركة بعد استخدامه في سند نقدية.");
+            "لا يمكن تغيير اتجاه أو تصنيف أو ارتباط نوع الحركة بعميل أو مورد بعد استخدامه في سند نقدية.");
 }

@@ -4,6 +4,8 @@ namespace MiniErp.Infrastructure.Identity;
 
 public sealed class ApplicationUser : IdentityUser<Guid>
 {
+    public DateTime CreatedOn { get; set; } = DateTime.UtcNow;
+
     public string FirstName { get; set; } = string.Empty;
 
     public string LastName { get; set; } = string.Empty;

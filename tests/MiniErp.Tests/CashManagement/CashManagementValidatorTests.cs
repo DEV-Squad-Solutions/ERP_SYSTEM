@@ -37,6 +37,7 @@ public sealed class CashManagementValidatorTests
             new CashMovementTypeRequest(
                 "Type",
                 (CashDirection)999,
+                CashMovementClassification.PartnerSettlement,
                 ForPartner: true,
                 IsActive: true,
                 IsDefaultForSales: false,
@@ -50,6 +51,51 @@ public sealed class CashManagementValidatorTests
             error =>
                 error.PropertyName ==
                 nameof(CashMovementTypeRequest.Direction));
+    }
+
+    [Fact]
+    public void MovementTypeValidator_RequiresValidClassificationAndPartnerSettlementParty()
+    {
+        var validator = new CashMovementTypeRequestValidator();
+        var undefined = validator.Validate(
+            CreateMovementType((CashMovementClassification)999, true));
+        var settlementWithoutPartner = validator.Validate(
+            CreateMovementType(
+                CashMovementClassification.PartnerSettlement,
+                false));
+
+        Assert.Contains(undefined.Errors, error => error.PropertyName ==
+            nameof(CashMovementTypeRequest.Classification));
+        Assert.Contains(settlementWithoutPartner.Errors, error =>
+            error.PropertyName ==
+            nameof(CashMovementTypeRequest.Classification));
+    }
+
+    [Theory]
+    [InlineData(CashMovementClassification.Expense)]
+    [InlineData(CashMovementClassification.Revenue)]
+    public void MovementTypeValidator_AllowsPartnerForDirectionNeutralClassification(
+        CashMovementClassification classification)
+    {
+        var result = new CashMovementTypeRequestValidator().Validate(
+            CreateMovementType(classification, forPartner: true));
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void MovementTypeValidator_InvoiceDefaultRequiresPartnerSettlement()
+    {
+        var request = CreateMovementType(
+            CashMovementClassification.Revenue,
+            forPartner: true) with
+        {
+            IsDefaultForSales = true
+        };
+        var result = new CashMovementTypeRequestValidator().Validate(request);
+
+        Assert.Contains(result.Errors, error => error.PropertyName ==
+            nameof(CashMovementTypeRequest.IsDefaultForSales));
     }
 
     [Theory]
@@ -66,6 +112,7 @@ public sealed class CashManagementValidatorTests
             new CashMovementTypeRequest(
                 "Invoice default",
                 direction,
+                CashMovementClassification.PartnerSettlement,
                 forPartner,
                 isActive,
                 IsDefaultForSales: true,
@@ -81,17 +128,19 @@ public sealed class CashManagementValidatorTests
     }
 
     [Theory]
-    [InlineData(CashPartyType.None, null, null, null, null)]
-    [InlineData(CashPartyType.Partner, 1, null, null, null)]
-    [InlineData(CashPartyType.Driver, null, 1, null, null)]
-    [InlineData(CashPartyType.Driver, null, 1, 1, null)]
-    [InlineData(CashPartyType.Other, null, null, null, "Outside party")]
+    [InlineData(CashPartyType.None, null, null, null, null, null)]
+    [InlineData(CashPartyType.Partner, 1, null, null, null, null)]
+    [InlineData(CashPartyType.Driver, null, 1, null, null, null)]
+    [InlineData(CashPartyType.Driver, null, 1, 1, null, null)]
+    [InlineData(CashPartyType.Other, null, null, null, "Outside party", null)]
+    [InlineData(CashPartyType.Employee, null, null, null, null, 1)]
     public void CashVoucherUpdateValidator_AcceptsEveryValidPartyShape(
         CashPartyType partyType,
         int? partnerId,
         int? driverId,
         int? tripId,
-        string? externalPartyName)
+        string? externalPartyName,
+        int? employeeId)
     {
         var validator = new CashVoucherUpdateRequestValidator();
         var result = validator.Validate(
@@ -100,7 +149,8 @@ public sealed class CashManagementValidatorTests
                 partnerId,
                 driverId,
                 tripId,
-                externalPartyName));
+                externalPartyName,
+                employeeId));
 
         Assert.True(result.IsValid);
     }
@@ -124,7 +174,10 @@ public sealed class CashManagementValidatorTests
                 null,
                 null,
                 null,
-                new byte[8]));
+                new byte[8])
+            {
+                EmployeeId = 1
+            });
 
         Assert.Contains(
             result.Errors,
@@ -146,6 +199,11 @@ public sealed class CashManagementValidatorTests
             error =>
                 error.PropertyName ==
                 nameof(CashVoucherUpdateRequest.ExternalPartyName));
+        Assert.Contains(
+            result.Errors,
+            error =>
+                error.PropertyName ==
+                nameof(CashVoucherUpdateRequest.EmployeeId));
         Assert.Contains(
             result.Errors,
             error => error.PropertyName ==
@@ -216,6 +274,7 @@ public sealed class CashManagementValidatorTests
                 new CashMovementTypeUpdateRequest(
                     "Type",
                     CashDirection.Receipt,
+                    CashMovementClassification.Other,
                     ForPartner: false,
                     IsActive: true,
                     IsDefaultForSales: false,
@@ -257,6 +316,21 @@ public sealed class CashManagementValidatorTests
                 nameof(CashVoucherUpdateRequest.RowVersion));
     }
 
+    private static CashMovementTypeRequest CreateMovementType(
+        CashMovementClassification classification,
+        bool forPartner) =>
+        new(
+            Name: "Movement",
+            Direction: CashDirection.Receipt,
+            Classification: classification,
+            ForPartner: forPartner,
+            IsActive: true,
+            IsDefaultForSales: false,
+            IsDefaultForPurchase: false,
+            IsDefaultForSalesReturn: false,
+            IsDefaultForPurchaseReturn: false,
+            Notes: null);
+
     [Fact]
     public void DriverTripBulkValidator_RejectsDuplicatesAndNegativeCost()
     {
@@ -286,7 +360,8 @@ public sealed class CashManagementValidatorTests
         int? partnerId,
         int? driverId,
         int? tripId,
-        string? externalPartyName) =>
+        string? externalPartyName,
+        int? employeeId = null) =>
         new(
             new DateOnly(2026, 7, 27),
             CashDirection.Receipt,
@@ -301,5 +376,8 @@ public sealed class CashManagementValidatorTests
             null,
             null,
             null,
-            new byte[8]);
+            new byte[8])
+        {
+            EmployeeId = employeeId
+        };
 }
