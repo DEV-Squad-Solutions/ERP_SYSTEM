@@ -12,7 +12,6 @@ using MiniErp.Application.Common.Authentication;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Users;
-using MiniErp.Domain.Entities.Companies;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Identity;
 using MiniErp.Infrastructure.Persistence;
@@ -150,6 +149,51 @@ public sealed class UserServiceTests
         Assert.Equal(
             originalStamp,
             await database.GetSecurityStampAsync(UserId));
+    }
+
+    [Fact]
+    public async Task Update_WithOwnNormalizedIdentityValues_DoesNotReportDuplicate()
+    {
+        await using var database = await UserTestDatabase.CreateAsync();
+        var service = database.CreateService(AdminId);
+
+        var result = await service.UpdateAsync(
+            UserId,
+            new UserUpdateRequest(
+                "  STANDARD-USER  ",
+                "  STANDARD-USER@EXAMPLE.COM  ",
+                "Changed",
+                "Name",
+                null,
+                [ApplicationRoles.User],
+                [1]));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("STANDARD-USER", result.Value.UserName);
+        Assert.Equal("STANDARD-USER@EXAMPLE.COM", result.Value.Email);
+    }
+
+    [Fact]
+    public async Task Update_WithAnotherUsersEmail_ReturnsConflict()
+    {
+        await using var database = await UserTestDatabase.CreateAsync();
+        var service = database.CreateService(AdminId);
+
+        var result = await service.UpdateAsync(
+            UserId,
+            new UserUpdateRequest(
+                "standard-user",
+                "admin-user@example.com",
+                "Changed",
+                "Name",
+                null,
+                [ApplicationRoles.User],
+                [1]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.Equal("Users.EmailExists", result.Error.Code);
+        Assert.Equal(nameof(UserUpdateRequest.Email), result.Error.FieldName);
     }
 
     [Fact]
@@ -453,10 +497,8 @@ public sealed class UserServiceTests
             await CreateRoleAsync(roleManager, ApplicationRoles.Admin);
             await CreateRoleAsync(roleManager, ApplicationRoles.User);
 
-            context.Companies.AddRange(
-                CreateCompany(1, "Company One"),
-                CreateCompany(2, "Company Two"));
-            await context.SaveChangesAsync();
+            await InsertCompanyAsync(context, 1, "Company One");
+            await InsertCompanyAsync(context, 2, "Company Two");
 
             await CreateUserAsync(
                 context,
@@ -474,6 +516,38 @@ public sealed class UserServiceTests
                 ApplicationRoles.User);
             context.ChangeTracker.Clear();
         }
+
+        private static Task InsertCompanyAsync(
+            ApplicationDbContext context,
+            int id,
+            string name) =>
+            context.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                 INSERT INTO Companies (
+                     Id,
+                     Name,
+                     Address,
+                     CommercialRegister,
+                     TaxNumber,
+                     ManagerName,
+                     RowVersion,
+                     CreatedById,
+                     CreatedOn,
+                     CreatedByPc,
+                     IsDeleted)
+                 VALUES (
+                     {id},
+                     {name},
+                     {$"{name} Address"},
+                     {$"CR-{id}"},
+                     {$"TAX-{id}"},
+                     {$"{name} Manager"},
+                     randomblob(8),
+                     {"System"},
+                     {DateTime.UtcNow},
+                     {"Tests"},
+                     {false})
+                 """);
 
         private static async Task CreateRoleAsync(
             RoleManager<IdentityRole<Guid>> roleManager,
@@ -520,16 +594,6 @@ public sealed class UserServiceTests
             await context.SaveChangesAsync();
         }
 
-        private static Company CreateCompany(int id, string name) =>
-            new()
-            {
-                Id = id,
-                Name = name,
-                Address = $"{name} Address",
-                CommercialRegister = $"CR-{id}",
-                TaxNumber = $"TAX-{id}",
-                ManagerName = $"{name} Manager"
-            };
     }
 
     private sealed class TestUserManager(

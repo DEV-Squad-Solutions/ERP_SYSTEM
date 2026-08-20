@@ -117,7 +117,8 @@ public sealed class UserService(
         var duplicateError = await FindDuplicateAsync(
             user.UserName!,
             user.Email!,
-            excludedId: null);
+            excludedId: null,
+            cancellationToken);
         if (duplicateError is not null)
         {
             return Result<UserResponse>.Failure(duplicateError);
@@ -190,7 +191,8 @@ public sealed class UserService(
         var duplicateError = await FindDuplicateAsync(
             normalizedUser.UserName!,
             normalizedUser.Email!,
-            id);
+            id,
+            cancellationToken);
         if (duplicateError is not null)
         {
             return Result<UserResponse>.Failure(duplicateError);
@@ -355,16 +357,25 @@ public sealed class UserService(
     private async Task<Error?> FindDuplicateAsync(
         string userName,
         string email,
-        Guid? excludedId)
+        Guid? excludedId,
+        CancellationToken cancellationToken)
     {
-        var userWithName = await userManager.FindByNameAsync(userName);
-        if (userWithName is not null && userWithName.Id != excludedId)
+        var normalizedUserName = userManager.NormalizeName(userName);
+        var normalizedEmail = userManager.NormalizeEmail(email);
+        var otherUsers = dbContext.Users
+            .AsNoTracking()
+            .Where(user => !excludedId.HasValue || user.Id != excludedId.Value);
+
+        if (await otherUsers.AnyAsync(
+                user => user.NormalizedUserName == normalizedUserName,
+                cancellationToken))
         {
             return UserNameExists(userName);
         }
 
-        var userWithEmail = await userManager.FindByEmailAsync(email);
-        return userWithEmail is not null && userWithEmail.Id != excludedId
+        return await otherUsers.AnyAsync(
+                user => user.NormalizedEmail == normalizedEmail,
+                cancellationToken)
             ? EmailExists(email)
             : null;
     }

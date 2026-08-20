@@ -16,7 +16,8 @@ public sealed class BusinessPartnerRequestValidator
 
         RuleFor(request => request.Email)
             .MaximumLength(256)
-            .EmailAddress();
+            .EmailAddress()
+            .When(request => !string.IsNullOrWhiteSpace(request.Email));
 
         RuleFor(request => request.Address)
             .MaximumLength(500);
