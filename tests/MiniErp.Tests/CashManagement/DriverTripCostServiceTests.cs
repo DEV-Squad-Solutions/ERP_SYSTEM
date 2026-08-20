@@ -36,7 +36,10 @@ public sealed class DriverTripCostServiceTests
         Assert.Equal(1, withoutCostRow.DriverTripId);
         Assert.Equal(1, withoutCostRow.BusinessPartnerId);
         Assert.Equal("Customer One", withoutCostRow.BusinessPartnerName);
-        Assert.Equal(2, Assert.Single(withCost.Value.Items).DriverTripId);
+        Assert.Equal("Egypt", withoutCostRow.CountryName);
+        var withCostRow = Assert.Single(withCost.Value.Items);
+        Assert.Equal(2, withCostRow.DriverTripId);
+        Assert.Null(withCostRow.CountryName);
     }
 
     [Fact]

@@ -304,6 +304,7 @@ public sealed class FinancialStatementServiceTests
             item => item.Description == "CV-DRIVER-GENERAL");
         Assert.Null(generalVoucher.BusinessPartnerId);
         Assert.Null(generalVoucher.BusinessPartnerName);
+        Assert.Null(generalVoucher.CountryName);
         Assert.All(
             tripSpecific.Value.Items,
             item =>
@@ -312,6 +313,7 @@ public sealed class FinancialStatementServiceTests
                 Assert.Equal(
                     "Customer One",
                     item.BusinessPartnerName);
+                Assert.Equal("Egypt", item.CountryName);
             });
         Assert.Contains(
             overall.Value.Items,

@@ -12,7 +12,10 @@ public sealed record DriverTripCostResponse(
     string DriverName,
     decimal? Cost,
     string? CostNotes,
-    byte[] RowVersion);
+    byte[] RowVersion)
+{
+    public string? CountryName { get; init; }
+}
 
 public sealed record DriverTripBulkCostUpdateResponse(
     IReadOnlyList<DriverTripCostResponse> Items);
