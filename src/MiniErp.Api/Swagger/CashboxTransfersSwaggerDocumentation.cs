@@ -36,9 +36,9 @@ public sealed class CashboxTransfersSwaggerDocumentation : IOperationFilter
                 "Create a cashbox transfer",
                 SwaggerOperationDescription.Create(
                     "Admin only. Atomically creates a payment in the source cashbox and a receipt in the destination cashbox.",
-                    "Requires two different active company-owned cashboxes with the same currency and a positive amount.",
+                    "Requires two different active company-owned cashboxes and a positive source amount. When their currencies differ, provide `conversionRate` (destination-currency units per one source-currency unit) and the API calculates the destination amount; sending `destinationAmount` remains supported and is verified when both are provided. The source exchange rate is resolved at the transfer date; the destination voucher rate is derived so the two vouchers have the same base-currency value.",
                     "The source cashbox balance cannot become negative. Generated vouchers cannot be edited independently.",
-                    "Cross-currency transfers return 409 until an exchange-difference policy is configured.")),
+                    "The source amount and destination amount are kept in their respective cashbox currencies.")),
             nameof(CashboxTransfersController.Update) => (
                 "Update a cashbox transfer",
                 SwaggerOperationDescription.Create(

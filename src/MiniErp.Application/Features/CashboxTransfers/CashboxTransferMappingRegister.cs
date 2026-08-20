@@ -24,6 +24,16 @@ public sealed class CashboxTransferMappingRegister : IRegister
                     .FirstOrDefault())
             .Map(
                 response => response.Currency,
-                transfer => transfer.SourceCashbox.Currency);
+                transfer => transfer.SourceCashbox.Currency)
+            .Map(
+                response => response.DestinationAmount,
+                transfer => transfer.Vouchers
+                    .Where(voucher =>
+                        voucher.Direction == CashDirection.Receipt)
+                    .Select(voucher => voucher.Amount)
+                    .FirstOrDefault())
+            .Map(
+                response => response.DestinationCurrency,
+                transfer => transfer.DestinationCashbox.Currency);
     }
 }

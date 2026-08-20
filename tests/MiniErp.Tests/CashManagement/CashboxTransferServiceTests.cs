@@ -88,7 +88,7 @@ public sealed class CashboxTransferServiceTests
 
     [Theory]
     [InlineData(1, 1, 10, "CashboxTransfers.CashboxesMustDiffer")]
-    [InlineData(1, 5, 10, "CashboxTransfers.CurrencyMismatch")]
+    [InlineData(1, 5, 10, "CashboxTransfers.DestinationAmountRequired")]
     [InlineData(1, 2, 1001, "CashboxTransfers.InsufficientCashboxBalance")]
     [InlineData(4, 2, 10, "CashboxTransfers.CashboxNotFound")]
     public async Task CreateRejectsInvalidOrUnsafeTransfer(
@@ -110,6 +110,88 @@ public sealed class CashboxTransferServiceTests
         Assert.Equal(expectedCode, result.Error.Code);
         Assert.Empty(await database.Context.CashboxTransfers.ToListAsync());
         Assert.Empty(await database.Context.CashVouchers.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreateSupportsDifferentCurrenciesWithDestinationAmount()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateCashboxTransferService(companyId: 1);
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                sourceCashboxId: 1,
+                destinationCashboxId: 5,
+                amount: 250m) with
+            {
+                DestinationAmount = 5m
+            });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(250m, result.Value.Amount);
+        Assert.Equal(CurrencyCode.EGP, result.Value.Currency);
+        Assert.Equal(5m, result.Value.DestinationAmount);
+        Assert.Equal(CurrencyCode.USD, result.Value.DestinationCurrency);
+        Assert.Equal(50m, result.Value.DestinationExchangeRate);
+        Assert.Equal(250m, result.Value.BaseAmount);
+        Assert.Equal(250m, result.Value.DestinationBaseAmount);
+
+        var vouchers = await database.Context.CashVouchers
+            .AsNoTracking()
+            .Where(voucher =>
+                voucher.CashboxTransferId == result.Value.Id)
+            .ToListAsync();
+        var payment = Assert.Single(vouchers, voucher =>
+            voucher.Direction == CashDirection.Payment);
+        var receipt = Assert.Single(vouchers, voucher =>
+            voucher.Direction == CashDirection.Receipt);
+        Assert.Equal(250m, payment.Amount);
+        Assert.Equal(CurrencyCode.EGP, payment.Currency);
+        Assert.Equal(5m, receipt.Amount);
+        Assert.Equal(CurrencyCode.USD, receipt.Currency);
+        Assert.Equal(50m, receipt.ExchangeRate);
+        Assert.Equal(250m, receipt.BaseAmount);
+
+        var source = await database.CreateCashboxService(1).GetByIdAsync(1);
+        var destination = await database.CreateCashboxService(1)
+            .GetByIdAsync(5);
+        Assert.Equal(750m, source.Value.CurrentBalance);
+        Assert.Equal(105m, destination.Value.CurrentBalance);
+    }
+
+    [Fact]
+    public async Task CreateCalculatesDestinationAmountFromConversionRate()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateCashboxTransferService(companyId: 1);
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                sourceCashboxId: 5,
+                destinationCashboxId: 1,
+                amount: 5m) with
+            {
+                ConversionRate = 50m
+            });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(5m, result.Value.Amount);
+        Assert.Equal(CurrencyCode.USD, result.Value.Currency);
+        Assert.Equal(50m, result.Value.ConversionRate);
+        Assert.Equal(250m, result.Value.DestinationAmount);
+        Assert.Equal(CurrencyCode.EGP, result.Value.DestinationCurrency);
+        Assert.Equal(50m, result.Value.ExchangeRate);
+        Assert.Equal(1m, result.Value.DestinationExchangeRate);
+        Assert.Equal(250m, result.Value.BaseAmount);
+        Assert.Equal(250m, result.Value.DestinationBaseAmount);
+
+        var source = await database.CreateCashboxService(1).GetByIdAsync(5);
+        var destination = await database.CreateCashboxService(1)
+            .GetByIdAsync(1);
+        Assert.Equal(95m, source.Value.CurrentBalance);
+        Assert.Equal(1250m, destination.Value.CurrentBalance);
     }
 
     [Fact]
@@ -149,6 +231,48 @@ public sealed class CashboxTransferServiceTests
             .GetByIdAsync(1);
         Assert.Equal(200m, source.Value.CurrentBalance);
         Assert.Equal(1300m, destination.Value.CurrentBalance);
+    }
+
+    [Fact]
+    public async Task UpdateSupportsDifferentCurrenciesWithDestinationAmount()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var created = await database.CreateCashboxTransferService(1)
+            .AddAsync(CreateRequest(amount: 100m));
+
+        await using var updateContext = database.CreateAdditionalContext();
+        var result = await database.CreateCashboxTransferService(
+                companyId: 1,
+                updateContext)
+            .UpdateAsync(
+                created.Value.Id,
+                new CashboxTransferUpdateRequest(
+                    TransferDate: new DateOnly(2026, 8, 9),
+                    SourceCashboxId: 5,
+                    DestinationCashboxId: 1,
+                    Amount: 5m,
+                    Description: "USD to EGP",
+                    Notes: null,
+                    RowVersion: created.Value.RowVersion,
+                    ExchangeRate: 50m,
+                    DestinationAmount: 250m));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CurrencyCode.USD, result.Value.Currency);
+        Assert.Equal(5m, result.Value.Amount);
+        Assert.Equal(CurrencyCode.EGP, result.Value.DestinationCurrency);
+        Assert.Equal(250m, result.Value.DestinationAmount);
+        Assert.Equal(50m, result.Value.ExchangeRate);
+        Assert.Equal(1m, result.Value.DestinationExchangeRate);
+        Assert.Equal(250m, result.Value.BaseAmount);
+        Assert.Equal(250m, result.Value.DestinationBaseAmount);
+
+        var source = await database.CreateCashboxService(1).GetByIdAsync(5);
+        var destination = await database.CreateCashboxService(1)
+            .GetByIdAsync(1);
+        Assert.Equal(95m, source.Value.CurrentBalance);
+        Assert.Equal(1250m, destination.Value.CurrentBalance);
     }
 
     [Fact]
