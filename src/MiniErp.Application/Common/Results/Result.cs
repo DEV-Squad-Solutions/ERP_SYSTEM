@@ -2,26 +2,42 @@ namespace MiniErp.Application.Common.Results;
 
 public class Result
 {
-    protected Result(bool isSuccess, Error error)
+    protected Result(bool isSuccess, IEnumerable<Error> errors)
     {
-        ArgumentNullException.ThrowIfNull(error);
+        ArgumentNullException.ThrowIfNull(errors);
 
-        if (isSuccess && error != Error.None)
+        var materializedErrors = errors.ToArray();
+        if (materializedErrors.Any(error => error is null))
         {
             throw new ArgumentException(
-                "A successful result cannot contain an error.",
-                nameof(error));
+                "A result cannot contain a null error.",
+                nameof(errors));
         }
 
-        if (!isSuccess && error == Error.None)
+        if (materializedErrors.Any(error => error == Error.None))
         {
             throw new ArgumentException(
-                "A failed result must contain an error.",
-                nameof(error));
+                "A result cannot contain Error.None.",
+                nameof(errors));
+        }
+
+        if (isSuccess && materializedErrors.Length > 0)
+        {
+            throw new ArgumentException(
+                "A successful result cannot contain errors.",
+                nameof(errors));
+        }
+
+        if (!isSuccess && materializedErrors.Length == 0)
+        {
+            throw new ArgumentException(
+                "A failed result must contain at least one error.",
+                nameof(errors));
         }
 
         IsSuccess = isSuccess;
-        Error = error;
+        Errors = materializedErrors;
+        Error = isSuccess ? Error.None : materializedErrors[0];
     }
 
     public bool IsSuccess { get; }
@@ -30,7 +46,16 @@ public class Result
 
     public Error Error { get; }
 
-    public static Result Success() => new(true, Error.None);
+    public IReadOnlyList<Error> Errors { get; }
 
-    public static Result Failure(Error error) => new(false, error);
+    public static Result Success() => new(true, Array.Empty<Error>());
+
+    public static Result Failure(Error error)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        return new Result(false, [error]);
+    }
+
+    public static Result Failure(IEnumerable<Error> errors) =>
+        new(false, errors);
 }

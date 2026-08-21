@@ -28,6 +28,12 @@ public static class DriverErrors
             "يوجد سائق آخر يحمل الرقم القومي نفسه.",
             nameof(DriverRequest.NationalId));
 
+    public static Error PhoneNumberExists(string phoneNumber) =>
+        Error.Conflict(
+            "Drivers.PhoneNumberExists",
+            $"رقم هاتف السائق '{phoneNumber}' مستخدم بالفعل.",
+            nameof(DriverRequest.PhoneNumber));
+
     public static Error InvalidId() =>
         Error.Validation(
             "Drivers.InvalidId",

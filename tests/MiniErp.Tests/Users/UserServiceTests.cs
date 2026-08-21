@@ -274,6 +274,58 @@ public sealed class UserServiceTests
         Assert.Equal(expectedField, result.Error.FieldName);
     }
 
+    [Fact]
+    public async Task Add_ReturnsAllDuplicateErrorsInFieldOrder()
+    {
+        await using var database = await UserTestDatabase.CreateAsync();
+        var service = database.CreateService(AdminId);
+
+        var result = await service.AddAsync(
+            new UserCreateRequest(
+                "admin-user",
+                "admin-user@example.com",
+                "New",
+                "User",
+                null,
+                "P@ssword123",
+                [ApplicationRoles.User],
+                [1]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            ["Users.UserNameExists", "Users.EmailExists"],
+            result.Errors.Select(error => error.Code));
+        Assert.Equal(
+            [
+                nameof(UserCreateRequest.UserName),
+                nameof(UserCreateRequest.Email)
+            ],
+            result.Errors.Select(error => error.FieldName));
+    }
+
+    [Fact]
+    public async Task Update_ReturnsAllDuplicateErrorsInFieldOrder()
+    {
+        await using var database = await UserTestDatabase.CreateAsync();
+        var service = database.CreateService(AdminId);
+
+        var result = await service.UpdateAsync(
+            UserId,
+            new UserUpdateRequest(
+                "admin-user",
+                "admin-user@example.com",
+                "Updated",
+                "User",
+                null,
+                [ApplicationRoles.User],
+                [1]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            ["Users.UserNameExists", "Users.EmailExists"],
+            result.Errors.Select(error => error.Code));
+    }
+
     private sealed class UserTestDatabase : IAsyncDisposable
     {
         private UserTestDatabase(

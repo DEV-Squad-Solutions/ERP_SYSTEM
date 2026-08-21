@@ -114,13 +114,13 @@ public sealed class UserService(
         cancellationToken.ThrowIfCancellationRequested();
 
         var user = request.Adapt<ApplicationUser>();
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             user.UserName!,
             user.Email!,
             excludedId: null);
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<UserResponse>.Failure(duplicateError);
+            return Result<UserResponse>.Failure(duplicateErrors);
         }
 
         var rolesResult = await ResolveRolesAsync(
@@ -187,13 +187,13 @@ public sealed class UserService(
         }
 
         var normalizedUser = request.Adapt<ApplicationUser>();
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             normalizedUser.UserName!,
             normalizedUser.Email!,
             id);
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<UserResponse>.Failure(duplicateError);
+            return Result<UserResponse>.Failure(duplicateErrors);
         }
 
         var rolesResult = await ResolveRolesAsync(
@@ -352,21 +352,25 @@ public sealed class UserService(
                     userCompany.Company.Name))
                 .ToList()));
 
-    private async Task<Error?> FindDuplicateAsync(
+    private async Task<IReadOnlyList<Error>> FindDuplicateAsync(
         string userName,
         string email,
         Guid? excludedId)
     {
+        var errors = new List<Error>();
         var userWithName = await userManager.FindByNameAsync(userName);
         if (userWithName is not null && userWithName.Id != excludedId)
         {
-            return UserNameExists(userName);
+            errors.Add(UserNameExists(userName));
         }
 
         var userWithEmail = await userManager.FindByEmailAsync(email);
-        return userWithEmail is not null && userWithEmail.Id != excludedId
-            ? EmailExists(email)
-            : null;
+        if (userWithEmail is not null && userWithEmail.Id != excludedId)
+        {
+            errors.Add(EmailExists(email));
+        }
+
+        return errors;
     }
 
     private async Task<Result<List<string>>> ResolveRolesAsync(
