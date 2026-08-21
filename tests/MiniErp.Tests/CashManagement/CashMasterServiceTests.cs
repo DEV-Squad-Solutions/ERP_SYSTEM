@@ -38,6 +38,7 @@ public sealed class CashMasterServiceTests
             "^CBX-[0-9]{4,}$",
             generated.Value.Code);
         Assert.Equal("Cashboxes.NameExists", duplicateName.Error.Code);
+        Assert.Single(duplicateName.Errors);
         Assert.True(sameCodeInOtherCompany.IsSuccess);
         Assert.Equal(2, sameCodeInOtherCompany.Value.CompanyId);
         Assert.Matches(
@@ -149,6 +150,7 @@ public sealed class CashMasterServiceTests
         var delete = await types.DeleteAsync(3);
 
         Assert.Equal("CashMovementTypes.NameExists", duplicate.Error.Code);
+        Assert.Single(duplicate.Errors);
         Assert.True(createdVoucher.IsSuccess);
         Assert.Equal(
             "CashMovementTypes.UsedSemanticsChangeNotAllowed",
@@ -352,7 +354,7 @@ public sealed class CashMasterServiceTests
             direction,
             cashboxId,
             movementTypeId,
-            CashPartyType.None,
+            null,
             null,
             null,
             null,
@@ -385,7 +387,7 @@ public sealed class CashMasterServiceTests
                 request.Direction,
                 request.CashboxId,
                 request.CashMovementTypeId,
-                request.PartyType,
+                request.EmployeeId,
                 request.BusinessPartnerId,
                 request.DriverId,
                 request.DriverTripId,
@@ -402,7 +404,7 @@ public sealed class CashMasterServiceTests
         CashDirection Direction,
         int CashboxId,
         int CashMovementTypeId,
-        CashPartyType PartyType,
+        int? EmployeeId,
         int? BusinessPartnerId,
         int? DriverId,
         int? DriverTripId,

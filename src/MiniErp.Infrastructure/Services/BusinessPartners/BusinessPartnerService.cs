@@ -348,13 +348,13 @@ public sealed class BusinessPartnerService(
                 .Select(entity => entity.Code),
             cancellationToken);
 
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             partner,
             excludedId: null,
             cancellationToken);
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<BusinessPartnerResponse>.Failure(duplicateError);
+            return Result<BusinessPartnerResponse>.Failure(duplicateErrors);
         }
 
         dbContext.BusinessPartners.Add(partner);
@@ -383,13 +383,13 @@ public sealed class BusinessPartnerService(
         }
 
         var normalizedPartner = request.Adapt<BusinessPartner>();
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             normalizedPartner,
             id,
             cancellationToken);
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<BusinessPartnerResponse>.Failure(duplicateError);
+            return Result<BusinessPartnerResponse>.Failure(duplicateErrors);
         }
 
         if (partner.Currency != normalizedPartner.Currency &&
@@ -449,7 +449,7 @@ public sealed class BusinessPartnerService(
         return Result.Success();
     }
 
-    private async Task<Error?> FindDuplicateAsync(
+    private async Task<IReadOnlyList<Error>> FindDuplicateAsync(
         BusinessPartner partner,
         int? excludedId,
         CancellationToken cancellationToken)
@@ -473,21 +473,25 @@ public sealed class BusinessPartnerService(
             })
             .ToListAsync(cancellationToken);
 
+        var errors = new List<Error>();
         if (duplicates.Any(entity => string.Equals(
                 entity.Name,
                 partner.Name,
                 StringComparison.OrdinalIgnoreCase)))
         {
-            return NameExists(partner.Name);
+            errors.Add(NameExists(partner.Name));
         }
 
-        return partner.TaxNumber is not null &&
-               duplicates.Any(entity => string.Equals(
-                   entity.TaxNumber,
-                   partner.TaxNumber,
-                   StringComparison.OrdinalIgnoreCase))
-            ? TaxNumberExists()
-            : null;
+        if (partner.TaxNumber is not null &&
+            duplicates.Any(entity => string.Equals(
+                entity.TaxNumber,
+                partner.TaxNumber,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            errors.Add(TaxNumberExists());
+        }
+
+        return errors;
     }
 
     private Task<bool> HasFinancialRecordsAsync(

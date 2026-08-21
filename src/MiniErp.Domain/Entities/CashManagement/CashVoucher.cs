@@ -44,6 +44,10 @@ public sealed class CashVoucher : AuditableEntity
 
     public BusinessPartner? BusinessPartner { get; set; }
 
+    public int? EmployeeId { get; set; }
+
+    public Employee? Employee { get; set; }
+
     public int? DriverId { get; set; }
 
     public Driver? Driver { get; set; }
@@ -51,10 +55,6 @@ public sealed class CashVoucher : AuditableEntity
     public int? DriverTripId { get; set; }
 
     public DriverTrip? DriverTrip { get; set; }
-
-    public int? EmployeeId { get; set; }
-
-    public Employee? Employee { get; set; }
 
     public string? ExternalPartyName { get; set; }
 

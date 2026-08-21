@@ -23,7 +23,7 @@ public sealed record CashVoucherUpdateRequest(
     CashDirection Direction,
     int? CashboxId,
     int? CashMovementTypeId,
-    CashPartyType? PartyType,
+    int? EmployeeId,
     int? BusinessPartnerId,
     int? DriverId,
     int? DriverTripId,
@@ -34,6 +34,4 @@ public sealed record CashVoucherUpdateRequest(
     string? Notes,
     byte[]? RowVersion,
     decimal? ExchangeRate = null)
-{
-    public int? EmployeeId { get; init; }
-}
+;

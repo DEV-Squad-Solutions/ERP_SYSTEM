@@ -153,10 +153,12 @@ namespace MiniErp.Infrastructure.Services.Employees
 
         public async Task<Result<EmployeeResponse>> UpdateAsync(int id, EmployeeUpdateRequest request, CancellationToken cancellationToken = default)
         {   
-            if (id <= 0)
-        {
-            return Result<EmployeeResponse>.Failure(InvalidId());
-        }
+            var validationError = await ValidateUpdateAsync(id, request, cancellationToken);
+            if (validationError is not null)
+            {
+                return Result<EmployeeResponse>.Failure(validationError);
+            }
+
             var employee = await dbContext.Employees
                 .FirstOrDefaultAsync(e => e.Id == id && e.CompanyId == campanyId, cancellationToken);
 
@@ -169,22 +171,27 @@ namespace MiniErp.Infrastructure.Services.Employees
             }
             await using var transaction = await dbContext.Database.BeginTransactionAsync(
                 cancellationToken);
-            var validationError = await ValidateUpdateAsync(id, request, cancellationToken);
-            if (validationError is not null)
-            {
-                return Result<EmployeeResponse>.Failure(validationError);
-            }
 
             employee.Name = string.IsNullOrWhiteSpace(request.Name) ? employee.Name : request.Name.Trim();
             employee.JobTitle = string.IsNullOrWhiteSpace(request.JobTitle) ? employee.JobTitle : request.JobTitle.Trim();
             employee.PhoneNumber = string.IsNullOrWhiteSpace(request.PhoneNumber) ? employee.PhoneNumber : request.PhoneNumber.Trim();
             employee.Email = string.IsNullOrWhiteSpace(request.Email) ? employee.Email : request.Email.Trim();
             employee.Address = string.IsNullOrWhiteSpace(request.Address) ? employee.Address : request.Address.Trim();
-            employee.Type = request.Type ?? employee.Type;
-            // Clear the opposing salary field to satisfy CK_Employees_SalaryType constraint
-            employee.DailySalary = request.Type == EmployeeType.Daily ? request.Salary : null;
-            employee.MonthlySalary = request.Type == EmployeeType.Monthly ? request.Salary : null;
-            employee.RequiredWorkingDaysPerMonth = request.Type == EmployeeType.Monthly ? request.RequiredWorkingDaysPerMonth : null;
+            var targetType = request.Type ?? employee.Type;
+            employee.Type = targetType;
+
+            if (targetType == EmployeeType.Daily)
+            {
+                employee.DailySalary = request.Salary ?? employee.DailySalary ?? employee.MonthlySalary;
+                employee.MonthlySalary = null;
+                employee.RequiredWorkingDaysPerMonth = null;
+            }
+            else // Monthly
+            {
+                employee.MonthlySalary = request.Salary ?? employee.MonthlySalary ?? employee.DailySalary;
+                employee.DailySalary = null;
+                employee.RequiredWorkingDaysPerMonth = request.RequiredWorkingDaysPerMonth ?? employee.RequiredWorkingDaysPerMonth;
+            }
 
             dbContext.Employees.Update(employee).State = Microsoft.EntityFrameworkCore.EntityState.Modified;
             await dbContext.SaveChangesAsync(cancellationToken);

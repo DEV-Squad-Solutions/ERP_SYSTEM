@@ -128,35 +128,33 @@ public sealed class CashManagementValidatorTests
     }
 
     [Theory]
-    [InlineData(CashPartyType.None, null, null, null, null, null)]
-    [InlineData(CashPartyType.Partner, 1, null, null, null, null)]
-    [InlineData(CashPartyType.Driver, null, 1, null, null, null)]
-    [InlineData(CashPartyType.Driver, null, 1, 1, null, null)]
-    [InlineData(CashPartyType.Other, null, null, null, "Outside party", null)]
-    [InlineData(CashPartyType.Employee, null, null, null, null, 1)]
+    [InlineData(null, null, null, null, null)]
+    [InlineData(1, null, null, null, null)]
+    [InlineData(null, 1, null, null, null)]
+    [InlineData(null, null, 1, null, null)]
+    [InlineData(null, null, 1, 1, null)]
+    [InlineData(null, null, null, null, "Outside party")]
     public void CashVoucherUpdateValidator_AcceptsEveryValidPartyShape(
-        CashPartyType partyType,
+        int? employeeId,
         int? partnerId,
         int? driverId,
         int? tripId,
-        string? externalPartyName,
-        int? employeeId)
+        string? externalPartyName)
     {
         var validator = new CashVoucherUpdateRequestValidator();
         var result = validator.Validate(
             CreateVoucher(
-                partyType,
+                employeeId,
                 partnerId,
                 driverId,
                 tripId,
-                externalPartyName,
-                employeeId));
+                externalPartyName));
 
         Assert.True(result.IsValid);
     }
 
     [Fact]
-    public void CashVoucherUpdateValidator_RejectsMismatchedPartyFieldsAndAmount()
+    public void CashVoucherUpdateValidator_RejectsMultiplePartyFieldsAndAmount()
     {
         var validator = new CashVoucherUpdateRequestValidator();
         var result = validator.Validate(
@@ -165,7 +163,7 @@ public sealed class CashManagementValidatorTests
                 CashDirection.Payment,
                 1,
                 4,
-                CashPartyType.Partner,
+                1,
                 null,
                 1,
                 1,
@@ -174,31 +172,8 @@ public sealed class CashManagementValidatorTests
                 null,
                 null,
                 null,
-                new byte[8])
-            {
-                EmployeeId = 1
-            });
+                new byte[8]));
 
-        Assert.Contains(
-            result.Errors,
-            error =>
-                error.PropertyName ==
-                nameof(CashVoucherUpdateRequest.BusinessPartnerId));
-        Assert.Contains(
-            result.Errors,
-            error =>
-                error.PropertyName ==
-                nameof(CashVoucherUpdateRequest.DriverId));
-        Assert.Contains(
-            result.Errors,
-            error =>
-                error.PropertyName ==
-                nameof(CashVoucherUpdateRequest.DriverTripId));
-        Assert.Contains(
-            result.Errors,
-            error =>
-                error.PropertyName ==
-                nameof(CashVoucherUpdateRequest.ExternalPartyName));
         Assert.Contains(
             result.Errors,
             error =>
@@ -238,6 +213,13 @@ public sealed class CashManagementValidatorTests
         Assert.DoesNotContain(
             typeof(CashVoucherUpdateRequest).GetProperties(),
             property => property.Name == "VoucherNumber");
+        Assert.Contains(
+            typeof(CashVoucherUpdateRequest).GetProperties(),
+            property => property.Name ==
+                nameof(CashVoucherUpdateRequest.EmployeeId));
+        Assert.DoesNotContain(
+            typeof(CashVoucherUpdateRequest).GetProperties(),
+            property => property.Name == "PartyType");
     }
 
     [Fact]
@@ -289,7 +271,7 @@ public sealed class CashManagementValidatorTests
                 CashDirection.Receipt,
                 1,
                 3,
-                CashPartyType.None,
+                null,
                 null,
                 null,
                 null,
@@ -356,18 +338,17 @@ public sealed class CashManagementValidatorTests
     }
 
     private static CashVoucherUpdateRequest CreateVoucher(
-        CashPartyType partyType,
+        int? employeeId,
         int? partnerId,
         int? driverId,
         int? tripId,
-        string? externalPartyName,
-        int? employeeId = null) =>
+        string? externalPartyName) =>
         new(
             new DateOnly(2026, 7, 27),
             CashDirection.Receipt,
             1,
             3,
-            partyType,
+            employeeId,
             partnerId,
             driverId,
             tripId,
@@ -376,8 +357,5 @@ public sealed class CashManagementValidatorTests
             null,
             null,
             null,
-            new byte[8])
-        {
-            EmployeeId = employeeId
-        };
+            new byte[8]);
 }

@@ -28,12 +28,8 @@ public sealed partial class PayrollEntryService
         if (filters.EmployeeId.HasValue)
             baseQuery = baseQuery.Where(e => e.EmployeeId == filters.EmployeeId.Value);
 
-        if (filters.IsTakeSalary.HasValue)
-            baseQuery = baseQuery.Where(e => e.IsTakeSalary == filters.IsTakeSalary.Value);
-
         if (filters.EmployeeType.HasValue)
             baseQuery = baseQuery.Where(e => e.EmployeeType == filters.EmployeeType.Value);
-
         return baseQuery
             .OrderByDescending(e => e.EndDate)
             .ThenByDescending(e => e.Id);

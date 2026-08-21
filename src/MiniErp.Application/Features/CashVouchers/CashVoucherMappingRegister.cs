@@ -88,6 +88,11 @@ public sealed class CashVoucherMappingRegister : IRegister
                     ? null
                     : voucher.BusinessPartner.Name)
             .Map(
+                response => response.EmployeeName,
+                voucher => voucher.Employee == null
+                    ? null
+                    : voucher.Employee.Name)
+            .Map(
                 response => response.DriverName,
                 voucher => voucher.Driver == null
                     ? null
@@ -97,11 +102,6 @@ public sealed class CashVoucherMappingRegister : IRegister
                 voucher => voucher.DriverTrip == null
                     ? null
                     : voucher.DriverTrip.InvoiceNumber)
-            .Map(
-                response => response.EmployeeName,
-                voucher => voucher.Employee == null
-                    ? null
-                    : voucher.Employee.Name)
             .Map(
                 response => response.InvoiceNumber,
                 voucher => voucher.Invoice == null

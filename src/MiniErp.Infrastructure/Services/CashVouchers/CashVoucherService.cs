@@ -48,14 +48,14 @@ public sealed class CashVoucherService(
                 (voucher.BusinessPartner != null &&
                  (voucher.BusinessPartner.Code.Contains(search) ||
                   voucher.BusinessPartner.Name.Contains(search))) ||
+                (voucher.Employee != null &&
+                 (voucher.Employee.Code.Contains(search) ||
+                  voucher.Employee.Name.Contains(search))) ||
                 (voucher.Driver != null &&
                  (voucher.Driver.Code.Contains(search) ||
                   voucher.Driver.Name.Contains(search))) ||
                 (voucher.DriverTrip != null &&
                  voucher.DriverTrip.InvoiceNumber.Contains(search)) ||
-                (voucher.Employee != null &&
-                 (voucher.Employee.Code.Contains(search) ||
-                  voucher.Employee.Name.Contains(search))) ||
                 (voucher.Invoice != null &&
                  (voucher.Invoice.InvoiceNumber.Contains(search) ||
                   (voucher.Invoice.PartnerInvoiceNo != null &&
@@ -260,7 +260,7 @@ public sealed class CashVoucherService(
             request.RowVersion;
 
         request.Adapt(voucher);
-        voucher.PartyType = request.PartyType ?? CashPartyType.None;
+        voucher.PartyType = preparation.Value.PartyType;
         await ApplyPreparationAsync(
             voucher,
             preparation.Value,
@@ -370,7 +370,19 @@ public sealed class CashVoucherService(
 
         var cashboxId = request.CashboxId.Value;
         var cashMovementTypeId = request.CashMovementTypeId.Value;
-        var partyType = request.PartyType ?? CashPartyType.None;
+        if (!HasAtMostOneParty(request))
+        {
+            return Result<VoucherPreparation>.Failure(
+                PartySelectionMustBeExclusive());
+        }
+
+        if (request.DriverTripId.HasValue && !request.DriverId.HasValue)
+        {
+            return Result<VoucherPreparation>.Failure(
+                DriverTripRequiresDriver());
+        }
+
+        var partyType = DerivePartyType(request);
 
         var cashbox = await dbContext.Cashboxes
             .FirstOrDefaultAsync(
@@ -463,6 +475,23 @@ public sealed class CashVoucherService(
                 MovementTypeForPartnerOnly());
         }
 
+        if (partyType == CashPartyType.Employee)
+        {
+            var employeeExists = await dbContext.Employees
+                .AsNoTracking()
+                .AnyAsync(
+                    entity =>
+                        entity.CompanyId == companyId &&
+                        entity.Id == request.EmployeeId &&
+                        entity.IsActive,
+                    cancellationToken);
+            if (!employeeExists)
+            {
+                return Result<VoucherPreparation>.Failure(
+                    EmployeeNotFound(request.EmployeeId));
+            }
+        }
+
         Driver? driver = null;
         if (partyType == CashPartyType.Driver)
         {
@@ -498,23 +527,6 @@ public sealed class CashVoucherService(
             }
         }
 
-        if (partyType == CashPartyType.Employee)
-        {
-            var employeeExists = await dbContext.Employees
-                .AsNoTracking()
-                .AnyAsync(
-                    employee =>
-                        employee.CompanyId == companyId &&
-                        employee.Id == request.EmployeeId &&
-                        employee.IsActive,
-                    cancellationToken);
-            if (!employeeExists)
-            {
-                return Result<VoucherPreparation>.Failure(
-                    EmployeeNotFound(request.EmployeeId));
-            }
-        }
-
         var balanceError = await ValidateFinalBalancesAsync(
             currentVoucher,
             cashboxId,
@@ -529,6 +541,7 @@ public sealed class CashVoucherService(
         return Result<VoucherPreparation>.Success(
             new VoucherPreparation(
                 cashbox,
+                partyType,
                 partner,
                 driver,
                 exchangeRateResult.Value));
@@ -695,10 +708,10 @@ public sealed class CashVoucherService(
         voucher.CashboxId = null;
         voucher.CashMovementTypeId = null;
         voucher.PartyType = CashPartyType.None;
+        voucher.EmployeeId = null;
         voucher.BusinessPartnerId = null;
         voucher.DriverId = null;
         voucher.DriverTripId = null;
-        voucher.EmployeeId = null;
         voucher.ExternalPartyName = null;
 
         voucher.Currency = await dbContext.CompanySettings
@@ -711,8 +724,32 @@ public sealed class CashVoucherService(
 
     private sealed record VoucherPreparation(
         Cashbox? Cashbox,
+        CashPartyType PartyType,
         BusinessPartner? BusinessPartner,
         Driver? Driver,
         ResolvedExchangeRate? ExchangeRate);
+
+    private static CashPartyType DerivePartyType(
+        CashVoucherUpdateRequest request) =>
+        request.EmployeeId.HasValue
+            ? CashPartyType.Employee
+            : request.BusinessPartnerId.HasValue
+                ? CashPartyType.Partner
+                : request.DriverId.HasValue
+                    ? CashPartyType.Driver
+                    : !string.IsNullOrWhiteSpace(request.ExternalPartyName)
+                        ? CashPartyType.Other
+                        : CashPartyType.None;
+
+    private static bool HasAtMostOneParty(CashVoucherUpdateRequest request)
+    {
+        var selectedPartyCount =
+            (request.EmployeeId.HasValue ? 1 : 0) +
+            (request.BusinessPartnerId.HasValue ? 1 : 0) +
+            (request.DriverId.HasValue ? 1 : 0) +
+            (!string.IsNullOrWhiteSpace(request.ExternalPartyName) ? 1 : 0);
+
+        return selectedPartyCount <= 1;
+    }
 
 }

@@ -114,14 +114,14 @@ public sealed class UserService(
         cancellationToken.ThrowIfCancellationRequested();
 
         var user = request.Adapt<ApplicationUser>();
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             user.UserName!,
             user.Email!,
             excludedId: null,
             cancellationToken);
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<UserResponse>.Failure(duplicateError);
+            return Result<UserResponse>.Failure(duplicateErrors);
         }
 
         var rolesResult = await ResolveRolesAsync(
@@ -188,14 +188,14 @@ public sealed class UserService(
         }
 
         var normalizedUser = request.Adapt<ApplicationUser>();
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             normalizedUser.UserName!,
             normalizedUser.Email!,
             id,
             cancellationToken);
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<UserResponse>.Failure(duplicateError);
+            return Result<UserResponse>.Failure(duplicateErrors);
         }
 
         var rolesResult = await ResolveRolesAsync(
@@ -354,12 +354,13 @@ public sealed class UserService(
                     userCompany.Company.Name))
                 .ToList()));
 
-    private async Task<Error?> FindDuplicateAsync(
+    private async Task<IReadOnlyList<Error>> FindDuplicateAsync(
         string userName,
         string email,
         Guid? excludedId,
         CancellationToken cancellationToken)
     {
+        var errors = new List<Error>();
         var normalizedUserName = userManager.NormalizeName(userName);
         var normalizedEmail = userManager.NormalizeEmail(email);
         var otherUsers = dbContext.Users
@@ -370,14 +371,17 @@ public sealed class UserService(
                 user => user.NormalizedUserName == normalizedUserName,
                 cancellationToken))
         {
-            return UserNameExists(userName);
+            errors.Add(UserNameExists(userName));
         }
 
-        return await otherUsers.AnyAsync(
+        if (await otherUsers.AnyAsync(
                 user => user.NormalizedEmail == normalizedEmail,
-                cancellationToken)
-            ? EmailExists(email)
-            : null;
+                cancellationToken))
+        {
+            errors.Add(EmailExists(email));
+        }
+
+        return errors;
     }
 
     private async Task<Result<List<string>>> ResolveRolesAsync(

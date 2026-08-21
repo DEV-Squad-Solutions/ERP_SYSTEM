@@ -154,6 +154,14 @@ public sealed class InvoiceMappingRegister : IRegister
                     ? null
                     : invoice.ItemsCategory.Name)
             .Map(
+                response => response.PriceStatus,
+                invoice => invoice.ContentType != InvoiceContentType.Items ||
+                    !invoice.Lines.Any()
+                        ? (InvoicePriceStatus?)null
+                        : invoice.Lines.Any(line => line.Price == 0m)
+                            ? InvoicePriceStatus.HasMissingPrice
+                            : InvoicePriceStatus.AllItemsPriced)
+            .Map(
                 response => response.DriverName,
                 invoice => invoice.Driver == null ? null : invoice.Driver.Name)
             .Map(

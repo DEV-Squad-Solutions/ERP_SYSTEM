@@ -96,15 +96,15 @@ public sealed class CompanyService(
         CancellationToken cancellationToken = default)
     {
         var company = request.Adapt<Company>();
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             company.CommercialRegister,
             company.TaxNumber,
             excludedId: null,
             cancellationToken);
 
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<CompanyResponse>.Failure(duplicateError);
+            return Result<CompanyResponse>.Failure(duplicateErrors);
         }
 
         var currentUserResult = currentUserService.GetUserId();
@@ -161,15 +161,15 @@ public sealed class CompanyService(
         }
 
         var normalizedCompany = request.Adapt<Company>();
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             normalizedCompany.CommercialRegister,
             normalizedCompany.TaxNumber,
             id,
             cancellationToken);
 
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<CompanyResponse>.Failure(duplicateError);
+            return Result<CompanyResponse>.Failure(duplicateErrors);
         }
 
         var entry = dbContext.Entry(company);
@@ -285,12 +285,13 @@ public sealed class CompanyService(
         return Result.Success();
     }
 
-    private async Task<Error?> FindDuplicateAsync(
+    private async Task<IReadOnlyList<Error>> FindDuplicateAsync(
         string commercialRegister,
         string taxNumber,
         int? excludedId,
         CancellationToken cancellationToken)
     {
+        var errors = new List<Error>();
         var commercialRegisterExists = await dbContext.Companies.AnyAsync(
             company =>
                 (!excludedId.HasValue || company.Id != excludedId.Value) &&
@@ -299,7 +300,7 @@ public sealed class CompanyService(
 
         if (commercialRegisterExists)
         {
-            return CommercialRegisterExists(commercialRegister);
+            errors.Add(CommercialRegisterExists(commercialRegister));
         }
 
         var taxNumberExists = await dbContext.Companies.AnyAsync(
@@ -308,9 +309,12 @@ public sealed class CompanyService(
                 company.TaxNumber == taxNumber,
             cancellationToken);
 
-        return taxNumberExists
-            ? TaxNumberExists(taxNumber)
-            : null;
+        if (taxNumberExists)
+        {
+            errors.Add(TaxNumberExists(taxNumber));
+        }
+
+        return errors;
     }
 
     private async Task<bool> HasFinancialOrInventoryHistoryAsync(

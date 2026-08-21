@@ -24,7 +24,7 @@ public interface IEmployeeAttendanceService
 
     Task<Result<EmployeeAttendanceResponse>> UpdateAsync(
         int id,
-        EmployeeAttendanceRequest request,
+        EmployeeAttendanceUpdateRequest request,
         CancellationToken cancellationToken = default);
 
     Task<Result> DeleteAsync(

@@ -4577,6 +4577,7 @@ public sealed class InvoiceServiceTests
         Assert.True(result.IsSuccess);
         var invoice = Assert.Single(result.Value.Items);
         Assert.Equal(expectedInvoiceNumber, invoice.InvoiceNumber);
+        Assert.Equal(priceStatus, invoice.PriceStatus);
     }
 
     [Fact]
@@ -6444,9 +6445,9 @@ public sealed class InvoiceServiceTests
                     CashboxId INTEGER NOT NULL,
                     CashMovementTypeId INTEGER NOT NULL,
                     PartyType INTEGER NOT NULL,
+                    EmployeeId INTEGER NULL,
                     BusinessPartnerId INTEGER NULL,
                     DriverId INTEGER NULL,
-                    EmployeeId INTEGER NULL,
                     DriverTripId INTEGER NULL,
                     ExternalPartyName TEXT NULL,
                     Amount NUMERIC NOT NULL,

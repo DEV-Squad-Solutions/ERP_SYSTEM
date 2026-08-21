@@ -189,6 +189,39 @@ public sealed class BusinessPartnerContainerStoreServiceTests
     }
 
     [Fact]
+    public async Task Add_ReturnsAllCaseInsensitiveDuplicateErrorsInFieldOrder()
+    {
+        await using var database =
+            await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
+        await database.SetTaxNumberAsync("TAX-001");
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.AddAsync(
+            new BusinessPartnerRequest(
+                "partner one",
+                null,
+                null,
+                null,
+                "tax-001",
+                CurrencyCode.EGP,
+                0m));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            [
+                "BusinessPartners.NameExists",
+                "BusinessPartners.TaxNumberExists"
+            ],
+            result.Errors.Select(error => error.Code));
+        Assert.Equal(
+            [
+                nameof(BusinessPartnerRequest.Name),
+                nameof(BusinessPartnerRequest.TaxNumber)
+            ],
+            result.Errors.Select(error => error.FieldName));
+    }
+
+    [Fact]
     public async Task Update_RejectsAnotherPartnersCaseInsensitiveDuplicateName()
     {
         await using var database =
@@ -253,6 +286,34 @@ public sealed class BusinessPartnerContainerStoreServiceTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("BusinessPartners.TaxNumberExists", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Update_ReturnsAllCaseInsensitiveDuplicateErrorsInFieldOrder()
+    {
+        await using var database =
+            await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
+        await database.SetTaxNumberAsync("TAX-001");
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.UpdateAsync(
+            2,
+            new BusinessPartnerRequest(
+                "partner one",
+                null,
+                null,
+                null,
+                "tax-001",
+                CurrencyCode.EGP,
+                0m));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            [
+                "BusinessPartners.NameExists",
+                "BusinessPartners.TaxNumberExists"
+            ],
+            result.Errors.Select(error => error.Code));
     }
 
     [Fact]

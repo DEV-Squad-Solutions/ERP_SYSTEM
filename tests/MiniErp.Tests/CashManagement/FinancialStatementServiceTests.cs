@@ -368,6 +368,7 @@ public sealed class FinancialStatementServiceTests
             item => item.Description == "CV-DRIVER-GENERAL");
         Assert.Null(generalVoucher.BusinessPartnerId);
         Assert.Null(generalVoucher.BusinessPartnerName);
+        Assert.Null(generalVoucher.CountryName);
         Assert.All(
             tripSpecific.Value.Items,
             item =>
@@ -376,6 +377,7 @@ public sealed class FinancialStatementServiceTests
                 Assert.Equal(
                     "Customer One",
                     item.BusinessPartnerName);
+                Assert.Equal("Egypt", item.CountryName);
             });
         Assert.Contains(
             overall.Value.Items,
@@ -754,7 +756,7 @@ public sealed class FinancialStatementServiceTests
             direction,
             1,
             movementTypeId,
-            CashPartyType.None,
+            null,
             null,
             null,
             null,
@@ -775,7 +777,7 @@ public sealed class FinancialStatementServiceTests
             direction,
             1,
             movementTypeId,
-            CashPartyType.Partner,
+            null,
             1,
             null,
             null,
@@ -796,7 +798,7 @@ public sealed class FinancialStatementServiceTests
             direction,
             1,
             direction == CashDirection.Payment ? 4 : 3,
-            CashPartyType.Driver,
+            null,
             null,
             1,
             tripId,
@@ -810,22 +812,19 @@ public sealed class FinancialStatementServiceTests
         int employeeId,
         decimal amount) =>
         new(
-            new DateOnly(2026, 7, 24),
-            CashDirection.Payment,
-            1,
-            4,
-            CashPartyType.Employee,
-            null,
-            null,
-            null,
-            null,
-            amount,
-            "REF-EMPLOYEE",
-            "Employee payment",
-            null)
-        {
-            EmployeeId = employeeId
-        };
+            VoucherDate: new DateOnly(2026, 7, 24),
+            Direction: CashDirection.Payment,
+            CashboxId: 1,
+            CashMovementTypeId: 4,
+            EmployeeId: employeeId,
+            BusinessPartnerId: null,
+            DriverId: null,
+            DriverTripId: null,
+            ExternalPartyName: null,
+            Amount: amount,
+            ReferenceNumber: "REF-EMPLOYEE",
+            Description: "Employee payment",
+            Notes: null);
 
     private static async Task<Result<CashVoucherResponse>> AddVoucherAsync(
         ICashVoucherService service,
@@ -850,7 +849,7 @@ public sealed class FinancialStatementServiceTests
                 request.Direction,
                 request.CashboxId,
                 request.CashMovementTypeId,
-                request.PartyType,
+                request.EmployeeId,
                 request.BusinessPartnerId,
                 request.DriverId,
                 request.DriverTripId,
@@ -859,10 +858,7 @@ public sealed class FinancialStatementServiceTests
                 request.ReferenceNumber,
                 request.Description,
                 request.Notes,
-                draft.Value.RowVersion)
-            {
-                EmployeeId = request.EmployeeId
-            });
+                draft.Value.RowVersion));
     }
 
     private sealed record VoucherTestRequest(
@@ -870,7 +866,7 @@ public sealed class FinancialStatementServiceTests
         CashDirection Direction,
         int CashboxId,
         int CashMovementTypeId,
-        CashPartyType PartyType,
+        int? EmployeeId,
         int? BusinessPartnerId,
         int? DriverId,
         int? DriverTripId,
@@ -878,8 +874,5 @@ public sealed class FinancialStatementServiceTests
         decimal Amount,
         string? ReferenceNumber,
         string? Description,
-        string? Notes)
-    {
-        public int? EmployeeId { get; init; }
-    }
+        string? Notes);
 }

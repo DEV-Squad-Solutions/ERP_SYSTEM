@@ -69,7 +69,7 @@ public sealed class ItemsController(IItemService itemService) : ApiControllerBas
         }
 
         return result.IsFailure
-            ? this.ToProblem(result.Error)
+            ? this.ToProblem(result.Errors)
             : CreatedAtAction(
                 nameof(GetById),
                 new { id = result.Value.Id },

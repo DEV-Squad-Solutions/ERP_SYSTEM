@@ -101,6 +101,8 @@ public sealed record InvoiceListResponse(
 
     public string? ItemsCategoryName { get; init; }
 
+    public InvoicePriceStatus? PriceStatus { get; init; }
+
     public int? PaymentVoucherId { get; init; }
 
     public int? CashboxId { get; init; }

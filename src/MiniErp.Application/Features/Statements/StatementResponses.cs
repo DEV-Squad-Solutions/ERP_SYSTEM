@@ -130,6 +130,8 @@ public sealed record DriverStatementItemResponse(
     public int? BusinessPartnerId { get; init; }
 
     public string? BusinessPartnerName { get; init; }
+
+    public string? CountryName { get; init; }
 }
 
 public sealed record DriverStatementSummaryResponse(

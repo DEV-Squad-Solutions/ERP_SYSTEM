@@ -3,7 +3,7 @@ using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.Employees
 {
-    public sealed class EmployeeRequestValidator : AbstractValidator<EmployeeRequest>
+    public sealed class EmployeeRequestValidator : AbstractValidator<EmployeeCreateRequest>
     {
         public EmployeeRequestValidator()
         {

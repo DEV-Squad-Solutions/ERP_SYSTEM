@@ -138,6 +138,31 @@ public sealed class DriverServiceTests
     }
 
     [Fact]
+    public async Task Add_ReturnsAllIndependentDuplicateErrors()
+    {
+        await using var database = await DriverTestDatabase.CreateAsync();
+        await database.SetDriverPhoneNumberAsync(1, "01000000000");
+
+        var result = await database.CreateService(companyId: 1).AddAsync(
+            new DriverRequest(
+                "active driver",
+                "01000000000",
+                "nat-1",
+                "lic-1",
+                null));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            [
+                "Drivers.NameExists",
+                "Drivers.PhoneNumberExists",
+                "Drivers.NationalIdExists",
+                "Drivers.LicenseNumberExists"
+            ],
+            result.Errors.Select(error => error.Code));
+    }
+
+    [Fact]
     public async Task Update_AllowsTheDriversOwnUniqueValues()
     {
         await using var database = await DriverTestDatabase.CreateAsync();
@@ -329,6 +354,17 @@ public sealed class DriverServiceTests
 
         private TimeProvider TimeProvider { get; }
 
+        public async Task SetDriverPhoneNumberAsync(
+            int driverId,
+            string phoneNumber)
+        {
+            var driver = await Context.Drivers
+                .SingleAsync(entity => entity.Id == driverId);
+            driver.PhoneNumber = phoneNumber;
+            await Context.SaveChangesAsync();
+            Context.ChangeTracker.Clear();
+        }
+
         public static async Task<DriverTestDatabase> CreateAsync()
         {
             var connection = new SqliteConnection("Data Source=:memory:");
@@ -465,6 +501,7 @@ public sealed class DriverServiceTests
                 CREATE TABLE CashVouchers (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    EmployeeId INTEGER NULL,
                     DriverId INTEGER NULL,
                     CashboxTransferId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL

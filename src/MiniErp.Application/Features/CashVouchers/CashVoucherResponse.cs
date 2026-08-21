@@ -14,6 +14,8 @@ public sealed record CashVoucherResponse(
     string? CashMovementTypeName,
     CashMovementClassification? Classification,
     CashPartyType PartyType,
+    int? EmployeeId,
+    string? EmployeeName,
     int? BusinessPartnerId,
     string? BusinessPartnerName,
     int? DriverId,
@@ -36,10 +38,6 @@ public sealed record CashVoucherResponse(
     public int? InvoiceId { get; init; }
 
     public int? CashboxTransferId { get; init; }
-
-    public int? EmployeeId { get; init; }
-
-    public string? EmployeeName { get; init; }
 
     public string? InvoiceNumber { get; init; }
 

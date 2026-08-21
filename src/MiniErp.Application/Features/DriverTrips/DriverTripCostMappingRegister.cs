@@ -21,6 +21,11 @@ public sealed class DriverTripCostMappingRegister : IRegister
             .Map(
                 response => response.DriverName,
                 trip => trip.Driver.Name)
+            .Map(
+                response => response.CountryName,
+                trip => trip.Invoice.Country == null
+                    ? null
+                    : trip.Invoice.Country.Name)
             .Map(response => response.CostNotes, trip => trip.CostNotes);
     }
 }

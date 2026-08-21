@@ -13,7 +13,55 @@ public static class ApiErrorResponseFactory
         HttpContext httpContext,
         Error error)
     {
-        var statusCode = error.Type switch
+        ArgumentNullException.ThrowIfNull(error);
+
+        return FromErrors(httpContext, [error]);
+    }
+
+    public static ApiErrorResponse FromError(
+        HttpContext httpContext,
+        IEnumerable<Error> errors) =>
+        FromErrors(httpContext, errors);
+
+    public static ApiErrorResponse FromError(
+        HttpContext httpContext,
+        Error error,
+        IEnumerable<string> messages)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        ArgumentNullException.ThrowIfNull(messages);
+
+        var mappedErrors = new List<Error> { error };
+        mappedErrors.AddRange(
+            messages
+                .Where(message => !string.IsNullOrWhiteSpace(message))
+                .Select(message => new Error(
+                    Code: error.Code,
+                    Description: message,
+                    Type: error.Type,
+                    FieldName: error.FieldName)));
+
+        return FromErrors(httpContext, mappedErrors);
+    }
+
+    public static ApiErrorResponse FromErrors(
+        HttpContext httpContext,
+        IEnumerable<Error> errors)
+    {
+        ArgumentNullException.ThrowIfNull(errors);
+
+        var materializedErrors = errors
+            .Where(error => error is not null && error != Error.None)
+            .ToArray();
+        if (materializedErrors.Length == 0)
+        {
+            throw new ArgumentException(
+                "At least one mapped error is required.",
+                nameof(errors));
+        }
+
+        var primaryError = materializedErrors[0];
+        var statusCode = primaryError.Type switch
         {
             ErrorType.Validation => StatusCodes.Status400BadRequest,
             ErrorType.Unauthorized => StatusCodes.Status401Unauthorized,
@@ -25,7 +73,7 @@ public static class ApiErrorResponseFactory
             _ => StatusCodes.Status500InternalServerError
         };
 
-        var title = error.Type switch
+        var title = primaryError.Type switch
         {
             ErrorType.Validation => "بيانات الطلب غير صحيحة.",
             ErrorType.Unauthorized => "يجب تسجيل الدخول أولًا.",
@@ -37,23 +85,21 @@ public static class ApiErrorResponseFactory
             _ => "حدث خطأ أثناء معالجة الطلب."
         };
 
-        IReadOnlyDictionary<string, string[]>? errors =
-            string.IsNullOrWhiteSpace(error.FieldName)
-                ? null
-                : new Dictionary<string, string[]>
-                {
-                    [error.FieldName] = [error.Description]
-                };
-
         return Create(
             httpContext,
             statusCode,
             title,
-            error.Description,
-            error.Code,
-            error.Type.ToString(),
-            errors);
+            primaryError.Description,
+            primaryError.Code,
+            primaryError.Type.ToString(),
+            MapErrors(materializedErrors));
     }
+
+    public static ApiErrorResponse FromError(
+        HttpContext httpContext,
+        Error error,
+        params string[] messages) =>
+        FromError(httpContext, error, (IEnumerable<string>)messages);
 
     public static ApiErrorResponse Validation(
         HttpContext httpContext,
@@ -216,6 +262,22 @@ public static class ApiErrorResponseFactory
                 .Select(LocalizeValidationMessage)
                 .ToArray(),
             StringComparer.Ordinal);
+
+    private static IReadOnlyDictionary<string, string[]> MapErrors(
+        IEnumerable<Error> errors) =>
+        errors
+            .GroupBy(
+                error => string.IsNullOrWhiteSpace(error.FieldName)
+                    ? "General"
+                    : error.FieldName!,
+                StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .Select(error => error.Description)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray(),
+                StringComparer.Ordinal);
 
     private static string LocalizeValidationMessage(string message) =>
         message.Any(character =>

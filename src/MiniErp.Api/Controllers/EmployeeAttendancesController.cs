@@ -54,7 +54,7 @@ public sealed class EmployeeAttendancesController(
             cancellationToken);
 
         return result.IsFailure
-            ? this.ToProblem(result.Error)
+            ? this.ToProblem(result.Errors)
             : CreatedAtAction(
                 nameof(GetById),
                 new { id = result.Value.Id },
@@ -83,7 +83,7 @@ public sealed class EmployeeAttendancesController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Update(
         int id,
-        EmployeeAttendanceRequest request,
+        EmployeeAttendanceUpdateRequest request,
         CancellationToken cancellationToken)
     {
         var result = await employeeAttendanceService.UpdateAsync(

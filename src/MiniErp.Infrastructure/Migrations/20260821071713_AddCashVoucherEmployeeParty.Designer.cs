@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using MiniErp.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using MiniErp.Infrastructure.Persistence;
 namespace MiniErp.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260821071713_AddCashVoucherEmployeeParty")]
+    partial class AddCashVoucherEmployeePartyCompatibilityMarker
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -494,9 +497,6 @@ namespace MiniErp.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("Classification")
-                        .HasColumnType("int");
-
                     b.Property<int>("CompanyId")
                         .HasColumnType("int");
 
@@ -612,19 +612,13 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.HasIndex("CompanyId", "Direction", "IsActive", "Name", "Id");
 
-                    b.HasIndex("CompanyId", "Classification", "Direction", "IsActive", "Name", "Id");
-
                     b.ToTable("CashMovementTypes", null, t =>
                         {
-                            t.HasCheckConstraint("CK_CashMovementTypes_Classification", "[Classification] IN (1, 2, 3, 4)");
-
                             t.HasCheckConstraint("CK_CashMovementTypes_Direction", "[Direction] IN (1, 2)");
 
-                            t.HasCheckConstraint("CK_CashMovementTypes_InvoiceDefaults", "(([IsDefaultForSales] = 0 AND [IsDefaultForPurchaseReturn] = 0) OR ([IsActive] = 1 AND [Direction] = 1 AND [Classification] = 1 AND [PartnerEffect] = 2)) AND (([IsDefaultForPurchase] = 0 AND [IsDefaultForSalesReturn] = 0) OR ([IsActive] = 1 AND [Direction] = 2 AND [Classification] = 1 AND [PartnerEffect] = 1))");
+                            t.HasCheckConstraint("CK_CashMovementTypes_InvoiceDefaults", "(([IsDefaultForSales] = 0 AND [IsDefaultForPurchaseReturn] = 0) OR ([IsActive] = 1 AND [Direction] = 1 AND [PartnerEffect] = 2)) AND (([IsDefaultForPurchase] = 0 AND [IsDefaultForSalesReturn] = 0) OR ([IsActive] = 1 AND [Direction] = 2 AND [PartnerEffect] = 1))");
 
                             t.HasCheckConstraint("CK_CashMovementTypes_PartnerEffect", "[PartnerEffect] IN (0, 1, 2)");
-
-                            t.HasCheckConstraint("CK_CashMovementTypes_PartnerSettlement", "[Classification] <> 1 OR [PartnerEffect] <> 0");
                         });
                 });
 
@@ -1913,11 +1907,13 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.ToTable("EmployeeAttendances", null, t =>
                         {
-                            t.HasCheckConstraint("CK_EmployeeAttendances_WorkDayRatio", "[WorkDayRatio] IN (1,2,3,4,5)");
+                            t.HasCheckConstraint("CK_EmployeeAttendances_CheckOutAfterCheckIn", "[CheckIn] IS NULL OR [CheckOut] IS NULL OR [CheckOut] >= [CheckIn]");
 
-                            t.HasCheckConstraint("CK_EmployeeAttendances_WorkDaysDeductionRatio", "[WorkDaysDeductionRatio] IS NULL OR [WorkDaysDeductionRatio] IN (1,2,3,4,5)");
+                            t.HasCheckConstraint("CK_EmployeeAttendances_WorkDayRatio", "[WorkDayRatio] IN (25,33,50,75,100)");
 
-                            t.HasCheckConstraint("CK_EmployeeAttendances_WorkOverTimeRatio", "[WorkOverTimeRatio] IS NULL OR [WorkOverTimeRatio] IN (1,2,3,4,5)");
+                            t.HasCheckConstraint("CK_EmployeeAttendances_WorkDaysDeductionRatio", "[WorkDaysDeductionRatio] IS NULL OR [WorkDaysDeductionRatio] IN (25,33,50,75,100)");
+
+                            t.HasCheckConstraint("CK_EmployeeAttendances_WorkOverTimeRatio", "[WorkOverTimeRatio] IS NULL OR [WorkOverTimeRatio] IN (25,33,50,75,100)");
                         });
                 });
 
@@ -2389,7 +2385,7 @@ namespace MiniErp.Infrastructure.Migrations
 
                             t.HasCheckConstraint("CK_ItemMovements_NonPositiveState", "[QuantityAfter] > 0 OR ([AverageCostAfter] = 0 AND [InventoryValueAfter] = 0)");
 
-                            t.HasCheckConstraint("CK_ItemMovements_PendingWithinMovement", "[PendingCostQuantity] <= CASE WHEN [QuantityIn] > 0 THEN [QuantityIn] ELSE [QuantityOut] END");
+                            t.HasCheckConstraint("CK_ItemMovements_PendingWithinOutbound", "[PendingCostQuantity] <= [QuantityOut]");
 
                             t.HasCheckConstraint("CK_ItemMovements_Quantity_NonNegative", "[QuantityIn] >= 0 AND [QuantityOut] >= 0");
                         });
@@ -4220,10 +4216,7 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasDatabaseName("UX_Countries_Code_Active")
                         .HasFilter("[IsActive] = 1 AND [IsDeleted] = 0");
 
-                    b.HasIndex("Name")
-                        .IsUnique()
-                        .HasDatabaseName("UX_Countries_Name_Active")
-                        .HasFilter("[IsActive] = 1 AND [IsDeleted] = 0");
+                    b.HasIndex("Name");
 
                     b.ToTable("Countries", (string)null);
                 });
@@ -4240,11 +4233,6 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Property<string>("ConcurrencyStamp")
                         .IsConcurrencyToken()
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("CreatedOn")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime2")
-                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("Email")
                         .HasMaxLength(256)
@@ -4309,9 +4297,6 @@ namespace MiniErp.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("UserNameIndex")
                         .HasFilter("[NormalizedUserName] IS NOT NULL");
-
-                    b.HasIndex("CreatedOn", "Id")
-                        .IsDescending();
 
                     b.ToTable("AspNetUsers", (string)null);
                 });

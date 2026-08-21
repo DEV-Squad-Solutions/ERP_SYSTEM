@@ -140,6 +140,35 @@ public sealed class CompanyServiceTests
     }
 
     [Fact]
+    public async Task Add_ReturnsAllDuplicateErrorsInFieldOrder()
+    {
+        await using var database = await CompanyTestDatabase.CreateAsync();
+        var service = database.CreateService(CurrentUserId);
+
+        var result = await service.AddAsync(
+            new CompanyRequest(
+                "New Company",
+                "New Address",
+                "CR-1",
+                "TAX-1",
+                "New Manager"));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            [
+                "Companies.CommercialRegisterExists",
+                "Companies.TaxNumberExists"
+            ],
+            result.Errors.Select(error => error.Code));
+        Assert.Equal(
+            [
+                nameof(CompanyRequest.CommercialRegister),
+                nameof(CompanyRequest.TaxNumber)
+            ],
+            result.Errors.Select(error => error.FieldName));
+    }
+
+    [Fact]
     public async Task Update_TrimsValuesAndAllowsUnchangedUniqueValues()
     {
         await using var database = await CompanyTestDatabase.CreateAsync();
@@ -166,6 +195,35 @@ public sealed class CompanyServiceTests
         Assert.Equal("CR-1", result.Value.CommercialRegister);
         Assert.Equal("TAX-1", result.Value.TaxNumber);
         Assert.Equal("Updated Manager", result.Value.ManagerName);
+    }
+
+    [Fact]
+    public async Task Update_ReturnsAllDuplicateErrorsInFieldOrder()
+    {
+        await using var database = await CompanyTestDatabase.CreateAsync();
+        var service = database.CreateService(CurrentUserId);
+        var current = await service.GetByIdAsync(2);
+        Assert.True(current.IsSuccess);
+
+        var result = await service.UpdateAsync(
+            2,
+            new CompanyUpdateRequest(
+                "Updated Company",
+                "Updated Address",
+                "CR-1",
+                "TAX-1",
+                "Updated Manager",
+                null,
+                null,
+                current.Value.RowVersion));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            [
+                "Companies.CommercialRegisterExists",
+                "Companies.TaxNumberExists"
+            ],
+            result.Errors.Select(error => error.Code));
     }
 
     [Fact]
@@ -628,6 +686,7 @@ public sealed class CompanyServiceTests
                 CREATE TABLE CashVouchers (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    EmployeeId INTEGER NULL,
                     CashboxTransferId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );

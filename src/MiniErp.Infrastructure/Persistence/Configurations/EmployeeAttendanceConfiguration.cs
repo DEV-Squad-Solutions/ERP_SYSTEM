@@ -1,8 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using MiniErp.Domain.Entities.Employees;
-
-namespace MiniErp.Infrastructure.Persistence.Configurations;
+using MiniErp.Infrastructure.Persistence.Configurations;
 
 public sealed class EmployeeAttendanceConfiguration
     : AuditableEntityConfiguration<EmployeeAttendance>
@@ -17,20 +16,16 @@ public sealed class EmployeeAttendanceConfiguration
             table =>
             {
                 table.HasCheckConstraint(
-                    "CK_EmployeeAttendances_CheckOutAfterCheckIn",
-                    "[CheckIn] IS NULL OR [CheckOut] IS NULL OR [CheckOut] >= [CheckIn]");
-
-                table.HasCheckConstraint(
                     "CK_EmployeeAttendances_WorkDayRatio",
-                    "[WorkDayRatio] IN (25,33,50,75,100)");
+                    "[WorkDayRatio] IN (1,2,3,4,5)");
 
                 table.HasCheckConstraint(
                     "CK_EmployeeAttendances_WorkOverTimeRatio",
-                    "[WorkOverTimeRatio] IS NULL OR [WorkOverTimeRatio] IN (25,33,50,75,100)");
+                    "[WorkOverTimeRatio] IS NULL OR [WorkOverTimeRatio] IN (1,2,3,4,5)");
 
                 table.HasCheckConstraint(
                     "CK_EmployeeAttendances_WorkDaysDeductionRatio",
-                    "[WorkDaysDeductionRatio] IS NULL OR [WorkDaysDeductionRatio] IN (25,33,50,75,100)");
+                    "[WorkDaysDeductionRatio] IS NULL OR [WorkDaysDeductionRatio] IN (1,2,3,4,5)");
             });
 
         builder.HasKey(attendance => attendance.Id);
@@ -59,29 +54,36 @@ public sealed class EmployeeAttendanceConfiguration
             .IsRequired();
 
         builder.Property(attendance => attendance.CheckIn)
-            .HasColumnType("time");
+            .HasColumnType("time")
+            .IsRequired(false);
 
         builder.Property(attendance => attendance.CheckOut)
-            .HasColumnType("time");
+            .HasColumnType("time")
+            .IsRequired(false);
 
         builder.Property(attendance => attendance.WorkHours)
-            .HasColumnType("time");
+            .HasColumnType("time")
+            .IsRequired(false);
 
         builder.Property(attendance => attendance.WorkDayRatio)
             .HasConversion<int>()
             .IsRequired();
 
         builder.Property(attendance => attendance.WorkOverTimeRatio)
-            .HasConversion<int>();
+            .HasConversion<int>()
+            .IsRequired(false);
 
         builder.Property(attendance => attendance.WorkDaysDeductionRatio)
-            .HasConversion<int>();
+            .HasConversion<int>()
+            .IsRequired(false);
 
         builder.Property(attendance => attendance.WorkLocation)
-            .HasMaxLength(200);
+            .HasMaxLength(200)
+            .IsRequired(false);
 
         builder.Property(attendance => attendance.Notes)
-            .HasMaxLength(1000);
+            .HasMaxLength(1000)
+            .IsRequired(false);
 
         builder.HasIndex(attendance => new
         {
@@ -89,8 +91,8 @@ public sealed class EmployeeAttendanceConfiguration
             attendance.EmployeeId,
             attendance.WorkDate
         })
-            .IsUnique()
-            .HasFilter("[IsDeleted] = 0");
+        .IsUnique()
+        .HasFilter("[IsDeleted] = 0");
 
         builder.HasIndex(attendance => new
         {

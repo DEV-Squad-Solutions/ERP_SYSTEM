@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -10,76 +10,94 @@ namespace MiniErp.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropCheckConstraint(
-                name: "CK_CashVouchers_PartyShape",
-                table: "CashVouchers");
+            migrationBuilder.Sql(
+                """
+                IF OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyShape]', N'C') IS NOT NULL
+                    ALTER TABLE [dbo].[CashVouchers] DROP CONSTRAINT [CK_CashVouchers_PartyShape];
 
-            migrationBuilder.DropCheckConstraint(
-                name: "CK_CashVouchers_PartyType",
-                table: "CashVouchers");
+                IF OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyType]', N'C') IS NOT NULL
+                    ALTER TABLE [dbo].[CashVouchers] DROP CONSTRAINT [CK_CashVouchers_PartyType];
 
-            migrationBuilder.AddColumn<int>(
-                name: "EmployeeId",
-                table: "CashVouchers",
-                type: "int",
-                nullable: true);
+                IF COL_LENGTH(N'dbo.CashVouchers', N'EmployeeId') IS NULL
+                    ALTER TABLE [dbo].[CashVouchers] ADD [EmployeeId] int NULL;
 
-            migrationBuilder.CreateIndex(
-                name: "IX_CashVouchers_CompanyId_EmployeeId_VoucherDate_Id",
-                table: "CashVouchers",
-                columns: new[] { "CompanyId", "EmployeeId", "VoucherDate", "Id" });
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE [name] = N'IX_CashVouchers_CompanyId_EmployeeId_VoucherDate_Id'
+                      AND [object_id] = OBJECT_ID(N'[dbo].[CashVouchers]'))
+                    CREATE INDEX [IX_CashVouchers_CompanyId_EmployeeId_VoucherDate_Id]
+                        ON [dbo].[CashVouchers] ([CompanyId], [EmployeeId], [VoucherDate], [Id]);
 
-            migrationBuilder.AddCheckConstraint(
-                name: "CK_CashVouchers_PartyShape",
-                table: "CashVouchers",
-                sql: "([PartyType] = 1 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [EmployeeId] IS NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 2 AND [BusinessPartnerId] IS NOT NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [EmployeeId] IS NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 3 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NOT NULL AND [EmployeeId] IS NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 4 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [EmployeeId] IS NULL AND [ExternalPartyName] IS NOT NULL) OR ([PartyType] = 5 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [EmployeeId] IS NOT NULL AND [ExternalPartyName] IS NULL)");
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM sys.foreign_keys
+                    WHERE [name] = N'FK_CashVouchers_Employees_CompanyId_EmployeeId'
+                      AND [parent_object_id] = OBJECT_ID(N'[dbo].[CashVouchers]'))
+                    ALTER TABLE [dbo].[CashVouchers] WITH CHECK
+                    ADD CONSTRAINT [FK_CashVouchers_Employees_CompanyId_EmployeeId]
+                        FOREIGN KEY ([CompanyId], [EmployeeId])
+                        REFERENCES [dbo].[Employees] ([CompanyId], [Id]);
 
-            migrationBuilder.AddCheckConstraint(
-                name: "CK_CashVouchers_PartyType",
-                table: "CashVouchers",
-                sql: "[PartyType] IN (1, 2, 3, 4, 5)");
+                IF OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyShape]', N'C') IS NULL
+                    ALTER TABLE [dbo].[CashVouchers] WITH CHECK
+                    ADD CONSTRAINT [CK_CashVouchers_PartyShape] CHECK (
+                        ([PartyType] = 1 AND [EmployeeId] IS NULL AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR
+                        ([PartyType] = 2 AND [EmployeeId] IS NULL AND [BusinessPartnerId] IS NOT NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR
+                        ([PartyType] = 3 AND [EmployeeId] IS NULL AND [BusinessPartnerId] IS NULL AND [DriverId] IS NOT NULL AND [ExternalPartyName] IS NULL) OR
+                        ([PartyType] = 4 AND [EmployeeId] IS NULL AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NOT NULL) OR
+                        ([PartyType] = 5 AND [EmployeeId] IS NOT NULL AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL));
 
-            migrationBuilder.AddForeignKey(
-                name: "FK_CashVouchers_Employees_CompanyId_EmployeeId",
-                table: "CashVouchers",
-                columns: new[] { "CompanyId", "EmployeeId" },
-                principalTable: "Employees",
-                principalColumns: new[] { "CompanyId", "Id" },
-                onDelete: ReferentialAction.Restrict);
+                IF OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyType]', N'C') IS NULL
+                    ALTER TABLE [dbo].[CashVouchers] WITH CHECK
+                    ADD CONSTRAINT [CK_CashVouchers_PartyType]
+                        CHECK ([PartyType] IN (1, 2, 3, 4, 5));
+                """);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropForeignKey(
-                name: "FK_CashVouchers_Employees_CompanyId_EmployeeId",
-                table: "CashVouchers");
+            migrationBuilder.Sql(
+                """
+                IF OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyShape]', N'C') IS NOT NULL
+                    ALTER TABLE [dbo].[CashVouchers] DROP CONSTRAINT [CK_CashVouchers_PartyShape];
 
-            migrationBuilder.DropIndex(
-                name: "IX_CashVouchers_CompanyId_EmployeeId_VoucherDate_Id",
-                table: "CashVouchers");
+                IF OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyType]', N'C') IS NOT NULL
+                    ALTER TABLE [dbo].[CashVouchers] DROP CONSTRAINT [CK_CashVouchers_PartyType];
 
-            migrationBuilder.DropCheckConstraint(
-                name: "CK_CashVouchers_PartyShape",
-                table: "CashVouchers");
+                IF EXISTS (
+                    SELECT 1
+                    FROM sys.foreign_keys
+                    WHERE [name] = N'FK_CashVouchers_Employees_CompanyId_EmployeeId'
+                      AND [parent_object_id] = OBJECT_ID(N'[dbo].[CashVouchers]'))
+                    ALTER TABLE [dbo].[CashVouchers]
+                        DROP CONSTRAINT [FK_CashVouchers_Employees_CompanyId_EmployeeId];
 
-            migrationBuilder.DropCheckConstraint(
-                name: "CK_CashVouchers_PartyType",
-                table: "CashVouchers");
+                IF EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE [name] = N'IX_CashVouchers_CompanyId_EmployeeId_VoucherDate_Id'
+                      AND [object_id] = OBJECT_ID(N'[dbo].[CashVouchers]'))
+                    DROP INDEX [IX_CashVouchers_CompanyId_EmployeeId_VoucherDate_Id]
+                        ON [dbo].[CashVouchers];
 
-            migrationBuilder.DropColumn(
-                name: "EmployeeId",
-                table: "CashVouchers");
+                IF COL_LENGTH(N'dbo.CashVouchers', N'EmployeeId') IS NOT NULL
+                    ALTER TABLE [dbo].[CashVouchers] DROP COLUMN [EmployeeId];
 
-            migrationBuilder.AddCheckConstraint(
-                name: "CK_CashVouchers_PartyShape",
-                table: "CashVouchers",
-                sql: "([PartyType] = 1 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 2 AND [BusinessPartnerId] IS NOT NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 3 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NOT NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 4 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NOT NULL)");
+                IF OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyShape]', N'C') IS NULL
+                    ALTER TABLE [dbo].[CashVouchers] WITH CHECK
+                    ADD CONSTRAINT [CK_CashVouchers_PartyShape] CHECK (
+                        ([PartyType] = 1 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR
+                        ([PartyType] = 2 AND [BusinessPartnerId] IS NOT NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR
+                        ([PartyType] = 3 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NOT NULL AND [ExternalPartyName] IS NULL) OR
+                        ([PartyType] = 4 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NOT NULL));
 
-            migrationBuilder.AddCheckConstraint(
-                name: "CK_CashVouchers_PartyType",
-                table: "CashVouchers",
-                sql: "[PartyType] IN (1, 2, 3, 4)");
+                IF OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyType]', N'C') IS NULL
+                    ALTER TABLE [dbo].[CashVouchers] WITH CHECK
+                    ADD CONSTRAINT [CK_CashVouchers_PartyType]
+                        CHECK ([PartyType] IN (1, 2, 3, 4));
+                """);
         }
     }
 }

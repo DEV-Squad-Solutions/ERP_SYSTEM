@@ -72,7 +72,7 @@ public sealed class UsersController(IUserService userService) : ApiControllerBas
         }
 
         return result.IsFailure
-            ? this.ToProblem(result.Error)
+            ? this.ToProblem(result.Errors)
             : CreatedAtAction(
                 nameof(GetById),
                 new { id = result.Value.Id },

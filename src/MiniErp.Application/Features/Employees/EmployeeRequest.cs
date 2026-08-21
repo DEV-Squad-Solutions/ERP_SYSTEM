@@ -5,16 +5,14 @@ using System.Text;
 
 namespace MiniErp.Application.Features.Employees
 {
-    public record EmployeeRequest(
-        string Name,
-        string? JobTitle,
-        string? PhoneNumber,
-        string? Email,
-        string? Address,
-        EmployeeType Type,
-        decimal? Salary,
-        int? RequiredWorkingDaysPerMonth=26,
-        bool IsActive = true
+    public record EmployeeFilterRequest(
+    string? Search = null,
+    string? Name = null,
+    string? Code = null,
+    string? JobTitle = null,
+    decimal? MinSalary = null,
+    decimal? MaxSalary = null,
+    EmployeeType? EmployeeType = null
     );
     public record EmployeeCreateRequest(
         string Name,
