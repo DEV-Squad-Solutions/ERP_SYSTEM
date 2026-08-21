@@ -337,6 +337,81 @@ public sealed class CashManagementValidatorTests
                 nameof(DriverTripBulkCostUpdateRequest.Items));
     }
 
+    [Fact]
+    public void CashVoucherBulkValidator_RejectsDuplicateIdsAndInvalidTypedItems()
+    {
+        var validator = new CashVoucherBulkRequestValidator();
+        var result = validator.Validate(
+            new CashVoucherBulkRequest(
+            [
+                new CashVoucherBulkAddItemRequest(
+                    Voucher: null),
+                new CashVoucherBulkUpdateItemRequest(
+                    Id: 7,
+                    RowVersion: new byte[8],
+                    Voucher: CreateBulkVoucher()),
+                new CashVoucherBulkDeleteItemRequest(
+                    Id: 7,
+                    RowVersion: new byte[8]),
+                new CashVoucherBulkUpdateItemRequest(
+                    Id: 0,
+                    RowVersion: null,
+                    Voucher: null)
+            ]));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName == nameof(CashVoucherBulkRequest.Items));
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName.EndsWith(
+                nameof(CashVoucherBulkUpdateItemRequest.Id),
+                StringComparison.Ordinal));
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName.EndsWith(
+                nameof(CashVoucherBulkAddItemRequest.Voucher),
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void CashVoucherBulkValidator_RejectsMoreThanMaximumItems()
+    {
+        var items = Enumerable.Range(
+                0,
+                CashVoucherBulkRequestValidator.MaximumItems + 1)
+            .Select(index =>
+                new CashVoucherBulkDeleteItemRequest(
+                    Id: index + 1,
+                    RowVersion: new byte[8]))
+            .ToArray();
+
+        var result = new CashVoucherBulkRequestValidator().Validate(
+            new CashVoucherBulkRequest(items));
+
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName == nameof(CashVoucherBulkRequest.Items));
+    }
+
+    private static CashVoucherBulkVoucherRequest CreateBulkVoucher() =>
+        new(
+            VoucherDate: new DateOnly(2026, 7, 27),
+            Direction: CashDirection.Receipt,
+            CashboxId: 1,
+            CashMovementTypeId: 3,
+            EmployeeId: null,
+            BusinessPartnerId: null,
+            DriverId: null,
+            DriverTripId: null,
+            ExternalPartyName: null,
+            Amount: 10m,
+            ReferenceNumber: null,
+            Description: null,
+            Notes: null,
+            ExchangeRate: null);
+
     private static CashVoucherUpdateRequest CreateVoucher(
         int? employeeId,
         int? partnerId,

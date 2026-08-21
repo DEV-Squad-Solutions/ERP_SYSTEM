@@ -199,6 +199,78 @@ public sealed class CashVoucherService(
         return Result<CashVoucherResponse>.Success(response);
     }
 
+    public async Task<Result<CashVoucherBulkResponse>> BulkAsync(
+        CashVoucherBulkRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var validationResult = new CashVoucherBulkRequestValidator()
+            .Validate(request);
+        if (!validationResult.IsValid)
+        {
+            return Result<CashVoucherBulkResponse>.Failure(
+                validationResult.Errors.Select(error =>
+                    Error.Validation(
+                        "CashVouchers.BulkValidation",
+                        error.ErrorMessage,
+                        error.PropertyName)));
+        }
+
+        // A bulk request is an independent unit of work. Clearing snapshots from
+        // earlier CRUD calls ensures RowVersion checks use the database value.
+        dbContext.ChangeTracker.Clear();
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        var results = new List<CashVoucherBulkItemResponse>();
+
+        for (var index = 0; index < request.Items!.Count; index++)
+        {
+            var item = request.Items[index];
+            Result<CashVoucherBulkItemResponse> itemResult = item switch
+            {
+                CashVoucherBulkAddItemRequest add => await AddBulkItemAsync(
+                    add,
+                    cancellationToken),
+                CashVoucherBulkUpdateItemRequest update => await UpdateBulkItemAsync(
+                    update,
+                    cancellationToken),
+                CashVoucherBulkDeleteItemRequest delete => await DeleteBulkItemAsync(
+                    delete,
+                    cancellationToken),
+                _ => Result<CashVoucherBulkItemResponse>.Failure(
+                    Error.Validation(
+                        "CashVouchers.BulkInvalidAction",
+                        "نوع العملية المرسل غير صحيح."))
+            };
+
+            if (itemResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<CashVoucherBulkResponse>.Failure(
+                    itemResult.Errors.Select(error =>
+                        BulkItemFailure(
+                            index,
+                            error,
+                            isVoucherPayloadError:
+                                item is CashVoucherBulkAddItemRequest or
+                                    CashVoucherBulkUpdateItemRequest)));
+            }
+
+            results.Add(itemResult.Value);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+
+        var summary = new CashVoucherBulkSummary(
+            Added: results.Count(item => item.Action == CashVoucherBulkAction.Add),
+            Updated: results.Count(item => item.Action == CashVoucherBulkAction.Update),
+            Deleted: results.Count(item => item.Action == CashVoucherBulkAction.Delete));
+        return Result<CashVoucherBulkResponse>.Success(
+            new CashVoucherBulkResponse(
+                Items: results,
+                Summary: summary));
+    }
+
     public async Task<Result<CashVoucherResponse>> UpdateAsync(
         int id,
         CashVoucherUpdateRequest request,
@@ -356,9 +428,242 @@ public sealed class CashVoucherService(
         }
     }
 
+    private async Task<Result<CashVoucherBulkItemResponse>> AddBulkItemAsync(
+        CashVoucherBulkAddItemRequest item,
+        CancellationToken cancellationToken)
+    {
+        var request = ToUpdateRequest(item.Voucher!, rowVersion: null);
+        var preparation = await PrepareAsync(
+            request,
+            currentVoucher: null,
+            cancellationToken);
+        if (preparation.IsFailure)
+        {
+            return Result<CashVoucherBulkItemResponse>.Failure(
+                preparation.Errors);
+        }
+
+        var voucher = new CashVoucher
+        {
+            CompanyId = companyId,
+            VoucherNumber = await GenerateVoucherNumberAsync(
+                request.Direction,
+                cancellationToken)
+        };
+        request.Adapt(voucher);
+        voucher.PartyType = preparation.Value.PartyType;
+        await ApplyPreparationAsync(voucher, preparation.Value, cancellationToken);
+        voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
+
+        dbContext.CashVouchers.Add(voucher);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await SynchronizePartnerMovementAsync(
+            voucher,
+            preparation.Value.BusinessPartner is not null,
+            cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var response = await ProjectResponseQuery(voucher.Id)
+            .AsNoTracking()
+            .FirstAsync(cancellationToken);
+        return Result<CashVoucherBulkItemResponse>.Success(
+            new CashVoucherBulkItemResponse(
+                Action: CashVoucherBulkAction.Add,
+                Status: "Added",
+                Id: voucher.Id,
+                Voucher: response));
+    }
+
+    private async Task<Result<CashVoucherBulkItemResponse>> UpdateBulkItemAsync(
+        CashVoucherBulkUpdateItemRequest item,
+        CancellationToken cancellationToken)
+    {
+        var id = item.Id;
+        var voucher = await dbContext.CashVouchers.FirstOrDefaultAsync(
+            entity =>
+                entity.Id == id &&
+                entity.CompanyId == companyId,
+            cancellationToken);
+        if (voucher is null)
+        {
+            return Result<CashVoucherBulkItemResponse>.Failure(
+                NotFound(id));
+        }
+
+        if (!voucher.RowVersion.SequenceEqual(item.RowVersion!))
+        {
+            return Result<CashVoucherBulkItemResponse>.Failure(Concurrency());
+        }
+
+        if (voucher.InvoiceId.HasValue)
+        {
+            return Result<CashVoucherBulkItemResponse>.Failure(
+                InvoiceGeneratedReadOnly());
+        }
+
+        if (voucher.CashboxTransferId.HasValue)
+        {
+            return Result<CashVoucherBulkItemResponse>.Failure(
+                TransferGeneratedReadOnly());
+        }
+
+        var request = ToUpdateRequest(item.Voucher!, item.RowVersion);
+        var preparation = await PrepareAsync(
+            request,
+            voucher,
+            cancellationToken);
+        if (preparation.IsFailure)
+        {
+            return Result<CashVoucherBulkItemResponse>.Failure(
+                preparation.Errors);
+        }
+
+        var entry = dbContext.Entry(voucher);
+        entry.Property(entity => entity.RowVersion).OriginalValue =
+            item.RowVersion!;
+        request.Adapt(voucher);
+        voucher.PartyType = preparation.Value.PartyType;
+        await ApplyPreparationAsync(voucher, preparation.Value, cancellationToken);
+        voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
+        entry.Property(entity => entity.LastModifiedAt).IsModified = true;
+
+        try
+        {
+            await SynchronizePartnerMovementAsync(
+                voucher,
+                preparation.Value.BusinessPartner is not null,
+                cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            dbContext.ChangeTracker.Clear();
+            return Result<CashVoucherBulkItemResponse>.Failure(Concurrency());
+        }
+
+        var response = await ProjectResponseQuery(voucher.Id)
+            .AsNoTracking()
+            .FirstAsync(cancellationToken);
+        return Result<CashVoucherBulkItemResponse>.Success(
+            new CashVoucherBulkItemResponse(
+                Action: CashVoucherBulkAction.Update,
+                Status: "Updated",
+                Id: voucher.Id,
+                Voucher: response));
+    }
+
+    private async Task<Result<CashVoucherBulkItemResponse>> DeleteBulkItemAsync(
+        CashVoucherBulkDeleteItemRequest item,
+        CancellationToken cancellationToken)
+    {
+        var id = item.Id;
+        var voucher = await dbContext.CashVouchers.FirstOrDefaultAsync(
+            entity =>
+                entity.Id == id &&
+                entity.CompanyId == companyId,
+            cancellationToken);
+        if (voucher is null)
+        {
+            return Result<CashVoucherBulkItemResponse>.Failure(
+                NotFound(id));
+        }
+
+        if (!voucher.RowVersion.SequenceEqual(item.RowVersion!))
+        {
+            return Result<CashVoucherBulkItemResponse>.Failure(Concurrency());
+        }
+
+        if (voucher.InvoiceId.HasValue)
+        {
+            return Result<CashVoucherBulkItemResponse>.Failure(
+                InvoiceGeneratedReadOnly());
+        }
+
+        if (voucher.CashboxTransferId.HasValue)
+        {
+            return Result<CashVoucherBulkItemResponse>.Failure(
+                TransferGeneratedReadOnly());
+        }
+
+        var balanceError = await ValidateFinalBalancesAsync(
+            voucher,
+            proposedCashboxId: null,
+            proposedDirection: null,
+            proposedAmount: null,
+            cancellationToken);
+        if (balanceError is not null)
+        {
+            return Result<CashVoucherBulkItemResponse>.Failure(balanceError);
+        }
+
+        var entry = dbContext.Entry(voucher);
+        entry.Property(entity => entity.RowVersion).OriginalValue =
+            item.RowVersion!;
+
+        try
+        {
+            var partnerMovements = await dbContext.BusinessPartnerMovements
+                .Where(movement =>
+                    movement.CompanyId == companyId &&
+                    movement.CashVoucherId == voucher.Id)
+                .ToListAsync(cancellationToken);
+            dbContext.BusinessPartnerMovements.RemoveRange(partnerMovements);
+            dbContext.CashVouchers.Remove(voucher);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            dbContext.ChangeTracker.Clear();
+            return Result<CashVoucherBulkItemResponse>.Failure(Concurrency());
+        }
+
+        return Result<CashVoucherBulkItemResponse>.Success(
+            new CashVoucherBulkItemResponse(
+                Action: CashVoucherBulkAction.Delete,
+                Status: "Deleted",
+                Id: voucher.Id,
+                Voucher: null));
+    }
+
+    private async Task<string> GenerateVoucherNumberAsync(
+        CashDirection direction,
+        CancellationToken cancellationToken)
+    {
+        var prefix = direction == CashDirection.Receipt ? "RCV" : "PAY";
+        return await EntityIdentifierGenerator.GenerateUniqueAsync(
+            dbContext,
+            prefix,
+            companyId,
+            dbContext.CashVouchers
+                .IgnoreQueryFilters()
+                .Where(entity => entity.CompanyId == companyId)
+                .Select(entity => entity.VoucherNumber),
+            cancellationToken);
+    }
+
+    private static CashVoucherUpdateRequest ToUpdateRequest(
+        CashVoucherBulkVoucherRequest request,
+        byte[]? rowVersion) =>
+        new(
+            VoucherDate: request.VoucherDate,
+            Direction: request.Direction,
+            CashboxId: request.CashboxId,
+            CashMovementTypeId: request.CashMovementTypeId,
+            EmployeeId: request.EmployeeId,
+            BusinessPartnerId: request.BusinessPartnerId,
+            DriverId: request.DriverId,
+            DriverTripId: request.DriverTripId,
+            ExternalPartyName: request.ExternalPartyName,
+            Amount: request.Amount,
+            ReferenceNumber: request.ReferenceNumber,
+            Description: request.Description,
+            Notes: request.Notes,
+            RowVersion: rowVersion,
+            ExchangeRate: request.ExchangeRate);
+
     private async Task<Result<VoucherPreparation>> PrepareAsync(
         CashVoucherUpdateRequest request,
-        CashVoucher currentVoucher,
+        CashVoucher? currentVoucher,
         CancellationToken cancellationToken)
     {
         if (!request.CashboxId.HasValue ||

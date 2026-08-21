@@ -72,6 +72,59 @@ public sealed class CashVouchersController(
     }
 
     [Authorize(Roles = "Admin")]
+    [HttpPost("bulk")]
+    [ProducesResponseType<CashVoucherBulkResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Bulk(
+        CashVoucherBulkRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await cashVoucherService.BulkAsync(
+            request,
+            cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Errors);
+        }
+
+        var operationId = Guid.NewGuid();
+        foreach (var item in result.Value.Items)
+        {
+            TryEnqueueRealtime<CashVouchersRealtimeJob>(
+                item.Status,
+                item.Id,
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+        }
+
+        for (var index = 0; index < request.Items!.Count; index++)
+        {
+            var item = request.Items[index];
+            var exchangeRate = item switch
+            {
+                CashVoucherBulkAddItemRequest add => add.Voucher?.ExchangeRate,
+                CashVoucherBulkUpdateItemRequest update =>
+                    update.Voucher?.ExchangeRate,
+                _ => null
+            };
+            if (!exchangeRate.HasValue)
+            {
+                continue;
+            }
+
+            var response = result.Value.Items[index];
+            TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
+                "Updated",
+                $"{response.Voucher!.Currency}:{response.Voucher.VoucherDate}",
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+        }
+
+        return Ok(result.Value);
+    }
+
+    [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}")]
     [ProducesResponseType<CashVoucherResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

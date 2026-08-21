@@ -128,4 +128,18 @@ public static class CashVoucherErrors
         Error.Conflict(
             "CashVouchers.InsufficientCashboxBalance",
             $"الرصيد المتاح في صندوق النقدية رقم {cashboxId} لا يسمح بهذه العملية.");
+
+    public static Error BulkItemFailure(
+        int index,
+        Error error,
+        bool isVoucherPayloadError) =>
+        new(
+            Code: error.Code,
+            Description: error.Description,
+            Type: error.Type,
+            FieldName: string.IsNullOrWhiteSpace(error.FieldName)
+                ? $"Items[{index}]"
+                : isVoucherPayloadError
+                    ? $"Items[{index}].Voucher.{error.FieldName}"
+                    : $"Items[{index}].{error.FieldName}");
 }

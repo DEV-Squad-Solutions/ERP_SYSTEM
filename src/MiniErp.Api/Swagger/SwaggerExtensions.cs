@@ -33,6 +33,8 @@ public static class SwaggerExtensions
             });
 
             options.SchemaFilter<EnumSchemaDocumentationFilter>();
+            options.SchemaFilter<CashVoucherBulkPolymorphismSchemaFilter>();
+            options.UseOneOfForPolymorphism();
             options.OperationFilter<AllowAnonymousOperationFilter>();
             options.OperationFilter<AuthenticationSwaggerDocumentation>(
                 configuration);

@@ -18,6 +18,10 @@ public interface ICashVoucherService
         CashVoucherRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<Result<CashVoucherBulkResponse>> BulkAsync(
+        CashVoucherBulkRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<Result<CashVoucherResponse>> UpdateAsync(
         int id,
         CashVoucherUpdateRequest request,

@@ -828,6 +828,239 @@ public sealed class CashVoucherServiceTests
         Assert.Equal(20m, persisted.Value.Amount);
     }
 
+    [Fact]
+    public async Task BulkCreatesCompletedPartnerVoucherAndMovement()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+
+        var result = await service.BulkAsync(
+            new CashVoucherBulkRequest(
+            [
+                new CashVoucherBulkAddItemRequest(
+                    Voucher: CreateBulkVoucher(
+                        direction: CashDirection.Receipt,
+                        movementTypeId: 1,
+                        partnerId: 1,
+                        amount: 125m))
+            ]));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value.Summary.Added);
+        var item = Assert.Single(result.Value.Items);
+        Assert.Equal("Added", item.Status);
+        Assert.NotNull(item.Voucher);
+        Assert.False(item.Voucher!.IsDraft);
+        Assert.Equal(CashPartyType.Partner, item.Voucher.PartyType);
+        Assert.Single(
+            await database.Context.BusinessPartnerMovements
+                .Where(movement => movement.CashVoucherId == item.Id)
+                .ToListAsync());
+    }
+
+    [Fact]
+    public async Task BulkAppliesMixedAddUpdateAndDeleteAndReturnsCounts()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var updated = await AddVoucherAsync(
+            service,
+            CreateRequest(
+                "BULK-UPDATE",
+                CashDirection.Receipt,
+                movementTypeId: 3,
+                amount: 10m));
+        var deleted = await AddVoucherAsync(
+            service,
+            CreateRequest(
+                "BULK-DELETE",
+                CashDirection.Receipt,
+                movementTypeId: 3,
+                amount: 15m));
+
+        var result = await service.BulkAsync(
+            new CashVoucherBulkRequest(
+            [
+                new CashVoucherBulkAddItemRequest(
+                    Voucher: CreateBulkVoucher(
+                        direction: CashDirection.Payment,
+                        movementTypeId: 4,
+                        amount: 20m)),
+                new CashVoucherBulkUpdateItemRequest(
+                    Id: updated.Value.Id,
+                    RowVersion: updated.Value.RowVersion,
+                    Voucher: CreateBulkVoucher(
+                        direction: CashDirection.Receipt,
+                        movementTypeId: 3,
+                        amount: 30m)),
+                new CashVoucherBulkDeleteItemRequest(
+                    Id: deleted.Value.Id,
+                    RowVersion: deleted.Value.RowVersion)
+            ]));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value.Summary.Added);
+        Assert.Equal(1, result.Value.Summary.Updated);
+        Assert.Equal(1, result.Value.Summary.Deleted);
+        Assert.Collection(
+            result.Value.Items,
+            added => Assert.Equal("Added", added.Status),
+            changed => Assert.Equal(30m, changed.Voucher!.Amount),
+            removed => Assert.Null(removed.Voucher));
+        Assert.Empty(
+            await database.Context.CashVouchers
+                .Where(voucher => voucher.Id == deleted.Value.Id)
+                .ToListAsync());
+    }
+
+    [Fact]
+    public async Task BulkFailureRollsBackEarlierItemsAndReportsItemIndex()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+
+        var result = await service.BulkAsync(
+            new CashVoucherBulkRequest(
+            [
+                new CashVoucherBulkAddItemRequest(
+                    Voucher: CreateBulkVoucher(
+                        direction: CashDirection.Receipt,
+                        movementTypeId: 3,
+                        amount: 10m)),
+                new CashVoucherBulkUpdateItemRequest(
+                    Id: 9999,
+                    RowVersion: new byte[8],
+                    Voucher: CreateBulkVoucher(
+                        direction: CashDirection.Receipt,
+                        movementTypeId: 3,
+                        amount: 10m))
+            ]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("CashVouchers.NotFound", result.Error.Code);
+        Assert.Equal("Items[1]", result.Error.FieldName);
+        Assert.Empty(await database.Context.CashVouchers.ToListAsync());
+    }
+
+    [Fact]
+    public async Task BulkRejectsStaleRowVersionAndPreservesVoucher()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var created = await AddVoucherAsync(
+            service,
+            CreateRequest(
+                "BULK-STALE",
+                CashDirection.Receipt,
+                movementTypeId: 3,
+                amount: 10m));
+        await using var winnerContext = database.CreateAdditionalContext();
+        var winnerService = database.CreateVoucherService(
+            companyId: 1,
+            context: winnerContext);
+        var winner = await winnerService.UpdateAsync(
+            created.Value.Id,
+            ToUpdateRequest(created.Value, amount: 20m));
+
+        var result = await service.BulkAsync(
+            new CashVoucherBulkRequest(
+            [
+                new CashVoucherBulkUpdateItemRequest(
+                    Id: created.Value.Id,
+                    RowVersion: created.Value.RowVersion,
+                    Voucher: CreateBulkVoucher(
+                        direction: CashDirection.Receipt,
+                        movementTypeId: 3,
+                        amount: 30m))
+            ]));
+
+        Assert.True(winner.IsSuccess);
+        Assert.True(result.IsFailure);
+        Assert.Equal("CashVouchers.Concurrency", result.Error.Code);
+        Assert.Equal("Items[0]", result.Error.FieldName);
+        Assert.Equal(
+            20m,
+            (await service.GetByIdAsync(created.Value.Id)).Value.Amount);
+    }
+
+    [Fact]
+    public async Task BulkRejectsOtherCompanyCashbox()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+
+        var result = await service.BulkAsync(
+            new CashVoucherBulkRequest(
+            [
+                new CashVoucherBulkAddItemRequest(
+                    Voucher: CreateBulkVoucher(
+                        direction: CashDirection.Receipt,
+                        cashboxId: 4,
+                        movementTypeId: 3,
+                        amount: 10m))
+            ]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("CashVouchers.CashboxNotFound", result.Error.Code);
+        Assert.Equal("Items[0].Voucher.CashboxId", result.Error.FieldName);
+    }
+
+    [Fact]
+    public async Task BulkRejectsInvoiceGeneratedVoucherDelete()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO CashVouchers (
+                Id, CompanyId, InvoiceId, VoucherNumber, VoucherDate,
+                Direction, CashboxId, CashMovementTypeId, PartyType,
+                BusinessPartnerId, Amount, Currency, LastModifiedAt,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                101, 1, 1, 'INV-BULK-1', '2026-07-25',
+                1, 1, 1, 2,
+                1, 25, 1, '2026-07-25',
+                'test', '2026-07-25', 'test', 0);
+            """);
+        var service = database.CreateVoucherService(companyId: 1);
+        var generated = await service.GetByIdAsync(101);
+
+        var result = await service.BulkAsync(
+            new CashVoucherBulkRequest(
+            [
+                new CashVoucherBulkDeleteItemRequest(
+                    Id: 101,
+                    RowVersion: generated.Value.RowVersion)
+            ]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("CashVouchers.InvoiceGeneratedReadOnly", result.Error.Code);
+        Assert.Equal("Items[0]", result.Error.FieldName);
+    }
+
+    private static CashVoucherBulkVoucherRequest CreateBulkVoucher(
+        CashDirection direction,
+        int cashboxId = 1,
+        int movementTypeId = 3,
+        int? partnerId = null,
+        decimal amount = 10m,
+        decimal? exchangeRate = null) =>
+        new(
+            VoucherDate: new DateOnly(2026, 7, 27),
+            Direction: direction,
+            CashboxId: cashboxId,
+            CashMovementTypeId: movementTypeId,
+            EmployeeId: null,
+            BusinessPartnerId: partnerId,
+            DriverId: null,
+            DriverTripId: null,
+            ExternalPartyName: null,
+            Amount: amount,
+            ReferenceNumber: "BULK",
+            Description: "Bulk voucher",
+            Notes: "Bulk notes",
+            ExchangeRate: exchangeRate);
+
     private static VoucherTestRequest CreateRequest(
         string number,
         CashDirection direction,
