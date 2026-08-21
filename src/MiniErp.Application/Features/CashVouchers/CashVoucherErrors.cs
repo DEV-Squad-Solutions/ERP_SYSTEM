@@ -75,7 +75,24 @@ public static class CashVoucherErrors
         Error.Conflict(
             "CashVouchers.MovementTypeForPartnerOnly",
             "نوع الحركة النقدية المختار مخصص للعملاء أو الموردين فقط.",
-            nameof(CashVoucherUpdateRequest.PartyType));
+            nameof(CashVoucherUpdateRequest.BusinessPartnerId));
+
+    public static Error PartySelectionMustBeExclusive() =>
+        Error.Validation(
+            "CashVouchers.PartySelectionMustBeExclusive",
+            "اختر طرفاً واحداً فقط للسند.");
+
+    public static Error DriverTripRequiresDriver() =>
+        Error.Validation(
+            "CashVouchers.DriverTripRequiresDriver",
+            "اختر السائق قبل اختيار الرحلة.",
+            nameof(CashVoucherUpdateRequest.DriverTripId));
+
+    public static Error EmployeeNotFound(int? id) =>
+        Error.NotFound(
+            "CashVouchers.EmployeeNotFound",
+            $"لم يتم العثور على الموظف رقم {id}.",
+            nameof(CashVoucherUpdateRequest.EmployeeId));
 
     public static Error PartnerNotFound(int? id) =>
         Error.NotFound(

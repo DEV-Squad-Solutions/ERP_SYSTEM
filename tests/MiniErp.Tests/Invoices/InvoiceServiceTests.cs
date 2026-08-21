@@ -6133,6 +6133,7 @@ public sealed class InvoiceServiceTests
                     CashboxId INTEGER NOT NULL,
                     CashMovementTypeId INTEGER NOT NULL,
                     PartyType INTEGER NOT NULL,
+                    EmployeeId INTEGER NULL,
                     BusinessPartnerId INTEGER NULL,
                     DriverId INTEGER NULL,
                     DriverTripId INTEGER NULL,

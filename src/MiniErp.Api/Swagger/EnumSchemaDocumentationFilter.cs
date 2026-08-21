@@ -55,10 +55,11 @@ public sealed class EnumSchemaDocumentationFilter : ISchemaFilter
 
         if (enumType == typeof(CashPartyType))
         {
-            return "Controls the party fields shown by the frontend: None uses " +
-                   "no party field; Partner requires businessPartnerId; Driver " +
-                   "requires driverId and allows an optional driverTripId; Other " +
-                   "requires externalPartyName.";
+            return "Returned party classification. The server derives it from " +
+                   "the update request: Employee uses employeeId, Partner uses " +
+                   "businessPartnerId, Driver uses driverId and allows an optional " +
+                   "driverTripId, Other uses externalPartyName, and None uses no " +
+                   "party field.";
         }
 
         return null;

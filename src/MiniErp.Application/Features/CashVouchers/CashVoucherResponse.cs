@@ -13,6 +13,8 @@ public sealed record CashVoucherResponse(
     int? CashMovementTypeId,
     string? CashMovementTypeName,
     CashPartyType PartyType,
+    int? EmployeeId,
+    string? EmployeeName,
     int? BusinessPartnerId,
     string? BusinessPartnerName,
     int? DriverId,

@@ -50,42 +50,38 @@ public sealed class CashVoucherUpdateRequestValidator
             .GreaterThan(0)
             .WithMessage("اختر نوع الحركة لاستكمال السند.");
 
-        RuleFor(request => request.PartyType)
-            .NotNull()
-            .Must(value => value.HasValue && Enum.IsDefined(value.Value))
-            .WithMessage("اختر نوع الطرف لاستكمال السند.");
+        RuleFor(request => request.EmployeeId)
+            .GreaterThan(0)
+            .When(request => request.EmployeeId.HasValue);
 
         RuleFor(request => request.BusinessPartnerId)
-            .NotNull()
             .GreaterThan(0)
-            .When(request => request.PartyType == CashPartyType.Partner);
-        RuleFor(request => request.BusinessPartnerId)
-            .Null()
-            .When(request => request.PartyType != CashPartyType.Partner);
+            .When(request => request.BusinessPartnerId.HasValue);
 
         RuleFor(request => request.DriverId)
-            .NotNull()
             .GreaterThan(0)
-            .When(request => request.PartyType == CashPartyType.Driver);
-        RuleFor(request => request.DriverId)
-            .Null()
-            .When(request => request.PartyType != CashPartyType.Driver);
+            .When(request => request.DriverId.HasValue);
 
         RuleFor(request => request.DriverTripId)
             .GreaterThan(0)
             .When(request => request.DriverTripId.HasValue);
-        RuleFor(request => request.DriverTripId)
-            .Null()
-            .When(request => request.PartyType != CashPartyType.Driver);
+        RuleFor(request => request)
+            .Must(request =>
+                !request.DriverTripId.HasValue || request.DriverId.HasValue)
+            .WithMessage("اختر السائق قبل اختيار الرحلة.")
+            .WithName(nameof(CashVoucherUpdateRequest.DriverTripId));
 
         RuleFor(request => request.ExternalPartyName)
-            .NotEmpty()
             .MaximumLength(
                 CashVoucherRequest.ExternalPartyNameMaximumLength)
-            .When(request => request.PartyType == CashPartyType.Other);
-        RuleFor(request => request.ExternalPartyName)
-            .Null()
-            .When(request => request.PartyType != CashPartyType.Other);
+            .Must(name => name is null || !string.IsNullOrWhiteSpace(name))
+            .WithMessage("اسم الطرف الخارجي لا يمكن أن يكون فارغاً.");
+
+        RuleFor(request => request)
+            .Must(HasAtMostOneParty)
+            .WithMessage("اختر طرفاً واحداً فقط للسند.")
+            .OverridePropertyName(
+                nameof(CashVoucherUpdateRequest.EmployeeId));
 
         RuleFor(request => request.Amount)
             .GreaterThan(0)
@@ -111,5 +107,16 @@ public sealed class CashVoucherUpdateRequestValidator
             .Must(rowVersion => rowVersion is { Length: 8 })
             .WithMessage(
                 "يجب إرسال إصدار سند النقدية الحالي للتعديل.");
+    }
+
+    private static bool HasAtMostOneParty(CashVoucherUpdateRequest request)
+    {
+        var selectedPartyCount =
+            (request.EmployeeId.HasValue ? 1 : 0) +
+            (request.BusinessPartnerId.HasValue ? 1 : 0) +
+            (request.DriverId.HasValue ? 1 : 0) +
+            (!string.IsNullOrWhiteSpace(request.ExternalPartyName) ? 1 : 0);
+
+        return selectedPartyCount <= 1;
     }
 }

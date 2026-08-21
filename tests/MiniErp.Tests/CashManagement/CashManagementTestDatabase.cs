@@ -194,6 +194,33 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 IsDeleted INTEGER NOT NULL
             );
 
+            CREATE TABLE Employees (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                Code TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                JobTitle TEXT NULL,
+                PhoneNumber TEXT NULL,
+                Email TEXT NULL,
+                Address TEXT NULL,
+                Type INTEGER NOT NULL,
+                DailySalary NUMERIC NULL,
+                MonthlySalary NUMERIC NULL,
+                RequiredWorkingDaysPerMonth INTEGER NULL,
+                LastDayOfReceivingSalary TEXT NULL,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
             CREATE TABLE Countries (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 Code TEXT NOT NULL,
@@ -482,6 +509,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 CashboxId INTEGER NULL,
                 CashMovementTypeId INTEGER NULL,
                 PartyType INTEGER NOT NULL,
+                EmployeeId INTEGER NULL,
                 BusinessPartnerId INTEGER NULL,
                 DriverId INTEGER NULL,
                 DriverTripId INTEGER NULL,
@@ -506,6 +534,19 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 DeletedOn TEXT NULL,
                 DeletedByPc TEXT NULL,
                 IsDeleted INTEGER NOT NULL,
+                CONSTRAINT CK_CashVouchers_PartyType CHECK (
+                    PartyType IN (1, 2, 3, 4, 5)),
+                CONSTRAINT CK_CashVouchers_PartyShape CHECK (
+                    (PartyType = 1 AND EmployeeId IS NULL AND BusinessPartnerId IS NULL AND
+                     DriverId IS NULL AND DriverTripId IS NULL AND ExternalPartyName IS NULL) OR
+                    (PartyType = 2 AND EmployeeId IS NULL AND BusinessPartnerId IS NOT NULL AND
+                     DriverId IS NULL AND DriverTripId IS NULL AND ExternalPartyName IS NULL) OR
+                    (PartyType = 3 AND EmployeeId IS NULL AND BusinessPartnerId IS NULL AND
+                     DriverId IS NOT NULL AND ExternalPartyName IS NULL) OR
+                    (PartyType = 4 AND EmployeeId IS NULL AND BusinessPartnerId IS NULL AND
+                     DriverId IS NULL AND DriverTripId IS NULL AND ExternalPartyName IS NOT NULL) OR
+                    (PartyType = 5 AND EmployeeId IS NOT NULL AND BusinessPartnerId IS NULL AND
+                     DriverId IS NULL AND DriverTripId IS NULL AND ExternalPartyName IS NULL)),
                 CONSTRAINT CK_CashVouchers_PostingReferencesTogether CHECK (
                     CashMovementTypeId IS NULL OR CashboxId IS NOT NULL),
                 CONSTRAINT CK_CashVouchers_TransferShape CHECK (
@@ -522,6 +563,9 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             CREATE UNIQUE INDEX IX_CashVouchers_Company_Transfer_Direction
             ON CashVouchers (CompanyId, CashboxTransferId, Direction)
             WHERE CashboxTransferId IS NOT NULL AND IsDeleted = 0;
+
+            CREATE INDEX IX_CashVouchers_Company_Employee_Date
+            ON CashVouchers (CompanyId, EmployeeId, VoucherDate, Id);
 
             CREATE TABLE InvoicePayments (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -654,6 +698,17 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 (2, 1, 'DRV-2', 'Driver Two', 'LIC-2', 1,
                  'test', '2026-01-01', 'test', 0),
                 (3, 2, 'DRV-3', 'Other Company Driver', 'LIC-3', 1,
+                 'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO Employees (
+                Id, CompanyId, Code, Name, Type, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 'EMP-1', 'Employee One', 1, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (2, 1, 'EMP-2', 'Inactive Employee', 1, 0,
+                 'test', '2026-01-01', 'test', 0),
+                (3, 2, 'EMP-3', 'Other Company Employee', 1, 1,
                  'test', '2026-01-01', 'test', 0);
 
             INSERT INTO Countries (

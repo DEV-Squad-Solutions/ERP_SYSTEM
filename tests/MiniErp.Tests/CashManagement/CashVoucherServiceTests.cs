@@ -152,7 +152,7 @@ public sealed class CashVoucherServiceTests
                     created.Value.Direction,
                     CashboxId: 1,
                     CashMovementTypeId: 3,
-                    PartyType: CashPartyType.None,
+                    EmployeeId: null,
                     BusinessPartnerId: null,
                     DriverId: null,
                     DriverTripId: null,
@@ -351,6 +351,163 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
+    public async Task EmployeeVoucherDerivesPartyAndMapsEmployeeFields()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var draft = await service.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 7, 27),
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                Amount: 75m,
+                Description: "Employee cash payment"));
+
+        var result = await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: draft.Value.VoucherDate,
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                CashMovementTypeId: 4,
+                EmployeeId: 1,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: 75m,
+                ReferenceNumber: null,
+                Description: "Employee cash payment",
+                Notes: null,
+                RowVersion: draft.Value.RowVersion));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CashPartyType.Employee, result.Value.PartyType);
+        Assert.Equal(1, result.Value.EmployeeId);
+        Assert.Equal("Employee One", result.Value.EmployeeName);
+        Assert.Null(result.Value.BusinessPartnerId);
+        Assert.Null(result.Value.DriverId);
+        Assert.Empty(
+            await database.Context.BusinessPartnerMovements
+                .Where(item => item.CashVoucherId == result.Value.Id)
+                .ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task EmployeeVoucherRejectsInactiveAndCrossCompanyEmployee(
+        int employeeId)
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var draft = await service.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 7, 27),
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                Amount: 25m,
+                Description: "Employee validation"));
+
+        var result = await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: draft.Value.VoucherDate,
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                CashMovementTypeId: 4,
+                EmployeeId: employeeId,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: 25m,
+                ReferenceNumber: null,
+                Description: "Employee validation",
+                Notes: null,
+                RowVersion: draft.Value.RowVersion));
+
+        Assert.Equal("CashVouchers.EmployeeNotFound", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task ExternalPartyNameStillDerivesOtherParty()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var draft = await service.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 7, 27),
+                Direction: CashDirection.Receipt,
+                CashboxId: 1,
+                Amount: 50m,
+                Description: "Historical external party"));
+
+        var result = await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: draft.Value.VoucherDate,
+                Direction: CashDirection.Receipt,
+                CashboxId: 1,
+                CashMovementTypeId: 3,
+                EmployeeId: null,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: "External party",
+                Amount: 50m,
+                ReferenceNumber: null,
+                Description: "Historical external party",
+                Notes: null,
+                RowVersion: draft.Value.RowVersion));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CashPartyType.Other, result.Value.PartyType);
+        Assert.Equal("External party", result.Value.ExternalPartyName);
+        Assert.Null(result.Value.EmployeeId);
+    }
+
+    [Fact]
+    public async Task VoucherRejectsMultiplePartySources()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var draft = await service.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 7, 27),
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                Amount: 25m,
+                Description: "Invalid party selection"));
+
+        var result = await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: draft.Value.VoucherDate,
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                CashMovementTypeId: 4,
+                EmployeeId: 1,
+                BusinessPartnerId: null,
+                DriverId: 1,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: 25m,
+                ReferenceNumber: null,
+                Description: "Invalid party selection",
+                Notes: null,
+                RowVersion: draft.Value.RowVersion));
+
+        Assert.Equal(
+            "CashVouchers.PartySelectionMustBeExclusive",
+            result.Error.Code);
+    }
+
+    [Fact]
     public async Task DriverVoucherRejectsTripOwnedByAnotherDriver()
     {
         await using var database =
@@ -427,7 +584,7 @@ public sealed class CashVoucherServiceTests
                 CashDirection.Payment,
                 created.Value.CashboxId,
                 4,
-                CashPartyType.Driver,
+                null,
                 null,
                 1,
                 null,
@@ -602,7 +759,7 @@ public sealed class CashVoucherServiceTests
             direction,
             cashboxId,
             movementTypeId,
-            CashPartyType.None,
+            null,
             null,
             null,
             null,
@@ -625,7 +782,7 @@ public sealed class CashVoucherServiceTests
             direction,
             cashboxId,
             movementTypeId,
-            CashPartyType.Partner,
+            null,
             partnerId,
             null,
             null,
@@ -647,7 +804,7 @@ public sealed class CashVoucherServiceTests
             direction,
             1,
             4,
-            CashPartyType.Driver,
+            null,
             null,
             driverId,
             tripId,
@@ -666,7 +823,7 @@ public sealed class CashVoucherServiceTests
             original.Direction,
             cashboxId ?? original.CashboxId,
             original.CashMovementTypeId,
-            original.PartyType,
+            original.EmployeeId,
             original.BusinessPartnerId,
             original.DriverId,
             original.DriverTripId,
@@ -700,7 +857,7 @@ public sealed class CashVoucherServiceTests
                 request.Direction,
                 request.CashboxId,
                 request.CashMovementTypeId,
-                request.PartyType,
+                request.EmployeeId,
                 request.BusinessPartnerId,
                 request.DriverId,
                 request.DriverTripId,
@@ -718,7 +875,7 @@ public sealed class CashVoucherServiceTests
         CashDirection Direction,
         int CashboxId,
         int CashMovementTypeId,
-        CashPartyType PartyType,
+        int? EmployeeId,
         int? BusinessPartnerId,
         int? DriverId,
         int? DriverTripId,
