@@ -456,6 +456,7 @@ public sealed class DriverServiceTests
                 CREATE TABLE CashVouchers (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    EmployeeId INTEGER NULL,
                     DriverId INTEGER NULL,
                     CashboxTransferId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL

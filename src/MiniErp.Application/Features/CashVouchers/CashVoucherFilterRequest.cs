@@ -9,6 +9,7 @@ public sealed record CashVoucherFilterRequest(
     int? CashboxId = null,
     int? CashMovementTypeId = null,
     CashPartyType? PartyType = null,
+    int? EmployeeId = null,
     int? BusinessPartnerId = null,
     int? DriverId = null,
     int? DriverTripId = null,

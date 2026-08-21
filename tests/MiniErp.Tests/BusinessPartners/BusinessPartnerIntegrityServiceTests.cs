@@ -275,6 +275,7 @@ public sealed class BusinessPartnerIntegrityServiceTests
                 CREATE TABLE Stores (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    EmployeeId INTEGER NULL,
                     BusinessPartnerId INTEGER NULL,
                     CashboxTransferId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
