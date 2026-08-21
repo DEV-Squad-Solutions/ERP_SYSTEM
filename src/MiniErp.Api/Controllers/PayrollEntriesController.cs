@@ -50,7 +50,7 @@ public sealed class PayrollEntriesController(
         var result = await payrollEntryService.AddAsync(request, cancellationToken);
 
         return result.IsFailure
-            ? this.ToProblem(result.Error)
+            ? this.ToProblem(result.Errors)
             : CreatedAtAction(
                 nameof(GetById),
                 new { id = result.Value.Id },

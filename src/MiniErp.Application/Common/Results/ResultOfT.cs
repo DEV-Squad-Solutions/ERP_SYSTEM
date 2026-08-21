@@ -5,13 +5,18 @@ public sealed class Result<T> : Result
     private readonly T? value;
 
     private Result(T value)
-        : base(true, Error.None)
+        : base(true, Array.Empty<Error>())
     {
         this.value = value;
     }
 
     private Result(Error error)
-        : base(false, error)
+        : base(false, [error])
+    {
+    }
+
+    private Result(IEnumerable<Error> errors)
+        : base(false, errors)
     {
     }
 
@@ -22,5 +27,12 @@ public sealed class Result<T> : Result
 
     public static Result<T> Success(T value) => new(value);
 
-    public new static Result<T> Failure(Error error) => new(error);
+    public new static Result<T> Failure(Error error)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        return new Result<T>(error);
+    }
+
+    public new static Result<T> Failure(IEnumerable<Error> errors) =>
+        new(errors);
 }

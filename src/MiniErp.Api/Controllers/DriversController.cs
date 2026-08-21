@@ -65,7 +65,7 @@ public sealed class DriversController(IDriverService driverService)
         }
 
         return result.IsFailure
-            ? this.ToProblem(result.Error)
+            ? this.ToProblem(result.Errors)
             : CreatedAtAction(
                 nameof(GetById),
                 new { id = result.Value.Id },

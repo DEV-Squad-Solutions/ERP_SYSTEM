@@ -128,13 +128,13 @@ public sealed class DriverService(
                 .Select(entity => entity.Code),
             cancellationToken);
 
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             driver,
             excludedId: null,
             cancellationToken);
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<DriverResponse>.Failure(duplicateError);
+            return Result<DriverResponse>.Failure(duplicateErrors);
         }
 
         dbContext.Drivers.Add(driver);
@@ -162,13 +162,13 @@ public sealed class DriverService(
         }
 
         var normalizedDriver = request.Adapt<Driver>();
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             normalizedDriver,
             id,
             cancellationToken);
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<DriverResponse>.Failure(duplicateError);
+            return Result<DriverResponse>.Failure(duplicateErrors);
         }
 
         var code = driver.Code;
@@ -229,7 +229,7 @@ public sealed class DriverService(
         return Result.Success();
     }
 
-    private async Task<Error?> FindDuplicateAsync(
+    private async Task<IReadOnlyList<Error>> FindDuplicateAsync(
         Driver driver,
         int? excludedId,
         CancellationToken cancellationToken)
@@ -242,21 +242,43 @@ public sealed class DriverService(
                 (entity.Name == driver.Name ||
                  entity.LicenseNumber == driver.LicenseNumber ||
                  (driver.NationalId != null &&
-                  entity.NationalId == driver.NationalId)))
+                  entity.NationalId == driver.NationalId) ||
+                 (driver.PhoneNumber != null &&
+                  entity.PhoneNumber == driver.PhoneNumber)))
             .Select(entity => new
             {
                 entity.Name,
                 entity.LicenseNumber,
-                entity.NationalId
+                entity.NationalId,
+                entity.PhoneNumber
             })
             .ToListAsync(cancellationToken);
 
+        var errors = new List<Error>();
         if (duplicates.Any(entity => string.Equals(
                 entity.Name,
                 driver.Name,
                 StringComparison.OrdinalIgnoreCase)))
         {
-            return NameExists(driver.Name);
+            errors.Add(NameExists(driver.Name));
+        }
+
+        if (driver.PhoneNumber is not null &&
+            duplicates.Any(entity => string.Equals(
+                entity.PhoneNumber,
+                driver.PhoneNumber,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            errors.Add(PhoneNumberExists(driver.PhoneNumber));
+        }
+
+        if (driver.NationalId is not null &&
+            duplicates.Any(entity => string.Equals(
+                entity.NationalId,
+                driver.NationalId,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            errors.Add(NationalIdExists());
         }
 
         if (duplicates.Any(entity => string.Equals(
@@ -264,16 +286,10 @@ public sealed class DriverService(
                 driver.LicenseNumber,
                 StringComparison.OrdinalIgnoreCase)))
         {
-            return LicenseNumberExists(driver.LicenseNumber);
+            errors.Add(LicenseNumberExists(driver.LicenseNumber));
         }
 
-        return driver.NationalId is not null &&
-               duplicates.Any(entity => string.Equals(
-                   entity.NationalId,
-                   driver.NationalId,
-                   StringComparison.OrdinalIgnoreCase))
-            ? NationalIdExists()
-            : null;
+        return errors;
     }
 
 }

@@ -68,7 +68,7 @@ public sealed class ItemUnitsController(IItemUnitService itemUnitService) : ApiC
         }
 
         return result.IsFailure
-            ? this.ToProblem(result.Error)
+            ? this.ToProblem(result.Errors)
             : CreatedAtAction(
                 nameof(GetById),
                 new { id = result.Value.Id },

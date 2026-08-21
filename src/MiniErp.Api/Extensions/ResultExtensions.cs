@@ -11,22 +11,27 @@ public static class ResultExtensions
         Result<T> result) =>
         result.IsSuccess
             ? controller.Ok(result.Value)
-            : controller.ToProblem(result.Error);
+            : controller.ToProblem(result.Errors);
 
     public static IActionResult ToActionResult(
         this ControllerBase controller,
         Result result) =>
         result.IsSuccess
             ? controller.NoContent()
-            : controller.ToProblem(result.Error);
+            : controller.ToProblem(result.Errors);
 
     public static IActionResult ToProblem(
         this ControllerBase controller,
         Error error)
+        => controller.ToProblem([error]);
+
+    public static IActionResult ToProblem(
+        this ControllerBase controller,
+        IEnumerable<Error> errors)
     {
-        var response = ApiErrorResponseFactory.FromError(
+        var response = ApiErrorResponseFactory.FromErrors(
             controller.HttpContext,
-            error);
+            errors);
         return ApiErrorResponseFactory.ToObjectResult(response);
     }
 }

@@ -137,13 +137,13 @@ public sealed class CashboxService(
             exchangeRateResult.Value.ExchangeRateId,
             exchangeRateResult.Value.Rate);
 
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             cashbox,
             excludedId: null,
             cancellationToken);
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<CashboxResponse>.Failure(duplicateError);
+            return Result<CashboxResponse>.Failure(duplicateErrors);
         }
 
         dbContext.Cashboxes.Add(cashbox);
@@ -192,13 +192,13 @@ public sealed class CashboxService(
         }
 
         var normalized = request.Adapt<Cashbox>();
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             normalized,
             id,
             cancellationToken);
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<CashboxResponse>.Failure(duplicateError);
+            return Result<CashboxResponse>.Failure(duplicateErrors);
         }
 
         var hasVouchers = await HasVouchersAsync(id, cancellationToken);
@@ -288,7 +288,7 @@ public sealed class CashboxService(
                 cashbox.Id == id)
             .ProjectToType<CashboxResponse>();
 
-    private async Task<Error?> FindDuplicateAsync(
+    private async Task<IReadOnlyList<Error>> FindDuplicateAsync(
         Cashbox cashbox,
         int? excludedId,
         CancellationToken cancellationToken)
@@ -306,10 +306,10 @@ public sealed class CashboxService(
 
         if (duplicate is null)
         {
-            return null;
+            return Array.Empty<Error>();
         }
 
-        return NameExists(cashbox.Name);
+        return [NameExists(cashbox.Name)];
     }
 
     private async Task<bool> HasVouchersAsync(

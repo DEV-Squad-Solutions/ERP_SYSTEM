@@ -130,13 +130,13 @@ public sealed class CashMovementTypeService(
         var movementType = request.Adapt<CashMovementType>();
         movementType.CompanyId = companyId;
 
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             movementType,
             excludedId: null,
             cancellationToken);
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<CashMovementTypeResponse>.Failure(duplicateError);
+            return Result<CashMovementTypeResponse>.Failure(duplicateErrors);
         }
 
         foreach (var invoiceType in GetDefaultInvoiceTypes(movementType))
@@ -193,13 +193,13 @@ public sealed class CashMovementTypeService(
         }
 
         var normalized = request.Adapt<CashMovementType>();
-        var duplicateError = await FindDuplicateAsync(
+        var duplicateErrors = await FindDuplicateAsync(
             normalized,
             id,
             cancellationToken);
-        if (duplicateError is not null)
+        if (duplicateErrors.Count > 0)
         {
-            return Result<CashMovementTypeResponse>.Failure(duplicateError);
+            return Result<CashMovementTypeResponse>.Failure(duplicateErrors);
         }
 
         if ((movementType.Direction != request.Direction ||
@@ -272,7 +272,7 @@ public sealed class CashMovementTypeService(
         return Result.Success();
     }
 
-    private async Task<Error?> FindDuplicateAsync(
+    private async Task<IReadOnlyList<Error>> FindDuplicateAsync(
         CashMovementType movementType,
         int? excludedId,
         CancellationToken cancellationToken)
@@ -290,8 +290,8 @@ public sealed class CashMovementTypeService(
                 cancellationToken);
 
         return exists
-            ? NameExists(movementType.Name)
-            : null;
+            ? [NameExists(movementType.Name)]
+            : Array.Empty<Error>();
     }
 
     private IQueryable<CashMovementTypeResponse> ProjectResponseQuery(
