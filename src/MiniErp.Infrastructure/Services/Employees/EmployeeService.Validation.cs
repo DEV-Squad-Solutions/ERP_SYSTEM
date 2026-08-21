@@ -64,7 +64,7 @@ namespace MiniErp.Infrastructure.Services.Employees
                     "Employee.InvalidName",
                     "يجب ألا يكون اسم الموظف فارغًا."
                     , nameof(request.Name));
-            if (request.Type == null || !Enum.IsDefined(typeof(EmployeeType), request.Type))
+            if(!Enum.IsDefined(typeof(EmployeeType), request.Type))
                 return Error.Validation(
                     "Employee.InvalidType",
                     "يجب إدخال نوع الموظف أو النوع المحدد غير صالح."
@@ -100,10 +100,10 @@ namespace MiniErp.Infrastructure.Services.Employees
                     "Employee.JobTitleTooLong",
                     "يجب ألا يزيد المسمى الوظيفي للموظف عن 200 حرف."
                     , nameof(request.JobTitle));
-            if(request.RequiredWorkingDaysPerMonth!=null && request.RequiredWorkingDaysPerMonth > 0&& request.RequiredWorkingDaysPerMonth <= 31)
+            if (request.RequiredWorkingDaysPerMonth != null && (request.RequiredWorkingDaysPerMonth < 1 || request.RequiredWorkingDaysPerMonth > 31))
                 return Error.Validation(
                     "Employee.RequiredWorkingDaysPerMonthTooLong",
-                    "يجب ألا يزيد عدد أيام العمل المطلوبة لكل شهر عن 0."
+                    "يجب أن يكون عدد أيام العمل المطلوبة لكل شهر بين 1 و 31."
                     , nameof(request.RequiredWorkingDaysPerMonth));
             return null;
         }
@@ -120,12 +120,12 @@ namespace MiniErp.Infrastructure.Services.Employees
                     "Employee.InvalidId",
                     "معرف الموظف غير صالح."
                     , nameof(id));
-            if (!string.IsNullOrWhiteSpace(request.Name))
+            if (request.Name != null && string.IsNullOrWhiteSpace(request.Name))
                 return Error.Validation(
                     "Employee.InvalidName",
                     "يجب ألا يكون اسم الموظف فارغًا."
                     , nameof(request.Name));
-            if (!Enum.IsDefined(typeof(EmployeeType), request.Type))
+            if (request.Type.HasValue && !Enum.IsDefined(typeof(EmployeeType), request.Type.Value))
                 return Error.Validation(
                     "Employee.InvalidType",
                     "يجب إدخال نوع الموظف أو النوع المحدد غير صالح."
@@ -133,7 +133,7 @@ namespace MiniErp.Infrastructure.Services.Employees
             if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
             {
                 var phoneExists = await dbContext.Employees
-                    .AnyAsync(e => e.CompanyId == campanyId && e.PhoneNumber == request.PhoneNumber.Trim(), cancellationToken);
+                    .AnyAsync(e => e.Id != id && e.CompanyId == campanyId && e.PhoneNumber == request.PhoneNumber.Trim(), cancellationToken);
                 if (phoneExists)
                     return Error.Conflict(
                         "Employee.PhoneAlreadyExists",
@@ -144,7 +144,7 @@ namespace MiniErp.Infrastructure.Services.Employees
             if (!string.IsNullOrWhiteSpace(request.Email))
             {
                 var emailExists = await dbContext.Employees
-                    .AnyAsync(e => e.CompanyId == campanyId && e.Email == request.Email.Trim().ToLower(), cancellationToken);
+                    .AnyAsync(e => e.Id != id && e.CompanyId == campanyId && e.Email == request.Email.Trim().ToLower(), cancellationToken);
                 if (emailExists)
                     return Error.Conflict(
                         "Employee.EmailAlreadyExists",
@@ -161,10 +161,10 @@ namespace MiniErp.Infrastructure.Services.Employees
                     "Employee.JobTitleTooLong",
                     "يجب ألا يزيد المسمى الوظيفي للموظف عن 200 حرف."
                     , nameof(request.JobTitle));
-            if (request.RequiredWorkingDaysPerMonth != null && request.RequiredWorkingDaysPerMonth > 0 && request.RequiredWorkingDaysPerMonth < 31)
+            if (request.RequiredWorkingDaysPerMonth != null && (request.RequiredWorkingDaysPerMonth < 1 || request.RequiredWorkingDaysPerMonth > 31))
                 return Error.Validation(
                     "Employee.RequiredWorkingDaysPerMonthTooLong",
-                    "يجب ألا يزيد عدد أيام العمل المطلوبة لكل شهر عن 30."
+                    "يجب أن يكون عدد أيام العمل المطلوبة لكل شهر بين 1 و 31."
                     , nameof(request.RequiredWorkingDaysPerMonth));
 
             return null;

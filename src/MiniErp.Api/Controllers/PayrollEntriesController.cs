@@ -44,7 +44,7 @@ public sealed class PayrollEntriesController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Create(
-        PayrollEntryRequest request,
+        PayrollEntryCreateRequest request,
         CancellationToken cancellationToken)
     {
         var result = await payrollEntryService.AddAsync(request, cancellationToken);

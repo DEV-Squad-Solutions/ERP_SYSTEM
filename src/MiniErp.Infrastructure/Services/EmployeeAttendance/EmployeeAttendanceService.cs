@@ -6,6 +6,7 @@ using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.EmployeeAttendance;
 using MiniErp.Application.Features.Employees;
 using MiniErp.Domain.Entities.Employees;
+using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.EmployeeAttendance;
@@ -149,9 +150,9 @@ public  sealed partial class EmployeeAttendanceService(
             EmployeeId = request.EmployeeId,
             Status = request.Status,
             WorkDate = request.WorkDate,
-            CheckIn = request.CheckIn,
-            CheckOut = request.CheckOut,
-            WorkHours = CalculateWorkHours(request.CheckIn, request.CheckOut),
+            CheckIn = request.Status == AttendanceStatus.Present ? request.CheckIn : null,
+            CheckOut = request.Status == AttendanceStatus.Present ? request.CheckOut : null,
+            WorkHours = request.Status == AttendanceStatus.Present ? CalculateWorkHours(request.CheckIn, request.CheckOut) : null,
             WorkDayRatio = request.WorkDayRatio,
             WorkOverTimeRatio = request.WorkOverTimeRatio,
             WorkDaysDeductionRatio = request.WorkDaysDeductionRatio,
@@ -218,9 +219,20 @@ public  sealed partial class EmployeeAttendanceService(
         attendance.EmployeeId = request.EmployeeId;
         attendance.Status = request.Status ?? attendance.Status;
         attendance.WorkDate = request.WorkDate;
-        attendance.CheckIn = request.CheckIn ?? attendance.CheckIn;
-        attendance.CheckOut = request.CheckOut ?? attendance.CheckOut;
-        attendance.WorkHours = CalculateWorkHours(request.CheckIn, request.CheckOut);
+
+        if (attendance.Status == AttendanceStatus.Present)
+        {
+            attendance.CheckIn = request.CheckIn ?? attendance.CheckIn;
+            attendance.CheckOut = request.CheckOut ?? attendance.CheckOut;
+            attendance.WorkHours = CalculateWorkHours(attendance.CheckIn, attendance.CheckOut);
+        }
+        else
+        {
+            attendance.CheckIn = null;
+            attendance.CheckOut = null;
+            attendance.WorkHours = null;
+        }
+
         attendance.WorkDayRatio = request.WorkDayRatio ?? attendance.WorkDayRatio;
         attendance.WorkOverTimeRatio = request.WorkOverTimeRatio ?? attendance.WorkOverTimeRatio;
         attendance.WorkDaysDeductionRatio = request.WorkDaysDeductionRatio ?? attendance.WorkDaysDeductionRatio;
@@ -321,9 +333,9 @@ public  sealed partial class EmployeeAttendanceService(
             {
                 attendance = existingRecord;
                 attendance.Status = item.Status;
-                attendance.CheckIn = item.CheckIn;
-                attendance.CheckOut = item.CheckOut;
-                attendance.WorkHours = CalculateWorkHours(item.CheckIn, item.CheckOut);
+                attendance.CheckIn = item.Status == AttendanceStatus.Present ? item.CheckIn : null;
+                attendance.CheckOut = item.Status == AttendanceStatus.Present ? item.CheckOut : null;
+                attendance.WorkHours = item.Status == AttendanceStatus.Present ? CalculateWorkHours(item.CheckIn, item.CheckOut) : null;
                 attendance.WorkDayRatio = item.WorkDayRatio;
                 attendance.WorkOverTimeRatio = item.WorkOverTimeRatio;
                 attendance.WorkDaysDeductionRatio = item.WorkDaysDeductionRatio;
@@ -340,9 +352,9 @@ public  sealed partial class EmployeeAttendanceService(
                     EmployeeId = item.EmployeeId,
                     Status = item.Status,
                     WorkDate = item.WorkDate,
-                    CheckIn = item.CheckIn,
-                    CheckOut = item.CheckOut,
-                    WorkHours = CalculateWorkHours(item.CheckIn, item.CheckOut),
+                    CheckIn = item.Status == AttendanceStatus.Present ? item.CheckIn : null,
+                    CheckOut = item.Status == AttendanceStatus.Present ? item.CheckOut : null,
+                    WorkHours = item.Status == AttendanceStatus.Present ? CalculateWorkHours(item.CheckIn, item.CheckOut) : null,
                     WorkDayRatio = item.WorkDayRatio,
                     WorkOverTimeRatio = item.WorkOverTimeRatio,
                     WorkDaysDeductionRatio = item.WorkDaysDeductionRatio,

@@ -14,17 +14,6 @@ namespace MiniErp.Application.Features.Employees
     decimal? MaxSalary = null,
     EmployeeType? EmployeeType = null
     );
-    public record EmployeeRequest(
-        string Name,
-        string? JobTitle,
-        string? PhoneNumber,
-        string? Email,
-        string? Address,
-        EmployeeType Type,
-        decimal? Salary,
-        int? RequiredWorkingDaysPerMonth=26,
-        bool IsActive = true
-    );
     public record EmployeeCreateRequest(
         string Name,
         string? JobTitle,
