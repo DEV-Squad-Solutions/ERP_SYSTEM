@@ -634,7 +634,8 @@ public sealed partial class FinancialStatementService(
                 ReferenceNumber: row.ReferenceNumber)
             {
                 BusinessPartnerId = row.BusinessPartnerId,
-                BusinessPartnerName = row.BusinessPartnerName
+                BusinessPartnerName = row.BusinessPartnerName,
+                CountryName = row.CountryName
             };
         }).ToList();
 
@@ -760,6 +761,10 @@ public sealed partial class FinancialStatementService(
                 BusinessPartnerName = voucher.DriverTripId.HasValue
                     ? voucher.DriverTrip!.BusinessPartner.Name
                     : null,
+                CountryName = voucher.DriverTripId.HasValue &&
+                    voucher.DriverTrip!.Invoice.Country != null
+                        ? voucher.DriverTrip.Invoice.Country!.Name
+                        : null,
                 MovementTypeName = voucher.CashMovementType!.Name,
                 Description = voucher.Description,
                 CashPaid = voucher.Direction == CashDirection.Payment
@@ -791,6 +796,9 @@ public sealed partial class FinancialStatementService(
                 DriverTripId = (int?)trip.Id,
                 BusinessPartnerId = trip.BusinessPartnerId,
                 BusinessPartnerName = trip.BusinessPartner.Name,
+                CountryName = trip.Invoice.Country == null
+                    ? null
+                    : trip.Invoice.Country.Name,
                 MovementTypeName = null,
                 Description = trip.CostNotes,
                 CashPaid = 0m,
@@ -908,6 +916,7 @@ public sealed partial class FinancialStatementService(
         public int? DriverTripId { get; init; }
         public int? BusinessPartnerId { get; init; }
         public string? BusinessPartnerName { get; init; }
+        public string? CountryName { get; init; }
         public string? MovementTypeName { get; init; }
         public string? Description { get; init; }
         public decimal CashPaid { get; init; }

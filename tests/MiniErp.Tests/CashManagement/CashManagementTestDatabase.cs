@@ -194,6 +194,24 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 IsDeleted INTEGER NOT NULL
             );
 
+            CREATE TABLE Countries (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Code TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                EnglishName TEXT NOT NULL,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
             CREATE TABLE Invoices (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,
@@ -201,6 +219,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 PartnerInvoiceNo TEXT NULL,
                 InvoiceType INTEGER NOT NULL DEFAULT 1,
                 ContentType INTEGER NOT NULL DEFAULT 1,
+                CountryId INTEGER NULL,
                 IsDeleted INTEGER NOT NULL
             );
 
@@ -637,12 +656,20 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 (3, 2, 'DRV-3', 'Other Company Driver', 'LIC-3', 1,
                  'test', '2026-01-01', 'test', 0);
 
-            INSERT INTO Invoices (
-                Id, CompanyId, InvoiceNumber, InvoiceType, IsDeleted)
+            INSERT INTO Countries (
+                Id, Code, Name, EnglishName, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
             VALUES
-                (1, 1, 'INV-1', 1, 0),
-                (2, 1, 'INV-2', 2, 0),
-                (3, 2, 'INV-3', 1, 0);
+                (1, 'EG', 'Egypt', 'Egypt', 1,
+                 'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO Invoices (
+                Id, CompanyId, InvoiceNumber, InvoiceType, CountryId,
+                IsDeleted)
+            VALUES
+                (1, 1, 'INV-1', 1, 1, 0),
+                (2, 1, 'INV-2', 2, NULL, 0),
+                (3, 2, 'INV-3', 1, NULL, 0);
 
             INSERT INTO Stores (
                 Id, CompanyId, BusinessPartnerId, Code, Name, Address,

@@ -23,7 +23,18 @@ public sealed record CashboxTransferResponse(
     string? Description,
     string? Notes,
     DateTime LastModifiedAt,
-    byte[] RowVersion);
+    byte[] RowVersion)
+{
+    public decimal DestinationAmount { get; init; }
+
+    public CurrencyCode DestinationCurrency { get; init; }
+
+    public decimal DestinationExchangeRate { get; init; }
+
+    public decimal DestinationBaseAmount { get; init; }
+
+    public decimal ConversionRate { get; init; }
+}
 
 public sealed record CashboxTransferListResponse(
     int Id,
@@ -38,4 +49,9 @@ public sealed record CashboxTransferListResponse(
     CurrencyCode Currency,
     string? Description,
     DateTime LastModifiedAt,
-    byte[] RowVersion);
+    byte[] RowVersion)
+{
+    public decimal DestinationAmount { get; init; }
+
+    public CurrencyCode DestinationCurrency { get; init; }
+}

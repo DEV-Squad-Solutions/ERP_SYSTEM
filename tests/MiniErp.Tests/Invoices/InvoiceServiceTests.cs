@@ -4274,6 +4274,7 @@ public sealed class InvoiceServiceTests
         Assert.True(result.IsSuccess);
         var invoice = Assert.Single(result.Value.Items);
         Assert.Equal(expectedInvoiceNumber, invoice.InvoiceNumber);
+        Assert.Equal(priceStatus, invoice.PriceStatus);
     }
 
     [Fact]

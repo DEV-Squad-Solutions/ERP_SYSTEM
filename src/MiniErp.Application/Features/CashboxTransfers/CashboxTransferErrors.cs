@@ -37,11 +37,29 @@ public static class CashboxTransferErrors
             $"الخزنة رقم {id} غير نشطة.",
             fieldName);
 
-    public static Error CurrencyMismatch() =>
-        Error.Conflict(
-            "CashboxTransfers.CurrencyMismatch",
-            "التحويل بين خزنتين بعملتين مختلفتين غير مدعوم حاليًا.",
-            nameof(CashboxTransferRequest.DestinationCashboxId));
+    public static Error DestinationAmountRequired() =>
+        Error.Validation(
+            "CashboxTransfers.DestinationAmountRequired",
+            "أدخل المبلغ المستلم أو سعر التحويل عند التحويل بين خزنتين بعملتين مختلفتين.",
+            nameof(CashboxTransferRequest.DestinationAmount));
+
+    public static Error ConversionRateDoesNotMatchDestinationAmount() =>
+        Error.Validation(
+            "CashboxTransfers.ConversionRateDoesNotMatchDestinationAmount",
+            "المبلغ المستلم لا يطابق مبلغ المصدر وسعر التحويل.",
+            nameof(CashboxTransferRequest.DestinationAmount));
+
+    public static Error DestinationAmountMustMatchSourceAmount() =>
+        Error.Validation(
+            "CashboxTransfers.DestinationAmountMustMatchSourceAmount",
+            "يجب أن يساوي المبلغ المستلم مبلغ المصدر عند تطابق عملتي الخزنتين.",
+            nameof(CashboxTransferRequest.DestinationAmount));
+
+    public static Error DestinationAmountDoesNotMatchBaseAmount() =>
+        Error.Validation(
+            "CashboxTransfers.DestinationAmountDoesNotMatchBaseAmount",
+            "يجب أن يساوي المبلغ المستلم قيمة مبلغ المصدر بالعملة الأساسية.",
+            nameof(CashboxTransferRequest.DestinationAmount));
 
     public static Error InsufficientCashboxBalance(int cashboxId) =>
         Error.Conflict(
