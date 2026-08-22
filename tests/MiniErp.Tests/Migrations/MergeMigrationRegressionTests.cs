@@ -94,6 +94,32 @@ public sealed class MergeMigrationRegressionTests
         Assert.Contains("WHEN 5 THEN 25", sql, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void CashVoucherPostingStateMigration_BackfillsExactLegacyPostingRule()
+    {
+        var operations = new AddCashVoucherPostingState().UpOperations;
+        var addColumnIndex = FindOperationIndex<AddColumnOperation>(operations);
+        var sqlIndex = FindOperationIndex<SqlOperation>(operations);
+        var addColumn = (AddColumnOperation)operations[addColumnIndex];
+        var sql = ((SqlOperation)operations[sqlIndex]).Sql;
+
+        Assert.True(addColumnIndex < sqlIndex);
+        Assert.Equal("IsPosted", addColumn.Name);
+        Assert.Equal("CashVouchers", addColumn.Table);
+        Assert.False(addColumn.IsNullable);
+        Assert.Equal(false, addColumn.DefaultValue);
+        Assert.Contains(
+            "[CashMovementTypeId] IS NOT NULL",
+            sql,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[CashboxTransferId] IS NOT NULL",
+            sql,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("[InvoiceId]", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("[BaseAmount]", sql, StringComparison.Ordinal);
+    }
+
     private static string GetMigrationId(Type migrationType) =>
         Assert.Single(
             migrationType.GetCustomAttributes(

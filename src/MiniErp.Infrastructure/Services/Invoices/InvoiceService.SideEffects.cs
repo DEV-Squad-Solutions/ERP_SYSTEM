@@ -229,6 +229,7 @@ public sealed partial class InvoiceService
                 BusinessPartnerId = invoice.BusinessPartnerId,
                 Amount = preparation.CashboxAmount,
                 Currency = preparation.CashboxCurrency,
+                IsPosted = true,
                 ReferenceNumber = invoice.InvoiceNumber,
                 Description = $"دفعة الفاتورة {invoice.InvoiceNumber}"
             };
@@ -252,6 +253,7 @@ public sealed partial class InvoiceService
             voucher.ExternalPartyName = null;
             voucher.Amount = preparation.CashboxAmount;
             voucher.Currency = preparation.CashboxCurrency;
+            voucher.IsPosted = true;
             voucher.ApplyExchangeRate(
                 preparation.ExchangeRateId,
                 preparation.ExchangeRate);

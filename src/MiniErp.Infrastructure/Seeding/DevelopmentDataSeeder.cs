@@ -1678,6 +1678,7 @@ public static class DevelopmentDataSeeder
                 BusinessPartnerId = partner.Id,
                 Amount = 1_000m,
                 Currency = cashbox.Currency,
+                IsPosted = true,
                 ReferenceNumber = $"SEED-REF-{company.Id}",
                 Description = "تحصيل تجريبي من العميل",
                 Notes = "سند نقدية تجريبي"
@@ -1690,6 +1691,7 @@ public static class DevelopmentDataSeeder
 
         if (voucher is not null)
         {
+            voucher.IsPosted = true;
             if (voucher.Amount != 0m && voucher.BaseAmount == 0m)
             {
                 voucher.ApplyExchangeRate(null, 1m);

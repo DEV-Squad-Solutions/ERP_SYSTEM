@@ -30,6 +30,17 @@ public sealed class CashVouchersController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("party-select")]
+    [ProducesResponseType<CashVoucherPartySelectResponse>(
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPartySelect(
+        CancellationToken cancellationToken)
+    {
+        var result = await cashVoucherService.GetPartySelectAsync(
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("{id:int}")]
     [ProducesResponseType<CashVoucherResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

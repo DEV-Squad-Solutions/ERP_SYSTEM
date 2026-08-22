@@ -154,6 +154,29 @@ public sealed class CashManagementValidatorTests
     }
 
     [Fact]
+    public void CashVoucherSaveValidators_AcceptNullMovementType()
+    {
+        var updateResult = new CashVoucherUpdateRequestValidator().Validate(
+            CreateVoucher(
+                employeeId: null,
+                partnerId: null,
+                driverId: null,
+                tripId: null,
+                externalPartyName: null) with
+            {
+                CashMovementTypeId = null
+            });
+        var bulkResult = new CashVoucherBulkVoucherRequestValidator().Validate(
+            CreateBulkVoucher() with
+            {
+                CashMovementTypeId = null
+            });
+
+        Assert.True(updateResult.IsValid);
+        Assert.True(bulkResult.IsValid);
+    }
+
+    [Fact]
     public void CashVoucherUpdateValidator_RejectsMultiplePartyFieldsAndAmount()
     {
         var validator = new CashVoucherUpdateRequestValidator();

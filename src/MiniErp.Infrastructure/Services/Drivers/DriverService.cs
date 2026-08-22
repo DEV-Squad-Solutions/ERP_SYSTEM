@@ -75,15 +75,11 @@ public sealed class DriverService(
     public async Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
         CancellationToken cancellationToken = default)
     {
-        var today = DateOnly.FromDateTime(
-            timeProvider.GetUtcNow().UtcDateTime);
         var response = await dbContext.Drivers
             .AsNoTracking()
             .Where(driver =>
                 driver.CompanyId == companyId &&
-                driver.IsActive &&
-                (driver.LicenseExpiryDate == null ||
-                 driver.LicenseExpiryDate >= today))
+                driver.IsActive)
             .OrderBy(driver => driver.Name)
             .ThenBy(driver => driver.Id)
             .ProjectToType<SelectResponse>()

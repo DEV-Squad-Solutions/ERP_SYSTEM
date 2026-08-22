@@ -27,10 +27,10 @@ public sealed class DriversSwaggerDocumentation : IOperationFilter
             nameof(DriversController.GetSelect) => (
                 "Get available drivers for selection",
                 SwaggerOperationDescription.Create(
-                    "Returns active, non-deleted drivers for the selected company whose licence has not expired, as ID and name pairs.",
+                    "Returns active, non-deleted drivers for the selected company as ID and name pairs, including drivers whose licence has expired.",
                     "A bearer token containing one `company_id`.",
-                    "No request fields. A null expiry date is treated as not expired.",
-                    "Returns an empty array when no driver is available. Inactive, deleted, expired, and other-company drivers are excluded.")),
+                    "No request fields. Licence expiry does not affect availability in this selection list.",
+                    "Returns an empty array when no driver is available. Inactive, deleted, and other-company drivers are excluded.")),
             nameof(DriversController.GetById) => (
                 "Get a driver",
                 SwaggerOperationDescription.Create(
@@ -44,7 +44,7 @@ public sealed class DriversSwaggerDocumentation : IOperationFilter
                     "Admin only. Creates a driver in the selected company.",
                     "`code`, `name`, and `licenseNumber`. Phone, national ID, and licence expiry date are optional; `isActive` defaults to true.",
                     "Required values are trimmed and non-empty. Maximum lengths: code 50, name 200, phone 50, nationalId 50, licenseNumber 100.",
-                    "Normalized name, code, and licence number must be unique per company; a supplied national ID must also be unique. Duplicates return 409. A past expiry date is accepted but excludes the driver from `/select`.")),
+                    "Normalized name, code, and licence number must be unique per company; a supplied national ID must also be unique. Duplicates return 409. A past expiry date is accepted and the active driver remains available in `/select`.")),
             nameof(DriversController.Update) => (
                 "Update a driver",
                 SwaggerOperationDescription.Create(

@@ -11,6 +11,25 @@ namespace MiniErp.Tests.Swagger;
 public sealed class CashVouchersSwaggerDocumentationTests
 {
     [Fact]
+    public void PartySelect_DocumentsScopeShapeOrderingAndExpiredDrivers()
+    {
+        var operation = new OpenApiOperation();
+
+        new CashVouchersSwaggerDocumentation().Apply(
+            operation,
+            Context(nameof(CashVouchersController.GetPartySelect)));
+
+        Assert.Equal(
+            "CashVouchers_GetPartySelect",
+            operation.OperationId);
+        Assert.Contains("selected company", operation.Description);
+        Assert.Contains("id and name", operation.Description);
+        Assert.Contains("ordered by name then id", operation.Description);
+        Assert.Contains("license is expired", operation.Description);
+        Assert.Contains("Inactive", operation.Description);
+    }
+
+    [Fact]
     public void Bulk_DocumentsAtomicMixedOperations()
     {
         var operation = new OpenApiOperation();
@@ -22,8 +41,25 @@ public sealed class CashVouchersSwaggerDocumentationTests
         Assert.Equal("CashVouchers_Bulk", operation.OperationId);
         Assert.Contains("atomic", operation.Description);
         Assert.Contains("rowVersion", operation.Description);
+        Assert.Contains("cashMovementTypeId is optional", operation.Description);
+        Assert.Contains("completed, posted voucher", operation.Description);
         Assert.Contains("preserves request order", operation.Description);
         Assert.DoesNotContain("clientKey", operation.Description);
+    }
+
+    [Fact]
+    public void Update_DocumentsOptionalTypePostingAndClearing()
+    {
+        var operation = new OpenApiOperation();
+
+        new CashVouchersSwaggerDocumentation().Apply(
+            operation,
+            Context(nameof(CashVouchersController.Update)));
+
+        Assert.Contains("cashMovementTypeId is optional", operation.Description);
+        Assert.Contains("completed, posted voucher", operation.Description);
+        Assert.Contains("clearing an existing movement type", operation.Description);
+        Assert.Contains("direction and party", operation.Description);
     }
 
     [Fact]

@@ -360,6 +360,7 @@ public sealed class CashboxTransferServiceTests
             PartyType = CashPartyType.None,
             Amount = 550m,
             Currency = CurrencyCode.EGP,
+            IsPosted = true,
             Description = "Payment after transfer"
         };
         laterPayment.ApplyExchangeRate(

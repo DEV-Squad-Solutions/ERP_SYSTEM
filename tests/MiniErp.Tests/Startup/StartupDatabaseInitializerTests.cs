@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using MiniErp.Api.Startup;
 
@@ -6,6 +8,90 @@ namespace MiniErp.Tests.Startup;
 
 public sealed class StartupDatabaseInitializerTests
 {
+    [Fact]
+    public async Task RecoveryService_StartAsync_WaitsForInitialAttemptToMarkReady()
+    {
+        var status = new StartupDatabaseStatus();
+        var initializationStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowInitializationToComplete = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = 0;
+        var initializer = new StartupDatabaseInitializer();
+        using var service = new TestDatabaseRecoveryService(
+            status,
+            cancellationToken => InitializeAsync(
+                initializer,
+                status,
+                async token =>
+                {
+                    Interlocked.Increment(ref attempts);
+                    initializationStarted.SetResult();
+                    await allowInitializationToComplete.Task.WaitAsync(token);
+                },
+                cancellationToken));
+
+        var startTask = service.StartAsync(CancellationToken.None);
+        await initializationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(startTask.IsCompleted);
+        Assert.False(status.GetSnapshot().IsReady);
+
+        allowInitializationToComplete.SetResult();
+        await startTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(status.GetSnapshot().IsReady);
+        Assert.Equal("Ready", status.GetSnapshot().State);
+        Assert.Equal(1, Volatile.Read(ref attempts));
+        await service.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task RecoveryService_StartAsync_AllowsDegradedStartupAndRetriesInBackground()
+    {
+        var status = new StartupDatabaseStatus();
+        var recoveryStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowRecoveryToComplete = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = 0;
+        var initializer = new StartupDatabaseInitializer();
+        using var service = new TestDatabaseRecoveryService(
+            status,
+            cancellationToken => InitializeAsync(
+                initializer,
+                status,
+                async token =>
+                {
+                    if (Interlocked.Increment(ref attempts) == 1)
+                    {
+                        throw new InvalidOperationException(
+                            "Database unavailable.");
+                    }
+
+                    recoveryStarted.TrySetResult();
+                    await allowRecoveryToComplete.Task.WaitAsync(token);
+                },
+                cancellationToken));
+
+        await service.StartAsync(CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        await recoveryStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(status.GetSnapshot().IsReady);
+        Assert.Equal("Degraded", status.GetSnapshot().State);
+        Assert.Equal("Migrations", status.GetSnapshot().FailurePhase);
+
+        allowRecoveryToComplete.SetResult();
+        await WaitUntilAsync(
+            () => status.GetSnapshot().IsReady,
+            TimeSpan.FromSeconds(5));
+
+        Assert.Equal(2, Volatile.Read(ref attempts));
+        Assert.Equal("Ready", status.GetSnapshot().State);
+        await service.StopAsync(CancellationToken.None);
+    }
+
     [Fact]
     public async Task MigrationFailure_ThenSuccess_RecoversToReady()
     {
@@ -175,4 +261,35 @@ public sealed class StartupDatabaseInitializerTests
             status: status,
             logger: NullLogger.Instance,
             cancellationToken: cancellationToken);
+
+    private static async Task WaitUntilAsync(
+        Func<bool> condition,
+        TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new TimeoutException("The expected condition was not reached.");
+            }
+
+            await Task.Delay(10);
+        }
+    }
+
+    private sealed class TestDatabaseRecoveryService(
+        StartupDatabaseStatus status,
+        Func<CancellationToken, Task> initializeAsync)
+        : DatabaseRecoveryService(
+            new ServiceCollection().BuildServiceProvider(),
+            new ConfigurationBuilder().Build(),
+            new StartupDatabaseInitializer(),
+            status,
+            NullLogger<DatabaseRecoveryService>.Instance)
+    {
+        protected override Task InitializeOnceAsync(
+            CancellationToken cancellationToken) =>
+            initializeAsync(cancellationToken);
+    }
 }

@@ -304,6 +304,7 @@ public sealed class EmployeeTransactionService(
             EmployeeId = employee.Id,
             Amount = request.Amount,
             Currency = cashbox.Currency,
+            IsPosted = true,
             Description = $"{typeLabel} للموظف: {employee.Name}",
             Notes = request.Notes
         };

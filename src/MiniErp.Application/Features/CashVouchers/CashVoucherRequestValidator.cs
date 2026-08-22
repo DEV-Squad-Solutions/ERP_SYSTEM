@@ -46,9 +46,8 @@ public sealed class CashVoucherUpdateRequestValidator
             .WithMessage("اختر صندوق النقدية لاستكمال السند.");
 
         RuleFor(request => request.CashMovementTypeId)
-            .NotNull()
             .GreaterThan(0)
-            .WithMessage("اختر نوع الحركة لاستكمال السند.");
+            .When(request => request.CashMovementTypeId.HasValue);
 
         RuleFor(request => request.EmployeeId)
             .GreaterThan(0)
@@ -132,7 +131,9 @@ public sealed class CashVoucherBulkVoucherRequestValidator
 
         RuleFor(request => request.Direction).IsInEnum();
         RuleFor(request => request.CashboxId).GreaterThan(0);
-        RuleFor(request => request.CashMovementTypeId).GreaterThan(0);
+        RuleFor(request => request.CashMovementTypeId)
+            .GreaterThan(0)
+            .When(request => request.CashMovementTypeId.HasValue);
         RuleFor(request => request.EmployeeId)
             .GreaterThan(0)
             .When(request => request.EmployeeId.HasValue);

@@ -6,7 +6,7 @@ using MiniErp.Infrastructure.Seeding;
 
 namespace MiniErp.Api.Startup;
 
-public sealed class DatabaseRecoveryService(
+public class DatabaseRecoveryService(
     IServiceProvider services,
     IConfiguration configuration,
     StartupDatabaseInitializer initializer,
@@ -15,30 +15,19 @@ public sealed class DatabaseRecoveryService(
 {
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(15);
 
+    public override async Task StartAsync(CancellationToken cancellationToken)
+    {
+        await InitializeOnceAsync(cancellationToken);
+        await base.StartAsync(cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
             if (status.GetSnapshot().State != "Ready")
             {
-                var applyMigrations = configuration.GetValue(
-                    "Database:ApplyMigrationsOnStartup",
-                    true);
-                await initializer.InitializeAsync(
-                    applyMigrations: applyMigrations,
-                    seedEnabled: configuration.GetValue("Seed:Enabled", false),
-                    canConnectAsync: CanConnectAsync,
-                    applyMigrationsAsync: cancellationToken =>
-                        PrepareDatabaseAsync(
-                            applyMigrations,
-                            cancellationToken),
-                    seedAsync: cancellationToken => DevelopmentDataSeeder.SeedAsync(
-                        services,
-                        configuration,
-                        cancellationToken),
-                    status: status,
-                    logger: logger,
-                    cancellationToken: stoppingToken);
+                await InitializeOnceAsync(stoppingToken);
             }
 
             await Task.Delay(RetryDelay, stoppingToken);
@@ -68,6 +57,27 @@ public sealed class DatabaseRecoveryService(
                 }
             }
         }
+    }
+
+    protected virtual Task InitializeOnceAsync(CancellationToken cancellationToken)
+    {
+        var applyMigrations = configuration.GetValue(
+            "Database:ApplyMigrationsOnStartup",
+            true);
+        return initializer.InitializeAsync(
+            applyMigrations: applyMigrations,
+            seedEnabled: configuration.GetValue("Seed:Enabled", false),
+            canConnectAsync: CanConnectAsync,
+            applyMigrationsAsync: token => PrepareDatabaseAsync(
+                applyMigrations,
+                token),
+            seedAsync: token => DevelopmentDataSeeder.SeedAsync(
+                services,
+                configuration,
+                token),
+            status: status,
+            logger: logger,
+            cancellationToken: cancellationToken);
     }
 
     private async Task<bool> CanConnectAsync(CancellationToken cancellationToken)

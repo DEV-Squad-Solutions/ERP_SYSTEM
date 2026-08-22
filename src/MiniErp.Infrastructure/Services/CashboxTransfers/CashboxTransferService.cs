@@ -648,8 +648,7 @@ public sealed class CashboxTransferService(
                 Balance = cashbox.OpeningBalance +
                     (cashbox.Vouchers
                         .Where(voucher =>
-                            (voucher.CashMovementTypeId.HasValue ||
-                             voucher.CashboxTransferId.HasValue) &&
+                            voucher.IsPosted &&
                             !excludedVoucherIds.Contains(voucher.Id))
                         .Sum(voucher =>
                             (decimal?)(voucher.Direction ==
@@ -729,6 +728,7 @@ public sealed class CashboxTransferService(
         voucher.ExternalPartyName = null;
         voucher.Amount = amount;
         voucher.Currency = cashbox.Currency;
+        voucher.IsPosted = true;
         voucher.ReferenceNumber = transfer.TransferNumber;
         voucher.Description = transfer.Description ??
             $"Cashbox transfer {transfer.TransferNumber}";

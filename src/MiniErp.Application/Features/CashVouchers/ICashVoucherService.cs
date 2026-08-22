@@ -14,6 +14,9 @@ public interface ICashVoucherService
         int id,
         CancellationToken cancellationToken = default);
 
+    Task<Result<CashVoucherPartySelectResponse>> GetPartySelectAsync(
+        CancellationToken cancellationToken = default);
+
     Task<Result<CashVoucherResponse>> AddAsync(
         CashVoucherRequest request,
         CancellationToken cancellationToken = default);

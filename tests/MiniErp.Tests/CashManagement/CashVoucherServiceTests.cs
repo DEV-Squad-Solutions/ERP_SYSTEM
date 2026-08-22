@@ -17,6 +17,59 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
+    public async Task PartySelect_ReturnsActiveCompanyPartiesOrderedByNameAndId()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE Drivers
+            SET LicenseExpiryDate = '2020-01-01'
+            WHERE Id = 1;
+
+            INSERT INTO Drivers (
+                Id, CompanyId, Code, Name, LicenseNumber,
+                LicenseExpiryDate, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (4, 1, 'DRV-4', 'Inactive Driver', 'LIC-4',
+                 NULL, 0,
+                 'test', '2026-01-01', 'test', 0),
+                (5, 1, 'DRV-5', 'A Driver With Expired License', 'LIC-5',
+                 '2020-01-01', 1,
+                 'test', '2026-01-01', 'test', 0);
+            """);
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreateVoucherService(companyId: 1);
+
+        var result = await service.GetPartySelectAsync();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(
+            [1, 2, 5],
+            result.Value.BusinessPartners.Select(item => item.Id));
+        Assert.Equal(
+            ["Customer One", "Supplier One", "USD Partner"],
+            result.Value.BusinessPartners.Select(item => item.Name));
+        Assert.Equal(
+            [5, 1, 2],
+            result.Value.Drivers.Select(item => item.Id));
+        Assert.Equal(
+            [
+                "A Driver With Expired License",
+                "Driver One",
+                "Driver Two"
+            ],
+            result.Value.Drivers.Select(item => item.Name));
+        Assert.Equal(
+            [1],
+            result.Value.Employees.Select(item => item.Id));
+        Assert.Equal(
+            ["Employee One"],
+            result.Value.Employees.Select(item => item.Name));
+    }
+
+    [Fact]
     public async Task ReceiptAndPaymentChangeOnlyDerivedCashboxBalance()
     {
         await using var database =
@@ -146,9 +199,13 @@ public sealed class CashVoucherServiceTests
         var completed = await service.GetAllAsync(
             new PaginationRequest { PageNumber = 1, PageSize = 10 },
             new CashVoucherFilterRequest(IsDraft: false));
+        var stored = await database.Context.CashVouchers
+            .AsNoTracking()
+            .SingleAsync(voucher => voucher.Id == result.Value.Id);
 
         Assert.True(result.IsSuccess);
         Assert.True(result.Value.IsDraft);
+        Assert.False(stored.IsPosted);
         Assert.Matches("^RCV-[0-9]{4,}$", result.Value.VoucherNumber);
         Assert.Equal(1, result.Value.CashboxId);
         Assert.Null(result.Value.CashMovementTypeId);
@@ -205,6 +262,89 @@ public sealed class CashVoucherServiceTests
         Assert.Equal(1, updated.Value.CashboxId);
         Assert.Equal(3, updated.Value.CashMovementTypeId);
         Assert.Equal(1250m, cashbox.Value.CurrentBalance);
+    }
+
+    [Fact]
+    public async Task UpdateWithoutMovementTypePostsDraftAndAffectsBalance()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var draft = await service.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 8, 2),
+                Direction: CashDirection.Receipt,
+                CashboxId: 1,
+                Amount: 40m,
+                Description: "Post without category"));
+
+        var updated = await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: draft.Value.VoucherDate,
+                Direction: draft.Value.Direction,
+                CashboxId: draft.Value.CashboxId,
+                CashMovementTypeId: null,
+                EmployeeId: null,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: draft.Value.Amount,
+                ReferenceNumber: null,
+                Description: draft.Value.Description,
+                Notes: null,
+                RowVersion: draft.Value.RowVersion));
+        var cashbox = await database.CreateCashboxService(1)
+            .GetByIdAsync(1);
+        var stored = await database.Context.CashVouchers
+            .AsNoTracking()
+            .SingleAsync(voucher => voucher.Id == draft.Value.Id);
+
+        Assert.True(updated.IsSuccess);
+        Assert.Null(updated.Value.CashMovementTypeId);
+        Assert.False(updated.Value.IsDraft);
+        Assert.True(stored.IsPosted);
+        Assert.Equal(1040m, cashbox.Value.CurrentBalance);
+    }
+
+    [Fact]
+    public async Task UpdateCanClearExistingTypeAndKeepPartnerMovementPosted()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var original = await AddVoucherAsync(
+            service,
+            CreatePartnerRequest(
+                "CLEAR-TYPE",
+                CashDirection.Receipt,
+                movementTypeId: 1,
+                partnerId: 1,
+                amount: 20m));
+
+        await using var updateContext = database.CreateAdditionalContext();
+        var updated = await database.CreateVoucherService(
+                companyId: 1,
+                context: updateContext)
+            .UpdateAsync(
+            original.Value.Id,
+            ToUpdateRequest(original.Value) with
+            {
+                CashMovementTypeId = null
+            });
+        var movements = await updateContext.BusinessPartnerMovements
+            .AsNoTracking()
+            .Where(movement => movement.CashVoucherId == original.Value.Id)
+            .ToListAsync();
+        var cashbox = await database.CreateCashboxService(1)
+            .GetByIdAsync(1);
+
+        Assert.True(updated.IsSuccess);
+        Assert.Null(updated.Value.CashMovementTypeId);
+        Assert.False(updated.Value.IsDraft);
+        Assert.Single(movements);
+        Assert.Equal(1020m, cashbox.Value.CurrentBalance);
     }
 
     [Fact]
@@ -731,12 +871,12 @@ public sealed class CashVoucherServiceTests
             INSERT INTO CashVouchers (
                 Id, CompanyId, InvoiceId, VoucherNumber, VoucherDate,
                 Direction, CashboxId, CashMovementTypeId, PartyType,
-                BusinessPartnerId, Amount, Currency, LastModifiedAt,
+                BusinessPartnerId, Amount, Currency, IsPosted, LastModifiedAt,
                 CreatedById, CreatedOn, CreatedByPc, IsDeleted)
             VALUES (
                 100, 1, 1, 'INV-PAY-1', '2026-07-25',
                 1, 1, 1, 2,
-                1, 25, 1, '2026-07-25',
+                1, 25, 1, 1, '2026-07-25',
                 'test', '2026-07-25', 'test', 0);
             """);
         var service = database.CreateVoucherService(companyId: 1);
@@ -829,7 +969,7 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
-    public async Task BulkCreatesCompletedPartnerVoucherAndMovement()
+    public async Task BulkAddWithoutMovementTypePostsPartnerVoucherImmediately()
     {
         await using var database = await CashManagementTestDatabase.CreateAsync();
         var service = database.CreateVoucherService(companyId: 1);
@@ -840,7 +980,7 @@ public sealed class CashVoucherServiceTests
                 new CashVoucherBulkAddItemRequest(
                     Voucher: CreateBulkVoucher(
                         direction: CashDirection.Receipt,
-                        movementTypeId: 1,
+                        movementTypeId: null,
                         partnerId: 1,
                         amount: 125m))
             ]));
@@ -851,11 +991,54 @@ public sealed class CashVoucherServiceTests
         Assert.Equal("Added", item.Status);
         Assert.NotNull(item.Voucher);
         Assert.False(item.Voucher!.IsDraft);
+        Assert.Null(item.Voucher.CashMovementTypeId);
         Assert.Equal(CashPartyType.Partner, item.Voucher.PartyType);
+        Assert.True((await database.Context.CashVouchers
+            .AsNoTracking()
+            .SingleAsync(voucher => voucher.Id == item.Id)).IsPosted);
         Assert.Single(
             await database.Context.BusinessPartnerMovements
                 .Where(movement => movement.CashVoucherId == item.Id)
                 .ToListAsync());
+    }
+
+    [Fact]
+    public async Task BulkUpdateCanClearMovementTypeAndRemainPosted()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var original = await AddVoucherAsync(
+            service,
+            CreateRequest(
+                "BULK-CLEAR-TYPE",
+                CashDirection.Receipt,
+                movementTypeId: 3,
+                amount: 10m));
+
+        var result = await service.BulkAsync(
+            new CashVoucherBulkRequest(
+            [
+                new CashVoucherBulkUpdateItemRequest(
+                    Id: original.Value.Id,
+                    RowVersion: original.Value.RowVersion,
+                    Voucher: CreateBulkVoucher(
+                        direction: CashDirection.Receipt,
+                        movementTypeId: null,
+                        amount: 30m))
+            ]));
+        var item = Assert.Single(result.Value.Items);
+        var cashbox = await database.CreateCashboxService(1)
+            .GetByIdAsync(1);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(item.Voucher);
+        Assert.Null(item.Voucher!.CashMovementTypeId);
+        Assert.False(item.Voucher.IsDraft);
+        Assert.True((await database.Context.CashVouchers
+            .AsNoTracking()
+            .SingleAsync(voucher => voucher.Id == item.Id)).IsPosted);
+        Assert.Equal(1030m, cashbox.Value.CurrentBalance);
     }
 
     [Fact]
@@ -1014,12 +1197,12 @@ public sealed class CashVoucherServiceTests
             INSERT INTO CashVouchers (
                 Id, CompanyId, InvoiceId, VoucherNumber, VoucherDate,
                 Direction, CashboxId, CashMovementTypeId, PartyType,
-                BusinessPartnerId, Amount, Currency, LastModifiedAt,
+                BusinessPartnerId, Amount, Currency, IsPosted, LastModifiedAt,
                 CreatedById, CreatedOn, CreatedByPc, IsDeleted)
             VALUES (
                 101, 1, 1, 'INV-BULK-1', '2026-07-25',
                 1, 1, 1, 2,
-                1, 25, 1, '2026-07-25',
+                1, 25, 1, 1, '2026-07-25',
                 'test', '2026-07-25', 'test', 0);
             """);
         var service = database.CreateVoucherService(companyId: 1);
@@ -1041,7 +1224,7 @@ public sealed class CashVoucherServiceTests
     private static CashVoucherBulkVoucherRequest CreateBulkVoucher(
         CashDirection direction,
         int cashboxId = 1,
-        int movementTypeId = 3,
+        int? movementTypeId = 3,
         int? partnerId = null,
         decimal amount = 10m,
         decimal? exchangeRate = null) =>

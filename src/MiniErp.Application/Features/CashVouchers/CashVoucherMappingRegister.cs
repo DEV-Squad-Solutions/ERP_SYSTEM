@@ -43,8 +43,7 @@ public sealed class CashVoucherMappingRegister : IRegister
                     : voucher.Company.Settings.BaseCurrency)
             .Map(
                 response => response.ExchangeRate,
-                voucher => (voucher.CashMovementTypeId.HasValue ||
-                    voucher.CashboxTransferId.HasValue) &&
+                voucher => voucher.IsPosted &&
                     voucher.Currency ==
                         (voucher.Company.Settings == null
                             ? Domain.Enums.CurrencyCode.EGP
@@ -53,8 +52,7 @@ public sealed class CashVoucherMappingRegister : IRegister
                         : voucher.ExchangeRate)
             .Map(
                 response => response.BaseAmount,
-                voucher => (voucher.CashMovementTypeId.HasValue ||
-                    voucher.CashboxTransferId.HasValue) &&
+                voucher => voucher.IsPosted &&
                     voucher.Currency ==
                         (voucher.Company.Settings == null
                             ? Domain.Enums.CurrencyCode.EGP
@@ -79,9 +77,7 @@ public sealed class CashVoucherMappingRegister : IRegister
                         voucher.CashMovementType.Classification)
             .Map(
                 response => response.IsDraft,
-                voucher => !voucher.CashboxId.HasValue ||
-                    (!voucher.CashMovementTypeId.HasValue &&
-                     !voucher.CashboxTransferId.HasValue))
+                voucher => !voucher.IsPosted)
             .Map(
                 response => response.BusinessPartnerName,
                 voucher => voucher.BusinessPartner == null

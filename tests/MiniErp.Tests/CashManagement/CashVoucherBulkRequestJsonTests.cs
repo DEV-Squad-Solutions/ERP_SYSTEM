@@ -21,7 +21,6 @@ public sealed class CashVoucherBulkRequestJsonTests
                     "voucherDate": "2026-08-21",
                     "direction": "Receipt",
                     "cashboxId": 1,
-                    "cashMovementTypeId": 3,
                     "amount": 100
                   }
                 },
@@ -33,7 +32,7 @@ public sealed class CashVoucherBulkRequestJsonTests
                     "voucherDate": "2026-08-21",
                     "direction": "Payment",
                     "cashboxId": 1,
-                    "cashMovementTypeId": 4,
+                    "cashMovementTypeId": null,
                     "amount": 25
                   }
                 },
@@ -53,8 +52,12 @@ public sealed class CashVoucherBulkRequestJsonTests
         Assert.NotNull(request?.Items);
         Assert.Collection(
             request.Items,
-            item => Assert.IsType<CashVoucherBulkAddItemRequest>(item),
-            item => Assert.IsType<CashVoucherBulkUpdateItemRequest>(item),
+            item => Assert.Null(
+                Assert.IsType<CashVoucherBulkAddItemRequest>(item)
+                    .Voucher!.CashMovementTypeId),
+            item => Assert.Null(
+                Assert.IsType<CashVoucherBulkUpdateItemRequest>(item)
+                    .Voucher!.CashMovementTypeId),
             item => Assert.IsType<CashVoucherBulkDeleteItemRequest>(item));
     }
 

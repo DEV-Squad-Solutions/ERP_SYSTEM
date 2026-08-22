@@ -77,6 +77,54 @@ public sealed class FinancialStatementServiceTests
     }
 
     [Fact]
+    public async Task CashboxStatementIncludesPostedNullTypeAndExcludesDraft()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var vouchers = database.CreateVoucherService(companyId: 1);
+        var bulk = await vouchers.BulkAsync(
+            new CashVoucherBulkRequest(
+            [
+                new CashVoucherBulkAddItemRequest(
+                    Voucher: new CashVoucherBulkVoucherRequest(
+                        VoucherDate: new DateOnly(2026, 8, 3),
+                        Direction: CashDirection.Receipt,
+                        CashboxId: 1,
+                        CashMovementTypeId: null,
+                        EmployeeId: null,
+                        BusinessPartnerId: null,
+                        DriverId: null,
+                        DriverTripId: null,
+                        ExternalPartyName: null,
+                        Amount: 30m,
+                        ReferenceNumber: null,
+                        Description: "Posted without category",
+                        Notes: null,
+                        ExchangeRate: null))
+            ]));
+        await vouchers.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 8, 4),
+                Direction: CashDirection.Receipt,
+                CashboxId: 1,
+                Amount: 50m,
+                Description: "Unposted draft"));
+
+        var result = await database.CreateStatementService(1)
+            .GetCashboxStatementAsync(
+                Page(),
+                new CashboxStatementFilterRequest(CashboxId: 1));
+
+        Assert.True(bulk.IsSuccess);
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value.Items);
+        Assert.Equal(bulk.Value.Items[0].Id, item.CashVoucherId);
+        Assert.Equal("سند قبض", item.MovementName);
+        Assert.Equal(30m, result.Value.Summary.TotalReceipts);
+        Assert.Equal(1030m, result.Value.Summary.ClosingBalance);
+    }
+
+    [Fact]
     public async Task CashboxStatementFiltersByMovementClassification()
     {
         await using var database =
@@ -156,12 +204,12 @@ public sealed class FinancialStatementServiceTests
             INSERT INTO CashVouchers (
                 CompanyId, VoucherNumber, VoucherDate, Direction,
                 CashboxId, CashMovementTypeId, PartyType, Amount,
-                Currency, ExchangeRate, BaseAmount, LastModifiedAt,
+                Currency, ExchangeRate, BaseAmount, IsPosted, LastModifiedAt,
                 CreatedById, CreatedOn, CreatedByPc, IsDeleted)
             VALUES (
                 1, 'USD-RECEIPT', '2026-07-10', 1,
                 5, 3, 1, 10,
-                2, 50, 500, '2026-07-10',
+                2, 50, 500, 1, '2026-07-10',
                 'test', '2026-07-10', 'test', 0);
             """);
 

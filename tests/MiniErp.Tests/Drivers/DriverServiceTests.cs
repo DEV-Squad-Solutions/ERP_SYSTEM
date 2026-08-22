@@ -66,7 +66,7 @@ public sealed class DriverServiceTests
     }
 
     [Fact]
-    public async Task GetSelect_ReturnsOnlyActiveUnexpiredCurrentCompanyDrivers()
+    public async Task GetSelect_ReturnsActiveCurrentCompanyDriversIncludingExpired()
     {
         await using var database = await DriverTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
@@ -74,7 +74,7 @@ public sealed class DriverServiceTests
         var result = await service.GetSelectAsync();
 
         Assert.True(result.IsSuccess);
-        Assert.Equal([1, 5], result.Value.Select(driver => driver.Id));
+        Assert.Equal([1, 3, 5], result.Value.Select(driver => driver.Id));
     }
 
     [Fact]

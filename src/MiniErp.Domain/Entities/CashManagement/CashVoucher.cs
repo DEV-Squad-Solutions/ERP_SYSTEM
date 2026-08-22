@@ -70,6 +70,8 @@ public sealed class CashVoucher : AuditableEntity
 
     public decimal BaseAmount { get; private set; }
 
+    public bool IsPosted { get; set; }
+
     public string? ReferenceNumber { get; set; }
 
     public string? Description { get; set; }
@@ -80,9 +82,7 @@ public sealed class CashVoucher : AuditableEntity
 
     public byte[] RowVersion { get; private set; } = [];
 
-    public bool IsDraft =>
-        !CashboxId.HasValue ||
-        (!CashMovementTypeId.HasValue && !CashboxTransferId.HasValue);
+    public bool IsDraft => !IsPosted;
 
     public InvoicePayment? InvoicePayment { get; set; }
 

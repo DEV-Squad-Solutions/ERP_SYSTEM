@@ -41,7 +41,7 @@ public sealed record CashVoucherBulkVoucherRequest(
     DateOnly VoucherDate,
     CashDirection Direction,
     int CashboxId,
-    int CashMovementTypeId,
+    int? CashMovementTypeId,
     int? EmployeeId,
     int? BusinessPartnerId,
     int? DriverId,

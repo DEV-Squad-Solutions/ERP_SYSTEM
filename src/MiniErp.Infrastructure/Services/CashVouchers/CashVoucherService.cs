@@ -103,9 +103,7 @@ public sealed class CashVoucherService(
             .Where(voucher =>
                 !filters.IsDraft.HasValue ||
                 filters.IsDraft.Value ==
-                (!voucher.CashboxId.HasValue ||
-                 (!voucher.CashMovementTypeId.HasValue &&
-                  !voucher.CashboxTransferId.HasValue)))
+                !voucher.IsPosted)
             .Where(voucher =>
                 !filters.FromDate.HasValue ||
                 voucher.VoucherDate >= filters.FromDate.Value)
@@ -139,6 +137,72 @@ public sealed class CashVoucherService(
         return response is null
             ? Result<CashVoucherResponse>.Failure(NotFound(id))
             : Result<CashVoucherResponse>.Success(response);
+    }
+
+    public async Task<Result<CashVoucherPartySelectResponse>>
+        GetPartySelectAsync(
+            CancellationToken cancellationToken = default)
+    {
+        var businessPartnerRows = await dbContext.BusinessPartners
+            .AsNoTracking()
+            .Where(partner =>
+                partner.CompanyId == companyId &&
+                partner.IsActive)
+            .OrderBy(partner => partner.Name)
+            .ThenBy(partner => partner.Id)
+            .Select(partner => new
+            {
+                partner.Id,
+                partner.Name
+            })
+            .ToListAsync(cancellationToken);
+
+        var driverRows = await dbContext.Drivers
+            .AsNoTracking()
+            .Where(driver =>
+                driver.CompanyId == companyId &&
+                driver.IsActive)
+            .OrderBy(driver => driver.Name)
+            .ThenBy(driver => driver.Id)
+            .Select(driver => new
+            {
+                driver.Id,
+                driver.Name
+            })
+            .ToListAsync(cancellationToken);
+
+        var employeeRows = await dbContext.Employees
+            .AsNoTracking()
+            .Where(employee =>
+                employee.CompanyId == companyId &&
+                employee.IsActive)
+            .OrderBy(employee => employee.Name)
+            .ThenBy(employee => employee.Id)
+            .Select(employee => new
+            {
+                employee.Id,
+                employee.Name
+            })
+            .ToListAsync(cancellationToken);
+
+        var response = new CashVoucherPartySelectResponse(
+            BusinessPartners: businessPartnerRows
+                .Select(partner => new SelectResponse(
+                    Id: partner.Id,
+                    Name: partner.Name))
+                .ToList(),
+            Drivers: driverRows
+                .Select(driver => new SelectResponse(
+                    Id: driver.Id,
+                    Name: driver.Name))
+                .ToList(),
+            Employees: employeeRows
+                .Select(employee => new SelectResponse(
+                    Id: employee.Id,
+                    Name: employee.Name))
+                .ToList());
+
+        return Result<CashVoucherPartySelectResponse>.Success(response);
     }
 
     public async Task<Result<CashVoucherResponse>> AddAsync(
@@ -185,6 +249,7 @@ public sealed class CashVoucherService(
                 cancellationToken);
         voucher.CashMovementTypeId = null;
         voucher.PartyType = CashPartyType.None;
+        voucher.IsPosted = false;
         voucher.InitializeDraft(cashbox.Currency);
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
 
@@ -333,6 +398,7 @@ public sealed class CashVoucherService(
 
         request.Adapt(voucher);
         voucher.PartyType = preparation.Value.PartyType;
+        voucher.IsPosted = true;
         await ApplyPreparationAsync(
             voucher,
             preparation.Value,
@@ -452,6 +518,7 @@ public sealed class CashVoucherService(
         };
         request.Adapt(voucher);
         voucher.PartyType = preparation.Value.PartyType;
+        voucher.IsPosted = true;
         await ApplyPreparationAsync(voucher, preparation.Value, cancellationToken);
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
 
@@ -523,6 +590,7 @@ public sealed class CashVoucherService(
             item.RowVersion!;
         request.Adapt(voucher);
         voucher.PartyType = preparation.Value.PartyType;
+        voucher.IsPosted = true;
         await ApplyPreparationAsync(voucher, preparation.Value, cancellationToken);
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
         entry.Property(entity => entity.LastModifiedAt).IsModified = true;
@@ -666,15 +734,13 @@ public sealed class CashVoucherService(
         CashVoucher? currentVoucher,
         CancellationToken cancellationToken)
     {
-        if (!request.CashboxId.HasValue ||
-            !request.CashMovementTypeId.HasValue)
+        if (!request.CashboxId.HasValue)
         {
             return Result<VoucherPreparation>.Failure(
                 PostingReferencesMustBeTogether());
         }
 
         var cashboxId = request.CashboxId.Value;
-        var cashMovementTypeId = request.CashMovementTypeId.Value;
         if (!HasAtMostOneParty(request))
         {
             return Result<VoucherPreparation>.Failure(
@@ -719,36 +785,41 @@ public sealed class CashVoucherService(
                 exchangeRateResult.Error);
         }
 
-        var movementType = await dbContext.CashMovementTypes
-            .FirstOrDefaultAsync(
-                entity =>
-                    entity.CompanyId == companyId &&
-                    entity.Id == cashMovementTypeId,
-                cancellationToken);
-        if (movementType is null)
+        CashMovementType? movementType = null;
+        if (request.CashMovementTypeId is int cashMovementTypeId)
         {
-            return Result<VoucherPreparation>.Failure(
-                MovementTypeNotFound(cashMovementTypeId));
-        }
+            movementType = await dbContext.CashMovementTypes
+                .FirstOrDefaultAsync(
+                    entity =>
+                        entity.CompanyId == companyId &&
+                        entity.Id == cashMovementTypeId,
+                    cancellationToken);
+            if (movementType is null)
+            {
+                return Result<VoucherPreparation>.Failure(
+                    MovementTypeNotFound(cashMovementTypeId));
+            }
 
-        if (!movementType.IsActive &&
-            (currentVoucher is null ||
-             currentVoucher.CashMovementTypeId != movementType.Id))
-        {
-            return Result<VoucherPreparation>.Failure(
-                MovementTypeInactive());
-        }
+            if (!movementType.IsActive &&
+                (currentVoucher is null ||
+                 currentVoucher.CashMovementTypeId != movementType.Id))
+            {
+                return Result<VoucherPreparation>.Failure(
+                    MovementTypeInactive());
+            }
 
-        if (movementType.Direction != request.Direction)
-        {
-            return Result<VoucherPreparation>.Failure(
-                MovementTypeDirectionMismatch());
+            if (movementType.Direction != request.Direction)
+            {
+                return Result<VoucherPreparation>.Failure(
+                    MovementTypeDirectionMismatch());
+            }
         }
 
         BusinessPartner? partner = null;
         if (partyType == CashPartyType.Partner)
         {
-            if (movementType.PartnerEffect == PartnerAccountEffect.None)
+            if (movementType is not null &&
+                movementType.PartnerEffect == PartnerAccountEffect.None)
             {
                 return Result<VoucherPreparation>.Failure(
                     MovementTypeNotForPartner());
@@ -774,7 +845,8 @@ public sealed class CashVoucherService(
                     PartnerCurrencyMismatch());
             }
         }
-        else if (movementType.PartnerEffect != PartnerAccountEffect.None)
+        else if (movementType is not null &&
+                 movementType.PartnerEffect != PartnerAccountEffect.None)
         {
             return Result<VoucherPreparation>.Failure(
                 MovementTypeForPartnerOnly());
@@ -834,9 +906,9 @@ public sealed class CashVoucherService(
 
         var balanceError = await ValidateFinalBalancesAsync(
             currentVoucher,
-            cashboxId,
-            request.Direction,
-            request.Amount,
+            proposedCashboxId: cashboxId,
+            proposedDirection: request.Direction,
+            proposedAmount: request.Amount,
             cancellationToken);
         if (balanceError is not null)
         {
@@ -845,11 +917,11 @@ public sealed class CashVoucherService(
 
         return Result<VoucherPreparation>.Success(
             new VoucherPreparation(
-                cashbox,
-                partyType,
-                partner,
-                driver,
-                exchangeRateResult.Value));
+                Cashbox: cashbox,
+                PartyType: partyType,
+                BusinessPartner: partner,
+                Driver: driver,
+                ExchangeRate: exchangeRateResult.Value));
     }
 
     private async Task<Error?> ValidateFinalBalancesAsync(
@@ -860,7 +932,11 @@ public sealed class CashVoucherService(
         CancellationToken cancellationToken)
     {
         var affectedCashboxIds = new HashSet<int>();
-        if (currentVoucher?.CashboxId is int currentCashboxId)
+        if (currentVoucher is
+            {
+                CashboxId: int currentCashboxId,
+                IsPosted: true
+            })
         {
             affectedCashboxIds.Add(currentCashboxId);
         }
@@ -882,8 +958,7 @@ public sealed class CashVoucherService(
                     cashbox.OpeningBalance +
                     (cashbox.Vouchers
                         .Where(voucher =>
-                            (voucher.CashMovementTypeId.HasValue ||
-                             voucher.CashboxTransferId.HasValue) &&
+                            voucher.IsPosted &&
                             (!excludedVoucherId.HasValue ||
                              voucher.Id != excludedVoucherId.Value))
                         .Sum(voucher =>

@@ -524,6 +524,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 ExchangeRateId INTEGER NULL,
                 ExchangeRate NUMERIC NOT NULL DEFAULT 1,
                 BaseAmount NUMERIC NOT NULL DEFAULT 0,
+                IsPosted INTEGER NOT NULL DEFAULT 0,
                 ReferenceNumber TEXT NULL,
                 Description TEXT NULL,
                 Notes TEXT NULL,

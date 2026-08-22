@@ -136,6 +136,10 @@ public sealed class CashVoucherConfiguration
             .HasDefaultValue(0m)
             .IsRequired();
 
+        builder.Property(voucher => voucher.IsPosted)
+            .HasDefaultValue(false)
+            .IsRequired();
+
         builder.Property(voucher => voucher.ReferenceNumber)
             .HasMaxLength(100);
 
