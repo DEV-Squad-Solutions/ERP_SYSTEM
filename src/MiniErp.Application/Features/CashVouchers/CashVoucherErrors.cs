@@ -77,6 +77,12 @@ public static class CashVoucherErrors
             "نوع الحركة النقدية المختار مخصص للعملاء أو الموردين فقط.",
             nameof(CashVoucherUpdateRequest.BusinessPartnerId));
 
+    public static Error MovementTypeNotAllowedForManualVoucher() =>
+        Error.Conflict(
+            "CashVouchers.MovementTypeNotAllowedForManualVoucher",
+            "نوع الحركة النقدية للسند اليدوي يجب أن يكون إيراداً لسند القبض أو مصروفاً لسند الصرف وغير مرتبط بحساب عميل أو مورد.",
+            nameof(CashVoucherUpdateRequest.CashMovementTypeId));
+
     public static Error PartySelectionMustBeExclusive() =>
         Error.Validation(
             "CashVouchers.PartySelectionMustBeExclusive",

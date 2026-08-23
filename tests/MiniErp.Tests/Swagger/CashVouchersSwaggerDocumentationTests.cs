@@ -23,10 +23,55 @@ public sealed class CashVouchersSwaggerDocumentationTests
             "CashVouchers_GetPartySelect",
             operation.OperationId);
         Assert.Contains("selected company", operation.Description);
-        Assert.Contains("id and name", operation.Description);
+        Assert.Contains("expenses", operation.Description);
+        Assert.Contains("revenues", operation.Description);
+        Assert.Contains("id, name, and classification", operation.Description);
+        Assert.Contains("Payment movements classified Expense", operation.Description);
+        Assert.Contains("Receipt movements classified Revenue", operation.Description);
+        Assert.Contains("partner effect", operation.Description);
         Assert.Contains("ordered by name then id", operation.Description);
         Assert.Contains("license is expired", operation.Description);
-        Assert.Contains("Inactive", operation.Description);
+        Assert.Contains("inactive", operation.Description);
+        Assert.DoesNotContain("cashMovements", operation.Description);
+        Assert.DoesNotContain("direction", operation.Description);
+    }
+
+    [Fact]
+    public void PartySelectSchema_UsesSeparatedCamelCaseMovementArrays()
+    {
+        var generator = new SchemaGenerator(
+            new SchemaGeneratorOptions(),
+            new JsonSerializerDataContractResolver(
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        var repository = new SchemaRepository();
+
+        generator.GenerateSchema(
+            typeof(CashVoucherPartySelectResponse),
+            repository);
+
+        var responseSchema = repository.Schemas[
+            nameof(CashVoucherPartySelectResponse)];
+        var responseProperties = Assert.IsAssignableFrom<
+            IDictionary<string, IOpenApiSchema>>(responseSchema.Properties);
+        Assert.Equal(
+            [
+                "businessPartners",
+                "drivers",
+                "employees",
+                "expenses",
+                "revenues"
+            ],
+            responseProperties.Keys);
+        Assert.DoesNotContain("cashMovements", responseProperties.Keys);
+
+        var movementSchema = repository.Schemas[
+            nameof(CashVoucherCashMovementSelectResponse)];
+        var movementProperties = Assert.IsAssignableFrom<
+            IDictionary<string, IOpenApiSchema>>(movementSchema.Properties);
+        Assert.Equal(
+            ["id", "name", "classification"],
+            movementProperties.Keys);
+        Assert.DoesNotContain("direction", movementProperties.Keys);
     }
 
     [Fact]
@@ -48,7 +93,7 @@ public sealed class CashVouchersSwaggerDocumentationTests
     }
 
     [Fact]
-    public void Update_DocumentsOptionalTypePostingAndClearing()
+    public void Update_DocumentsExclusiveTargetAndManualMovementEligibility()
     {
         var operation = new OpenApiOperation();
 
@@ -56,10 +101,12 @@ public sealed class CashVouchersSwaggerDocumentationTests
             operation,
             Context(nameof(CashVouchersController.Update)));
 
-        Assert.Contains("cashMovementTypeId is optional", operation.Description);
+        Assert.Contains("exactly one posting target", operation.Description);
+        Assert.Contains("cashMovementTypeId to be null", operation.Description);
         Assert.Contains("completed, posted voucher", operation.Description);
-        Assert.Contains("clearing an existing movement type", operation.Description);
-        Assert.Contains("direction and party", operation.Description);
+        Assert.Contains("Receipt with Revenue", operation.Description);
+        Assert.Contains("Payment with Expense", operation.Description);
+        Assert.Contains("non-partner", operation.Description);
     }
 
     [Fact]

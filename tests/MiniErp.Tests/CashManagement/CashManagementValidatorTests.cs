@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using MiniErp.Application.Features.CashMovementTypes;
 using MiniErp.Application.Features.CashVouchers;
 using MiniErp.Application.Features.Cashboxes;
@@ -128,13 +130,12 @@ public sealed class CashManagementValidatorTests
     }
 
     [Theory]
-    [InlineData(null, null, null, null, null)]
     [InlineData(1, null, null, null, null)]
     [InlineData(null, 1, null, null, null)]
     [InlineData(null, null, 1, null, null)]
     [InlineData(null, null, 1, 1, null)]
     [InlineData(null, null, null, null, "Outside party")]
-    public void CashVoucherUpdateValidator_AcceptsEveryValidPartyShape(
+    public void CashVoucherUpdateValidator_AcceptsEveryValidPartyTarget(
         int? employeeId,
         int? partnerId,
         int? driverId,
@@ -154,12 +155,12 @@ public sealed class CashManagementValidatorTests
     }
 
     [Fact]
-    public void CashVoucherSaveValidators_AcceptNullMovementType()
+    public void UpdateAcceptsPartyWithNullMovementAndBulkStillAcceptsNoTarget()
     {
         var updateResult = new CashVoucherUpdateRequestValidator().Validate(
             CreateVoucher(
                 employeeId: null,
-                partnerId: null,
+                partnerId: 1,
                 driverId: null,
                 tripId: null,
                 externalPartyName: null) with
@@ -174,6 +175,127 @@ public sealed class CashManagementValidatorTests
 
         Assert.True(updateResult.IsValid);
         Assert.True(bulkResult.IsValid);
+    }
+
+    [Theory]
+    [InlineData(CashDirection.Receipt, false)]
+    [InlineData(CashDirection.Payment, false)]
+    [InlineData(CashDirection.Receipt, true)]
+    public void MovementTypeValidator_AllowsOmittedClassification(
+        CashDirection direction,
+        bool forPartner)
+    {
+        var request = new CashMovementTypeRequest(
+            Name: "Inferred classification",
+            Direction: direction,
+            Classification: null,
+            ForPartner: forPartner,
+            IsActive: true,
+            IsDefaultForSales: false,
+            IsDefaultForPurchase: false,
+            IsDefaultForSalesReturn: false,
+            IsDefaultForPurchaseReturn: false,
+            Notes: null);
+
+        var result = new CashMovementTypeRequestValidator().Validate(request);
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void MovementTypeRequest_OmittedClassificationDeserializesAndValidates()
+    {
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+        options.Converters.Add(
+            new JsonStringEnumConverter(
+                JsonNamingPolicy.CamelCase,
+                allowIntegerValues: false));
+        var request = JsonSerializer.Deserialize<CashMovementTypeRequest>(
+            """
+            {
+              "name": "General receipt",
+              "direction": "Receipt"
+            }
+            """,
+            options);
+
+        Assert.NotNull(request);
+        Assert.Null(request.Classification);
+
+        var result = new CashMovementTypeRequestValidator().Validate(request);
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void MovementTypeValidator_UsesInferredPartnerSettlementForInvoiceDefaults()
+    {
+        var request = new CashMovementTypeRequest(
+            Name: "Default collection",
+            Direction: CashDirection.Receipt,
+            Classification: null,
+            ForPartner: true,
+            IsActive: true,
+            IsDefaultForSales: true,
+            IsDefaultForPurchase: false,
+            IsDefaultForSalesReturn: false,
+            IsDefaultForPurchaseReturn: false,
+            Notes: null);
+
+        var result = new CashMovementTypeRequestValidator().Validate(request);
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void CashVoucherUpdateValidator_AcceptsMovementAsOnlyTarget()
+    {
+        var result = new CashVoucherUpdateRequestValidator().Validate(
+            CreateVoucher(
+                employeeId: null,
+                partnerId: null,
+                driverId: null,
+                tripId: null,
+                externalPartyName: null));
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void CashVoucherUpdateValidator_RejectsNoTargetAndPartyWithMovement()
+    {
+        var noTarget = new CashVoucherUpdateRequestValidator().Validate(
+            CreateVoucher(
+                employeeId: null,
+                partnerId: null,
+                driverId: null,
+                tripId: null,
+                externalPartyName: null) with
+            {
+                CashMovementTypeId = null
+            });
+        var partyAndMovement = new CashVoucherUpdateRequestValidator().Validate(
+            CreateVoucher(
+                employeeId: 1,
+                partnerId: null,
+                driverId: null,
+                tripId: null,
+                externalPartyName: null) with
+            {
+                CashMovementTypeId = 9
+            });
+
+        Assert.Contains(
+            noTarget.Errors,
+            error => error.PropertyName ==
+                nameof(CashVoucherUpdateRequest.EmployeeId));
+        Assert.Contains(
+            partyAndMovement.Errors,
+            error => error.PropertyName ==
+                nameof(CashVoucherUpdateRequest.EmployeeId));
     }
 
     [Fact]
@@ -442,18 +564,24 @@ public sealed class CashManagementValidatorTests
         int? tripId,
         string? externalPartyName) =>
         new(
-            new DateOnly(2026, 7, 27),
-            CashDirection.Receipt,
-            1,
-            3,
-            employeeId,
-            partnerId,
-            driverId,
-            tripId,
-            externalPartyName,
-            10m,
-            null,
-            null,
-            null,
-            new byte[8]);
+            VoucherDate: new DateOnly(2026, 7, 27),
+            Direction: CashDirection.Receipt,
+            CashboxId: 1,
+            CashMovementTypeId:
+                employeeId.HasValue ||
+                partnerId.HasValue ||
+                driverId.HasValue ||
+                !string.IsNullOrWhiteSpace(externalPartyName)
+                    ? null
+                    : 9,
+            EmployeeId: employeeId,
+            BusinessPartnerId: partnerId,
+            DriverId: driverId,
+            DriverTripId: tripId,
+            ExternalPartyName: externalPartyName,
+            Amount: 10m,
+            ReferenceNumber: null,
+            Description: null,
+            Notes: null,
+            RowVersion: new byte[8]);
 }

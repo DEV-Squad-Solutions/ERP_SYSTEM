@@ -17,9 +17,13 @@ public sealed class CashMovementTypeRequestValidator
             .IsInEnum();
 
         RuleFor(request => request.Classification)
-            .IsInEnum()
-            .Must((request, classification) =>
-                classification != CashMovementClassification.PartnerSettlement ||
+            .Must(classification =>
+                !classification.HasValue ||
+                Enum.IsDefined(classification.Value))
+            .WithMessage("قيمة تصنيف الحركة النقدية غير مدعومة.")
+            .Must((request, _) =>
+                request.ResolveClassification() !=
+                CashMovementClassification.PartnerSettlement ||
                 request.ForPartner)
             .WithMessage(
                 "تسوية العميل أو المورد يجب أن تكون مرتبطة بعميل أو مورد.");
@@ -69,7 +73,7 @@ public sealed class CashMovementTypeRequestValidator
             selector,
             forPartner,
             isActive,
-            request => request.Classification,
+            request => request.ResolveClassification(),
             direction,
             expectedDirection,
             invoiceTypeName);

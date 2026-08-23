@@ -34,10 +34,10 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
             nameof(CashVouchersController.GetPartySelect) => (
                 "Get cash-voucher party selections",
                 SwaggerOperationDescription.Create(
-                    "Returns the active business partners, drivers, and employees available to cash vouchers for the selected company.",
+                    "Returns the active business partners, drivers, employees, expenses, and revenues available to cash vouchers for the selected company.",
                     "No request parameters.",
-                    "Each collection contains only id and name and is ordered by name then id. Active drivers remain available even when their license is expired.",
-                    "Inactive and other-company records are excluded.")),
+                    "Party collections contain id and name. expenses contain Payment movements classified Expense; revenues contain Receipt movements classified Revenue. Both contain id, name, and classification. Every collection is ordered by name then id. Active drivers remain available even when their license is expired.",
+                    "Cash movements with a partner effect, inactive records, and other-company records are excluded.")),
             nameof(CashVouchersController.Create) => (
                 "Create a cash voucher",
                 SwaggerOperationDescription.Create(
@@ -56,8 +56,8 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
                 "Update a cash voucher",
                 SwaggerOperationDescription.Create(
                     "Admin only. Replaces a manual draft or completed voucher and all derived effects, including its base-currency snapshot, atomically.",
-                    "All voucher fields plus the original base64 rowVersion. Voucher number is server-generated, immutable, and is not sent. Party type is derived by the server: send at most one of employeeId, businessPartnerId, driverId, or externalPartyName; omitting all of them means no party. driverTripId is allowed only with driverId. cashMovementTypeId is optional.",
-                    "An active cashbox is required. A supplied cashMovementTypeId must be active, belong to the selected company, and match the voucher direction and party. Omitting it or sending null still saves a completed, posted voucher with its normal cashbox and partner effects; this also allows clearing an existing movement type. For a foreign-currency cashbox, send exchangeRate or omit it to use the registered rate for the voucher date.",
+                    "All voucher fields plus the original base64 rowVersion. Voucher number is server-generated, immutable, and is not sent. Send exactly one posting target: employeeId, businessPartnerId, driverId, externalPartyName, or cashMovementTypeId. driverTripId is allowed only with driverId.",
+                    "An active cashbox is required. A cashMovementTypeId target must be an active non-partner type from the selected company and use the matching pair: Receipt with Revenue or Payment with Expense. A party target requires cashMovementTypeId to be null and still saves a completed, posted voucher with its normal cashbox and partner effects. For a foreign-currency cashbox, send exchangeRate or omit it to use the registered rate for the voucher date.",
                     "A stale token returns CashVouchers.Concurrency. An invoice-generated voucher returns CashVouchers.InvoiceGeneratedReadOnly and must be changed through its invoice.")),
             nameof(CashVouchersController.Delete) => (
                 "Delete a cash voucher",

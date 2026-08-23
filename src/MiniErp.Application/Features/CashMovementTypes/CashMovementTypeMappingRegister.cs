@@ -13,6 +13,9 @@ public sealed class CashMovementTypeMappingRegister : IRegister
                 movementType => movementType.Name,
                 request => request.Name.Trim())
             .Map(
+                movementType => movementType.Classification,
+                request => request.ResolveClassification())
+            .Map(
                 movementType => movementType.PartnerEffect,
                 request => request.ForPartner
                     ? request.Direction == CashDirection.Receipt

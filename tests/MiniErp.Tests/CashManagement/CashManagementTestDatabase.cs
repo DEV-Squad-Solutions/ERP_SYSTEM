@@ -811,6 +811,10 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 (7, 1, 'Supplier Refund', 1, 1, 2, 1, 0, 0, 0, 1,
                  'test', '2026-01-01', 'test', 0),
                 (8, 1, 'Customer Refund', 2, 1, 1, 1, 0, 0, 1, 0,
+                 'test', '2026-01-01', 'test', 0),
+                (9, 1, 'Consulting Revenue', 1, 3, 0, 1, 0, 0, 0, 0,
+                 'test', '2026-01-01', 'test', 0),
+                (10, 1, 'Office Expense', 2, 2, 0, 1, 0, 0, 0, 0,
                  'test', '2026-01-01', 'test', 0);
 
             INSERT INTO DriverTrips (

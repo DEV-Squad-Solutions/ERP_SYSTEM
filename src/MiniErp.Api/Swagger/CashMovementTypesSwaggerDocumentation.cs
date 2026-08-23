@@ -43,8 +43,8 @@ public sealed class CashMovementTypesSwaggerDocumentation : IOperationFilter
                 "Create a cash movement type",
                 SwaggerOperationDescription.Create(
                     "Admin only. Creates a reusable category such as Customer Collection, Supplier Payment, Driver Advance, or Other Receipt.",
-                    "Name, direction, required classification, forPartner, isActive, the four invoice-default flags, and optional notes.",
-                    "Classification is direction-neutral: Expense and Revenue may be Receipt or Payment and may be linked to a partner. PartnerSettlement requires forPartner=true. Invoice defaults must be active PartnerSettlement types with their required direction. The server derives Debit or Credit from direction.",
+                    "Name, direction, optional classification, forPartner, isActive, the four invoice-default flags, and optional notes.",
+                    "When classification is omitted or null, the server uses PartnerSettlement for partner types, Revenue for non-partner Receipt, and Expense for non-partner Payment. An explicit classification is direction-neutral: Expense and Revenue may be Receipt or Payment and may be linked to a partner. PartnerSettlement requires forPartner=true. Invoice defaults must be active PartnerSettlement types with their required direction. The server derives Debit or Credit from direction.",
                     "Name is unique within company and direction; duplicates return 409.")),
             nameof(CashMovementTypesController.Update) => (
                 "Update a cash movement type",

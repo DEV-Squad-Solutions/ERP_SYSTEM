@@ -30,21 +30,21 @@ public sealed class FinancialStatementServiceTests
                 "CV-BEFORE",
                 new DateOnly(2026, 7, 10),
                 CashDirection.Receipt,
-                3,
+                9,
                 100m));
         await AddVoucherAsync(vouchers,
             CreateGeneralVoucher(
                 "CV-PERIOD-PAY",
                 new DateOnly(2026, 7, 22),
                 CashDirection.Payment,
-                4,
+                10,
                 40m));
         await AddVoucherAsync(vouchers,
             CreateGeneralVoucher(
                 "CV-PERIOD-RECEIPT",
                 new DateOnly(2026, 7, 23),
                 CashDirection.Receipt,
-                3,
+                9,
                 25m));
         await vouchers.AddAsync(
             new CashVoucherRequest(
@@ -129,25 +129,20 @@ public sealed class FinancialStatementServiceTests
     {
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
-        var paymentType = await database.Context.CashMovementTypes
-            .SingleAsync(type => type.Id == 4);
-        paymentType.Classification = CashMovementClassification.Expense;
-        await database.Context.SaveChangesAsync();
-
         var vouchers = database.CreateVoucherService(companyId: 1);
         await AddVoucherAsync(vouchers,
             CreateGeneralVoucher(
                 "CV-OTHER",
                 new DateOnly(2026, 7, 22),
                 CashDirection.Receipt,
-                3,
+                9,
                 25m));
         var expense = await AddVoucherAsync(vouchers,
             CreateGeneralVoucher(
                 "CV-EXPENSE",
                 new DateOnly(2026, 7, 23),
                 CashDirection.Payment,
-                4,
+                10,
                 10m));
 
         var result = await database.CreateStatementService(1)
@@ -250,7 +245,6 @@ public sealed class FinancialStatementServiceTests
                 "CV-PARTNER-STMT",
                 new DateOnly(2026, 7, 15),
                 CashDirection.Receipt,
-                movementTypeId: 1,
                 amount: 50m));
 
         var result = await database.CreateStatementService(1)
@@ -800,40 +794,39 @@ public sealed class FinancialStatementServiceTests
         int movementTypeId,
         decimal amount) =>
         new(
-            date,
-            direction,
-            1,
-            movementTypeId,
-            null,
-            null,
-            null,
-            null,
-            null,
-            amount,
-            null,
-            number,
-            null);
+            VoucherDate: date,
+            Direction: direction,
+            CashboxId: 1,
+            CashMovementTypeId: movementTypeId,
+            EmployeeId: null,
+            BusinessPartnerId: null,
+            DriverId: null,
+            DriverTripId: null,
+            ExternalPartyName: null,
+            Amount: amount,
+            ReferenceNumber: null,
+            Description: number,
+            Notes: null);
 
     private static VoucherTestRequest CreatePartnerVoucher(
         string number,
         DateOnly date,
         CashDirection direction,
-        int movementTypeId,
         decimal amount) =>
         new(
-            date,
-            direction,
-            1,
-            movementTypeId,
-            null,
-            1,
-            null,
-            null,
-            null,
-            amount,
-            "REF-PARTNER",
-            number,
-            null);
+            VoucherDate: date,
+            Direction: direction,
+            CashboxId: 1,
+            CashMovementTypeId: null,
+            EmployeeId: null,
+            BusinessPartnerId: 1,
+            DriverId: null,
+            DriverTripId: null,
+            ExternalPartyName: null,
+            Amount: amount,
+            ReferenceNumber: "REF-PARTNER",
+            Description: number,
+            Notes: null);
 
     private static VoucherTestRequest CreateDriverVoucher(
         string number,
@@ -842,19 +835,19 @@ public sealed class FinancialStatementServiceTests
         int? tripId,
         decimal amount) =>
         new(
-            date,
-            direction,
-            1,
-            direction == CashDirection.Payment ? 4 : 3,
-            null,
-            null,
-            1,
-            tripId,
-            null,
-            amount,
-            "REF-DRIVER",
-            number,
-            null);
+            VoucherDate: date,
+            Direction: direction,
+            CashboxId: 1,
+            CashMovementTypeId: null,
+            EmployeeId: null,
+            BusinessPartnerId: null,
+            DriverId: 1,
+            DriverTripId: tripId,
+            ExternalPartyName: null,
+            Amount: amount,
+            ReferenceNumber: "REF-DRIVER",
+            Description: number,
+            Notes: null);
 
     private static VoucherTestRequest CreateEmployeeVoucher(
         int employeeId,
@@ -863,7 +856,7 @@ public sealed class FinancialStatementServiceTests
             VoucherDate: new DateOnly(2026, 7, 24),
             Direction: CashDirection.Payment,
             CashboxId: 1,
-            CashMovementTypeId: 4,
+            CashMovementTypeId: null,
             EmployeeId: employeeId,
             BusinessPartnerId: null,
             DriverId: null,
@@ -880,11 +873,11 @@ public sealed class FinancialStatementServiceTests
     {
         var draft = await service.AddAsync(
             new CashVoucherRequest(
-                request.VoucherDate,
-                request.Direction,
-                request.CashboxId,
-                request.Amount,
-                request.Description));
+                VoucherDate: request.VoucherDate,
+                Direction: request.Direction,
+                CashboxId: request.CashboxId,
+                Amount: request.Amount,
+                Description: request.Description));
         if (draft.IsFailure)
         {
             return draft;
@@ -893,27 +886,27 @@ public sealed class FinancialStatementServiceTests
         return await service.UpdateAsync(
             draft.Value.Id,
             new CashVoucherUpdateRequest(
-                request.VoucherDate,
-                request.Direction,
-                request.CashboxId,
-                request.CashMovementTypeId,
-                request.EmployeeId,
-                request.BusinessPartnerId,
-                request.DriverId,
-                request.DriverTripId,
-                request.ExternalPartyName,
-                request.Amount,
-                request.ReferenceNumber,
-                request.Description,
-                request.Notes,
-                draft.Value.RowVersion));
+                VoucherDate: request.VoucherDate,
+                Direction: request.Direction,
+                CashboxId: request.CashboxId,
+                CashMovementTypeId: request.CashMovementTypeId,
+                EmployeeId: request.EmployeeId,
+                BusinessPartnerId: request.BusinessPartnerId,
+                DriverId: request.DriverId,
+                DriverTripId: request.DriverTripId,
+                ExternalPartyName: request.ExternalPartyName,
+                Amount: request.Amount,
+                ReferenceNumber: request.ReferenceNumber,
+                Description: request.Description,
+                Notes: request.Notes,
+                RowVersion: draft.Value.RowVersion));
     }
 
     private sealed record VoucherTestRequest(
         DateOnly VoucherDate,
         CashDirection Direction,
         int CashboxId,
-        int CashMovementTypeId,
+        int? CashMovementTypeId,
         int? EmployeeId,
         int? BusinessPartnerId,
         int? DriverId,

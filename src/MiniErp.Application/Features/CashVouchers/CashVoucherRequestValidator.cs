@@ -77,8 +77,9 @@ public sealed class CashVoucherUpdateRequestValidator
             .WithMessage("اسم الطرف الخارجي لا يمكن أن يكون فارغاً.");
 
         RuleFor(request => request)
-            .Must(HasAtMostOneParty)
-            .WithMessage("اختر طرفاً واحداً فقط للسند.")
+            .Must(HasExactlyOnePostingTarget)
+            .WithMessage(
+                "اختر طرفاً واحداً أو نوع حركة نقدية واحداً للسند.")
             .OverridePropertyName(
                 nameof(CashVoucherUpdateRequest.EmployeeId));
 
@@ -108,15 +109,17 @@ public sealed class CashVoucherUpdateRequestValidator
                 "يجب إرسال إصدار سند النقدية الحالي للتعديل.");
     }
 
-    private static bool HasAtMostOneParty(CashVoucherUpdateRequest request)
+    private static bool HasExactlyOnePostingTarget(
+        CashVoucherUpdateRequest request)
     {
-        var selectedPartyCount =
+        var selectedTargetCount =
+            (request.CashMovementTypeId.HasValue ? 1 : 0) +
             (request.EmployeeId.HasValue ? 1 : 0) +
             (request.BusinessPartnerId.HasValue ? 1 : 0) +
             (request.DriverId.HasValue ? 1 : 0) +
             (!string.IsNullOrWhiteSpace(request.ExternalPartyName) ? 1 : 0);
 
-        return selectedPartyCount <= 1;
+        return selectedTargetCount == 1;
     }
 }
 
