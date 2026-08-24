@@ -17,36 +17,42 @@ namespace MiniErp.Infrastructure.Migrations
 
                 IF OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyType]', N'C') IS NOT NULL
                     ALTER TABLE [dbo].[CashVouchers] DROP CONSTRAINT [CK_CashVouchers_PartyType];
+                """);
 
+            migrationBuilder.Sql(
+                """
                 IF COL_LENGTH(N'dbo.CashVouchers', N'EmployeeId') IS NULL
                     ALTER TABLE [dbo].[CashVouchers] ADD [EmployeeId] int NULL;
+                """);
 
+            migrationBuilder.Sql(
+                """
                 IF NOT EXISTS (
                     SELECT 1
                     FROM sys.indexes
                     WHERE [name] = N'IX_CashVouchers_CompanyId_EmployeeId_VoucherDate_Id'
                       AND [object_id] = OBJECT_ID(N'[dbo].[CashVouchers]'))
-                    CREATE INDEX [IX_CashVouchers_CompanyId_EmployeeId_VoucherDate_Id]
-                        ON [dbo].[CashVouchers] ([CompanyId], [EmployeeId], [VoucherDate], [Id]);
+                    EXEC(N'CREATE INDEX [IX_CashVouchers_CompanyId_EmployeeId_VoucherDate_Id]
+                        ON [dbo].[CashVouchers] ([CompanyId], [EmployeeId], [VoucherDate], [Id]);');
 
                 IF NOT EXISTS (
                     SELECT 1
                     FROM sys.foreign_keys
                     WHERE [name] = N'FK_CashVouchers_Employees_CompanyId_EmployeeId'
                       AND [parent_object_id] = OBJECT_ID(N'[dbo].[CashVouchers]'))
-                    ALTER TABLE [dbo].[CashVouchers] WITH CHECK
-                    ADD CONSTRAINT [FK_CashVouchers_Employees_CompanyId_EmployeeId]
+                    EXEC(N'ALTER TABLE [dbo].[CashVouchers] WITH CHECK
+                        ADD CONSTRAINT [FK_CashVouchers_Employees_CompanyId_EmployeeId]
                         FOREIGN KEY ([CompanyId], [EmployeeId])
-                        REFERENCES [dbo].[Employees] ([CompanyId], [Id]);
+                        REFERENCES [dbo].[Employees] ([CompanyId], [Id]);');
 
                 IF OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyShape]', N'C') IS NULL
-                    ALTER TABLE [dbo].[CashVouchers] WITH CHECK
-                    ADD CONSTRAINT [CK_CashVouchers_PartyShape] CHECK (
+                    EXEC(N'ALTER TABLE [dbo].[CashVouchers] WITH CHECK
+                        ADD CONSTRAINT [CK_CashVouchers_PartyShape] CHECK (
                         ([PartyType] = 1 AND [EmployeeId] IS NULL AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR
                         ([PartyType] = 2 AND [EmployeeId] IS NULL AND [BusinessPartnerId] IS NOT NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR
                         ([PartyType] = 3 AND [EmployeeId] IS NULL AND [BusinessPartnerId] IS NULL AND [DriverId] IS NOT NULL AND [ExternalPartyName] IS NULL) OR
                         ([PartyType] = 4 AND [EmployeeId] IS NULL AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NOT NULL) OR
-                        ([PartyType] = 5 AND [EmployeeId] IS NOT NULL AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL));
+                        ([PartyType] = 5 AND [EmployeeId] IS NOT NULL AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL));');
 
                 IF OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyType]', N'C') IS NULL
                     ALTER TABLE [dbo].[CashVouchers] WITH CHECK
@@ -81,10 +87,16 @@ namespace MiniErp.Infrastructure.Migrations
                       AND [object_id] = OBJECT_ID(N'[dbo].[CashVouchers]'))
                     DROP INDEX [IX_CashVouchers_CompanyId_EmployeeId_VoucherDate_Id]
                         ON [dbo].[CashVouchers];
+                """);
 
+            migrationBuilder.Sql(
+                """
                 IF COL_LENGTH(N'dbo.CashVouchers', N'EmployeeId') IS NOT NULL
                     ALTER TABLE [dbo].[CashVouchers] DROP COLUMN [EmployeeId];
+                """);
 
+            migrationBuilder.Sql(
+                """
                 IF OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyShape]', N'C') IS NULL
                     ALTER TABLE [dbo].[CashVouchers] WITH CHECK
                     ADD CONSTRAINT [CK_CashVouchers_PartyShape] CHECK (

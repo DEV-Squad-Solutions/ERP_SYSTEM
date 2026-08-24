@@ -11,24 +11,59 @@ public sealed class MergeMigrationRegressionTests
     {
         var migration = new AddCashVoucherEmployeeParty();
 
-        var operation = Assert.Single(
-            migration.UpOperations.OfType<SqlOperation>());
+        var operations = migration.UpOperations
+            .OfType<SqlOperation>()
+            .ToArray();
 
+        Assert.Equal(3, operations.Length);
+        Assert.Contains(
+            "OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyShape]', N'C') IS NOT NULL",
+            operations[0].Sql,
+            StringComparison.Ordinal);
         Assert.Contains(
             "COL_LENGTH(N'dbo.CashVouchers', N'EmployeeId') IS NULL",
-            operation.Sql,
+            operations[1].Sql,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ALTER TABLE [dbo].[CashVouchers] ADD [EmployeeId] int NULL",
+            operations[1].Sql,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "CREATE INDEX",
+            operations[1].Sql,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ADD [EmployeeId]",
+            operations[2].Sql,
             StringComparison.Ordinal);
         Assert.Contains(
             "IF NOT EXISTS",
-            operation.Sql,
+            operations[2].Sql,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            3,
+            operations[2].Sql.Split(
+                "EXEC(N'",
+                StringSplitOptions.None).Length - 1);
+        Assert.Contains(
+            "EXEC(N'CREATE INDEX [IX_CashVouchers_CompanyId_EmployeeId_VoucherDate_Id]",
+            operations[2].Sql,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "EXEC(N'ALTER TABLE [dbo].[CashVouchers] WITH CHECK",
+            operations[2].Sql,
             StringComparison.Ordinal);
         Assert.Contains(
             "FK_CashVouchers_Employees_CompanyId_EmployeeId",
-            operation.Sql,
+            operations[2].Sql,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "OBJECT_ID(N'[dbo].[CK_CashVouchers_PartyShape]', N'C') IS NULL",
+            operations[2].Sql,
             StringComparison.Ordinal);
         Assert.Contains(
             "[PartyType] = 5",
-            operation.Sql,
+            operations[2].Sql,
             StringComparison.Ordinal);
     }
 

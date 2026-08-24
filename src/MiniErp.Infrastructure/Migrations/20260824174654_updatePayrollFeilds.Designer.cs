@@ -12,7 +12,7 @@ using MiniErp.Infrastructure.Persistence;
 namespace MiniErp.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260824142010_updatePayrollFeilds")]
+    [Migration("20260824174654_updatePayrollFeilds")]
     partial class updatePayrollFeilds
     {
         /// <inheritdoc />
