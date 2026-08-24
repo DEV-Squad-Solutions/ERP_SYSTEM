@@ -58,20 +58,20 @@ namespace MiniErp.Infrastructure.Services.Employees
             if (filters.MinSalary.HasValue)
             {
                 query = query.Where(employee => 
-                employee.MonthlySalary.HasValue && 
-                employee.MonthlySalary.Value >= filters.MinSalary.Value);
+                employee.MonthlySalary.HasValue && employee.MonthlySalary.Value >= filters.MinSalary.Value
+                || employee.DailySalary.HasValue && employee.DailySalary.Value >= filters.MinSalary.Value);
             }
 
             if (filters.MaxSalary.HasValue)
             {
                 query = query.Where(employee => 
-                employee.MonthlySalary.HasValue && 
-                employee.MonthlySalary.Value <= filters.MaxSalary.Value);
+                employee.MonthlySalary.HasValue &&  employee.MonthlySalary.Value <= filters.MaxSalary.Value
+                || employee.DailySalary.HasValue &&  employee.DailySalary.Value <=filters.MaxSalary.Value);
             }
             if (filters.EmployeeType.HasValue)
             {
                 query = query.Where(employee =>
-                    employee.Type == filters.EmployeeType.Value);
+                employee.Type == filters.EmployeeType.Value);
             }
 
             return query;

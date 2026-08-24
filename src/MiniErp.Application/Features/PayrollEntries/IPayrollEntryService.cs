@@ -18,9 +18,26 @@ public interface IPayrollEntryService
         PayrollEntryCreateRequest request,
         CancellationToken cancellationToken = default);
 
-    Task<Result<PayrollEntryResponse>> PaySalaryAsync(
+    Task<Result<List<PayrollEntryResponse>>> AddBulkAsync(
+        BulkPayrollEntryCreateRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<PayrollEntryResponse>> MoveSalaryForEmployeeAccountAsync(
         int id,
         PayrollEntrySalaryPaymentRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<List<PayrollEntryResponse>>> MoveSalaryForEmployeeAccountBulkAsync(
+        BulkPayrollEntrySalaryPaymentRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<PayrollEntryResponse>> UpdateAsync(
+        int id,
+        PayrollEntryUpdateRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<PayrollEntryResponse>> RecalculateAsync(
+        int id,
         CancellationToken cancellationToken = default);
 
     Task<Result> DeleteAsync(

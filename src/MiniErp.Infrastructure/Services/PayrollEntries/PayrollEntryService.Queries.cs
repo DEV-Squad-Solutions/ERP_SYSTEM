@@ -74,11 +74,42 @@ public sealed partial class PayrollEntryService
     private static decimal GetRatioValue(WorkDayRatio? ratio) =>
         ratio switch
         {
-            WorkDayRatio.FullDay => 1m,
+            WorkDayRatio.FullDay         => 1m,
             WorkDayRatio.ThreeQuarterDay => 0.75m,
-            WorkDayRatio.HalfDay => 0.5m,
-            WorkDayRatio.ThirdDay => 1m / 3m,
-            WorkDayRatio.QuarterDay => 0.25m,
-            _ => 0m
+            WorkDayRatio.HalfDay         => 0.5m,
+            WorkDayRatio.ThirdDay        => 1m / 3m,
+            WorkDayRatio.QuarterDay      => 0.25m,
+            _                            => 0m
         };
+
+    /// <summary>
+    /// Computes (grossSalary, calculatedSalary) from an employee and their attendance summary.
+    /// Returns (-1, -1) when the employee's salary configuration is incomplete.
+    /// </summary>
+    private static (decimal GrossSalary, decimal CalculatedSalary) CalculateSalary(
+        Domain.Entities.Employees.Employee employee,
+        AttendanceSummary summary)
+    {
+        var workedUnits = summary.TotalPresentDays
+            + (summary.TotalOvertimeDays  ?? 0m)
+            - (summary.TotalDeductionDays ?? 0m);
+
+        if (employee.Type == EmployeeType.Monthly && employee.MonthlySalary.HasValue)
+        {
+            var gross = employee.MonthlySalary.Value;
+            var calculated = employee.RequiredWorkingDaysPerMonth is > 0
+                ? (gross / employee.RequiredWorkingDaysPerMonth.Value) * workedUnits
+                : gross;
+            return (GrossSalary: gross, CalculatedSalary: calculated);
+        }
+
+        if (employee.Type == EmployeeType.Daily && employee.DailySalary.HasValue)
+        {
+            var gross = employee.DailySalary.Value;
+            return (GrossSalary: gross, CalculatedSalary: gross * workedUnits);
+        }
+
+        // Sentinel: salary not configured
+        return (GrossSalary: -1m, CalculatedSalary: -1m);
+    }
 }

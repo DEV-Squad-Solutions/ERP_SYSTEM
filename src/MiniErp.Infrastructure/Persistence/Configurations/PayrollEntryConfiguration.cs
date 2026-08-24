@@ -16,16 +16,6 @@ public sealed class PayrollEntryConfiguration
             table =>
             {
                 table.HasCheckConstraint(
-                    "CK_PayrollEntries_Amounts_NonNegative",
-                    "([Overtimebydayunit] IS NULL OR [Overtimebydayunit] >= 0) AND " +
-                    "([RequiredWorkingDays] IS NULL OR [RequiredWorkingDays] >= 0) AND " +
-                    "[Bonus] >= 0 AND " +
-                    "[Deduction] >= 0 AND " +
-                    "([GrossSalary] IS NULL OR [GrossSalary] >= 0) AND " +
-                    "([NetSalary] IS NULL OR [NetSalary] >= 0) AND " +
-                    "([Deductionbydayunit] IS NULL OR [Deductionbydayunit] >= 0)");
-
-                table.HasCheckConstraint(
                     "CK_PayrollEntries_Dates",
                     "[StartDate] <= [EndDate]");
 
@@ -34,6 +24,18 @@ public sealed class PayrollEntryConfiguration
                     "[PresentDays] >= 0 AND " +
                     "[AbsentDays] >= 0 AND " +
                     "[WorkedDaysbydayunit] >= 0");
+
+                table.HasCheckConstraint(
+                    "CK_PayrollEntries_Amounts_NonNegative",
+                    "([Overtimebydayunit] IS NULL OR [Overtimebydayunit] >= 0) AND " +
+                    "([Deductionbydayunit] IS NULL OR [Deductionbydayunit] >= 0) AND " +
+                    "([RequiredWorkingDays] IS NULL OR [RequiredWorkingDays] >= 0) AND " +
+                    "([Bonus] IS NULL OR [Bonus] >= 0) AND " +
+                    "([Deduction] IS NULL OR [Deduction] >= 0) AND " +
+                    "([SalaryPerDay] IS NULL OR [SalaryPerDay] >= 0) AND " +
+                    "[CalculatedSalary] >= 0 AND " +
+                    "[GrossSalary] >= 0 AND " +
+                    "[NetSalary] >= 0");
             });
 
         builder.HasKey(entry => entry.Id);
@@ -41,14 +43,14 @@ public sealed class PayrollEntryConfiguration
         builder.Property(entry => entry.Id)
             .ValueGeneratedOnAdd();
 
+
         builder.Property(entry => entry.CompanyId)
             .IsRequired();
 
-        builder.HasAlternateKey(entry => new
-        {
-            entry.CompanyId,
-            entry.Id
-        });
+        builder.HasOne(entry => entry.Company)
+            .WithMany()
+            .HasForeignKey(entry => entry.CompanyId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         builder.Property(entry => entry.StartDate)
             .HasColumnType("date")
@@ -58,7 +60,7 @@ public sealed class PayrollEntryConfiguration
             .HasColumnType("date")
             .IsRequired();
 
-        builder.Property(entry => entry.EmployeeId)
+       builder.Property(entry => entry.EmployeeId)
             .IsRequired();
 
         builder.Property(entry => entry.EmployeeCode)
@@ -72,6 +74,21 @@ public sealed class PayrollEntryConfiguration
         builder.Property(entry => entry.EmployeeType)
             .HasConversion<int>()
             .IsRequired();
+
+        builder.HasOne(entry => entry.Employee)
+            .WithMany()
+            .HasForeignKey(entry => new
+            {
+                entry.CompanyId,
+                entry.EmployeeId
+            })
+            .HasPrincipalKey(employee => new
+            {
+                employee.CompanyId,
+                employee.Id
+            })
+            .OnDelete(DeleteBehavior.Restrict);
+
 
         builder.Property(entry => entry.PresentDays)
             .IsRequired();
@@ -92,6 +109,13 @@ public sealed class PayrollEntryConfiguration
         builder.Property(entry => entry.RequiredWorkingDays)
             .HasPrecision(18, 2);
 
+        builder.Property(entry => entry.Bonus)
+            .HasPrecision(18, 2);
+
+        builder.Property(entry => entry.Deduction)
+            .HasPrecision(18, 2);
+
+
         builder.Property(entry => entry.SalaryPerDay)
             .HasPrecision(18, 2);
 
@@ -99,68 +123,21 @@ public sealed class PayrollEntryConfiguration
             .HasPrecision(18, 2)
             .IsRequired();
 
-        builder.Property(entry => entry.Bonus)
-            .HasPrecision(18, 2)
-            .IsRequired();
-
-        builder.Property(entry => entry.Deduction)
-            .HasPrecision(18, 2)
-            .IsRequired();
-
         builder.Property(entry => entry.GrossSalary)
-            .HasPrecision(18, 2);
+            .HasPrecision(18, 2)
+            .IsRequired();
 
         builder.Property(entry => entry.NetSalary)
-            .HasPrecision(18, 2);
-
-        builder.Property(entry => entry.IsTakeSalary)
+            .HasPrecision(18, 2)
             .IsRequired();
 
-        builder.Property(entry => entry.CashVoucherId);
-
-        builder.HasIndex(entry => new
-        {
-            entry.CompanyId,
-            entry.EmployeeId,
-            entry.StartDate,
-            entry.EndDate
-        })
-            .IsUnique()
-            .HasFilter("[IsDeleted] = 0");
-
-        builder.HasIndex(entry => new
-        {
-            entry.CompanyId,
-            entry.StartDate,
-            entry.EndDate
-        });
-
-        builder.HasIndex(entry => new
-        {
-            entry.CompanyId,
-            entry.EmployeeType
-        });
+        builder.Property(entry => entry.IsSalaryMoveToEmployeeAccount)
+            .HasColumnName("IsTakeSalary")
+            .IsRequired();
 
 
-
-        builder.HasOne(entry => entry.Company)
-            .WithMany()
-            .HasForeignKey(entry => entry.CompanyId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        builder.HasOne(entry => entry.Employee)
-            .WithMany()
-            .HasForeignKey(entry => new
-            {
-                entry.CompanyId,
-                entry.EmployeeId
-            })
-            .HasPrincipalKey(employee => new
-            {
-                employee.CompanyId,
-                employee.Id
-            })
-            .OnDelete(DeleteBehavior.Restrict);
+        builder.Property(entry => entry.CashVoucherId)
+            .IsRequired(false);
 
         builder.HasOne(entry => entry.CashVoucher)
             .WithMany()
@@ -176,5 +153,65 @@ public sealed class PayrollEntryConfiguration
             })
             .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // ============================================================
+        // Cashbox
+        // ============================================================
+
+        builder.Property(entry => entry.CashboxId)
+            .IsRequired(false);
+
+        builder.HasOne(entry => entry.Cashbox)
+            .WithMany()
+            .HasForeignKey(entry => new
+            {
+                entry.CompanyId,
+                entry.CashboxId
+            })
+            .HasPrincipalKey(cashbox => new
+            {
+                cashbox.CompanyId,
+                cashbox.Id
+            })
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ============================================================
+        // Indexes
+        // ============================================================
+
+        // Prevent duplicate payroll entries for the same employee
+        // and payroll period.
+        builder.HasIndex(entry => new
+        {
+            entry.CompanyId,
+            entry.EmployeeId,
+            entry.StartDate,
+            entry.EndDate
+        })
+        .IsUnique()
+        .HasFilter("[IsDeleted] = 0");
+
+        // Useful for querying payroll by period.
+        builder.HasIndex(entry => new
+        {
+            entry.CompanyId,
+            entry.StartDate,
+            entry.EndDate
+        });
+
+        // Useful for querying payroll by employee type.
+        builder.HasIndex(entry => new
+        {
+            entry.CompanyId,
+            entry.EmployeeType
+        });
+
+        // Useful for finding payroll records by employee.
+        builder.HasIndex(entry => new
+        {
+            entry.CompanyId,
+            entry.EmployeeId
+        });
     }
 }

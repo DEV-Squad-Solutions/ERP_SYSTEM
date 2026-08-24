@@ -26,24 +26,27 @@ namespace MiniErp.Application.Features.PayrollEntries
         string EmployeeCode,
         string EmployeeName,
         EmployeeType EmployeeType,
-        decimal Bonus,
-        decimal Deduction,
-        decimal? GrossSalary,
-        decimal? NetSalary
+        decimal? Bonus,
+        decimal? Deduction,
+        decimal GrossSalary,
+        decimal NetSalary
         );
     public record PayrollEntryResponse(
         int Id,
         int CompanyId,
+        int? CashboxVoucherId,
+        int? CashboxId,
         DateOnly StartDate,
         DateOnly EndDate,
         int EmployeeId,
         string EmployeeCode,
         string EmployeeName,
         EmployeeType EmployeeType,
-        decimal Bonus,
-        decimal Deduction,
-        decimal? GrossSalary,
-        decimal? NetSalary,
+        decimal? Bonus,
+        decimal? Deduction,
+        decimal GrossSalary,
+        decimal NetSalary,
+        bool IsSalaryMoveToEmployeeAccount,
         AttendanceSummary AttendanceSummary
     );
 }

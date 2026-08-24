@@ -1,33 +1,45 @@
-using MiniErp.Domain.Entities.Payroll;
 using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.PayrollEntries
 {
     public sealed record PayrollEntryFilterRequest(
-    int? EmployeeId = null,
-    DateOnly? StartDate = null,
-    DateOnly? EndDate = null,
-    bool? IsTakeSalary = null,
-    EmployeeType? EmployeeType = null,
-    string? Search = null);
+        int? EmployeeId = null,
+        DateOnly? StartDate = null,
+        DateOnly? EndDate = null,
+        bool? IsSalaryMoveToEmployeeAccount = null,
+        EmployeeType? EmployeeType = null,
+        string? Search = null);
 
     public sealed record PayrollEntryCreateRequest(
         DateOnly? StartDate,
         DateOnly? EndDate,
-        int CashboxId,
-        int CashMovementTypeId,
+        int? CashboxVoucherId,
+        int? CashboxId,
         int EmployeeId,
         decimal? Bonus = null,
         decimal? Deduction = null);
 
-    //public sealed record PayrollEntryUpdateRequest(
-    //    int EmployeeId,
-    //    DateOnly? StartDate,
-    //    DateOnly? EndDate,
-    //    decimal? Bonus = 0,
-    //    decimal? Deduction = 0,
-    //    decimal? Overtimebydayunit = 0,
-    //    int? CashboxId = null,
-    //    int? CashMovementTypeId = null);
+    public sealed record BulkPayrollEntryCreateRequest(
+        List<IndividualPayrollEntryCreateRequest> Entries,
+        DateOnly? DefaultStartDate = null,
+        DateOnly? DefaultEndDate = null,
+        int? DefaultCashboxId = null);
 
+    public sealed record IndividualPayrollEntryCreateRequest(
+        int EmployeeId,
+        DateOnly? StartDate = null,
+        DateOnly? EndDate = null,
+        int? CashboxId = null,
+        int? CashboxVoucherId = null,
+        decimal? Bonus = null,
+        decimal? Deduction = null);
+
+    public sealed record PayrollEntryUpdateRequest(
+        int EmployeeId,
+        DateOnly? StartDate = null,
+        DateOnly? EndDate = null,
+        int? CashboxId = null,
+        int? CashboxVoucherId = null,
+        decimal? Bonus = null,
+        decimal? Deduction = null);
 }

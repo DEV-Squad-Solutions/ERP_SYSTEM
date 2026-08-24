@@ -31,23 +31,25 @@ namespace MiniErp.Domain.Entities.Payroll
         public decimal WorkedDaysbydayunit { get; set; }
         public decimal? Overtimebydayunit { get; set; }
         public decimal? Deductionbydayunit { get; set; }
-        public decimal? RequiredWorkingDays { get; set; } = 26;
+        public decimal? RequiredWorkingDays { get; set; }
 
         // Manual Transactions / Adjustments
-        public decimal Bonus { get; set; } = default!;
-        public decimal Deduction { get; set; } = default!;
+        public decimal? Bonus { get; set; } = default!;
+        public decimal? Deduction { get; set; } = default!;
 
         // Salary Calculations
         public decimal? SalaryPerDay { get; set; }
         public decimal CalculatedSalary { get; set; }
 
         // Payroll Status
-        public decimal? GrossSalary { get; set; } // Gross Salary before deductions
-        public decimal? NetSalary { get; set; }   // Net Salary after deductions
-        public bool IsTakeSalary { get; set; }
+        public decimal GrossSalary { get; set; } // Gross Salary before deductions
+        public decimal NetSalary { get; set; }   // Net Salary after deductions
+        public bool IsSalaryMoveToEmployeeAccount { get; set; }
 
         // Treasury / Cash box movement link
         public int? CashVoucherId { get; set; }
         public CashVoucher? CashVoucher { get; set; }
-    }
+        public int? CashboxId { get; set; }
+        public Cashbox? Cashbox { get; set; }
+        }
 }

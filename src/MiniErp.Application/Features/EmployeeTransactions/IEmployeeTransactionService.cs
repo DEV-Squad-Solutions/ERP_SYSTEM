@@ -43,6 +43,14 @@ public interface IEmployeeTransactionService
         DateOnly transactionDate,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Called internally by PayrollEntryService when salaries are confirmed in bulk.
+    /// Credits each employee's account with their net salary amount.
+    /// </summary>
+    Task<Result<List<EmployeeTransactionResponse>>> PostSalaryCreditBulkAsync(
+        IReadOnlyList<EmployeeSalaryCreditItem> items,
+        CancellationToken cancellationToken = default);
+
     Task<Result<EmployeeTransactionResponse>> UpdateAsync(
         int id,
         EmployeeAccountEntryRequest request,
@@ -52,3 +60,11 @@ public interface IEmployeeTransactionService
         int id,
         CancellationToken cancellationToken = default);
 }
+
+public sealed record EmployeeSalaryCreditItem(
+    int EmployeeId,
+    decimal Amount,
+    int PayrollEntryId,
+    DateOnly TransactionDate,
+    string? Notes = null);
+

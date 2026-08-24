@@ -14,7 +14,7 @@ public sealed partial class PayrollEntryService
 
     private static Error? ValidateFilters(PayrollEntryFilterRequest filters, CancellationToken cancellationToken)
     {
-        if(!string.IsNullOrWhiteSpace(filters.Search) && filters.Search.Length > 100)
+        if (!string.IsNullOrWhiteSpace(filters.Search) && filters.Search.Length > 100)
             return Error.Validation(
                 "PayrollEntry.SearchTooLong",
                 "عبارة البحث طويلة جدًا."
@@ -24,12 +24,12 @@ public sealed partial class PayrollEntryService
                 "PayrollEntry.InvalidEmployeeId",
                 "معرف الموظف غير صالح."
                 , nameof(filters.EmployeeId));
-        if(filters.StartDate != null && filters.EndDate != null && filters.StartDate > filters.EndDate)
+        if (filters.StartDate != null && filters.EndDate != null && filters.StartDate > filters.EndDate)
             return Error.Validation(
                 "PayrollEntry.InvalidDateRange",
                 "تاريخ البدء لا يمكن أن يكون بعد تاريخ الانتهاء."
                 , nameof(filters.StartDate));
-        if(filters.EmployeeType != null && !Enum.IsDefined(typeof(EmployeeType), filters.EmployeeType))
+        if (filters.EmployeeType != null && !Enum.IsDefined(typeof(EmployeeType), filters.EmployeeType))
             return Error.Validation(
                 "PayrollEntry.InvalidEmployeeType",
                 "نوع الموظف المحدد غير صالح."
@@ -37,53 +37,140 @@ public sealed partial class PayrollEntryService
 
         return null;
     }
-    private static Error? ValidateAddAsync(PayrollEntryCreateRequest filters, CancellationToken cancellationToken)
+    private static Error? ValidateAddAsync(PayrollEntryCreateRequest request, CancellationToken cancellationToken)
     {
-        if (filters.EmployeeId <= 0)
+        if (request.EmployeeId <= 0)
             return Error.Validation(
                 "PayrollEntry.InvalidEmployeeId",
-                "معرف الموظف غير صالح."
-                , nameof(filters.EmployeeId));
-        if(filters.CashboxId <= 0)
+                "معرف الموظف غير صالح.",
+                nameof(request.EmployeeId));
+
+        if (request.CashboxId.HasValue && request.CashboxId.Value <= 0)
             return Error.Validation(
                 "PayrollEntry.InvalidCashboxId",
-                "معرف الخزينه غير صالح."
-                , nameof(filters.CashboxId));
-        if(filters.CashMovementTypeId <= 0)
+                "معرف الخزينه غير صالح.",
+                nameof(request.CashboxId));
+
+        if (request.CashboxVoucherId.HasValue && request.CashboxVoucherId.Value <= 0)
             return Error.Validation(
-                "PayrollEntry.InvalidCashMovementTypeId",
-                "معرف نوع حركة النقدية غير صالح."
-                , nameof(filters.CashMovementTypeId));
-        if (filters.StartDate != null &&filters.EndDate != null && filters.StartDate > filters.EndDate)
+                "PayrollEntry.InvalidCashboxVoucherId",
+                "معرف قسيمة الخزينه غير صالح.",
+                nameof(request.CashboxVoucherId));
+
+        if (request.StartDate != null && request.EndDate != null && request.StartDate > request.EndDate)
             return Error.Validation(
                 "PayrollEntry.InvalidDateRange",
-                "تاريخ البدء لا يمكن أن يكون بعد تاريخ الانتهاء."
-                , nameof(filters.StartDate));
-       if(filters.Bonus < 0)
+                "تاريخ البدء لا يمكن أن يكون بعد تاريخ الانتهاء.",
+                nameof(request.StartDate));
+
+        if (request.Bonus.HasValue && request.Bonus.Value < 0)
             return Error.Validation(
-                "PayrollEntry.NegativeBonus",
-                "لا يمكن أن يكون المكافأة سالبة."
-                , nameof(filters.Bonus));
-       if(filters.Deduction < 0)
+                "PayrollEntry.InvalidBonus",
+                "المكافأة يجب أن تكون أكبر من أو تساوي صفر.",
+                nameof(request.Bonus));
+
+        if (request.Deduction.HasValue && request.Deduction.Value < 0)
             return Error.Validation(
-                "PayrollEntry.NegativeDeduction",
-                "لا يمكن أن يكون الخصم سالبًا."
-                , nameof(filters.Deduction));
+                "PayrollEntry.InvalidDeduction",
+                "الخصم يجب أن يكون أكبر من أو تساوي صفر.",
+                nameof(request.Deduction));
+
         return null;
     }
+
+    private static Error? ValidateAddBulkAsync(BulkPayrollEntryCreateRequest request)
+    {
+        if (request.Entries is null || request.Entries.Count == 0)
+            return Error.Validation(
+                "PayrollEntry.EmptyBulkRequest",
+                "يجب إرسال مدخل راتب واحد على الأقل.");
+
+        if (request.DefaultStartDate.HasValue && request.DefaultEndDate.HasValue && request.DefaultStartDate.Value > request.DefaultEndDate.Value)
+            return Error.Validation(
+                "PayrollEntry.InvalidDateRange",
+                "تاريخ البدء الافتراضي لا يمكن أن يكون بعد تاريخ الانتهاء الافتراضي.",
+                nameof(request.DefaultStartDate));
+
+        var duplicateEmployees = request.Entries
+            .GroupBy(e => e.EmployeeId)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+
+        if (duplicateEmployees.Count > 0)
+            return Error.Validation(
+                "PayrollEntry.DuplicateEmployee",
+                $"لا يجوز تكرار نفس الموظف داخل الطلب الواحد: {string.Join(", ", duplicateEmployees)}");
+
+        return null;
+    }
+
+    private static Error? ValidateBulkPaymentAsync(BulkPayrollEntrySalaryPaymentRequest request)
+    {
+        var hasEntries = request.Entries is { Count: > 0 };
+        var hasIds = request.PayrollEntryIds is { Count: > 0 };
+
+        if (!hasEntries && !hasIds)
+            return Error.Validation(
+                "PayrollEntry.EmptyBulkPaymentRequest",
+                "يجب تحديد قيود الرواتب المطلوب صرفها.");
+
+        if (hasEntries)
+        {
+            var duplicateIds = request.Entries!
+                .GroupBy(e => e.PayrollEntryId)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .ToList();
+
+            if (duplicateIds.Count > 0)
+                return Error.Validation(
+                    "PayrollEntry.DuplicateEntryId",
+                    $"لا يجوز تكرار قيد الراتب داخل الطلب الواحد: {string.Join(", ", duplicateIds)}");
+        }
+
+        if (hasIds)
+        {
+            var duplicateIds = request.PayrollEntryIds!
+                .GroupBy(id => id)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .ToList();
+
+            if (duplicateIds.Count > 0)
+                return Error.Validation(
+                    "PayrollEntry.DuplicateEntryId",
+                    $"لا يجوز تكرار قيد الراتب داخل الطلب الواحد: {string.Join(", ", duplicateIds)}");
+        }
+
+        return null;
+    }
+
     private static Error? ValidateForPayment(
         Domain.Entities.Payroll.PayrollEntry entry)
     {
-        if (entry.IsTakeSalary) //take salary means the salary has moved to employee account, so we cannot pay it again
+        if (entry.IsSalaryMoveToEmployeeAccount)
             return Error.Conflict(
                 "PayrollEntry.AlreadyPaid",
-                "تم صرف راتب هذا القيد مسبقًا.");
+                $"تم تحويل راتب القيد رقم {entry.Id} إلى حساب الموظف مسبقًا.");
 
-        var amount = entry.NetSalary ?? entry.CalculatedSalary;
-        if (amount <= 0)
+        if (entry.NetSalary <= 0)
             return Error.Validation(
                 "PayrollEntry.NoSalaryAmount",
-                "لا توجد قيمة صافي راتب لهذا القيد.");
+                $"صافي راتب القيد رقم {entry.Id} يجب أن يكون أكبر من صفر.");
+
+        return null;
+    }
+
+    /// <summary>
+    /// Guards UpdateAsync / RecalculateAsync — entry must not have been paid yet.
+    /// </summary>
+    private static Error? ValidateForUpdate(Domain.Entities.Payroll.PayrollEntry entry)
+    {
+        if (entry.IsSalaryMoveToEmployeeAccount)
+            return Error.Conflict(
+                "PayrollEntry.AlreadyPaid",
+                $"لا يمكن تعديل قيد الراتب رقم {entry.Id} لأن راتبه قد تم تحويله إلى حساب الموظف.");
 
         return null;
     }

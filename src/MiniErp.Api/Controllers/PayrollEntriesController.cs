@@ -58,21 +58,51 @@ public sealed class PayrollEntriesController(
     }
 
     [Authorize(Roles = "Admin")]
-    [HttpPost("{id:int}/pay")]
+    [HttpPost("bulk")]
+    [ProducesResponseType<List<PayrollEntryResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CreateBulk(
+        BulkPayrollEntryCreateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await payrollEntryService.AddBulkAsync(request, cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("{id:int}/move-salary")]
     [ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> PaySalary(
+    public async Task<IActionResult> MoveSalary(
         int id,
         PayrollEntrySalaryPaymentRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await payrollEntryService.PaySalaryAsync(
+        var result = await payrollEntryService.MoveSalaryForEmployeeAccountAsync(
             id,
             request,
             cancellationToken);
         return this.ToActionResult(result);
     }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("bulk/move-salary")]
+    [ProducesResponseType<List<PayrollEntryResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> MoveSalaryBulk(
+        BulkPayrollEntrySalaryPaymentRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await payrollEntryService.MoveSalaryForEmployeeAccountBulkAsync(
+            request,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
 
     [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]

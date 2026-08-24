@@ -378,6 +378,92 @@ public sealed class EmployeeTransactionService(
         return Result<EmployeeTransactionResponse>.Success(MapToResponse(entry));
     }
 
+    // ─── POST SALARY CREDIT BULK (called by PayrollEntryService) ────────────
+
+    public async Task<Result<List<EmployeeTransactionResponse>>> PostSalaryCreditBulkAsync(
+        IReadOnlyList<EmployeeSalaryCreditItem> items,
+        CancellationToken cancellationToken = default)
+    {
+        if (items is null || items.Count == 0)
+            return Result<List<EmployeeTransactionResponse>>.Success([]);
+
+        var employeeIds = items.Select(i => i.EmployeeId).Distinct().ToList();
+
+        var employees = await dbContext.Employees
+            .Where(e => e.CompanyId == companyId && employeeIds.Contains(e.Id))
+            .ToDictionaryAsync(e => e.Id, cancellationToken);
+
+        if (employees.Count != employeeIds.Count)
+        {
+            var missingIds = employeeIds.Where(id => !employees.ContainsKey(id)).ToList();
+            return Result<List<EmployeeTransactionResponse>>.Failure(
+                Error.NotFound(
+                    "Employee.NotFound",
+                    $"بعض الموظفين المحددين غير موجودين: {string.Join(", ", missingIds)}"));
+        }
+
+        // Fetch current running balances for all target employees in a single batch
+        var latestTransactions = await dbContext.EmployeeTransactions
+            .AsNoTracking()
+            .Where(t => t.CompanyId == companyId && employeeIds.Contains(t.EmployeeId))
+            .GroupBy(t => t.EmployeeId)
+            .Select(g => new
+            {
+                EmployeeId = g.Key,
+                LastRunningBalance = g.OrderByDescending(t => t.TransactionDate)
+                                      .ThenByDescending(t => t.Id)
+                                      .Select(t => t.RunningBalance)
+                                      .FirstOrDefault()
+            })
+            .ToDictionaryAsync(x => x.EmployeeId, x => x.LastRunningBalance, cancellationToken);
+
+        var runningBalances = new Dictionary<int, decimal>();
+        foreach (var id in employeeIds)
+        {
+            runningBalances[id] = latestTransactions.GetValueOrDefault(id, 0m);
+        }
+
+        var transactions = new List<EmployeeTransaction>(items.Count);
+        foreach (var item in items)
+        {
+            var currentBalance = runningBalances[item.EmployeeId];
+            var newBalance = currentBalance + item.Amount;
+            runningBalances[item.EmployeeId] = newBalance;
+
+            var transactionNotes = !string.IsNullOrWhiteSpace(item.Notes)
+                ? item.Notes.Trim()
+                : $"راتب مقيد من مسير الرواتب رقم {item.PayrollEntryId}";
+
+            var entry = new EmployeeTransaction
+            {
+                CompanyId = companyId,
+                EmployeeId = item.EmployeeId,
+                Type = EmployeeTransactionType.Credit,
+                Amount = item.Amount,
+                TransactionDate = item.TransactionDate,
+                Notes = transactionNotes,
+                RunningBalance = newBalance,
+                SourceType = EmployeeTransactionSource.Payroll,
+                SourceId = item.PayrollEntryId
+            };
+
+            transactions.Add(entry);
+        }
+
+        dbContext.EmployeeTransactions.AddRange(transactions);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var responses = new List<EmployeeTransactionResponse>(transactions.Count);
+        foreach (var entry in transactions)
+        {
+            entry.Employee = employees[entry.EmployeeId];
+            responses.Add(MapToResponse(entry));
+        }
+
+        return Result<List<EmployeeTransactionResponse>>.Success(responses);
+    }
+
+
     // ─── UPDATE ─────────────────────────────────────────────────────────────
 
     public async Task<Result<EmployeeTransactionResponse>> UpdateAsync(
