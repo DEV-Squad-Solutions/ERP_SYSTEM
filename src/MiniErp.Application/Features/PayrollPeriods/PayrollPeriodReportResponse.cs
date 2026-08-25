@@ -55,7 +55,7 @@ public sealed record PayrollPeriodReportResponse(
     int? PeriodId,
     string? PeriodCode,
     string? PeriodName,
-    DateOnly? PeriodStatus,
+    PayrollPeriodStatus? PeriodStatus,
     DateOnly StartDate,
     DateOnly EndDate,
     PayrollPeriodReportSummary Summary,

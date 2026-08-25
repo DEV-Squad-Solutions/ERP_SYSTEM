@@ -73,7 +73,11 @@ namespace MiniErp.Infrastructure.Services.Employees
                 query = query.Where(employee =>
                 employee.Type == filters.EmployeeType.Value);
             }
-
+            if(filters.IsActive.HasValue)
+            {
+                query = query.Where(employee =>
+                employee.IsActive == filters.IsActive.Value);
+            }            
             return query;
         }
 

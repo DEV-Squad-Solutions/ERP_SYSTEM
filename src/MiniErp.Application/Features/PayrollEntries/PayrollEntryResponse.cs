@@ -4,11 +4,11 @@ namespace MiniErp.Application.Features.PayrollEntries
 {
     public sealed record PayrollEntryPageResponse(
         IReadOnlyCollection<PayrollEntriesListResponse> PayrollEntries,
-            int PageNumber,
-            int PageSize,
-            int TotalCount,
-            int TotalPages,
-            AttendanceSummary AttendanceSummary);
+        int PageNumber,
+        int PageSize,
+        int TotalCount,
+        int TotalPages,
+        AttendanceSummary AttendanceSummary);
 
     public record class AttendanceSummary(
         int PresentDays,
@@ -29,13 +29,12 @@ namespace MiniErp.Application.Features.PayrollEntries
         decimal? Bonus,
         decimal? Deduction,
         decimal GrossSalary,
-        decimal NetSalary
-        );
+        decimal NetSalary,
+        bool IsSalaryMoveToEmployeeAccount);
+
     public record PayrollEntryResponse(
         int Id,
         int CompanyId,
-        int? CashboxVoucherId,
-        int? CashboxId,
         DateOnly StartDate,
         DateOnly EndDate,
         int EmployeeId,
@@ -47,6 +46,5 @@ namespace MiniErp.Application.Features.PayrollEntries
         decimal GrossSalary,
         decimal NetSalary,
         bool IsSalaryMoveToEmployeeAccount,
-        AttendanceSummary AttendanceSummary
-    );
+        AttendanceSummary AttendanceSummary);
 }

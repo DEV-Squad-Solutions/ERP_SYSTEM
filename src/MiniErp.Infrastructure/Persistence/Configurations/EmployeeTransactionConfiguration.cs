@@ -55,7 +55,11 @@ public sealed class EmployeeTransactionConfiguration
 
         builder.Property(t => t.SourceId);
 
-        builder.Property(t => t.CashVoucherId);
+        builder.Property(t => t.CashVoucherId)
+            .IsRequired();
+
+        builder.Property(t => t.CashBoxId)
+            .IsRequired();
 
         builder.Property(t => t.Notes)
             .HasMaxLength(1000);
@@ -93,8 +97,14 @@ public sealed class EmployeeTransactionConfiguration
         {
             t.CompanyId,
             t.CashVoucherId
-        })
-            .HasFilter("[CashVoucherId] IS NOT NULL AND [IsDeleted] = 0");
+        });
+
+        // Cashbox lookup
+        builder.HasIndex(t => new
+        {
+            t.CompanyId,
+            t.CashBoxId
+        });
 
         // ── Relationships ────────────────────────────────────────────────────
 
@@ -113,7 +123,14 @@ public sealed class EmployeeTransactionConfiguration
             .WithMany()
             .HasForeignKey(t => new { t.CompanyId, t.CashVoucherId })
             .HasPrincipalKey(v => new { v.CompanyId, v.Id })
-            .IsRequired(false)
+            .IsRequired()
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(t => t.Cashbox)
+            .WithMany()
+            .HasForeignKey(t => new { t.CompanyId, t.CashBoxId })
+            .HasPrincipalKey(c => new { c.CompanyId, c.Id })
+            .IsRequired()
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

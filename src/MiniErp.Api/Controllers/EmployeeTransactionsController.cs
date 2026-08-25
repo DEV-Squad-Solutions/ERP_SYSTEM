@@ -40,9 +40,23 @@ public sealed class EmployeeTransactionsController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("employee/{employeeId:int}/balance")]
+    [ProducesResponseType<EmployeeAccountBalanceResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetBalance(
+        int employeeId,
+        CancellationToken cancellationToken)
+    {
+        var result = await employeeTransactionService.GetBalanceAsync(
+            employeeId,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<EmployeeTransactionResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Create(
         EmployeeAccountEntryRequest request,
@@ -61,12 +75,61 @@ public sealed class EmployeeTransactionsController(
     }
 
     [Authorize(Roles = "Admin")]
+    [HttpPost("bulk")]
+    [ProducesResponseType<List<EmployeeTransactionResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CreateBulk(
+        BulkEmployeeAccountEntryRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await employeeTransactionService.AddBulkAsync(
+            request,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("withdraw")]
+    [ProducesResponseType<EmployeeTransactionResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Withdraw(
+        EmployeeWithdrawalRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await employeeTransactionService.WithdrawAsync(
+            request,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("bulk/withdraw")]
+    [ProducesResponseType<List<EmployeeTransactionResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> WithdrawBulk(
+        BulkEmployeeWithdrawalRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await employeeTransactionService.WithdrawBulkAsync(
+            request,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}")]
     [ProducesResponseType<EmployeeTransactionResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Update(
         int id,
-        EmployeeAccountEntryRequest request,
+        EmployeeTransactionUpdateRequest request,
         CancellationToken cancellationToken)
     {
         var result = await employeeTransactionService.UpdateAsync(
@@ -80,12 +143,31 @@ public sealed class EmployeeTransactionsController(
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(
         int id,
         CancellationToken cancellationToken)
     {
         var result = await employeeTransactionService.DeleteAsync(
             id,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [HttpGet("employee/{employeeId:int}/statement")]
+    [ProducesResponseType<EmployeeStatementResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetStatement(
+        int employeeId,
+        [FromQuery] DateOnly fromDate,
+        [FromQuery] DateOnly toDate,
+        CancellationToken cancellationToken)
+    {
+        var result = await employeeTransactionService.GetStatementAsync(
+            employeeId,
+            fromDate,
+            toDate,
             cancellationToken);
         return this.ToActionResult(result);
     }

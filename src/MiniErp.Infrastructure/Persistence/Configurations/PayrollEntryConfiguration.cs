@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Payroll;
 
 namespace MiniErp.Infrastructure.Persistence.Configurations;
@@ -134,47 +135,6 @@ public sealed class PayrollEntryConfiguration
         builder.Property(entry => entry.IsSalaryMoveToEmployeeAccount)
             .HasColumnName("IsTakeSalary")
             .IsRequired();
-
-
-        builder.Property(entry => entry.CashVoucherId)
-            .IsRequired(false);
-
-        builder.HasOne(entry => entry.CashVoucher)
-            .WithMany()
-            .HasForeignKey(entry => new
-            {
-                entry.CompanyId,
-                entry.CashVoucherId
-            })
-            .HasPrincipalKey(voucher => new
-            {
-                voucher.CompanyId,
-                voucher.Id
-            })
-            .IsRequired(false)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        // ============================================================
-        // Cashbox
-        // ============================================================
-
-        builder.Property(entry => entry.CashboxId)
-            .IsRequired(false);
-
-        builder.HasOne(entry => entry.Cashbox)
-            .WithMany()
-            .HasForeignKey(entry => new
-            {
-                entry.CompanyId,
-                entry.CashboxId
-            })
-            .HasPrincipalKey(cashbox => new
-            {
-                cashbox.CompanyId,
-                cashbox.Id
-            })
-            .IsRequired(false)
-            .OnDelete(DeleteBehavior.Restrict);
 
         // ============================================================
         // Indexes

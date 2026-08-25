@@ -19,6 +19,8 @@ namespace MiniErp.Domain.Entities.Payroll
 
         public int EmployeeId { get; set; }
         public Employee Employee { get; set; } = default!;
+        public int? EmployeeTransactionId { get; set; }
+        public EmployeeTransaction EmployeeTransaction { get; set; } = default!;
 
         // Employee Snapshot
         public string EmployeeCode { get; set; } = default!;
@@ -46,10 +48,6 @@ namespace MiniErp.Domain.Entities.Payroll
         public decimal NetSalary { get; set; }   // Net Salary after deductions
         public bool IsSalaryMoveToEmployeeAccount { get; set; }
 
-        // Treasury / Cash box movement link
-        public int? CashVoucherId { get; set; }
-        public CashVoucher? CashVoucher { get; set; }
-        public int? CashboxId { get; set; }
-        public Cashbox? Cashbox { get; set; }
+
         }
 }

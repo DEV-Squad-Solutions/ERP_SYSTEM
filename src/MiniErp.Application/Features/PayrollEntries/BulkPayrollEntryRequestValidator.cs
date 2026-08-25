@@ -22,16 +22,6 @@ public sealed class IndividualPayrollEntryCreateRequestValidator
             .When(item => item.Deduction.HasValue)
             .WithMessage("الخصم يجب أن يكون أكبر من أو تساوي صفر.");
 
-        RuleFor(item => item.CashboxId)
-            .GreaterThan(0)
-            .When(item => item.CashboxId.HasValue)
-            .WithMessage("معرف الخزينة غير صالح.");
-
-        RuleFor(item => item.CashboxVoucherId)
-            .GreaterThan(0)
-            .When(item => item.CashboxVoucherId.HasValue)
-            .WithMessage("معرف قسيمة الخزينة غير صالح.");
-
         RuleFor(item => item)
             .Must(item => !item.StartDate.HasValue || !item.EndDate.HasValue || item.StartDate.Value <= item.EndDate.Value)
             .WithMessage("تاريخ البدء يجب أن يكون قبل أو يساوي تاريخ الانتهاء.");
@@ -145,16 +135,6 @@ public sealed class PayrollEntryUpdateRequestValidator
             .GreaterThanOrEqualTo(0)
             .When(r => r.Deduction.HasValue)
             .WithMessage("الخصم يجب أن يكون أكبر من أو يساوي صفر.");
-
-        RuleFor(r => r.CashboxId)
-            .GreaterThan(0)
-            .When(r => r.CashboxId.HasValue)
-            .WithMessage("معرف الخزينة غير صالح.");
-
-        RuleFor(r => r.CashboxVoucherId)
-            .GreaterThan(0)
-            .When(r => r.CashboxVoucherId.HasValue)
-            .WithMessage("معرف قسيمة الخزينة غير صالح.");
 
         RuleFor(r => r)
             .Must(r => !r.StartDate.HasValue || !r.EndDate.HasValue || r.StartDate.Value <= r.EndDate.Value)

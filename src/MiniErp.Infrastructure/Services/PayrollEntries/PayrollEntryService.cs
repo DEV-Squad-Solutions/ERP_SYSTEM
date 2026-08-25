@@ -4,7 +4,6 @@ using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.EmployeeTransactions;
 using MiniErp.Application.Features.PayrollEntries;
-using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Payroll;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -106,6 +105,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                         "يجب تحديد الراتب أو اليومية للموظف."));
 
             decimal netSalary = calculatedSalary + (request.Bonus ?? 0) - (request.Deduction ?? 0);
+            bool shouldAutoMove = request.IsSalaryMoveToEmployeeAccount ?? false;
 
             var entry = new PayrollEntry
             {
@@ -122,21 +122,48 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 Overtimebydayunit               = attendanceSummary.TotalOvertimeDays,
                 Deductionbydayunit              = attendanceSummary.TotalDeductionDays,
                 RequiredWorkingDays             = employee.RequiredWorkingDaysPerMonth,
-                SalaryPerDay                    = employee.Type == EmployeeType.Monthly && employee.RequiredWorkingDaysPerMonth is > 0
-                    ? employee.MonthlySalary!.Value / employee.RequiredWorkingDaysPerMonth.Value
+                SalaryPerDay                    = employee.Type == EmployeeType.Monthly
+                    ? ((employee.RequiredWorkingDaysPerMonth is > 0)
+                        ? employee.MonthlySalary!.Value / employee.RequiredWorkingDaysPerMonth.Value
+                        : employee.MonthlySalary!.Value)
                     : employee.DailySalary,
                 Bonus                           = request.Bonus,
                 Deduction                       = request.Deduction,
                 GrossSalary                     = grossSalary,
                 CalculatedSalary                = calculatedSalary,
                 NetSalary                       = netSalary,
-                CashboxId                       = request.CashboxId,
-                CashVoucherId                   = request.CashboxVoucherId,
-                IsSalaryMoveToEmployeeAccount   = false
+                IsSalaryMoveToEmployeeAccount   = shouldAutoMove
             };
 
             dbContext.PayrollEntries.Add(entry);
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (shouldAutoMove)
+            {
+                var cashInfo = await ResolveCashboxAndMovementTypeAsync(
+                    request.CashboxId,
+                    request.CashMovementTypeId,
+                    cancellationToken);
+
+                if (cashInfo is not null)
+                {
+                    var creditResult = await employeeTransactionService.PostSalaryCreditAsync(
+                        employeeId: entry.EmployeeId,
+                        amount: entry.NetSalary,
+                        payrollEntryId: entry.Id,
+                        transactionDate: entry.EndDate,
+                        cashboxId: cashInfo.Value.CashboxId,
+                        cashMovementTypeId: cashInfo.Value.CashMovementTypeId,
+                        cancellationToken: cancellationToken);
+
+                    if (creditResult.IsSuccess)
+                    {
+                        employee.LastDayOfReceivingSalary = entry.EndDate;
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                    }
+                }
+            }
+
             return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
         }
 
@@ -170,8 +197,9 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             {
                 var emp = employees[item.EmployeeId];
                 var startDate = item.StartDate
-                    ?? request.DefaultStartDate
-                    ?? (emp.LastDayOfReceivingSalary?.AddDays(1) ?? DateOnly.FromDateTime(emp.CreatedOn));
+                    ?? (emp.LastDayOfReceivingSalary?.AddDays(1) 
+                        ?? request.DefaultStartDate 
+                        ?? DateOnly.FromDateTime(emp.CreatedOn));
                 var endDate = item.EndDate ?? request.DefaultEndDate ?? today;
 
                 if (startDate > endDate)
@@ -185,7 +213,6 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             var minStartDate = dateRanges.Values.Min(r => r.StartDate);
             var maxEndDate   = dateRanges.Values.Max(r => r.EndDate);
 
-            // Single batch attendance query for all employees across the full date window
             var attendances = await dbContext.EmployeeAttendances
                 .AsNoTracking()
                 .Where(a =>
@@ -217,14 +244,11 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     .ToList();
 
                 var summary = new AttendanceSummary(
-                    PresentDays:      empAttendances.Count(a => a.Status == AttendanceStatus.Present),
-                    AbsentDays:       empAttendances.Count(a => a.Status == AttendanceStatus.Absent),
-                    TotalPresentDays: empAttendances.Where(a => a.Status == AttendanceStatus.Present)
-                        .Sum(a => GetRatioValue(a.WorkDayRatio)),
-                    TotalOvertimeDays: empAttendances.Where(a => a.Status == AttendanceStatus.Present)
-                        .Sum(a => GetRatioValue(a.WorkOverTimeRatio)),
-                    TotalDeductionDays: empAttendances.Where(a => a.Status == AttendanceStatus.Present)
-                        .Sum(a => GetRatioValue(a.WorkDaysDeductionRatio)));
+                    PresentDays:        empAttendances.Count(a => a.Status == AttendanceStatus.Present),
+                    AbsentDays:         empAttendances.Count(a => a.Status == AttendanceStatus.Absent),
+                    TotalPresentDays:   empAttendances.Where(a => a.Status == AttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkDayRatio)),
+                    TotalOvertimeDays:  empAttendances.Where(a => a.Status == AttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkOverTimeRatio)),
+                    TotalDeductionDays: empAttendances.Where(a => a.Status == AttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkDaysDeductionRatio)));
 
                 var (grossSalary, calculatedSalary) = CalculateSalary(emp, summary);
                 if (grossSalary < 0)
@@ -233,6 +257,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                             $"يجب تحديد الراتب أو اليومية للموظف {emp.Name}."));
 
                 var netSalary = calculatedSalary + (item.Bonus ?? 0) - (item.Deduction ?? 0);
+                bool moveSalary = item.IsSalaryMoveToEmployeeAccount ?? request.DefaultIsSalaryMoveToEmployeeAccount ?? false;
 
                 entries.Add(new PayrollEntry
                 {
@@ -257,15 +282,60 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     GrossSalary                     = grossSalary,
                     CalculatedSalary                = calculatedSalary,
                     NetSalary                       = netSalary,
-                    CashboxId                       = item.CashboxId ?? request.DefaultCashboxId,
-                    CashVoucherId                   = item.CashboxVoucherId,
-                    IsSalaryMoveToEmployeeAccount   = false
+                    IsSalaryMoveToEmployeeAccount   = moveSalary
                 });
             }
 
             await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
             dbContext.PayrollEntries.AddRange(entries);
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            var autoMoveEntries = entries.Where(e => e.IsSalaryMoveToEmployeeAccount).ToList();
+            if (autoMoveEntries.Count > 0)
+            {
+                var creditItems = new List<EmployeeSalaryCreditItem>();
+                for (int i = 0; i < autoMoveEntries.Count; i++)
+                {
+                    var e = autoMoveEntries[i];
+                    var reqItem = request.Entries.FirstOrDefault(r => r.EmployeeId == e.EmployeeId);
+                    var cashInfo = await ResolveCashboxAndMovementTypeAsync(
+                        reqItem?.CashboxId ?? request.DefaultCashboxId,
+                        reqItem?.CashMovementTypeId ?? request.DefaultCashMovementTypeId,
+                        cancellationToken);
+
+                    if (cashInfo is not null)
+                    {
+                        creditItems.Add(new EmployeeSalaryCreditItem(
+                            EmployeeId:         e.EmployeeId,
+                            Amount:             e.NetSalary,
+                            PayrollEntryId:     e.Id,
+                            TransactionDate:    e.EndDate,
+                            CashboxId:          cashInfo.Value.CashboxId,
+                            CashMovementTypeId: cashInfo.Value.CashMovementTypeId,
+                            Notes:              $"راتب مقيد تلقائيًا من مسير الرواتب رقم {e.Id}"));
+                    }
+                }
+
+                if (creditItems.Count > 0)
+                {
+                    var creditResult = await employeeTransactionService.PostSalaryCreditBulkAsync(
+                        items: creditItems,
+                        cancellationToken: cancellationToken);
+
+                    if (creditResult.IsSuccess)
+                    {
+                        foreach (var entry in autoMoveEntries)
+                        {
+                            if (employees.TryGetValue(entry.EmployeeId, out var emp))
+                            {
+                                emp.LastDayOfReceivingSalary = entry.EndDate;
+                            }
+                        }
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                    }
+                }
+            }
+
             await transaction.CommitAsync(cancellationToken);
 
             return Result<List<PayrollEntryResponse>>.Success(entries.Select(MapToResponse).ToList());
@@ -298,8 +368,26 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 return Result<PayrollEntryResponse>.Failure(guardError);
             }
 
+            var cashInfo = await ResolveCashboxAndMovementTypeAsync(
+                request.CashboxId,
+                request.CashMovementTypeId,
+                cancellationToken);
+
+            if (cashInfo is null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("PayrollEntry.CashboxRequired", "يجب توفر صندوق نقدي نشط ونوع حركة لإتمام قيد الراتب."));
+            }
+
             var creditResult = await employeeTransactionService.PostSalaryCreditAsync(
-                entry.EmployeeId, entry.NetSalary, entry.Id, request.PostingDate, cancellationToken);
+                employeeId:         entry.EmployeeId,
+                amount:             entry.NetSalary,
+                payrollEntryId:     entry.Id,
+                transactionDate:    request.PostingDate,
+                cashboxId:          cashInfo.Value.CashboxId,
+                cashMovementTypeId: cashInfo.Value.CashMovementTypeId,
+                cancellationToken:  cancellationToken);
 
             if (creditResult.IsFailure)
             {
@@ -313,6 +401,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
 
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+
             return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
         }
 
@@ -376,19 +465,36 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 }
             }
 
-            var creditItems = requestedItems.Select(item =>
+            var creditItems = new List<EmployeeSalaryCreditItem>();
+            foreach (var item in requestedItems)
             {
                 var entry = entriesMap[item.PayrollEntryId];
-                return new EmployeeSalaryCreditItem(
-                    EmployeeId:      entry.EmployeeId,
-                    Amount:          entry.NetSalary,
-                    PayrollEntryId:  entry.Id,
-                    TransactionDate: item.PostingDate,
-                    Notes:           item.Notes);
-            }).ToList();
+                var reqEntry = request.Entries?.FirstOrDefault(r => r.PayrollEntryId == item.PayrollEntryId);
+                var cashInfo = await ResolveCashboxAndMovementTypeAsync(
+                    reqEntry?.CashboxId ?? request.DefaultCashboxId,
+                    reqEntry?.CashMovementTypeId ?? request.DefaultCashMovementTypeId,
+                    cancellationToken);
+
+                if (cashInfo is null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Validation("PayrollEntry.CashboxRequired", "يجب توفر صندوق نقدي نشط ونوع حركة لإتمام قيد الراتب."));
+                }
+
+                creditItems.Add(new EmployeeSalaryCreditItem(
+                    EmployeeId:         entry.EmployeeId,
+                    Amount:             entry.NetSalary,
+                    PayrollEntryId:     entry.Id,
+                    TransactionDate:    item.PostingDate,
+                    CashboxId:          cashInfo.Value.CashboxId,
+                    CashMovementTypeId: cashInfo.Value.CashMovementTypeId,
+                    Notes:              item.Notes));
+            }
 
             var creditResult = await employeeTransactionService.PostSalaryCreditBulkAsync(
-                creditItems, cancellationToken);
+                items: creditItems,
+                cancellationToken: cancellationToken);
 
             if (creditResult.IsFailure)
             {
@@ -405,6 +511,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
 
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+
             return Result<List<PayrollEntryResponse>>.Success(entries.Select(MapToResponse).ToList());
         }
 
@@ -417,14 +524,14 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
         {
             var reqError = ValidateAddAsync(
                 new PayrollEntryCreateRequest(
-                    StartDate:        request.StartDate,
-                    EndDate:          request.EndDate,
-                    CashboxVoucherId: request.CashboxVoucherId,
-                    CashboxId:        request.CashboxId,
-                    EmployeeId:       request.EmployeeId,
-                    Bonus:            request.Bonus,
-                    Deduction:        request.Deduction),
+                    StartDate:                      request.StartDate,
+                    EndDate:                        request.EndDate,
+                    EmployeeId:                     request.EmployeeId,
+                    Bonus:                          request.Bonus,
+                    Deduction:                      request.Deduction,
+                    IsSalaryMoveToEmployeeAccount:  request.IsSalaryMoveToEmployeeAccount),
                 cancellationToken);
+
             if (reqError is not null)
                 return Result<PayrollEntryResponse>.Failure(reqError);
 
@@ -467,6 +574,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                         "يجب تحديد الراتب أو اليومية للموظف."));
 
             var netSalary = calculatedSalary + (request.Bonus ?? 0) - (request.Deduction ?? 0);
+            bool shouldAutoMove = request.IsSalaryMoveToEmployeeAccount ?? entry.IsSalaryMoveToEmployeeAccount;
 
             entry.EmployeeId                    = employee.Id;
             entry.EmployeeCode                  = employee.Code;
@@ -488,10 +596,40 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             entry.GrossSalary                   = grossSalary;
             entry.CalculatedSalary              = calculatedSalary;
             entry.NetSalary                     = netSalary;
-            entry.CashboxId                     = request.CashboxId;
-            entry.CashVoucherId                 = request.CashboxVoucherId;
+
+            // Capture the flag BEFORE overwriting it — the guard below needs the old value.
+            bool wasAlreadyMoved = entry.IsSalaryMoveToEmployeeAccount;
+            entry.IsSalaryMoveToEmployeeAccount = shouldAutoMove;
 
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            // Only post an auto-credit when the flag is being enabled for the first time.
+            if (shouldAutoMove && !wasAlreadyMoved)
+            {
+                var cashInfo = await ResolveCashboxAndMovementTypeAsync(
+                    request.CashboxId,
+                    request.CashMovementTypeId,
+                    cancellationToken);
+
+                if (cashInfo is not null)
+                {
+                    var creditResult = await employeeTransactionService.PostSalaryCreditAsync(
+                        employeeId:         entry.EmployeeId,
+                        amount:             entry.NetSalary,
+                        payrollEntryId:     entry.Id,
+                        transactionDate:    entry.EndDate,
+                        cashboxId:          cashInfo.Value.CashboxId,
+                        cashMovementTypeId: cashInfo.Value.CashMovementTypeId,
+                        cancellationToken:  cancellationToken);
+
+                    if (creditResult.IsSuccess)
+                    {
+                        employee.LastDayOfReceivingSalary = entry.EndDate;
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                    }
+                }
+            }
+
             return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
         }
 
@@ -576,8 +714,6 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             new(
                 Id:                             entry.Id,
                 CompanyId:                      entry.CompanyId,
-                 CashboxVoucherId:              entry.CashVoucherId,
-                 CashboxId:                     entry.CashboxId,
                 StartDate:                      entry.StartDate,
                 EndDate:                        entry.EndDate,
                 EmployeeId:                     entry.EmployeeId,
@@ -588,7 +724,6 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 Deduction:                      entry.Deduction,
                 GrossSalary:                    entry.GrossSalary,
                 NetSalary:                      entry.NetSalary,
-               
                 IsSalaryMoveToEmployeeAccount:  entry.IsSalaryMoveToEmployeeAccount,
                 AttendanceSummary: new AttendanceSummary(
                     PresentDays:        entry.PresentDays,

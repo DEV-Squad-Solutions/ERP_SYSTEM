@@ -45,18 +45,6 @@ public sealed partial class PayrollEntryService
                 "معرف الموظف غير صالح.",
                 nameof(request.EmployeeId));
 
-        if (request.CashboxId.HasValue && request.CashboxId.Value <= 0)
-            return Error.Validation(
-                "PayrollEntry.InvalidCashboxId",
-                "معرف الخزينه غير صالح.",
-                nameof(request.CashboxId));
-
-        if (request.CashboxVoucherId.HasValue && request.CashboxVoucherId.Value <= 0)
-            return Error.Validation(
-                "PayrollEntry.InvalidCashboxVoucherId",
-                "معرف قسيمة الخزينه غير صالح.",
-                nameof(request.CashboxVoucherId));
-
         if (request.StartDate != null && request.EndDate != null && request.StartDate > request.EndDate)
             return Error.Validation(
                 "PayrollEntry.InvalidDateRange",

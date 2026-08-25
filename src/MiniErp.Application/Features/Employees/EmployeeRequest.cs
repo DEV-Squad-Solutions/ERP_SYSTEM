@@ -12,7 +12,8 @@ namespace MiniErp.Application.Features.Employees
     string? JobTitle = null,
     decimal? MinSalary = null,
     decimal? MaxSalary = null,
-    EmployeeType? EmployeeType = null
+    EmployeeType? EmployeeType = null,
+    bool? IsActive = null
     );
     public record EmployeeCreateRequest(
         string Name,
@@ -22,8 +23,8 @@ namespace MiniErp.Application.Features.Employees
         string? Address,
         EmployeeType Type,
         decimal? Salary,
-        int? RequiredWorkingDaysPerMonth=26,
-        bool IsActive = true
+        int? RequiredWorkingDaysPerMonth,
+        bool IsActive
     );
     public record EmployeeUpdateRequest(
         int? CompanyId,
@@ -35,6 +36,6 @@ namespace MiniErp.Application.Features.Employees
         EmployeeType? Type,
         decimal? Salary,
         int? RequiredWorkingDaysPerMonth,
-        bool IsActive = true
+        bool? IsActive 
     );
 }

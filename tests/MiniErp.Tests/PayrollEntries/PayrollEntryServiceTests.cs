@@ -40,8 +40,6 @@ public sealed class PayrollEntryServiceTests
         var request = new PayrollEntryCreateRequest(
             StartDate: startDate,
             EndDate: endDate,
-            CashboxVoucherId: null,
-            CashboxId: null,
             EmployeeId: 1,
             Bonus: 100m,
             Deduction: 50m);
@@ -86,8 +84,6 @@ public sealed class PayrollEntryServiceTests
         var addResult = await service.AddAsync(new PayrollEntryCreateRequest(
             StartDate: startDate,
             EndDate: endDate,
-            CashboxVoucherId: null,
-            CashboxId: null,
             EmployeeId: 1));
 
         Assert.True(addResult.IsSuccess);
@@ -329,8 +325,6 @@ public sealed class PayrollEntryServiceTests
         var addResult = await service.AddAsync(new PayrollEntryCreateRequest(
             StartDate: new DateOnly(2026, 8, 1),
             EndDate: new DateOnly(2026, 8, 1),
-            CashboxVoucherId: null,
-            CashboxId: null,
             EmployeeId: 1));
 
         Assert.True(addResult.IsSuccess);
@@ -349,5 +343,48 @@ public sealed class PayrollEntryServiceTests
         // Assert
         Assert.True(bulkMoveResult.IsFailure);
         Assert.Equal("PayrollEntry.AlreadyPaid", bulkMoveResult.Error.Code);
+    }
+
+    [Fact]
+    public async Task AddAsync_WithIsSalaryMoveToEmployeeAccount_ShouldAutomaticallyCreditEmployeeTransaction()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreatePayrollService();
+
+        var startDate = new DateOnly(2026, 8, 1);
+        var endDate = new DateOnly(2026, 8, 5);
+
+        for (int day = 1; day <= 5; day++)
+        {
+            database.Context.EmployeeAttendances.Add(new AttendanceEntity
+            {
+                CompanyId = 1,
+                EmployeeId = 1,
+                WorkDate = new DateOnly(2026, 8, day),
+                Status = AttendanceStatus.Present,
+                WorkDayRatio = WorkDayRatio.FullDay
+            });
+        }
+        await database.Context.SaveChangesAsync();
+
+        var request = new PayrollEntryCreateRequest(
+            StartDate: startDate,
+            EndDate: endDate,
+            EmployeeId: 1,
+            IsSalaryMoveToEmployeeAccount: true);
+
+        // Act
+        var result = await service.AddAsync(request);
+
+        // Assert
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value.IsSalaryMoveToEmployeeAccount);
+
+        var employeeTx = await database.Context.EmployeeTransactions
+            .FirstOrDefaultAsync(t => t.CompanyId == 1 && t.EmployeeId == 1 && t.SourceId == result.Value.Id);
+
+        Assert.NotNull(employeeTx);
+        Assert.Equal(result.Value.NetSalary, employeeTx.Amount);
     }
 }

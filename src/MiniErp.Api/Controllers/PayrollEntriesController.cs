@@ -105,6 +105,33 @@ public sealed class PayrollEntriesController(
 
 
     [Authorize(Roles = "Admin")]
+    [HttpPut("{id:int}")]
+    [ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Update(
+        int id,
+        PayrollEntryUpdateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await payrollEntryService.UpdateAsync(id, request, cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("{id:int}/recalculate")]
+    [ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Recalculate(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        var result = await payrollEntryService.RecalculateAsync(id, cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

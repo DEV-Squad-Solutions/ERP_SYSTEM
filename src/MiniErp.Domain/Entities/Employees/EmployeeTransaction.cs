@@ -34,9 +34,15 @@ public sealed class EmployeeTransaction : AuditableEntity
     public int? SourceId { get; set; }
 
     /// <summary>
-    /// Populated for cash-backed types (Withdrawal, Advance) — links to the
-    /// CashVoucher that was created when cash was physically disbursed.
+    /// Mandatory link to the CashVoucher that was generated for this transaction.
+    /// Every operation on an employee account is backed by a Cash Voucher.
     /// </summary>
-    public int? CashVoucherId { get; set; }
-    public CashVoucher? CashVoucher { get; set; }
+    public int CashVoucherId { get; set; }
+    public CashVoucher CashVoucher { get; set; } = null!;
+
+    /// <summary>
+    /// Mandatory link to the Cashbox associated with this transaction's cash voucher.
+    /// </summary>
+    public int CashBoxId { get; set; }
+    public Cashbox Cashbox { get; set; } = null!;
 }
