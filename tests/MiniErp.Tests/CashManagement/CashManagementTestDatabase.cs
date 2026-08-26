@@ -573,6 +573,31 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             CREATE INDEX IX_CashVouchers_Company_Employee_Date
             ON CashVouchers (CompanyId, EmployeeId, VoucherDate, Id);
 
+            CREATE TABLE EmployeeTransactions (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                EmployeeId INTEGER NOT NULL,
+                Type INTEGER NOT NULL,
+                Amount NUMERIC NOT NULL,
+                TransactionDate TEXT NOT NULL,
+                Notes TEXT NULL,
+                RunningBalance NUMERIC NOT NULL,
+                SourceType INTEGER NOT NULL,
+                SourceId INTEGER NULL,
+                CashVoucherId INTEGER NOT NULL,
+                CashBoxId INTEGER NOT NULL,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
             CREATE TABLE InvoicePayments (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,

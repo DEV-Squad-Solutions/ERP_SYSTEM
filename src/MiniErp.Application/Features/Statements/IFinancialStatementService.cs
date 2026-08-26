@@ -25,4 +25,9 @@ public interface IFinancialStatementService
             PaginationRequest pagination,
             ContainerStoreStatementFilterRequest filters,
             CancellationToken cancellationToken = default);
+
+    Task<Result<OperationalTrialBalanceResponse>>
+        GetOperationalTrialBalanceAsync(
+            OperationalTrialBalanceFilterRequest filters,
+            CancellationToken cancellationToken = default);
 }

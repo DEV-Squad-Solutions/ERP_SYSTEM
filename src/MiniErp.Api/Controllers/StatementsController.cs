@@ -78,6 +78,20 @@ public sealed class StatementsController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("operational-trial-balance")]
+    [ProducesResponseType<OperationalTrialBalanceResponse>(
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetOperationalTrialBalance(
+        [FromQuery] OperationalTrialBalanceFilterRequest filters,
+        CancellationToken cancellationToken)
+    {
+        var result = await statementService
+            .GetOperationalTrialBalanceAsync(
+                filters,
+                cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("profitability/invoices")]
     [ProducesResponseType<InvoiceProfitabilityListResponse>(
         StatusCodes.Status200OK)]
