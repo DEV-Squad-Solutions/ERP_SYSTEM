@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace MiniErp.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class CreateDatabase : Migration
+    public partial class createdatabase : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -30,6 +30,7 @@ namespace MiniErp.Infrastructure.Migrations
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    CreatedOn = table.Column<DateTime>(type: "datetime2", nullable: false, defaultValueSql: "SYSUTCDATETIME()"),
                     FirstName = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
                     LastName = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
                     ProfileImage = table.Column<string>(type: "nvarchar(max)", nullable: false),
@@ -89,7 +90,7 @@ namespace MiniErp.Infrastructure.Migrations
                         .Annotation("SqlServer:Identity", "1, 1"),
                     Code = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
                     Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
-                    ArabicName = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
+                    EnglishName = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
                     IsActive = table.Column<bool>(type: "bit", nullable: false),
                     CreatedById = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: false),
                     CreatedOn = table.Column<DateTime>(type: "datetime2", nullable: false),
@@ -274,6 +275,7 @@ namespace MiniErp.Infrastructure.Migrations
                     CompanyId = table.Column<int>(type: "int", nullable: false),
                     Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
                     Direction = table.Column<int>(type: "int", nullable: false),
+                    Classification = table.Column<int>(type: "int", nullable: false),
                     PartnerEffect = table.Column<int>(type: "int", nullable: false),
                     IsActive = table.Column<bool>(type: "bit", nullable: false, defaultValue: true),
                     IsDefaultForSales = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
@@ -297,9 +299,11 @@ namespace MiniErp.Infrastructure.Migrations
                 {
                     table.PrimaryKey("PK_CashMovementTypes", x => x.Id);
                     table.UniqueConstraint("AK_CashMovementTypes_CompanyId_Id", x => new { x.CompanyId, x.Id });
+                    table.CheckConstraint("CK_CashMovementTypes_Classification", "[Classification] IN (1, 2, 3, 4)");
                     table.CheckConstraint("CK_CashMovementTypes_Direction", "[Direction] IN (1, 2)");
-                    table.CheckConstraint("CK_CashMovementTypes_InvoiceDefaults", "(([IsDefaultForSales] = 0 AND [IsDefaultForPurchaseReturn] = 0) OR ([IsActive] = 1 AND [Direction] = 1 AND [PartnerEffect] = 2)) AND (([IsDefaultForPurchase] = 0 AND [IsDefaultForSalesReturn] = 0) OR ([IsActive] = 1 AND [Direction] = 2 AND [PartnerEffect] = 1))");
+                    table.CheckConstraint("CK_CashMovementTypes_InvoiceDefaults", "(([IsDefaultForSales] = 0 AND [IsDefaultForPurchaseReturn] = 0) OR ([IsActive] = 1 AND [Direction] = 1 AND [Classification] = 1 AND [PartnerEffect] = 2)) AND (([IsDefaultForPurchase] = 0 AND [IsDefaultForSalesReturn] = 0) OR ([IsActive] = 1 AND [Direction] = 2 AND [Classification] = 1 AND [PartnerEffect] = 1))");
                     table.CheckConstraint("CK_CashMovementTypes_PartnerEffect", "[PartnerEffect] IN (0, 1, 2)");
+                    table.CheckConstraint("CK_CashMovementTypes_PartnerSettlement", "[Classification] <> 1 OR [PartnerEffect] <> 0");
                     table.ForeignKey(
                         name: "FK_CashMovementTypes_Companies_CompanyId",
                         column: x => x.CompanyId,
@@ -434,7 +438,6 @@ namespace MiniErp.Infrastructure.Migrations
                     table.UniqueConstraint("AK_Employees_CompanyId_Id", x => new { x.CompanyId, x.Id });
                     table.CheckConstraint("CK_Employees_RequiredWorkingDays", "[RequiredWorkingDaysPerMonth] IS NULL OR ([RequiredWorkingDaysPerMonth] >= 1 AND [RequiredWorkingDaysPerMonth] <= 31)");
                     table.CheckConstraint("CK_Employees_Salary_NonNegative", "([DailySalary] IS NULL OR [DailySalary] >= 0) AND ([MonthlySalary] IS NULL OR [MonthlySalary] >= 0)");
-                    table.CheckConstraint("CK_Employees_SalaryType", "([Type] = 0 AND [DailySalary] IS NOT NULL AND [MonthlySalary] IS NULL) OR ([Type] = 1 AND [MonthlySalary] IS NOT NULL AND [DailySalary] IS NULL)");
                     table.ForeignKey(
                         name: "FK_Employees_Companies_CompanyId",
                         column: x => x.CompanyId,
@@ -730,10 +733,9 @@ namespace MiniErp.Infrastructure.Migrations
                 {
                     table.PrimaryKey("PK_EmployeeAttendances", x => x.Id);
                     table.UniqueConstraint("AK_EmployeeAttendances_CompanyId_Id", x => new { x.CompanyId, x.Id });
-                    table.CheckConstraint("CK_EmployeeAttendances_CheckOutAfterCheckIn", "[CheckIn] IS NULL OR [CheckOut] IS NULL OR [CheckOut] >= [CheckIn]");
-                    table.CheckConstraint("CK_EmployeeAttendances_WorkDayRatio", "[WorkDayRatio] IN (25,33,50,75,100)");
-                    table.CheckConstraint("CK_EmployeeAttendances_WorkDaysDeductionRatio", "[WorkDaysDeductionRatio] IS NULL OR [WorkDaysDeductionRatio] IN (25,33,50,75,100)");
-                    table.CheckConstraint("CK_EmployeeAttendances_WorkOverTimeRatio", "[WorkOverTimeRatio] IS NULL OR [WorkOverTimeRatio] IN (25,33,50,75,100)");
+                    table.CheckConstraint("CK_EmployeeAttendances_WorkDayRatio", "[WorkDayRatio] IN (1,2,3,4,5)");
+                    table.CheckConstraint("CK_EmployeeAttendances_WorkDaysDeductionRatio", "[WorkDaysDeductionRatio] IS NULL OR [WorkDaysDeductionRatio] IN (1,2,3,4,5)");
+                    table.CheckConstraint("CK_EmployeeAttendances_WorkOverTimeRatio", "[WorkOverTimeRatio] IS NULL OR [WorkOverTimeRatio] IN (1,2,3,4,5)");
                     table.ForeignKey(
                         name: "FK_EmployeeAttendances_Companies_CompanyId",
                         column: x => x.CompanyId,
@@ -957,7 +959,7 @@ namespace MiniErp.Infrastructure.Migrations
                     ExchangeRateId = table.Column<int>(type: "int", nullable: true),
                     ExchangeRate = table.Column<decimal>(type: "decimal(28,12)", precision: 28, scale: 12, nullable: false, defaultValue: 1m),
                     DriverId = table.Column<int>(type: "int", nullable: true),
-                    ActualDriverId = table.Column<int>(type: "int", nullable: true),
+                    ActualDriverName = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
                     UsesExternalDriver = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
                     ExternalDriverName = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
                     VehicleNumber = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
@@ -1007,12 +1009,6 @@ namespace MiniErp.Infrastructure.Migrations
                         column: x => x.CountryId,
                         principalTable: "Countries",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_Invoices_Drivers_CompanyId_ActualDriverId",
-                        columns: x => new { x.CompanyId, x.ActualDriverId },
-                        principalTable: "Drivers",
-                        principalColumns: new[] { "CompanyId", "Id" },
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_Invoices_Drivers_CompanyId_DriverId",
@@ -1273,7 +1269,7 @@ namespace MiniErp.Infrastructure.Migrations
                     table.CheckConstraint("CK_ItemMovements_Costs_NonNegative", "[PendingCostQuantity] >= 0 AND [TotalCost] >= 0 AND [AverageCostAfter] >= 0 AND [InventoryValueAfter] >= 0");
                     table.CheckConstraint("CK_ItemMovements_ExactlyOneDirection", "([QuantityIn] > 0 AND [QuantityOut] = 0) OR ([QuantityIn] = 0 AND [QuantityOut] > 0)");
                     table.CheckConstraint("CK_ItemMovements_NonPositiveState", "[QuantityAfter] > 0 OR ([AverageCostAfter] = 0 AND [InventoryValueAfter] = 0)");
-                    table.CheckConstraint("CK_ItemMovements_PendingWithinOutbound", "[PendingCostQuantity] <= [QuantityOut]");
+                    table.CheckConstraint("CK_ItemMovements_PendingWithinMovement", "[PendingCostQuantity] <= CASE WHEN [QuantityIn] > 0 THEN [QuantityIn] ELSE [QuantityOut] END");
                     table.CheckConstraint("CK_ItemMovements_Quantity_NonNegative", "[QuantityIn] >= 0 AND [QuantityOut] >= 0");
                     table.ForeignKey(
                         name: "FK_ItemMovements_Companies_CompanyId",
@@ -1524,7 +1520,7 @@ namespace MiniErp.Infrastructure.Migrations
                         .Annotation("SqlServer:Identity", "1, 1"),
                     CompanyId = table.Column<int>(type: "int", nullable: false),
                     DriverId = table.Column<int>(type: "int", nullable: false),
-                    ActualDriverId = table.Column<int>(type: "int", nullable: true),
+                    ActualDriverName = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
                     InvoiceId = table.Column<int>(type: "int", nullable: false),
                     BusinessPartnerId = table.Column<int>(type: "int", nullable: false),
                     InvoiceNumber = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
@@ -1560,12 +1556,6 @@ namespace MiniErp.Infrastructure.Migrations
                         column: x => x.CompanyId,
                         principalTable: "Companies",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_DriverTrips_Drivers_CompanyId_ActualDriverId",
-                        columns: x => new { x.CompanyId, x.ActualDriverId },
-                        principalTable: "Drivers",
-                        principalColumns: new[] { "CompanyId", "Id" },
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_DriverTrips_Drivers_CompanyId_DriverId",
@@ -1940,6 +1930,7 @@ namespace MiniErp.Infrastructure.Migrations
                     CashMovementTypeId = table.Column<int>(type: "int", nullable: true),
                     PartyType = table.Column<int>(type: "int", nullable: false),
                     BusinessPartnerId = table.Column<int>(type: "int", nullable: true),
+                    EmployeeId = table.Column<int>(type: "int", nullable: true),
                     DriverId = table.Column<int>(type: "int", nullable: true),
                     DriverTripId = table.Column<int>(type: "int", nullable: true),
                     ExternalPartyName = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
@@ -1948,6 +1939,7 @@ namespace MiniErp.Infrastructure.Migrations
                     ExchangeRateId = table.Column<int>(type: "int", nullable: true),
                     ExchangeRate = table.Column<decimal>(type: "decimal(28,12)", precision: 28, scale: 12, nullable: false, defaultValue: 1m),
                     BaseAmount = table.Column<decimal>(type: "decimal(28,8)", precision: 28, scale: 8, nullable: false, defaultValue: 0m),
+                    IsPosted = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
                     ReferenceNumber = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
                     Description = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
                     Notes = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
@@ -1970,8 +1962,8 @@ namespace MiniErp.Infrastructure.Migrations
                     table.UniqueConstraint("AK_CashVouchers_CompanyId_Id", x => new { x.CompanyId, x.Id });
                     table.CheckConstraint("CK_CashVouchers_Amount_Positive", "[Amount] > 0");
                     table.CheckConstraint("CK_CashVouchers_Direction", "[Direction] IN (1, 2)");
-                    table.CheckConstraint("CK_CashVouchers_PartyShape", "([PartyType] = 1 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 2 AND [BusinessPartnerId] IS NOT NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 3 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NOT NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 4 AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NOT NULL)");
-                    table.CheckConstraint("CK_CashVouchers_PartyType", "[PartyType] IN (1, 2, 3, 4)");
+                    table.CheckConstraint("CK_CashVouchers_PartyShape", "([PartyType] = 1 AND [EmployeeId] IS NULL AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 2 AND [EmployeeId] IS NULL AND [BusinessPartnerId] IS NOT NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 3 AND [EmployeeId] IS NULL AND [BusinessPartnerId] IS NULL AND [DriverId] IS NOT NULL AND [ExternalPartyName] IS NULL) OR ([PartyType] = 4 AND [EmployeeId] IS NULL AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NOT NULL) OR ([PartyType] = 5 AND [EmployeeId] IS NOT NULL AND [BusinessPartnerId] IS NULL AND [DriverId] IS NULL AND [DriverTripId] IS NULL AND [ExternalPartyName] IS NULL)");
+                    table.CheckConstraint("CK_CashVouchers_PartyType", "[PartyType] IN (1, 2, 3, 4, 5)");
                     table.CheckConstraint("CK_CashVouchers_PostingReferencesTogether", "[CashMovementTypeId] IS NULL OR [CashboxId] IS NOT NULL");
                     table.CheckConstraint("CK_CashVouchers_TransferShape", "[CashboxTransferId] IS NULL OR ([CashboxId] IS NOT NULL AND [CashMovementTypeId] IS NULL AND [InvoiceId] IS NULL AND [PartyType] = 1)");
                     table.ForeignKey(
@@ -2014,6 +2006,12 @@ namespace MiniErp.Infrastructure.Migrations
                         name: "FK_CashVouchers_Drivers_CompanyId_DriverId",
                         columns: x => new { x.CompanyId, x.DriverId },
                         principalTable: "Drivers",
+                        principalColumns: new[] { "CompanyId", "Id" },
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_CashVouchers_Employees_CompanyId_EmployeeId",
+                        columns: x => new { x.CompanyId, x.EmployeeId },
+                        principalTable: "Employees",
                         principalColumns: new[] { "CompanyId", "Id" },
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
@@ -2108,7 +2106,8 @@ namespace MiniErp.Infrastructure.Migrations
                     RunningBalance = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: false),
                     SourceType = table.Column<int>(type: "int", nullable: false),
                     SourceId = table.Column<int>(type: "int", nullable: true),
-                    CashVoucherId = table.Column<int>(type: "int", nullable: true),
+                    CashVoucherId = table.Column<int>(type: "int", nullable: false),
+                    CashBoxId = table.Column<int>(type: "int", nullable: false),
                     CreatedById = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: false),
                     CreatedOn = table.Column<DateTime>(type: "datetime2", nullable: false),
                     CreatedByPc = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
@@ -2129,6 +2128,12 @@ namespace MiniErp.Infrastructure.Migrations
                         name: "FK_EmployeeTransactions_CashVouchers_CompanyId_CashVoucherId",
                         columns: x => new { x.CompanyId, x.CashVoucherId },
                         principalTable: "CashVouchers",
+                        principalColumns: new[] { "CompanyId", "Id" },
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_EmployeeTransactions_Cashboxes_CompanyId_CashBoxId",
+                        columns: x => new { x.CompanyId, x.CashBoxId },
+                        principalTable: "Cashboxes",
                         principalColumns: new[] { "CompanyId", "Id" },
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
@@ -2211,6 +2216,7 @@ namespace MiniErp.Infrastructure.Migrations
                     EndDate = table.Column<DateOnly>(type: "date", nullable: false),
                     CompanyId = table.Column<int>(type: "int", nullable: false),
                     EmployeeId = table.Column<int>(type: "int", nullable: false),
+                    EmployeeTransactionId = table.Column<int>(type: "int", nullable: true),
                     EmployeeCode = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
                     EmployeeName = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
                     EmployeeType = table.Column<int>(type: "int", nullable: false),
@@ -2220,14 +2226,13 @@ namespace MiniErp.Infrastructure.Migrations
                     Overtimebydayunit = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: true),
                     Deductionbydayunit = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: true),
                     RequiredWorkingDays = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: true),
-                    Bonus = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: false),
-                    Deduction = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: false),
+                    Bonus = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: true),
+                    Deduction = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: true),
                     SalaryPerDay = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: true),
                     CalculatedSalary = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: false),
-                    GrossSalary = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: true),
-                    NetSalary = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: true),
+                    GrossSalary = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: false),
+                    NetSalary = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: false),
                     IsTakeSalary = table.Column<bool>(type: "bit", nullable: false),
-                    CashVoucherId = table.Column<int>(type: "int", nullable: true),
                     CreatedById = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: false),
                     CreatedOn = table.Column<DateTime>(type: "datetime2", nullable: false),
                     CreatedByPc = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
@@ -2242,22 +2247,20 @@ namespace MiniErp.Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_PayrollEntries", x => x.Id);
-                    table.UniqueConstraint("AK_PayrollEntries_CompanyId_Id", x => new { x.CompanyId, x.Id });
-                    table.CheckConstraint("CK_PayrollEntries_Amounts_NonNegative", "([Overtimebydayunit] IS NULL OR [Overtimebydayunit] >= 0) AND ([RequiredWorkingDays] IS NULL OR [RequiredWorkingDays] >= 0) AND [Bonus] >= 0 AND [Deduction] >= 0 AND ([GrossSalary] IS NULL OR [GrossSalary] >= 0) AND ([NetSalary] IS NULL OR [NetSalary] >= 0) AND ([Deductionbydayunit] IS NULL OR [Deductionbydayunit] >= 0)");
+                    table.CheckConstraint("CK_PayrollEntries_Amounts_NonNegative", "([Overtimebydayunit] IS NULL OR [Overtimebydayunit] >= 0) AND ([Deductionbydayunit] IS NULL OR [Deductionbydayunit] >= 0) AND ([RequiredWorkingDays] IS NULL OR [RequiredWorkingDays] >= 0) AND ([Bonus] IS NULL OR [Bonus] >= 0) AND ([Deduction] IS NULL OR [Deduction] >= 0) AND ([SalaryPerDay] IS NULL OR [SalaryPerDay] >= 0) AND [CalculatedSalary] >= 0 AND [GrossSalary] >= 0 AND [NetSalary] >= 0");
                     table.CheckConstraint("CK_PayrollEntries_Dates", "[StartDate] <= [EndDate]");
                     table.CheckConstraint("CK_PayrollEntries_Days", "[PresentDays] >= 0 AND [AbsentDays] >= 0 AND [WorkedDaysbydayunit] >= 0");
-                    table.ForeignKey(
-                        name: "FK_PayrollEntries_CashVouchers_CompanyId_CashVoucherId",
-                        columns: x => new { x.CompanyId, x.CashVoucherId },
-                        principalTable: "CashVouchers",
-                        principalColumns: new[] { "CompanyId", "Id" },
-                        onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_PayrollEntries_Companies_CompanyId",
                         column: x => x.CompanyId,
                         principalTable: "Companies",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_PayrollEntries_EmployeeTransactions_EmployeeTransactionId",
+                        column: x => x.EmployeeTransactionId,
+                        principalTable: "EmployeeTransactions",
+                        principalColumn: "Id");
                     table.ForeignKey(
                         name: "FK_PayrollEntries_Employees_CompanyId_EmployeeId",
                         columns: x => new { x.CompanyId, x.EmployeeId },
@@ -2297,6 +2300,12 @@ namespace MiniErp.Infrastructure.Migrations
                 name: "EmailIndex",
                 table: "AspNetUsers",
                 column: "NormalizedEmail");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AspNetUsers_CreatedOn_Id",
+                table: "AspNetUsers",
+                columns: new[] { "CreatedOn", "Id" },
+                descending: new bool[0]);
 
             migrationBuilder.CreateIndex(
                 name: "UserNameIndex",
@@ -2393,6 +2402,11 @@ namespace MiniErp.Infrastructure.Migrations
                 filter: "[IsDeleted] = 0");
 
             migrationBuilder.CreateIndex(
+                name: "IX_CashMovementTypes_CompanyId_Classification_Direction_IsActive_Name_Id",
+                table: "CashMovementTypes",
+                columns: new[] { "CompanyId", "Classification", "Direction", "IsActive", "Name", "Id" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_CashMovementTypes_CompanyId_DefaultForPurchase",
                 table: "CashMovementTypes",
                 columns: new[] { "CompanyId", "IsDefaultForPurchase" },
@@ -2465,6 +2479,11 @@ namespace MiniErp.Infrastructure.Migrations
                 columns: new[] { "CompanyId", "DriverTripId", "VoucherDate", "Id" });
 
             migrationBuilder.CreateIndex(
+                name: "IX_CashVouchers_CompanyId_EmployeeId_VoucherDate_Id",
+                table: "CashVouchers",
+                columns: new[] { "CompanyId", "EmployeeId", "VoucherDate", "Id" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_CashVouchers_CompanyId_ExchangeRateId",
                 table: "CashVouchers",
                 columns: new[] { "CompanyId", "ExchangeRateId" });
@@ -2535,14 +2554,16 @@ namespace MiniErp.Infrastructure.Migrations
                 filter: "[IsActive] = 1 AND [IsDeleted] = 0");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Countries_Name",
-                table: "Countries",
-                column: "Name");
-
-            migrationBuilder.CreateIndex(
                 name: "UX_Countries_Code_Active",
                 table: "Countries",
                 column: "Code",
+                unique: true,
+                filter: "[IsActive] = 1 AND [IsDeleted] = 0");
+
+            migrationBuilder.CreateIndex(
+                name: "UX_Countries_Name_Active",
+                table: "Countries",
+                column: "Name",
                 unique: true,
                 filter: "[IsActive] = 1 AND [IsDeleted] = 0");
 
@@ -2573,11 +2594,6 @@ namespace MiniErp.Infrastructure.Migrations
                 columns: new[] { "CompanyId", "NationalId" },
                 unique: true,
                 filter: "[NationalId] IS NOT NULL AND [IsDeleted] = 0");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_DriverTrips_CompanyId_ActualDriverId",
-                table: "DriverTrips",
-                columns: new[] { "CompanyId", "ActualDriverId" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_DriverTrips_CompanyId_BusinessPartnerId",
@@ -2627,10 +2643,14 @@ namespace MiniErp.Infrastructure.Migrations
                 filter: "[IsDeleted] = 0");
 
             migrationBuilder.CreateIndex(
+                name: "IX_EmployeeTransactions_CompanyId_CashBoxId",
+                table: "EmployeeTransactions",
+                columns: new[] { "CompanyId", "CashBoxId" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_EmployeeTransactions_CompanyId_CashVoucherId",
                 table: "EmployeeTransactions",
-                columns: new[] { "CompanyId", "CashVoucherId" },
-                filter: "[CashVoucherId] IS NOT NULL AND [IsDeleted] = 0");
+                columns: new[] { "CompanyId", "CashVoucherId" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_EmployeeTransactions_CompanyId_EmployeeId_TransactionDate_Id",
@@ -2762,11 +2782,6 @@ namespace MiniErp.Infrastructure.Migrations
                 columns: new[] { "CompanyId", "InvoiceId", "Id" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_Invoices_CompanyId_ActualDriverId",
-                table: "Invoices",
-                columns: new[] { "CompanyId", "ActualDriverId" });
-
-            migrationBuilder.CreateIndex(
                 name: "IX_Invoices_CompanyId_BusinessPartnerId_InvoiceDate",
                 table: "Invoices",
                 columns: new[] { "CompanyId", "BusinessPartnerId", "InvoiceDate" });
@@ -2889,9 +2904,9 @@ namespace MiniErp.Infrastructure.Migrations
                 columns: new[] { "CompanyId", "ExchangeRateId" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_PayrollEntries_CompanyId_CashVoucherId",
+                name: "IX_PayrollEntries_CompanyId_EmployeeId",
                 table: "PayrollEntries",
-                columns: new[] { "CompanyId", "CashVoucherId" });
+                columns: new[] { "CompanyId", "EmployeeId" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_PayrollEntries_CompanyId_EmployeeId_StartDate_EndDate",
@@ -2909,6 +2924,11 @@ namespace MiniErp.Infrastructure.Migrations
                 name: "IX_PayrollEntries_CompanyId_StartDate_EndDate",
                 table: "PayrollEntries",
                 columns: new[] { "CompanyId", "StartDate", "EndDate" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PayrollEntries_EmployeeTransactionId",
+                table: "PayrollEntries",
+                column: "EmployeeTransactionId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_PayrollPeriods_CompanyId_Code",
@@ -3130,9 +3150,6 @@ namespace MiniErp.Infrastructure.Migrations
                 name: "EmployeeAttendances");
 
             migrationBuilder.DropTable(
-                name: "EmployeeTransactions");
-
-            migrationBuilder.DropTable(
                 name: "EntityIdentifierSequences");
 
             migrationBuilder.DropTable(
@@ -3187,10 +3204,7 @@ namespace MiniErp.Infrastructure.Migrations
                 name: "ItemMovements");
 
             migrationBuilder.DropTable(
-                name: "CashVouchers");
-
-            migrationBuilder.DropTable(
-                name: "Employees");
+                name: "EmployeeTransactions");
 
             migrationBuilder.DropTable(
                 name: "StockAdjustments");
@@ -3211,6 +3225,15 @@ namespace MiniErp.Infrastructure.Migrations
                 name: "Items");
 
             migrationBuilder.DropTable(
+                name: "CashVouchers");
+
+            migrationBuilder.DropTable(
+                name: "InventoryCounts");
+
+            migrationBuilder.DropTable(
+                name: "ItemUnits");
+
+            migrationBuilder.DropTable(
                 name: "CashMovementTypes");
 
             migrationBuilder.DropTable(
@@ -3220,10 +3243,7 @@ namespace MiniErp.Infrastructure.Migrations
                 name: "DriverTrips");
 
             migrationBuilder.DropTable(
-                name: "InventoryCounts");
-
-            migrationBuilder.DropTable(
-                name: "ItemUnits");
+                name: "Employees");
 
             migrationBuilder.DropTable(
                 name: "Cashboxes");
