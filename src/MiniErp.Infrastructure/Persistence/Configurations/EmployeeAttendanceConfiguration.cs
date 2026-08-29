@@ -15,8 +15,9 @@ public sealed class EmployeeAttendanceConfiguration
             "EmployeeAttendances",
             table =>
             {
-                table.HasCheckConstraint("CK_EmployeeAttendances_EmployeeAttendanceStatus",
-                    "[EmployeeAttendanceStatus] IN (0,1)");                
+                table.HasCheckConstraint(
+                    "CK_EmployeeAttendances_EmployeeAttendanceStatus",
+                    "[Status] IN (0,1)");
                 table.HasCheckConstraint(
                     "CK_EmployeeAttendances_WorkDayRatio",
                     "[WorkDayRatio] IN (1,2,3,4,5)");
@@ -46,6 +47,7 @@ public sealed class EmployeeAttendanceConfiguration
             .IsRequired();
 
         builder.Property(attendance => attendance.Status)
+            .HasColumnName("Status")
             .HasConversion<int>()
             .IsRequired();
 
