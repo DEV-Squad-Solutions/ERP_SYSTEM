@@ -78,6 +78,36 @@ public sealed class StatementsController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("employee")]
+    [ProducesResponseType<EmployeeStatementResponse>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetEmployeeStatement(
+        [FromQuery] PaginationRequest pagination,
+        [FromQuery] EmployeeStatementFilterRequest filters,
+        CancellationToken cancellationToken)
+    {
+        var result = await statementService.GetEmployeeStatementAsync(
+            pagination,
+            filters,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [HttpGet("employee/{employeeId:int}/balance")]
+    [ProducesResponseType<EmployeeAccountBalanceResponse>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetEmployeeBalance(
+        int employeeId,
+        CancellationToken cancellationToken)
+    {
+        var result = await statementService.GetEmployeeBalanceAsync(
+            employeeId,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("profitability/invoices")]
     [ProducesResponseType<InvoiceProfitabilityListResponse>(
         StatusCodes.Status200OK)]

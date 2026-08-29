@@ -7,7 +7,7 @@ public sealed record EmployeeAttendanceResponse(
     int CompanyId,
     int EmployeeId,
     string EmployeeName,
-    AttendanceStatus Status,
+    EmployeeAttendanceStatus Status,
     DateOnly WorkDate,
     TimeOnly? CheckIn,
     TimeOnly? CheckOut,

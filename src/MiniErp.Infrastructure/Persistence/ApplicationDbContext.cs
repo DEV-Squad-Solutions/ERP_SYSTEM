@@ -117,10 +117,9 @@ public sealed class ApplicationDbContext
     public DbSet<PayrollEntry> PayrollEntries => Set<PayrollEntry>();
     public DbSet<Employee> Employees => Set<Employee>();
     public DbSet<EmployeeAttendance> EmployeeAttendances => Set<EmployeeAttendance>();
-    public DbSet<EmployeeTransaction> EmployeeTransactions => Set<EmployeeTransaction>();
-
-    public DbSet<EntityIdentifierSequence> EntityIdentifierSequences =>
-        Set<EntityIdentifierSequence>();
+    public DbSet<EmployeeMovement> EmployeeMovements => Set<EmployeeMovement>();
+    public DbSet<EmployeeOpeningBalance> EmployeeOpeningBalances => Set<EmployeeOpeningBalance>();
+    public DbSet<EntityIdentifierSequence> EntityIdentifierSequences =>Set<EntityIdentifierSequence>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

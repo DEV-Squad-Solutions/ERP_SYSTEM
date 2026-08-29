@@ -50,6 +50,14 @@ public sealed record ContainerStoreStatementFilterRequest(
     string? InvoiceNumber = null,
     ContainerMovementDirection? Direction = null);
 
+public sealed record EmployeeStatementFilterRequest(
+    int EmployeeId,
+    string? Search = null,
+    DateOnly? FromDate = null,
+    DateOnly? ToDate = null,
+    EmployeeStatementSourceType? SourceType = null,
+    EmployeeMovementType? MovementType = null);
+
 public enum ContainerMovementDirection
 {
     Outgoing = 1,
@@ -67,4 +75,12 @@ public enum DriverStatementSourceType
 {
     CashVoucher = 1,
     DriverTrip = 2
+}
+
+public enum EmployeeStatementSourceType
+{
+    OpeningBalance = 1,
+    SalaryTransfer = 2,
+    Movement = 3,
+    CashVoucher = 4
 }

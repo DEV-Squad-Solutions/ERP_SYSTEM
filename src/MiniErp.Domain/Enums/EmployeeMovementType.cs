@@ -1,6 +1,6 @@
 namespace MiniErp.Domain.Enums;
 
-public enum EmployeeTransactionType
+public enum EmployeeMovementType
 {
     /// <summary>Reduces the balance (company owes less — employee takes money).</summary>
     Debit = 1,

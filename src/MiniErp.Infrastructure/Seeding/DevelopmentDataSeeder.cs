@@ -2047,31 +2047,33 @@ public static class DevelopmentDataSeeder
 
         if (employees.Count == 0) return;
 
-        var existingTransactions = await dbContext.EmployeeTransactions
+        var existingMovements = await dbContext.EmployeeMovements
             .IgnoreQueryFilters()
             .Where(t => t.CompanyId == company.Id && t.Notes != null && t.Notes.Contains("Seed transaction"))
             .AnyAsync(cancellationToken);
 
-        if (existingTransactions) return;
+        if (existingMovements) return;
 
         var createdOn = DateTime.UtcNow;
         var createdByPc = Environment.MachineName;
-        var transactionDate = new DateOnly(2026, 7, 20);
+        var movementDate = new DateOnly(2026, 7, 20);
 
         foreach (var employeeId in employees)
         {
-            dbContext.EmployeeTransactions.Add(new EmployeeTransaction
+            var movement = new EmployeeMovement
             {
                 CompanyId = company.Id,
                 EmployeeId = employeeId,
-                TransactionDate = transactionDate,
-                Amount = 500m,
-                Type = EmployeeTransactionType.Credit,
+                MovementDate = movementDate,
+                Type = EmployeeMovementType.Credit,
                 Notes = "Seed transaction - Performance Bonus",
                 CreatedById = SeedActor,
                 CreatedByPc = createdByPc,
                 CreatedOn = createdOn
-            });
+            };
+            movement.ApplyAmounts(EmployeeMovementType.Credit, 500m);
+            movement.ApplyExchangeRate(1m);
+            dbContext.EmployeeMovements.Add(movement);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);

@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.EmployeeOpeningBalances.Jobs;
+using MiniErp.Api.Features.PayrollEntries.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.PayrollEntries;
 
@@ -49,6 +51,16 @@ public sealed class PayrollEntriesController(
     {
         var result = await payrollEntryService.AddAsync(request, cancellationToken);
 
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            TryEnqueueRealtime<PayrollEntriesRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+        }
+
         return result.IsFailure
             ? this.ToProblem(result.Errors)
             : CreatedAtAction(
@@ -67,6 +79,18 @@ public sealed class PayrollEntriesController(
         CancellationToken cancellationToken)
     {
         var result = await payrollEntryService.AddBulkAsync(request, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            foreach (var entry in result.Value)
+            {
+                TryEnqueueRealtime<PayrollEntriesRealtimeJob>(
+                    "Added",
+                    entry.Id,
+                    realtime => job => job.ExecuteAsync(realtime));
+            }
+        }
+
         return this.ToActionResult(result);
     }
 
@@ -84,11 +108,29 @@ public sealed class PayrollEntriesController(
             id,
             request,
             cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            TryEnqueueRealtime<PayrollEntriesRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+
+            TryEnqueueRealtime<EmployeeOpeningBalancesRealtimeJob>(
+                "Added",
+                id,
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+        }
+
         return this.ToActionResult(result);
     }
 
     [Authorize(Roles = "Admin")]
     [HttpPost("bulk/move-salary")]
+    [HttpPost("move-salary/bulk")]
     [ProducesResponseType<List<PayrollEntryResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -100,9 +142,25 @@ public sealed class PayrollEntriesController(
         var result = await payrollEntryService.MoveSalaryForEmployeeAccountBulkAsync(
             request,
             cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            foreach (var entry in result.Value)
+            {
+                TryEnqueueRealtime<PayrollEntriesRealtimeJob>(
+                    "Updated",
+                    entry.Id,
+                    realtime => job => job.ExecuteAsync(realtime));
+
+                TryEnqueueRealtime<EmployeeOpeningBalancesRealtimeJob>(
+                    "Added",
+                    entry.Id,
+                    realtime => job => job.ExecuteAsync(realtime));
+            }
+        }
+
         return this.ToActionResult(result);
     }
-
 
     [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}")]
@@ -115,6 +173,37 @@ public sealed class PayrollEntriesController(
         CancellationToken cancellationToken)
     {
         var result = await payrollEntryService.UpdateAsync(id, request, cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<PayrollEntriesRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPut("bulk")]
+    [ProducesResponseType<List<PayrollEntryResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> UpdateBulk(
+        BulkPayrollEntryUpdateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await payrollEntryService.UpdateBulkAsync(request, cancellationToken);
+        if (result.IsSuccess)
+        {
+            foreach (var entry in result.Value)
+            {
+                TryEnqueueRealtime<PayrollEntriesRealtimeJob>(
+                    "Updated",
+                    entry.Id,
+                    realtime => job => job.ExecuteAsync(realtime));
+            }
+        }
         return this.ToActionResult(result);
     }
 
@@ -128,6 +217,13 @@ public sealed class PayrollEntriesController(
         CancellationToken cancellationToken)
     {
         var result = await payrollEntryService.RecalculateAsync(id, cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<PayrollEntriesRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
         return this.ToActionResult(result);
     }
 
@@ -141,6 +237,38 @@ public sealed class PayrollEntriesController(
         CancellationToken cancellationToken)
     {
         var result = await payrollEntryService.DeleteAsync(id, cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<PayrollEntriesRealtimeJob>(
+                "Deleted",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpDelete("bulk")]
+    [HttpPost("bulk/delete")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteBulk(
+        BulkPayrollEntryDeleteRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await payrollEntryService.DeleteBulkAsync(request, cancellationToken);
+        if (result.IsSuccess)
+        {
+            foreach (var id in request.PayrollEntryIds)
+            {
+                TryEnqueueRealtime<PayrollEntriesRealtimeJob>(
+                    "Deleted",
+                    id,
+                    realtime => job => job.ExecuteAsync(realtime));
+            }
+        }
         return this.ToActionResult(result);
     }
 }

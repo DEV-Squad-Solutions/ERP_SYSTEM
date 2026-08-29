@@ -25,4 +25,13 @@ public interface IFinancialStatementService
             PaginationRequest pagination,
             ContainerStoreStatementFilterRequest filters,
             CancellationToken cancellationToken = default);
+
+    Task<Result<EmployeeStatementResponse>> GetEmployeeStatementAsync(
+        PaginationRequest pagination,
+        EmployeeStatementFilterRequest filters,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<EmployeeAccountBalanceResponse>> GetEmployeeBalanceAsync(
+        int employeeId,
+        CancellationToken cancellationToken = default);
 }

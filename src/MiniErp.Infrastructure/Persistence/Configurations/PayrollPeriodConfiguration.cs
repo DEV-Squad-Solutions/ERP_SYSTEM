@@ -4,9 +4,17 @@ using MiniErp.Domain.Entities.Payroll;
 
 namespace MiniErp.Infrastructure.Persistence.Configurations;
 
-public sealed class PayrollPeriodConfiguration(bool isSqlite)
-    : AuditableEntityConfiguration<PayrollPeriod>
+public sealed class PayrollPeriodConfiguration : AuditableEntityConfiguration<PayrollPeriod>
 {
+    private readonly bool isSqlite;
+
+    public PayrollPeriodConfiguration() : this(false) { }
+
+    public PayrollPeriodConfiguration(bool isSqlite)
+    {
+        this.isSqlite = isSqlite;
+    }
+
     public override void Configure(
         EntityTypeBuilder<PayrollPeriod> builder)
     {

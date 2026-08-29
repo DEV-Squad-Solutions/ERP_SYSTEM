@@ -44,6 +44,12 @@ public sealed class PayrollEntryConfiguration
         builder.Property(entry => entry.Id)
             .ValueGeneratedOnAdd();
 
+        builder.HasAlternateKey(entry => new
+        {
+            entry.CompanyId,
+            entry.Id
+        });
+
 
         builder.Property(entry => entry.CompanyId)
             .IsRequired();
@@ -135,6 +141,9 @@ public sealed class PayrollEntryConfiguration
         builder.Property(entry => entry.IsSalaryMoveToEmployeeAccount)
             .HasColumnName("IsTakeSalary")
             .IsRequired();
+
+        builder.Property(entry => entry.SalaryMovedOn)
+            .HasColumnType("date");
 
         // ============================================================
         // Indexes

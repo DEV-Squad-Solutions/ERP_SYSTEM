@@ -135,3 +135,26 @@ public sealed class ContainerStoreStatementFilterRequestValidator
                 "تاريخ النهاية يجب ألا يسبق تاريخ البداية.");
     }
 }
+
+public sealed class EmployeeStatementFilterRequestValidator
+    : AbstractValidator<EmployeeStatementFilterRequest>
+{
+    public EmployeeStatementFilterRequestValidator()
+    {
+        RuleFor(filter => filter.EmployeeId).GreaterThan(0);
+        RuleFor(filter => filter.Search).MaximumLength(256);
+        RuleFor(filter => filter.SourceType)
+            .IsInEnum()
+            .When(filter => filter.SourceType.HasValue);
+        RuleFor(filter => filter.MovementType)
+            .IsInEnum()
+            .When(filter => filter.MovementType.HasValue);
+        RuleFor(filter => filter.ToDate)
+            .GreaterThanOrEqualTo(filter => filter.FromDate)
+            .When(filter =>
+                filter.FromDate.HasValue &&
+                filter.ToDate.HasValue)
+            .WithMessage(
+                "تاريخ النهاية يجب ألا يسبق تاريخ البداية.");
+    }
+}

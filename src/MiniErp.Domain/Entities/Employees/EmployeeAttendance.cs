@@ -17,7 +17,7 @@ namespace MiniErp.Domain.Entities.Employees
         public int EmployeeId { get; set; }
         public Employee Employee { get; set; } = default!;
 
-        public AttendanceStatus Status { get; set; }
+        public EmployeeAttendanceStatus Status { get; set; }
         public DateOnly WorkDate { get; set; }
         public TimeOnly? CheckIn { get; set; }
         public TimeOnly? CheckOut { get; set; }
