@@ -1872,7 +1872,8 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasColumnType("nvarchar(1000)");
 
                     b.Property<int>("Status")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("Status");
 
                     b.Property<string>("UpdatedById")
                         .HasMaxLength(450)
@@ -1918,6 +1919,8 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.ToTable("EmployeeAttendances", null, t =>
                         {
+                            t.HasCheckConstraint("CK_EmployeeAttendances_EmployeeAttendanceStatus", "[Status] IN (0,1)");
+
                             t.HasCheckConstraint("CK_EmployeeAttendances_WorkDayRatio", "[WorkDayRatio] IN (1,2,3,4,5)");
 
                             t.HasCheckConstraint("CK_EmployeeAttendances_WorkDaysDeductionRatio", "[WorkDaysDeductionRatio] IS NULL OR [WorkDaysDeductionRatio] IN (1,2,3,4,5)");
@@ -1926,7 +1929,7 @@ namespace MiniErp.Infrastructure.Migrations
                         });
                 });
 
-            modelBuilder.Entity("MiniErp.Domain.Entities.Employees.EmployeeTransaction", b =>
+            modelBuilder.Entity("MiniErp.Domain.Entities.Employees.EmployeeMovement", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1934,14 +1937,19 @@ namespace MiniErp.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<decimal>("Amount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
+                    b.Property<decimal>("BaseCredit")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)")
+                        .HasDefaultValue(0m);
 
-                    b.Property<int>("CashBoxId")
-                        .HasColumnType("int");
+                    b.Property<decimal>("BaseDebit")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)")
+                        .HasDefaultValue(0m);
 
-                    b.Property<int>("CashVoucherId")
+                    b.Property<int?>("CashVoucherId")
                         .HasColumnType("int");
 
                     b.Property<int>("CompanyId")
@@ -1960,6 +1968,17 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedOn")
                         .HasColumnType("datetime2");
 
+                    b.Property<decimal>("Credit")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("Currency")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Debit")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<string>("DeletedById")
                         .HasMaxLength(450)
                         .HasColumnType("nvarchar(450)");
@@ -1974,25 +1993,21 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Property<int>("EmployeeId")
                         .HasColumnType("int");
 
+                    b.Property<decimal>("ExchangeRate")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(28, 12)
+                        .HasColumnType("decimal(28,12)")
+                        .HasDefaultValue(1m);
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
+
+                    b.Property<DateOnly>("MovementDate")
+                        .HasColumnType("date");
 
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
-
-                    b.Property<decimal>("RunningBalance")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<int?>("SourceId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("SourceType")
-                        .HasColumnType("int");
-
-                    b.Property<DateOnly>("TransactionDate")
-                        .HasColumnType("date");
 
                     b.Property<int>("Type")
                         .HasColumnType("int");
@@ -2012,20 +2027,139 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.HasAlternateKey("CompanyId", "Id");
 
-                    b.HasIndex("CompanyId", "CashBoxId");
+                    b.HasIndex("CompanyId", "CashVoucherId")
+                        .IsUnique()
+                        .HasFilter("[CashVoucherId] IS NOT NULL AND [IsDeleted] = 0");
 
-                    b.HasIndex("CompanyId", "CashVoucherId");
+                    b.HasIndex("CompanyId", "EmployeeId", "Currency", "MovementDate", "Id");
 
-                    b.HasIndex("CompanyId", "EmployeeId", "Type");
-
-                    b.HasIndex("CompanyId", "SourceType", "SourceId")
-                        .HasFilter("[SourceId] IS NOT NULL AND [IsDeleted] = 0");
-
-                    b.HasIndex("CompanyId", "EmployeeId", "TransactionDate", "Id");
-
-                    b.ToTable("EmployeeTransactions", null, t =>
+                    b.ToTable("EmployeeMovements", null, t =>
                         {
-                            t.HasCheckConstraint("CK_EmployeeTransactions_Amount_Positive", "[Amount] > 0");
+                            t.HasCheckConstraint("CK_EmployeeMovements_Amounts_NonNegative", "[Debit] >= 0 AND [Credit] >= 0");
+
+                            t.HasCheckConstraint("CK_EmployeeMovements_ExactlyOneAmount", "([Debit] > 0 AND [Credit] = 0) OR ([Debit] = 0 AND [Credit] > 0)");
+                        });
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Employees.EmployeeOpeningBalance", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("BalanceType")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("BaseAmount")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)")
+                        .HasDefaultValue(0m);
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Currency")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateOnly>("DocumentDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("DocumentNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("ExchangeRate")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(28, 12)
+                        .HasColumnType("decimal(28,12)")
+                        .HasDefaultValue(1m);
+
+                    b.Property<int?>("ExchangeRateId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("PayrollEntryId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("CompanyId", "Id");
+
+                    b.HasIndex("CompanyId", "DocumentNumber")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "EmployeeId");
+
+                    b.HasIndex("CompanyId", "ExchangeRateId");
+
+                    b.HasIndex("CompanyId", "PayrollEntryId")
+                        .IsUnique()
+                        .HasFilter("[PayrollEntryId] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.ToTable("EmployeeOpeningBalances", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_EmployeeOpeningBalances_Amount_Positive", "[Amount] > 0");
+
+                            t.HasCheckConstraint("CK_EmployeeOpeningBalances_Currency_EGP", "[Currency] = 1");
                         });
                 });
 
@@ -3932,9 +4066,6 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<int?>("EmployeeTransactionId")
-                        .HasColumnType("int");
-
                     b.Property<int>("EmployeeType")
                         .HasColumnType("int");
 
@@ -3967,6 +4098,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<DateOnly?>("SalaryMovedOn")
+                        .HasColumnType("date");
+
                     b.Property<decimal?>("SalaryPerDay")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
@@ -3990,8 +4124,6 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("EmployeeTransactionId");
 
                     b.HasIndex("CompanyId", "EmployeeId");
 
@@ -4854,7 +4986,7 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("Employee");
                 });
 
-            modelBuilder.Entity("MiniErp.Domain.Entities.Employees.EmployeeTransaction", b =>
+            modelBuilder.Entity("MiniErp.Domain.Entities.Employees.EmployeeMovement", b =>
                 {
                     b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
                         .WithMany()
@@ -4862,19 +4994,11 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("MiniErp.Domain.Entities.CashManagement.Cashbox", "Cashbox")
-                        .WithMany()
-                        .HasForeignKey("CompanyId", "CashBoxId")
-                        .HasPrincipalKey("CompanyId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("MiniErp.Domain.Entities.CashManagement.CashVoucher", "CashVoucher")
                         .WithMany()
                         .HasForeignKey("CompanyId", "CashVoucherId")
                         .HasPrincipalKey("CompanyId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("MiniErp.Domain.Entities.Employees.Employee", "Employee")
                         .WithMany()
@@ -4885,11 +5009,45 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.Navigation("CashVoucher");
 
-                    b.Navigation("Cashbox");
+                    b.Navigation("Company");
+
+                    b.Navigation("Employee");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Employees.EmployeeOpeningBalance", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Employees.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "EmployeeId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Companies.ExchangeRate", "ExchangeRateRecord")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "ExchangeRateId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("MiniErp.Domain.Entities.Payroll.PayrollEntry", "PayrollEntry")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "PayrollEntryId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Company");
 
                     b.Navigation("Employee");
+
+                    b.Navigation("ExchangeRateRecord");
+
+                    b.Navigation("PayrollEntry");
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.Inventory.InventoryCostAllocation", b =>
@@ -5499,10 +5657,6 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("MiniErp.Domain.Entities.Employees.EmployeeTransaction", "EmployeeTransaction")
-                        .WithMany()
-                        .HasForeignKey("EmployeeTransactionId");
-
                     b.HasOne("MiniErp.Domain.Entities.Employees.Employee", "Employee")
                         .WithMany()
                         .HasForeignKey("CompanyId", "EmployeeId")
@@ -5513,8 +5667,6 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("Company");
 
                     b.Navigation("Employee");
-
-                    b.Navigation("EmployeeTransaction");
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.Payroll.PayrollPeriod", b =>

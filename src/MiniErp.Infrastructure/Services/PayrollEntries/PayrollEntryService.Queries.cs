@@ -60,16 +60,16 @@ public sealed partial class PayrollEntryService
             .ToListAsync(cancellationToken);
 
         return new AttendanceSummary(
-            PresentDays: attendances.Count(a => a.Status == AttendanceStatus.Present),
-            AbsentDays: attendances.Count(a => a.Status == AttendanceStatus.Absent),
+            PresentDays: attendances.Count(a => a.Status == EmployeeAttendanceStatus.Present),
+            AbsentDays: attendances.Count(a => a.Status == EmployeeAttendanceStatus.Absent),
             TotalPresentDays: attendances
-                .Where(a => a.Status == AttendanceStatus.Present)
+                .Where(a => a.Status == EmployeeAttendanceStatus.Present)
                 .Sum(a => GetRatioValue(a.WorkDayRatio)),
             TotalOvertimeDays: attendances
-                .Where(a => a.Status == AttendanceStatus.Present)
+                .Where(a => a.Status == EmployeeAttendanceStatus.Present)
                 .Sum(a => GetRatioValue(a.WorkOverTimeRatio)),
             TotalDeductionDays: attendances
-                .Where(a => a.Status == AttendanceStatus.Present)
+                .Where(a => a.Status == EmployeeAttendanceStatus.Present)
                 .Sum(a => GetRatioValue(a.WorkDaysDeductionRatio)));
     }
 
@@ -113,53 +113,5 @@ public sealed partial class PayrollEntryService
 
         // Sentinel: salary not configured
         return (GrossSalary: -1m, CalculatedSalary: -1m);
-    }
-
-    private async Task<(int CashboxId, int CashMovementTypeId)?> ResolveCashboxAndMovementTypeAsync(
-        int? requestedCashboxId,
-        int? requestedMovementTypeId,
-        CancellationToken cancellationToken)
-    {
-        int cashboxId;
-        if (requestedCashboxId.HasValue)
-        {
-            cashboxId = requestedCashboxId.Value;
-        }
-        else
-        {
-            var defaultCashbox = await dbContext.Cashboxes
-                .AsNoTracking()
-                .Where(c => c.CompanyId == companyId && c.IsActive)
-                .OrderBy(c => c.Id)
-                .Select(c => c.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (defaultCashbox == 0)
-                return null;
-
-            cashboxId = defaultCashbox;
-        }
-
-        int movementTypeId;
-        if (requestedMovementTypeId.HasValue)
-        {
-            movementTypeId = requestedMovementTypeId.Value;
-        }
-        else
-        {
-            var defaultMovementType = await dbContext.CashMovementTypes
-                .AsNoTracking()
-                .Where(m => m.CompanyId == companyId && m.IsActive)
-                .OrderBy(m => m.Id)
-                .Select(m => m.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (defaultMovementType == 0)
-                return null;
-
-            movementTypeId = defaultMovementType;
-        }
-
-        return (cashboxId, movementTypeId);
     }
 }

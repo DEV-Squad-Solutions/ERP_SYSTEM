@@ -1,9 +1,11 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
-using MiniErp.Application.Features.EmployeeTransactions;
+using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Application.Features.PayrollEntries;
+using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Entities.Payroll;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -14,7 +16,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
         ApplicationDbContext dbContext,
         IPaginationService paginationService,
         ICurrentCompanyContext currentCompanyContext,
-        IEmployeeTransactionService employeeTransactionService)
+        IExchangeRateResolver exchangeRateResolver)
         : IPayrollEntryService, IScopedService
     {
         private readonly int companyId = currentCompanyContext.CompanyId;
@@ -105,7 +107,6 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                         "يجب تحديد الراتب أو اليومية للموظف."));
 
             decimal netSalary = calculatedSalary + (request.Bonus ?? 0) - (request.Deduction ?? 0);
-            bool shouldAutoMove = request.IsSalaryMoveToEmployeeAccount ?? false;
 
             var entry = new PayrollEntry
             {
@@ -132,37 +133,12 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 GrossSalary                     = grossSalary,
                 CalculatedSalary                = calculatedSalary,
                 NetSalary                       = netSalary,
-                IsSalaryMoveToEmployeeAccount   = shouldAutoMove
+                IsSalaryMoveToEmployeeAccount   = false,
+                SalaryMovedOn                   = null
             };
 
             dbContext.PayrollEntries.Add(entry);
             await dbContext.SaveChangesAsync(cancellationToken);
-
-            if (shouldAutoMove)
-            {
-                var cashInfo = await ResolveCashboxAndMovementTypeAsync(
-                    request.CashboxId,
-                    request.CashMovementTypeId,
-                    cancellationToken);
-
-                if (cashInfo is not null)
-                {
-                    var creditResult = await employeeTransactionService.PostSalaryCreditAsync(
-                        employeeId: entry.EmployeeId,
-                        amount: entry.NetSalary,
-                        payrollEntryId: entry.Id,
-                        transactionDate: entry.EndDate,
-                        cashboxId: cashInfo.Value.CashboxId,
-                        cashMovementTypeId: cashInfo.Value.CashMovementTypeId,
-                        cancellationToken: cancellationToken);
-
-                    if (creditResult.IsSuccess)
-                    {
-                        employee.LastDayOfReceivingSalary = entry.EndDate;
-                        await dbContext.SaveChangesAsync(cancellationToken);
-                    }
-                }
-            }
 
             return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
         }
@@ -244,11 +220,11 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     .ToList();
 
                 var summary = new AttendanceSummary(
-                    PresentDays:        empAttendances.Count(a => a.Status == AttendanceStatus.Present),
-                    AbsentDays:         empAttendances.Count(a => a.Status == AttendanceStatus.Absent),
-                    TotalPresentDays:   empAttendances.Where(a => a.Status == AttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkDayRatio)),
-                    TotalOvertimeDays:  empAttendances.Where(a => a.Status == AttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkOverTimeRatio)),
-                    TotalDeductionDays: empAttendances.Where(a => a.Status == AttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkDaysDeductionRatio)));
+                    PresentDays:        empAttendances.Count(a => a.Status == EmployeeAttendanceStatus.Present),
+                    AbsentDays:         empAttendances.Count(a => a.Status == EmployeeAttendanceStatus.Absent),
+                    TotalPresentDays:   empAttendances.Where(a => a.Status == EmployeeAttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkDayRatio)),
+                    TotalOvertimeDays:  empAttendances.Where(a => a.Status == EmployeeAttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkOverTimeRatio)),
+                    TotalDeductionDays: empAttendances.Where(a => a.Status == EmployeeAttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkDaysDeductionRatio)));
 
                 var (grossSalary, calculatedSalary) = CalculateSalary(emp, summary);
                 if (grossSalary < 0)
@@ -257,7 +233,6 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                             $"يجب تحديد الراتب أو اليومية للموظف {emp.Name}."));
 
                 var netSalary = calculatedSalary + (item.Bonus ?? 0) - (item.Deduction ?? 0);
-                bool moveSalary = item.IsSalaryMoveToEmployeeAccount ?? request.DefaultIsSalaryMoveToEmployeeAccount ?? false;
 
                 entries.Add(new PayrollEntry
                 {
@@ -282,61 +257,13 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     GrossSalary                     = grossSalary,
                     CalculatedSalary                = calculatedSalary,
                     NetSalary                       = netSalary,
-                    IsSalaryMoveToEmployeeAccount   = moveSalary
+                    IsSalaryMoveToEmployeeAccount   = false,
+                    SalaryMovedOn                   = null
                 });
             }
 
-            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
             dbContext.PayrollEntries.AddRange(entries);
             await dbContext.SaveChangesAsync(cancellationToken);
-
-            var autoMoveEntries = entries.Where(e => e.IsSalaryMoveToEmployeeAccount).ToList();
-            if (autoMoveEntries.Count > 0)
-            {
-                var creditItems = new List<EmployeeSalaryCreditItem>();
-                for (int i = 0; i < autoMoveEntries.Count; i++)
-                {
-                    var e = autoMoveEntries[i];
-                    var reqItem = request.Entries.FirstOrDefault(r => r.EmployeeId == e.EmployeeId);
-                    var cashInfo = await ResolveCashboxAndMovementTypeAsync(
-                        reqItem?.CashboxId ?? request.DefaultCashboxId,
-                        reqItem?.CashMovementTypeId ?? request.DefaultCashMovementTypeId,
-                        cancellationToken);
-
-                    if (cashInfo is not null)
-                    {
-                        creditItems.Add(new EmployeeSalaryCreditItem(
-                            EmployeeId:         e.EmployeeId,
-                            Amount:             e.NetSalary,
-                            PayrollEntryId:     e.Id,
-                            TransactionDate:    e.EndDate,
-                            CashboxId:          cashInfo.Value.CashboxId,
-                            CashMovementTypeId: cashInfo.Value.CashMovementTypeId,
-                            Notes:              $"راتب مقيد تلقائيًا من مسير الرواتب رقم {e.Id}"));
-                    }
-                }
-
-                if (creditItems.Count > 0)
-                {
-                    var creditResult = await employeeTransactionService.PostSalaryCreditBulkAsync(
-                        items: creditItems,
-                        cancellationToken: cancellationToken);
-
-                    if (creditResult.IsSuccess)
-                    {
-                        foreach (var entry in autoMoveEntries)
-                        {
-                            if (employees.TryGetValue(entry.EmployeeId, out var emp))
-                            {
-                                emp.LastDayOfReceivingSalary = entry.EndDate;
-                            }
-                        }
-                        await dbContext.SaveChangesAsync(cancellationToken);
-                    }
-                }
-            }
-
-            await transaction.CommitAsync(cancellationToken);
 
             return Result<List<PayrollEntryResponse>>.Success(entries.Select(MapToResponse).ToList());
         }
@@ -348,7 +275,8 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             PayrollEntrySalaryPaymentRequest request,
             CancellationToken cancellationToken = default)
         {
-            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            await using var transaction = await dbContext.Database
+                .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
             var entry = await dbContext.PayrollEntries
                 .Include(e => e.Employee)
@@ -368,34 +296,49 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 return Result<PayrollEntryResponse>.Failure(guardError);
             }
 
-            var cashInfo = await ResolveCashboxAndMovementTypeAsync(
-                request.CashboxId,
-                request.CashMovementTypeId,
+            var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+                CurrencyCode.EGP,
+                request.PostingDate,
+                requestedRate: null,
+                cancellationToken: cancellationToken);
+
+            if (exchangeRateResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Result<PayrollEntryResponse>.Failure(exchangeRateResult.Error);
+            }
+
+            var documentNumber = await EntityIdentifierGenerator.GenerateUniqueAsync(
+                dbContext,
+                prefix: "EOB",
+                companyId: companyId,
+                existingIdentifiers: dbContext.EmployeeOpeningBalances
+                    .IgnoreQueryFilters()
+                    .Where(e => e.CompanyId == companyId)
+                    .Select(e => e.DocumentNumber),
                 cancellationToken);
 
-            if (cashInfo is null)
+            var openingBalance = new EmployeeOpeningBalance
             {
-                await transaction.RollbackAsync(cancellationToken);
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation("PayrollEntry.CashboxRequired", "يجب توفر صندوق نقدي نشط ونوع حركة لإتمام قيد الراتب."));
-            }
+                CompanyId = companyId,
+                EmployeeId = entry.EmployeeId,
+                PayrollEntryId = entry.Id,
+                DocumentNumber = documentNumber,
+                DocumentDate = request.PostingDate,
+                Currency = CurrencyCode.EGP,
+                BalanceType = EmployeeBalanceType.Credit,
+                Amount = entry.NetSalary,
+                Notes = request.Notes ?? $"تحويل راتب مسير رواتب #{entry.Id} للفترة من {entry.StartDate:yyyy-MM-dd} إلى {entry.EndDate:yyyy-MM-dd}"
+            };
+            openingBalance.ApplyExchangeRate(
+                exchangeRateResult.Value.ExchangeRateId,
+                exchangeRateResult.Value.Rate);
 
-            var creditResult = await employeeTransactionService.PostSalaryCreditAsync(
-                employeeId:         entry.EmployeeId,
-                amount:             entry.NetSalary,
-                payrollEntryId:     entry.Id,
-                transactionDate:    request.PostingDate,
-                cashboxId:          cashInfo.Value.CashboxId,
-                cashMovementTypeId: cashInfo.Value.CashMovementTypeId,
-                cancellationToken:  cancellationToken);
-
-            if (creditResult.IsFailure)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return Result<PayrollEntryResponse>.Failure(creditResult.Error);
-            }
+            dbContext.EmployeeOpeningBalances.Add(openingBalance);
 
             entry.IsSalaryMoveToEmployeeAccount = true;
+            entry.SalaryMovedOn = request.PostingDate;
+
             if (entry.Employee is not null)
                 entry.Employee.LastDayOfReceivingSalary = entry.EndDate;
 
@@ -437,7 +380,8 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
 
             var entryIds = requestedItems.Select(x => x.PayrollEntryId).Distinct().ToList();
 
-            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            await using var transaction = await dbContext.Database
+                .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
             var entries = await dbContext.PayrollEntries
                 .Include(e => e.Employee)
@@ -465,50 +409,60 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 }
             }
 
-            var creditItems = new List<EmployeeSalaryCreditItem>();
+            var openingBalances = new List<EmployeeOpeningBalance>(requestedItems.Count);
+
             foreach (var item in requestedItems)
             {
                 var entry = entriesMap[item.PayrollEntryId];
-                var reqEntry = request.Entries?.FirstOrDefault(r => r.PayrollEntryId == item.PayrollEntryId);
-                var cashInfo = await ResolveCashboxAndMovementTypeAsync(
-                    reqEntry?.CashboxId ?? request.DefaultCashboxId,
-                    reqEntry?.CashMovementTypeId ?? request.DefaultCashMovementTypeId,
-                    cancellationToken);
 
-                if (cashInfo is null)
+                var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+                    CurrencyCode.EGP,
+                    item.PostingDate,
+                    requestedRate: null,
+                    cancellationToken: cancellationToken);
+
+                if (exchangeRateResult.IsFailure)
                 {
                     await transaction.RollbackAsync(cancellationToken);
-                    return Result<List<PayrollEntryResponse>>.Failure(
-                        Error.Validation("PayrollEntry.CashboxRequired", "يجب توفر صندوق نقدي نشط ونوع حركة لإتمام قيد الراتب."));
+                    return Result<List<PayrollEntryResponse>>.Failure(exchangeRateResult.Error);
                 }
 
-                creditItems.Add(new EmployeeSalaryCreditItem(
-                    EmployeeId:         entry.EmployeeId,
-                    Amount:             entry.NetSalary,
-                    PayrollEntryId:     entry.Id,
-                    TransactionDate:    item.PostingDate,
-                    CashboxId:          cashInfo.Value.CashboxId,
-                    CashMovementTypeId: cashInfo.Value.CashMovementTypeId,
-                    Notes:              item.Notes));
-            }
+                var documentNumber = await EntityIdentifierGenerator.GenerateUniqueAsync(
+                    dbContext,
+                    prefix: "EOB",
+                    companyId: companyId,
+                    existingIdentifiers: dbContext.EmployeeOpeningBalances
+                        .IgnoreQueryFilters()
+                        .Where(e => e.CompanyId == companyId)
+                        .Select(e => e.DocumentNumber),
+                    cancellationToken);
 
-            var creditResult = await employeeTransactionService.PostSalaryCreditBulkAsync(
-                items: creditItems,
-                cancellationToken: cancellationToken);
+                var openingBalance = new EmployeeOpeningBalance
+                {
+                    CompanyId = companyId,
+                    EmployeeId = entry.EmployeeId,
+                    PayrollEntryId = entry.Id,
+                    DocumentNumber = documentNumber,
+                    DocumentDate = item.PostingDate,
+                    Currency = CurrencyCode.EGP,
+                    BalanceType = EmployeeBalanceType.Credit,
+                    Amount = entry.NetSalary,
+                    Notes = item.Notes ?? $"تحويل راتب مسير رواتب #{entry.Id} للفترة من {entry.StartDate:yyyy-MM-dd} إلى {entry.EndDate:yyyy-MM-dd}"
+                };
+                openingBalance.ApplyExchangeRate(
+                    exchangeRateResult.Value.ExchangeRateId,
+                    exchangeRateResult.Value.Rate);
 
-            if (creditResult.IsFailure)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return Result<List<PayrollEntryResponse>>.Failure(creditResult.Error);
-            }
+                openingBalances.Add(openingBalance);
 
-            foreach (var entry in entries)
-            {
                 entry.IsSalaryMoveToEmployeeAccount = true;
+                entry.SalaryMovedOn = item.PostingDate;
+
                 if (entry.Employee is not null)
                     entry.Employee.LastDayOfReceivingSalary = entry.EndDate;
             }
 
+            dbContext.EmployeeOpeningBalances.AddRange(openingBalances);
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
@@ -524,12 +478,11 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
         {
             var reqError = ValidateAddAsync(
                 new PayrollEntryCreateRequest(
-                    StartDate:                      request.StartDate,
-                    EndDate:                        request.EndDate,
-                    EmployeeId:                     request.EmployeeId,
-                    Bonus:                          request.Bonus,
-                    Deduction:                      request.Deduction,
-                    IsSalaryMoveToEmployeeAccount:  request.IsSalaryMoveToEmployeeAccount),
+                    StartDate:  request.StartDate,
+                    EndDate:    request.EndDate,
+                    EmployeeId: request.EmployeeId,
+                    Bonus:      request.Bonus,
+                    Deduction:  request.Deduction),
                 cancellationToken);
 
             if (reqError is not null)
@@ -574,7 +527,6 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                         "يجب تحديد الراتب أو اليومية للموظف."));
 
             var netSalary = calculatedSalary + (request.Bonus ?? 0) - (request.Deduction ?? 0);
-            bool shouldAutoMove = request.IsSalaryMoveToEmployeeAccount ?? entry.IsSalaryMoveToEmployeeAccount;
 
             entry.EmployeeId                    = employee.Id;
             entry.EmployeeCode                  = employee.Code;
@@ -597,38 +549,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             entry.CalculatedSalary              = calculatedSalary;
             entry.NetSalary                     = netSalary;
 
-            // Capture the flag BEFORE overwriting it — the guard below needs the old value.
-            bool wasAlreadyMoved = entry.IsSalaryMoveToEmployeeAccount;
-            entry.IsSalaryMoveToEmployeeAccount = shouldAutoMove;
-
             await dbContext.SaveChangesAsync(cancellationToken);
-
-            // Only post an auto-credit when the flag is being enabled for the first time.
-            if (shouldAutoMove && !wasAlreadyMoved)
-            {
-                var cashInfo = await ResolveCashboxAndMovementTypeAsync(
-                    request.CashboxId,
-                    request.CashMovementTypeId,
-                    cancellationToken);
-
-                if (cashInfo is not null)
-                {
-                    var creditResult = await employeeTransactionService.PostSalaryCreditAsync(
-                        employeeId:         entry.EmployeeId,
-                        amount:             entry.NetSalary,
-                        payrollEntryId:     entry.Id,
-                        transactionDate:    entry.EndDate,
-                        cashboxId:          cashInfo.Value.CashboxId,
-                        cashMovementTypeId: cashInfo.Value.CashMovementTypeId,
-                        cancellationToken:  cancellationToken);
-
-                    if (creditResult.IsSuccess)
-                    {
-                        employee.LastDayOfReceivingSalary = entry.EndDate;
-                        await dbContext.SaveChangesAsync(cancellationToken);
-                    }
-                }
-            }
 
             return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
         }
@@ -701,9 +622,190 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             if (entry.IsSalaryMoveToEmployeeAccount)
                 return Result.Failure(
                     Error.Conflict("PayrollEntry.AlreadyPaid",
-                        "لا يمكن حذف قيد راتب تم صرفه. يجب إلغاء سند الصرف أولًا."));
+                        "لا يمكن حذف قيد راتب تم تحويل راتبه إلى حساب الموظف."));
 
             dbContext.PayrollEntries.Remove(entry);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return Result.Success();
+        }
+
+        // ─── UPDATE BULK ────────────────────────────────────────────────────────
+
+        public async Task<Result<List<PayrollEntryResponse>>> UpdateBulkAsync(
+            BulkPayrollEntryUpdateRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (request.Entries is null || request.Entries.Count == 0)
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.Validation("PayrollEntry.EmptyBulkRequest", "يجب إرسال قيد راتب واحد على الأقل للتعديل."));
+
+            var ids = request.Entries.Select(e => e.Id).Distinct().ToList();
+            var employeeIds = request.Entries.Select(e => e.EmployeeId).Distinct().ToList();
+
+            var entries = await dbContext.PayrollEntries
+                .Where(e => e.CompanyId == companyId && ids.Contains(e.Id))
+                .ToListAsync(cancellationToken);
+
+            var entriesMap = entries.ToDictionary(e => e.Id);
+            if (entries.Count != ids.Count)
+            {
+                var missingIds = ids.Where(id => !entriesMap.ContainsKey(id)).ToList();
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.NotFound("PayrollEntry.NotFound",
+                        $"بعض قيود الرواتب المحددة غير موجودة: {string.Join(", ", missingIds)}"));
+            }
+
+            foreach (var entry in entries)
+            {
+                var guardError = ValidateForUpdate(entry);
+                if (guardError is not null)
+                    return Result<List<PayrollEntryResponse>>.Failure(guardError);
+            }
+
+            var employees = await dbContext.Employees
+                .Where(e => e.CompanyId == companyId && employeeIds.Contains(e.Id))
+                .ToDictionaryAsync(e => e.Id, cancellationToken);
+
+            if (employees.Count != employeeIds.Count)
+            {
+                var missingIds = employeeIds.Where(id => !employees.ContainsKey(id)).ToList();
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.NotFound("Employee.NotFound",
+                        $"بعض الموظفين المحددين غير موجودين: {string.Join(", ", missingIds)}"));
+            }
+
+            var today = DateOnly.FromDateTime(DateTime.Now);
+            var dateRanges = new Dictionary<int, (DateOnly StartDate, DateOnly EndDate)>();
+
+            foreach (var item in request.Entries)
+            {
+                var emp = employees[item.EmployeeId];
+                var startDate = item.StartDate
+                    ?? emp.LastDayOfReceivingSalary?.AddDays(1)
+                    ?? DateOnly.FromDateTime(emp.CreatedOn);
+                var endDate = item.EndDate ?? today;
+
+                if (startDate > endDate)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Validation("PayrollEntry.InvalidDateRange",
+                            $"تاريخ البداية للموظف {emp.Name} ({startDate}) يجب أن يكون قبل أو يساوي تاريخ النهاية ({endDate})."));
+
+                dateRanges[item.Id] = (startDate, endDate);
+            }
+
+            var minStartDate = dateRanges.Values.Min(r => r.StartDate);
+            var maxEndDate = dateRanges.Values.Max(r => r.EndDate);
+
+            var attendances = await dbContext.EmployeeAttendances
+                .AsNoTracking()
+                .Where(a =>
+                    a.CompanyId == companyId &&
+                    employeeIds.Contains(a.EmployeeId) &&
+                    a.WorkDate >= minStartDate &&
+                    a.WorkDate <= maxEndDate)
+                .Select(a => new
+                {
+                    a.EmployeeId,
+                    a.WorkDate,
+                    a.Status,
+                    a.WorkDayRatio,
+                    a.WorkOverTimeRatio,
+                    a.WorkDaysDeductionRatio
+                })
+                .ToListAsync(cancellationToken);
+
+            var attendanceLookup = attendances.ToLookup(a => a.EmployeeId);
+
+            await using var transaction = await dbContext.Database
+                .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+            foreach (var item in request.Entries)
+            {
+                var entry = entriesMap[item.Id];
+                var emp = employees[item.EmployeeId];
+                var (startDate, endDate) = dateRanges[item.Id];
+
+                var empAttendances = attendanceLookup[emp.Id]
+                    .Where(a => a.WorkDate >= startDate && a.WorkDate <= endDate)
+                    .ToList();
+
+                var summary = new AttendanceSummary(
+                    PresentDays:        empAttendances.Count(a => a.Status == EmployeeAttendanceStatus.Present),
+                    AbsentDays:         empAttendances.Count(a => a.Status == EmployeeAttendanceStatus.Absent),
+                    TotalPresentDays:   empAttendances.Where(a => a.Status == EmployeeAttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkDayRatio)),
+                    TotalOvertimeDays:  empAttendances.Where(a => a.Status == EmployeeAttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkOverTimeRatio)),
+                    TotalDeductionDays: empAttendances.Where(a => a.Status == EmployeeAttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkDaysDeductionRatio)));
+
+                var (grossSalary, calculatedSalary) = CalculateSalary(emp, summary);
+                if (grossSalary < 0)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Validation("Employee.SalaryRequired",
+                            $"يجب تحديد الراتب أو اليومية للموظف {emp.Name}."));
+
+                var netSalary = calculatedSalary + (item.Bonus ?? 0) - (item.Deduction ?? 0);
+
+                entry.EmployeeId                    = emp.Id;
+                entry.EmployeeCode                  = emp.Code;
+                entry.EmployeeName                  = emp.Name;
+                entry.EmployeeType                  = emp.Type;
+                entry.StartDate                     = startDate;
+                entry.EndDate                       = endDate;
+                entry.PresentDays                   = summary.PresentDays;
+                entry.AbsentDays                    = summary.AbsentDays;
+                entry.WorkedDaysbydayunit           = summary.TotalPresentDays;
+                entry.Overtimebydayunit             = summary.TotalOvertimeDays;
+                entry.Deductionbydayunit            = summary.TotalDeductionDays;
+                entry.RequiredWorkingDays           = emp.RequiredWorkingDaysPerMonth;
+                entry.SalaryPerDay                  = emp.Type == EmployeeType.Monthly && emp.RequiredWorkingDaysPerMonth is > 0
+                    ? emp.MonthlySalary!.Value / emp.RequiredWorkingDaysPerMonth.Value
+                    : emp.DailySalary;
+                entry.Bonus                         = item.Bonus;
+                entry.Deduction                     = item.Deduction;
+                entry.GrossSalary                   = grossSalary;
+                entry.CalculatedSalary              = calculatedSalary;
+                entry.NetSalary                     = netSalary;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            return Result<List<PayrollEntryResponse>>.Success(entries.Select(MapToResponse).ToList());
+        }
+
+        // ─── DELETE BULK ────────────────────────────────────────────────────────
+
+        public async Task<Result> DeleteBulkAsync(
+            BulkPayrollEntryDeleteRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (request.PayrollEntryIds is null || request.PayrollEntryIds.Count == 0)
+                return Result.Failure(
+                    Error.Validation("PayrollEntry.EmptyBulkRequest", "يجب تحديد معرفات قيود الرواتب المراد حذفها."));
+
+            var ids = request.PayrollEntryIds.Distinct().ToList();
+
+            var entries = await dbContext.PayrollEntries
+                .Where(e => e.CompanyId == companyId && ids.Contains(e.Id))
+                .ToListAsync(cancellationToken);
+
+            if (entries.Count != ids.Count)
+            {
+                var existingIds = entries.Select(e => e.Id).ToHashSet();
+                var missingIds = ids.Where(id => !existingIds.Contains(id)).ToList();
+                return Result.Failure(
+                    Error.NotFound("PayrollEntry.NotFound",
+                        $"بعض قيود الرواتب المحددة غير موجودة: {string.Join(", ", missingIds)}"));
+            }
+
+            var movedEntries = entries.Where(e => e.IsSalaryMoveToEmployeeAccount).Select(e => e.Id).ToList();
+            if (movedEntries.Count > 0)
+            {
+                return Result.Failure(
+                    Error.Conflict("PayrollEntry.AlreadyPaid",
+                        $"لا يمكن حذف قيود الرواتب التالية لأن رواتبها تم تحويلها بالفعل إلى حسابات الموظفين: {string.Join(", ", movedEntries)}"));
+            }
+
+            dbContext.PayrollEntries.RemoveRange(entries);
             await dbContext.SaveChangesAsync(cancellationToken);
             return Result.Success();
         }
@@ -725,6 +827,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 GrossSalary:                    entry.GrossSalary,
                 NetSalary:                      entry.NetSalary,
                 IsSalaryMoveToEmployeeAccount:  entry.IsSalaryMoveToEmployeeAccount,
+                SalaryMovedOn:                  entry.SalaryMovedOn,
                 AttendanceSummary: new AttendanceSummary(
                     PresentDays:        entry.PresentDays,
                     AbsentDays:         entry.AbsentDays,

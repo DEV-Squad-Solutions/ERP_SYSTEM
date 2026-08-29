@@ -420,34 +420,58 @@ public sealed partial class FinancialStatementService
                     accountCode: employee.Code,
                     accountName: employee.Name));
 
-        var transactionGroups = await dbContext.EmployeeTransactions
+        var openingBalanceGroups = await dbContext.EmployeeOpeningBalances
             .AsNoTracking()
-            .Where(transaction =>
-                transaction.CompanyId == companyId &&
-                transaction.TransactionDate <= filters.ToDate)
-            .GroupBy(transaction => new
+            .Where(balance =>
+                balance.CompanyId == companyId &&
+                balance.DocumentDate <= filters.ToDate)
+            .GroupBy(balance => new
             {
-                AccountId = transaction.EmployeeId,
-                IsOpening = transaction.TransactionDate < filters.FromDate
+                AccountId = balance.EmployeeId,
+                IsOpening = balance.DocumentDate < filters.FromDate
             })
             .Select(group => new
             {
                 group.Key.AccountId,
                 group.Key.IsOpening,
-                Debit = group.Sum(transaction =>
-                    transaction.Type == EmployeeTransactionType.Credit ||
-                    transaction.Type == EmployeeTransactionType.Bonus
-                        ? 0m
-                        : transaction.Amount),
-                Credit = group.Sum(transaction =>
-                    transaction.Type == EmployeeTransactionType.Credit ||
-                    transaction.Type == EmployeeTransactionType.Bonus
-                        ? transaction.Amount
+                Debit = group.Sum(balance =>
+                    balance.BalanceType == EmployeeBalanceType.Debit
+                        ? balance.BaseAmount
+                        : 0m),
+                Credit = group.Sum(balance =>
+                    balance.BalanceType == EmployeeBalanceType.Credit
+                        ? balance.BaseAmount
                         : 0m)
             })
             .ToListAsync(cancellationToken);
 
-        ApplyGroups(accounts, transactionGroups.Select(group =>
+        ApplyGroups(accounts, openingBalanceGroups.Select(group =>
+            new AccountMovementGroup(
+                AccountId: group.AccountId,
+                IsOpening: group.IsOpening,
+                Debit: group.Debit,
+                Credit: group.Credit)));
+
+        var movementGroups = await dbContext.EmployeeMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.MovementDate <= filters.ToDate)
+            .GroupBy(movement => new
+            {
+                AccountId = movement.EmployeeId,
+                IsOpening = movement.MovementDate < filters.FromDate
+            })
+            .Select(group => new
+            {
+                group.Key.AccountId,
+                group.Key.IsOpening,
+                Debit = group.Sum(movement => movement.BaseDebit),
+                Credit = group.Sum(movement => movement.BaseCredit)
+            })
+            .ToListAsync(cancellationToken);
+
+        ApplyGroups(accounts, movementGroups.Select(group =>
             new AccountMovementGroup(
                 AccountId: group.AccountId,
                 IsOpening: group.IsOpening,
@@ -461,9 +485,9 @@ public sealed partial class FinancialStatementService
                 voucher.IsPosted &&
                 voucher.EmployeeId.HasValue &&
                 voucher.VoucherDate <= filters.ToDate &&
-                !dbContext.EmployeeTransactions.Any(transaction =>
-                    transaction.CompanyId == companyId &&
-                    transaction.CashVoucherId == voucher.Id))
+                !dbContext.EmployeeMovements.Any(movement =>
+                    movement.CompanyId == companyId &&
+                    movement.CashVoucherId == voucher.Id))
             .GroupBy(voucher => new
             {
                 AccountId = voucher.EmployeeId!.Value,

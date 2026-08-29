@@ -388,7 +388,7 @@ public static class DevelopmentDataSeeder
                 payrollPeriod,
                 cancellationToken);
 
-            await SeedEmployeeTransactionsAsync(
+            await SeedEmployeeAccountDataAsync(
                 dbContext,
                 company,
                 payrollPeriod,
@@ -3553,7 +3553,7 @@ public static class DevelopmentDataSeeder
                 CompanyId = company.Id,
                 EmployeeId = employeeId,
                 WorkDate = targetDate,
-                Status = AttendanceStatus.Present,
+                Status = EmployeeAttendanceStatus.Present,
                 CheckIn = new TimeOnly(8, 0, 0),
                 CheckOut = new TimeOnly(16, 30, 0),
                 WorkHours = new TimeOnly(8, 30, 0),
@@ -3569,7 +3569,7 @@ public static class DevelopmentDataSeeder
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private static async Task SeedEmployeeTransactionsAsync(
+    private static async Task SeedEmployeeAccountDataAsync(
         ApplicationDbContext dbContext,
         Company company,
         PayrollPeriod payrollPeriod,
@@ -3594,28 +3594,6 @@ public static class DevelopmentDataSeeder
             return;
         }
 
-        var cashbox = await dbContext.Cashboxes
-            .FirstOrDefaultAsync(
-                entity =>
-                    entity.CompanyId == company.Id &&
-                    entity.Code == "CASH-MAIN" &&
-                    entity.IsActive,
-                cancellationToken);
-        var movementType = await dbContext.CashMovementTypes
-            .FirstOrDefaultAsync(
-                entity =>
-                    entity.CompanyId == company.Id &&
-                    entity.Name == "Other Receipt" &&
-                    entity.Direction == CashDirection.Receipt &&
-                    entity.IsActive,
-                cancellationToken);
-
-        if (cashbox is null || movementType is null)
-        {
-            throw new InvalidOperationException(
-                $"Cash management seed dependencies are missing for company {company.Id}.");
-        }
-
         var createdOn = new DateTime(
             2026,
             7,
@@ -3628,97 +3606,43 @@ public static class DevelopmentDataSeeder
 
         foreach (var payrollEntry in payrollEntries)
         {
-            var existingTransaction = await dbContext.EmployeeTransactions
+            var existingOpeningBalance = await dbContext.EmployeeOpeningBalances
+                .IgnoreQueryFilters()
                 .FirstOrDefaultAsync(
-                    transaction =>
-                        transaction.CompanyId == company.Id &&
-                        transaction.SourceType == EmployeeTransactionSource.Payroll &&
-                        transaction.SourceId == payrollEntry.Id,
+                    openingBalance =>
+                        openingBalance.CompanyId == company.Id &&
+                        openingBalance.PayrollEntryId == payrollEntry.Id &&
+                        !openingBalance.IsDeleted,
                     cancellationToken);
 
-            if (existingTransaction is not null)
+            if (existingOpeningBalance is not null)
             {
-                payrollEntry.EmployeeTransactionId = existingTransaction.Id;
                 payrollEntry.IsSalaryMoveToEmployeeAccount = true;
+                payrollEntry.SalaryMovedOn ??= payrollPeriod.EndDate;
                 payrollEntry.Employee.LastDayOfReceivingSalary = payrollPeriod.EndDate;
                 continue;
             }
 
-            var voucherNumber =
-                $"SEED-PAYROLL-{company.Id}-{payrollEntry.EmployeeId}";
-            var voucher = await dbContext.CashVouchers
-                .FirstOrDefaultAsync(
-                    entity =>
-                        entity.CompanyId == company.Id &&
-                        entity.VoucherNumber == voucherNumber,
-                    cancellationToken);
-
-            if (voucher is null)
-            {
-                voucher = new CashVoucher
-                {
-                    CompanyId = company.Id,
-                    VoucherNumber = voucherNumber,
-                    VoucherDate = payrollPeriod.EndDate,
-                    Direction = CashDirection.Receipt,
-                    CashboxId = cashbox.Id,
-                    CashMovementTypeId = movementType.Id,
-                    PartyType = CashPartyType.Employee,
-                    EmployeeId = payrollEntry.EmployeeId,
-                    Amount = payrollEntry.NetSalary,
-                    Currency = cashbox.Currency,
-                    IsPosted = true,
-                    ReferenceNumber = $"PAYROLL-{payrollEntry.Id}",
-                    Description = $"Payroll credit for {payrollEntry.EmployeeName}",
-                    Notes = "Development seed payroll credit",
-                    CreatedById = SeedActor,
-                    CreatedByPc = createdByPc,
-                    CreatedOn = createdOn
-                };
-                voucher.Touch(createdOn);
-                voucher.ApplyExchangeRate(null, 1m);
-                dbContext.CashVouchers.Add(voucher);
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
-
-            var existingEntries = await dbContext.EmployeeTransactions
-                .AsNoTracking()
-                .Where(transaction =>
-                    transaction.CompanyId == company.Id &&
-                    transaction.EmployeeId == payrollEntry.EmployeeId)
-                .Select(transaction => new
-                {
-                    transaction.Type,
-                    transaction.Amount
-                })
-                .ToListAsync(cancellationToken);
-            var runningBalance = existingEntries.Sum(transaction =>
-                IsEmployeeCredit(transaction.Type)
-                    ? transaction.Amount
-                    : -transaction.Amount) + payrollEntry.NetSalary;
-
-            var employeeTransaction = new EmployeeTransaction
+            var openingBalance = new EmployeeOpeningBalance
             {
                 CompanyId = company.Id,
                 EmployeeId = payrollEntry.EmployeeId,
-                Type = EmployeeTransactionType.Credit,
+                PayrollEntryId = payrollEntry.Id,
+                DocumentNumber = $"SEED-EOB-{company.Id}-{payrollEntry.Id}",
+                DocumentDate = payrollPeriod.EndDate,
+                Currency = CurrencyCode.EGP,
+                BalanceType = EmployeeBalanceType.Credit,
                 Amount = payrollEntry.NetSalary,
-                TransactionDate = payrollPeriod.EndDate,
                 Notes = $"Development seed payroll credit for {payrollEntry.EmployeeName}",
-                RunningBalance = runningBalance,
-                SourceType = EmployeeTransactionSource.Payroll,
-                SourceId = payrollEntry.Id,
-                CashVoucherId = voucher.Id,
-                CashBoxId = cashbox.Id,
                 CreatedById = SeedActor,
                 CreatedByPc = createdByPc,
                 CreatedOn = createdOn
             };
-            dbContext.EmployeeTransactions.Add(employeeTransaction);
-            await dbContext.SaveChangesAsync(cancellationToken);
+            openingBalance.ApplyExchangeRate(null, 1m);
+            dbContext.EmployeeOpeningBalances.Add(openingBalance);
 
-            payrollEntry.EmployeeTransactionId = employeeTransaction.Id;
             payrollEntry.IsSalaryMoveToEmployeeAccount = true;
+            payrollEntry.SalaryMovedOn = payrollPeriod.EndDate;
             payrollEntry.Employee.LastDayOfReceivingSalary = payrollPeriod.EndDate;
         }
 
@@ -3754,6 +3678,7 @@ public static class DevelopmentDataSeeder
         var payrollPeriod = new PayrollPeriod
         {
             CompanyId = company.Id,
+            Code = "PR-2026-07",
             Name = "July 2026",
             StartDate = startDate,
             EndDate = endDate,
@@ -3835,22 +3760,22 @@ public static class DevelopmentDataSeeder
                 .Where(attendance => attendance.EmployeeId == employee.Id)
                 .ToArray();
             var presentDays = employeeAttendances.Count(attendance =>
-                attendance.Status == AttendanceStatus.Present);
+                attendance.Status == EmployeeAttendanceStatus.Present);
             var absentDays = employeeAttendances.Count(attendance =>
-                attendance.Status == AttendanceStatus.Absent);
+                attendance.Status == EmployeeAttendanceStatus.Absent);
             var workedDays = employeeAttendances
                 .Where(attendance =>
-                    attendance.Status == AttendanceStatus.Present)
+                    attendance.Status == EmployeeAttendanceStatus.Present)
                 .Sum(attendance => GetWorkDayRatioValue(
                     attendance.WorkDayRatio));
             var overtimeDays = employeeAttendances
                 .Where(attendance =>
-                    attendance.Status == AttendanceStatus.Present)
+                    attendance.Status == EmployeeAttendanceStatus.Present)
                 .Sum(attendance => GetWorkDayRatioValue(
                     attendance.WorkOverTimeRatio));
             var deductionDays = employeeAttendances
                 .Where(attendance =>
-                    attendance.Status == AttendanceStatus.Present)
+                    attendance.Status == EmployeeAttendanceStatus.Present)
                 .Sum(attendance => GetWorkDayRatioValue(
                     attendance.WorkDaysDeductionRatio));
             var salaryPerDay = employee.Type == EmployeeType.Monthly
@@ -3941,9 +3866,6 @@ public static class DevelopmentDataSeeder
             WorkDayRatio.QuarterDay => 0.25m,
             _ => 0m
         };
-
-    private static bool IsEmployeeCredit(EmployeeTransactionType type) =>
-        type is EmployeeTransactionType.Credit or EmployeeTransactionType.Bonus;
 
     private sealed record SeedUser(
         string UserName,

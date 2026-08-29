@@ -36,11 +36,19 @@ public interface IPayrollEntryService
         PayrollEntryUpdateRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<Result<List<PayrollEntryResponse>>> UpdateBulkAsync(
+        BulkPayrollEntryUpdateRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<Result<PayrollEntryResponse>> RecalculateAsync(
         int id,
         CancellationToken cancellationToken = default);
 
     Task<Result> DeleteAsync(
         int id,
+        CancellationToken cancellationToken = default);
+
+    Task<Result> DeleteBulkAsync(
+        BulkPayrollEntryDeleteRequest request,
         CancellationToken cancellationToken = default);
 }

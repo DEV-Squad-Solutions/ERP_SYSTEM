@@ -28,4 +28,9 @@ public static class StatementErrors
         Error.NotFound(
             "Statements.ContainerStoreNotFound",
             $"لا يوجد مخزن عبوات نشط للعميل رقم {businessPartnerId}.");
+
+    public static Error EmployeeNotFound(int id) =>
+        Error.NotFound(
+            "Statements.EmployeeNotFound",
+            $"لم يتم العثور على الموظف رقم {id}.");
 }

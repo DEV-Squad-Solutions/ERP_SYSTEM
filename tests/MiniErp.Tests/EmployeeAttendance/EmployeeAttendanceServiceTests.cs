@@ -23,14 +23,14 @@ public sealed class EmployeeAttendanceServiceTests
         [
             new IndividualAttendanceRecordRequest(
                 EmployeeId: 1,
-                Status: AttendanceStatus.Present,
+                Status: EmployeeAttendanceStatus.Present,
                 WorkDate: workDate,
                 CheckIn: new TimeOnly(9, 0),
                 CheckOut: new TimeOnly(17, 0)
             ),
             new IndividualAttendanceRecordRequest(
                 EmployeeId: 2,
-                Status: AttendanceStatus.Absent,
+                Status: EmployeeAttendanceStatus.Absent,
                 WorkDate: workDate,
                 CheckIn: null,
                 CheckOut: null
@@ -47,13 +47,13 @@ public sealed class EmployeeAttendanceServiceTests
         var first = result.Value.FirstOrDefault(x => x.EmployeeId == 1);
         Assert.NotNull(first);
         Assert.Equal("Employee One", first.EmployeeName);
-        Assert.Equal(AttendanceStatus.Present, first.Status);
+        Assert.Equal(EmployeeAttendanceStatus.Present, first.Status);
         Assert.Equal(new TimeOnly(8, 0), first.WorkHours); // 17:00 - 9:00 = 8 hours
 
         var second = result.Value.FirstOrDefault(x => x.EmployeeId == 2);
         Assert.NotNull(second);
         Assert.Equal("Employee Two", second.EmployeeName);
-        Assert.Equal(AttendanceStatus.Absent, second.Status);
+        Assert.Equal(EmployeeAttendanceStatus.Absent, second.Status);
         Assert.Null(second.WorkHours);
 
         // Verify Database
@@ -74,7 +74,7 @@ public sealed class EmployeeAttendanceServiceTests
         {
             CompanyId = 1,
             EmployeeId = 1,
-            Status = AttendanceStatus.Absent,
+            Status = EmployeeAttendanceStatus.Absent,
             WorkDate = workDate
         };
         database.Context.EmployeeAttendances.Add(existingRecord);
@@ -84,14 +84,14 @@ public sealed class EmployeeAttendanceServiceTests
         [
             new IndividualAttendanceRecordRequest(
                 EmployeeId: 1,
-                Status: AttendanceStatus.Present,
+                Status: EmployeeAttendanceStatus.Present,
                 WorkDate: workDate,
                 CheckIn: new TimeOnly(9, 0),
                 CheckOut: new TimeOnly(17, 0)
             ),
             new IndividualAttendanceRecordRequest(
                 EmployeeId: 2,
-                Status: AttendanceStatus.Present,
+                Status: EmployeeAttendanceStatus.Present,
                 WorkDate: workDate,
                 CheckIn: new TimeOnly(10, 0),
                 CheckOut: new TimeOnly(18, 0)
@@ -109,10 +109,10 @@ public sealed class EmployeeAttendanceServiceTests
         var dbRecords = await database.Context.EmployeeAttendances.OrderBy(a => a.EmployeeId).ToListAsync();
         Assert.Equal(2, dbRecords.Count);
         
-        Assert.Equal(AttendanceStatus.Present, dbRecords[0].Status);
+        Assert.Equal(EmployeeAttendanceStatus.Present, dbRecords[0].Status);
         Assert.Equal(new TimeOnly(8, 0), dbRecords[0].WorkHours);
 
-        Assert.Equal(AttendanceStatus.Present, dbRecords[1].Status);
+        Assert.Equal(EmployeeAttendanceStatus.Present, dbRecords[1].Status);
         Assert.Equal(new TimeOnly(8, 0), dbRecords[1].WorkHours);
     }
 
@@ -128,7 +128,7 @@ public sealed class EmployeeAttendanceServiceTests
         [
             new IndividualAttendanceRecordRequest(
                 EmployeeId: 99, // Non-existent employee
-                Status: AttendanceStatus.Present,
+                Status: EmployeeAttendanceStatus.Present,
                 WorkDate: workDate,
                 CheckIn: new TimeOnly(9, 0),
                 CheckOut: new TimeOnly(17, 0)

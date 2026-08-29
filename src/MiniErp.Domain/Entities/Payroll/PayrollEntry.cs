@@ -1,53 +1,43 @@
 using MiniErp.Domain.Common.Entities;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Employees;
-using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Enums;
-using System;
 
-namespace MiniErp.Domain.Entities.Payroll
+namespace MiniErp.Domain.Entities.Payroll;
+
+public sealed class PayrollEntry : AuditableEntity
 {
-    public sealed class PayrollEntry : AuditableEntity
-    {
-        public int Id { get; set; }
+    public int Id { get; set; }
 
-        public DateOnly StartDate { get; set; }
-        public DateOnly EndDate { get; set; }
+    public DateOnly StartDate { get; set; }
+    public DateOnly EndDate { get; set; }
 
-        public int CompanyId { get; set; }
-        public Company Company { get; set; } = null!;
+    public int CompanyId { get; set; }
+    public Company Company { get; set; } = null!;
 
-        public int EmployeeId { get; set; }
-        public Employee Employee { get; set; } = default!;
-        public int? EmployeeTransactionId { get; set; }
-        public EmployeeTransaction EmployeeTransaction { get; set; } = default!;
+    public int EmployeeId { get; set; }
+    public Employee Employee { get; set; } = default!;
 
-        // Employee Snapshot
-        public string EmployeeCode { get; set; } = default!;
-        public string EmployeeName { get; set; } = default!;
-        public EmployeeType EmployeeType { get; set; }
+    public string EmployeeCode { get; set; } = default!;
+    public string EmployeeName { get; set; } = default!;
+    public EmployeeType EmployeeType { get; set; }
 
-        // Attendance Summary
-        public int PresentDays { get; set; }
-        public int AbsentDays { get; set; }
-        public decimal WorkedDaysbydayunit { get; set; }
-        public decimal? Overtimebydayunit { get; set; }
-        public decimal? Deductionbydayunit { get; set; }
-        public decimal? RequiredWorkingDays { get; set; }
+    public int PresentDays { get; set; }
+    public int AbsentDays { get; set; }
+    public decimal WorkedDaysbydayunit { get; set; }
+    public decimal? Overtimebydayunit { get; set; }
+    public decimal? Deductionbydayunit { get; set; }
+    public decimal? RequiredWorkingDays { get; set; }
 
-        // Manual Transactions / Adjustments
-        public decimal? Bonus { get; set; } = default!;
-        public decimal? Deduction { get; set; } = default!;
+    public decimal? Bonus { get; set; }
+    public decimal? Deduction { get; set; }
 
-        // Salary Calculations
-        public decimal? SalaryPerDay { get; set; }
-        public decimal CalculatedSalary { get; set; }
+    public decimal? SalaryPerDay { get; set; }
+    public decimal CalculatedSalary { get; set; }
 
-        // Payroll Status
-        public decimal GrossSalary { get; set; } // Gross Salary before deductions
-        public decimal NetSalary { get; set; }   // Net Salary after deductions
-        public bool IsSalaryMoveToEmployeeAccount { get; set; }
+    public decimal GrossSalary { get; set; }
+    public decimal NetSalary { get; set; }
 
-
-        }
+    public bool IsSalaryMoveToEmployeeAccount { get; set; }
+    public DateOnly? SalaryMovedOn { get; set; }
 }

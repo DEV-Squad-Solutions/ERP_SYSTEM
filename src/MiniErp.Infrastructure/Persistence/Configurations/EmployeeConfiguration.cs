@@ -4,9 +4,17 @@ using MiniErp.Domain.Entities.Employees;
 
 namespace MiniErp.Infrastructure.Persistence.Configurations;
 
-public sealed class EmployeeConfiguration(bool isSqlite)
-    : AuditableEntityConfiguration<Employee>
+public sealed class EmployeeConfiguration : AuditableEntityConfiguration<Employee>
 {
+    private readonly bool isSqlite;
+
+    public EmployeeConfiguration() : this(false) { }
+
+    public EmployeeConfiguration(bool isSqlite)
+    {
+        this.isSqlite = isSqlite;
+    }
+
     public override void Configure(EntityTypeBuilder<Employee> builder)
     {
         base.Configure(builder);

@@ -31,7 +31,7 @@ public sealed class PayrollEntryServiceTests
                 CompanyId = 1,
                 EmployeeId = 1,
                 WorkDate = new DateOnly(2026, 8, day),
-                Status = AttendanceStatus.Present,
+                Status = EmployeeAttendanceStatus.Present,
                 WorkDayRatio = WorkDayRatio.FullDay
             });
         }
@@ -59,7 +59,7 @@ public sealed class PayrollEntryServiceTests
     }
 
     [Fact]
-    public async Task MoveSalaryForEmployeeAccountAsync_ShouldCreditEmployeeTransaction_AndMarkAsMoved()
+    public async Task MoveSalaryForEmployeeAccountAsync_ShouldCreateEmployeeOpeningBalance_AndMarkAsMoved()
     {
         // Arrange
         await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
@@ -75,7 +75,7 @@ public sealed class PayrollEntryServiceTests
                 CompanyId = 1,
                 EmployeeId = 1,
                 WorkDate = new DateOnly(2026, 8, day),
-                Status = AttendanceStatus.Present,
+                Status = EmployeeAttendanceStatus.Present,
                 WorkDayRatio = WorkDayRatio.FullDay
             });
         }
@@ -100,25 +100,71 @@ public sealed class PayrollEntryServiceTests
         // Assert
         Assert.True(moveResult.IsSuccess);
         Assert.True(moveResult.Value.IsSalaryMoveToEmployeeAccount);
+        Assert.Equal(payDate, moveResult.Value.SalaryMovedOn);
 
-        // Verify EmployeeTransaction account ledger record
-        var transactions = await database.Context.EmployeeTransactions
-            .Where(t => t.CompanyId == 1 && t.EmployeeId == 1)
+        // Verify EmployeeOpeningBalance account ledger record
+        var openingBalances = await database.Context.EmployeeOpeningBalances
+            .Where(b => b.CompanyId == 1 && b.EmployeeId == 1)
             .ToListAsync();
 
-        Assert.Single(transactions);
-        var tx = transactions[0];
-        Assert.Equal(EmployeeTransactionType.Credit, tx.Type);
-        Assert.Equal(EmployeeTransactionSource.Payroll, tx.SourceType);
-        Assert.Equal(entryId, tx.SourceId);
-        Assert.Equal(moveResult.Value.NetSalary, tx.Amount);
-        Assert.Equal(moveResult.Value.NetSalary, tx.RunningBalance);
-        Assert.Equal(payDate, tx.TransactionDate);
+        Assert.Single(openingBalances);
+        var ob = openingBalances[0];
+        Assert.Equal(EmployeeBalanceType.Credit, ob.BalanceType);
+        Assert.Equal(entryId, ob.PayrollEntryId);
+        Assert.Equal(moveResult.Value.NetSalary, ob.Amount);
+        Assert.Equal(payDate, ob.DocumentDate);
+        Assert.StartsWith("EOB-", ob.DocumentNumber);
 
         // Verify Employee LastDayOfReceivingSalary updated
         var employee = await database.Context.Employees.FindAsync(1);
         Assert.NotNull(employee);
         Assert.Equal(endDate, employee.LastDayOfReceivingSalary);
+    }
+
+    [Fact]
+    public async Task MoveSalaryForEmployeeAccountAsync_ShouldBeIdempotent_AndRejectDuplicateTransfer()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreatePayrollService();
+
+        database.Context.EmployeeAttendances.Add(new AttendanceEntity
+        {
+            CompanyId = 1,
+            EmployeeId = 1,
+            WorkDate = new DateOnly(2026, 8, 1),
+            Status = EmployeeAttendanceStatus.Present,
+            WorkDayRatio = WorkDayRatio.FullDay
+        });
+        await database.Context.SaveChangesAsync();
+
+        var addResult = await service.AddAsync(new PayrollEntryCreateRequest(
+            StartDate: new DateOnly(2026, 8, 1),
+            EndDate: new DateOnly(2026, 8, 1),
+            EmployeeId: 1));
+
+        Assert.True(addResult.IsSuccess);
+        var entryId = addResult.Value.Id;
+
+        // First transfer - Should succeed
+        var firstTransfer = await service.MoveSalaryForEmployeeAccountAsync(
+            entryId,
+            new PayrollEntrySalaryPaymentRequest(PostingDate: new DateOnly(2026, 8, 2)));
+        Assert.True(firstTransfer.IsSuccess);
+
+        // Act - Second transfer attempt on the same payroll entry
+        var secondTransfer = await service.MoveSalaryForEmployeeAccountAsync(
+            entryId,
+            new PayrollEntrySalaryPaymentRequest(PostingDate: new DateOnly(2026, 8, 2)));
+
+        // Assert - Rejected with Conflict
+        Assert.True(secondTransfer.IsFailure);
+        Assert.Equal("PayrollEntry.AlreadyPaid", secondTransfer.Error.Code);
+
+        // Ensure only 1 opening balance was created
+        var openingBalancesCount = await database.Context.EmployeeOpeningBalances
+            .CountAsync(b => b.CompanyId == 1 && b.PayrollEntryId == entryId);
+        Assert.Equal(1, openingBalancesCount);
     }
 
     [Fact]
@@ -139,7 +185,7 @@ public sealed class PayrollEntryServiceTests
                 CompanyId = 1,
                 EmployeeId = 1,
                 WorkDate = new DateOnly(2026, 8, day),
-                Status = AttendanceStatus.Present,
+                Status = EmployeeAttendanceStatus.Present,
                 WorkDayRatio = WorkDayRatio.FullDay,
                 WorkOverTimeRatio = day == 1 ? WorkDayRatio.HalfDay : null // 0.5 overtime day
             });
@@ -153,7 +199,7 @@ public sealed class PayrollEntryServiceTests
                 CompanyId = 1,
                 EmployeeId = 2,
                 WorkDate = new DateOnly(2026, 8, day),
-                Status = AttendanceStatus.Present,
+                Status = EmployeeAttendanceStatus.Present,
                 WorkDayRatio = WorkDayRatio.FullDay
             });
         }
@@ -220,7 +266,7 @@ public sealed class PayrollEntryServiceTests
                 CompanyId = 1,
                 EmployeeId = 1,
                 WorkDate = new DateOnly(2026, 8, day),
-                Status = AttendanceStatus.Present,
+                Status = EmployeeAttendanceStatus.Present,
                 WorkDayRatio = WorkDayRatio.FullDay
             });
             database.Context.EmployeeAttendances.Add(new AttendanceEntity
@@ -228,7 +274,7 @@ public sealed class PayrollEntryServiceTests
                 CompanyId = 1,
                 EmployeeId = 2,
                 WorkDate = new DateOnly(2026, 8, day),
-                Status = AttendanceStatus.Present,
+                Status = EmployeeAttendanceStatus.Present,
                 WorkDayRatio = WorkDayRatio.FullDay
             });
         }
@@ -259,22 +305,18 @@ public sealed class PayrollEntryServiceTests
         Assert.Equal(2, moveResult.Value.Count);
         Assert.All(moveResult.Value, e => Assert.True(e.IsSalaryMoveToEmployeeAccount));
 
-        // Verify transactions created for both employees
-        var tx1 = await database.Context.EmployeeTransactions
-            .FirstOrDefaultAsync(t => t.CompanyId == 1 && t.EmployeeId == 1);
-        Assert.NotNull(tx1);
-        Assert.Equal(EmployeeTransactionType.Credit, tx1.Type);
-        Assert.Equal(EmployeeTransactionSource.Payroll, tx1.SourceType);
-        Assert.Equal(1000m, tx1.Amount); // 5 * 200
-        Assert.Equal(1000m, tx1.RunningBalance);
+        // Verify opening balances created for both employees
+        var ob1 = await database.Context.EmployeeOpeningBalances
+            .FirstOrDefaultAsync(b => b.CompanyId == 1 && b.EmployeeId == 1);
+        Assert.NotNull(ob1);
+        Assert.Equal(EmployeeBalanceType.Credit, ob1.BalanceType);
+        Assert.Equal(1000m, ob1.Amount); // 5 * 200
 
-        var tx2 = await database.Context.EmployeeTransactions
-            .FirstOrDefaultAsync(t => t.CompanyId == 1 && t.EmployeeId == 2);
-        Assert.NotNull(tx2);
-        Assert.Equal(EmployeeTransactionType.Credit, tx2.Type);
-        Assert.Equal(EmployeeTransactionSource.Payroll, tx2.SourceType);
-        Assert.Equal(1000m, tx2.Amount); // 5 * 200
-        Assert.Equal(1000m, tx2.RunningBalance);
+        var ob2 = await database.Context.EmployeeOpeningBalances
+            .FirstOrDefaultAsync(b => b.CompanyId == 1 && b.EmployeeId == 2);
+        Assert.NotNull(ob2);
+        Assert.Equal(EmployeeBalanceType.Credit, ob2.BalanceType);
+        Assert.Equal(1000m, ob2.Amount); // 5 * 200
 
         // Verify employees' LastDayOfReceivingSalary
         var emp1 = await database.Context.Employees.FindAsync(1);
@@ -317,7 +359,7 @@ public sealed class PayrollEntryServiceTests
             CompanyId = 1,
             EmployeeId = 1,
             WorkDate = new DateOnly(2026, 8, 1),
-            Status = AttendanceStatus.Present,
+            Status = EmployeeAttendanceStatus.Present,
             WorkDayRatio = WorkDayRatio.FullDay
         });
         await database.Context.SaveChangesAsync();
@@ -346,45 +388,46 @@ public sealed class PayrollEntryServiceTests
     }
 
     [Fact]
-    public async Task AddAsync_WithIsSalaryMoveToEmployeeAccount_ShouldAutomaticallyCreditEmployeeTransaction()
+    public async Task UpdateAsync_And_DeleteAsync_ShouldFail_WhenSalaryAlreadyMoved()
     {
         // Arrange
         await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
         var service = database.CreatePayrollService();
 
-        var startDate = new DateOnly(2026, 8, 1);
-        var endDate = new DateOnly(2026, 8, 5);
-
-        for (int day = 1; day <= 5; day++)
+        database.Context.EmployeeAttendances.Add(new AttendanceEntity
         {
-            database.Context.EmployeeAttendances.Add(new AttendanceEntity
-            {
-                CompanyId = 1,
-                EmployeeId = 1,
-                WorkDate = new DateOnly(2026, 8, day),
-                Status = AttendanceStatus.Present,
-                WorkDayRatio = WorkDayRatio.FullDay
-            });
-        }
+            CompanyId = 1,
+            EmployeeId = 1,
+            WorkDate = new DateOnly(2026, 8, 1),
+            Status = EmployeeAttendanceStatus.Present,
+            WorkDayRatio = WorkDayRatio.FullDay
+        });
         await database.Context.SaveChangesAsync();
 
-        var request = new PayrollEntryCreateRequest(
-            StartDate: startDate,
-            EndDate: endDate,
-            EmployeeId: 1,
-            IsSalaryMoveToEmployeeAccount: true);
+        var addResult = await service.AddAsync(new PayrollEntryCreateRequest(
+            StartDate: new DateOnly(2026, 8, 1),
+            EndDate: new DateOnly(2026, 8, 1),
+            EmployeeId: 1));
 
-        // Act
-        var result = await service.AddAsync(request);
+        Assert.True(addResult.IsSuccess);
+        var entryId = addResult.Value.Id;
 
-        // Assert
-        Assert.True(result.IsSuccess);
-        Assert.True(result.Value.IsSalaryMoveToEmployeeAccount);
+        // Move salary
+        var moveResult = await service.MoveSalaryForEmployeeAccountAsync(
+            entryId,
+            new PayrollEntrySalaryPaymentRequest(PostingDate: new DateOnly(2026, 8, 2)));
+        Assert.True(moveResult.IsSuccess);
 
-        var employeeTx = await database.Context.EmployeeTransactions
-            .FirstOrDefaultAsync(t => t.CompanyId == 1 && t.EmployeeId == 1 && t.SourceId == result.Value.Id);
+        // Act & Assert Update
+        var updateResult = await service.UpdateAsync(
+            entryId,
+            new PayrollEntryUpdateRequest(EmployeeId: 1, Bonus: 500m));
+        Assert.True(updateResult.IsFailure);
+        Assert.Equal("PayrollEntry.AlreadyPaid", updateResult.Error.Code);
 
-        Assert.NotNull(employeeTx);
-        Assert.Equal(result.Value.NetSalary, employeeTx.Amount);
+        // Act & Assert Delete
+        var deleteResult = await service.DeleteAsync(entryId);
+        Assert.True(deleteResult.IsFailure);
+        Assert.Equal("PayrollEntry.AlreadyPaid", deleteResult.Error.Code);
     }
 }

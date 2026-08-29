@@ -30,4 +30,13 @@ public interface IFinancialStatementService
         GetOperationalTrialBalanceAsync(
             OperationalTrialBalanceFilterRequest filters,
             CancellationToken cancellationToken = default);
+
+    Task<Result<EmployeeStatementResponse>> GetEmployeeStatementAsync(
+        PaginationRequest pagination,
+        EmployeeStatementFilterRequest filters,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<EmployeeAccountBalanceResponse>> GetEmployeeBalanceAsync(
+        int employeeId,
+        CancellationToken cancellationToken = default);
 }

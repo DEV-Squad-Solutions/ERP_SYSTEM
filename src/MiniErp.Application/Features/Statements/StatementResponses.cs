@@ -223,3 +223,68 @@ public sealed record ContainerStoreStatementResponse(
     int TotalCount,
     int TotalPages,
     ContainerStoreStatementSummaryResponse Summary);
+
+public sealed record EmployeeStatementItemResponse(
+    int SourceId,
+    EmployeeStatementSourceType SourceType,
+    DateOnly Date,
+    string DocumentNumber,
+    string MovementName,
+    string? Description,
+    decimal DebitAmount,
+    decimal CreditAmount,
+    decimal BalanceAmount,
+    string BalanceDescription,
+    string? ReferenceNumber)
+{
+    public decimal ExchangeRate { get; init; }
+
+    public decimal BaseDebitAmount { get; init; }
+
+    public decimal BaseCreditAmount { get; init; }
+
+    public decimal BaseBalanceAmount { get; init; }
+}
+
+public sealed record EmployeeStatementSummaryResponse(
+    decimal OpeningBalanceAmount,
+    string OpeningBalanceDescription,
+    decimal TotalDebits,
+    decimal TotalCredits,
+    decimal ClosingBalanceAmount,
+    string ClosingBalanceDescription)
+{
+    public decimal BaseOpeningBalanceAmount { get; init; }
+
+    public decimal BaseTotalDebits { get; init; }
+
+    public decimal BaseTotalCredits { get; init; }
+
+    public decimal BaseClosingBalanceAmount { get; init; }
+}
+
+public sealed record EmployeeStatementResponse(
+    int EmployeeId,
+    string EmployeeCode,
+    string EmployeeName,
+    CurrencyCode Currency,
+    IReadOnlyList<EmployeeStatementItemResponse> Items,
+    int PageNumber,
+    int PageSize,
+    int TotalCount,
+    int TotalPages,
+    EmployeeStatementSummaryResponse Summary)
+{
+    public CurrencyCode BaseCurrency { get; init; }
+}
+
+public sealed record EmployeeAccountBalanceResponse(
+    int EmployeeId,
+    string EmployeeCode,
+    string EmployeeName,
+    CurrencyCode Currency,
+    decimal BalanceAmount,
+    string BalanceDescription,
+    decimal TotalCredits,
+    decimal TotalDebits,
+    DateOnly? LastMovementDate);

@@ -4,9 +4,9 @@ using System.Text;
 
 namespace MiniErp.Domain.Enums
 {
-    public enum AttendanceStatus
+    public enum EmployeeAttendanceStatus
     {
-        Present,
-        Absent,
+        Absent = 0,
+        Present = 1,
     }
 }

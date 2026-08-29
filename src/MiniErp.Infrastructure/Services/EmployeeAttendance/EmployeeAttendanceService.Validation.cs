@@ -27,7 +27,7 @@ namespace MiniErp.Infrastructure.Services.EmployeeAttendance
                     "EmployeeAttendance.InvalidWorkDateRange",
                     "تاريخ العمل من يجب أن يكون قبل تاريخ العمل إلى."
                     , nameof(filters.WorkDateFrom));
-            if (filters.Status is not null && !Enum.IsDefined(typeof(AttendanceStatus), filters.Status))
+            if (filters.Status is not null && !Enum.IsDefined(typeof(EmployeeAttendanceStatus), filters.Status))
                 return Error.Validation(
                     "EmployeeAttendance.InvalidStatus",
                     "حالة الحضور المحددة غير صالحة."
@@ -46,12 +46,12 @@ namespace MiniErp.Infrastructure.Services.EmployeeAttendance
                     "EmployeeAttendance.InvalidWorkDate",
                     "تاريخ العمل غير صالح."
                     , nameof(filters.WorkDate));
-            if (!Enum.IsDefined(typeof(AttendanceStatus), filters.Status))
+            if (!Enum.IsDefined(typeof(EmployeeAttendanceStatus), filters.Status))
                 return Error.Validation(
                     "EmployeeAttendance.InvalidStatus",
                     "حالة الحضور المحددة غير صالحة."
                     , nameof(filters.Status));
-            if (filters.Status == AttendanceStatus.Present)
+            if (filters.Status == EmployeeAttendanceStatus.Present)
             {
                 if (filters.CheckIn == null)
                     return Error.Validation(
@@ -78,12 +78,12 @@ namespace MiniErp.Infrastructure.Services.EmployeeAttendance
                     "EmployeeAttendance.InvalidWorkDate",
                     "تاريخ العمل غير صالح."
                     , nameof(filters.WorkDate));
-            if (filters.Status != null&& !Enum.IsDefined(typeof(AttendanceStatus), filters.Status))
+            if (filters.Status != null&& !Enum.IsDefined(typeof(EmployeeAttendanceStatus), filters.Status))
                 return Error.Validation(
                     "EmployeeAttendance.InvalidStatus",
                     "حالة الحضور المحددة غير صالحة."
                     , nameof(filters.Status));
-            if (filters.Status == AttendanceStatus.Present)
+            if (filters.Status == EmployeeAttendanceStatus.Present)
             {
                 if (filters.CheckIn == null)
                     return Error.Validation(

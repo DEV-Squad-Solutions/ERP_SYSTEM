@@ -94,6 +94,21 @@ public sealed class EmployeeAttendancesController(
     }
 
     [Authorize(Roles = "Admin")]
+    [HttpPut("bulk")]
+    [ProducesResponseType<List<EmployeeAttendanceResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateBulk(
+        BulkEmployeeAttendanceUpdateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await employeeAttendanceService.UpdateBulkAsync(
+            request,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -103,6 +118,22 @@ public sealed class EmployeeAttendancesController(
     {
         var result = await employeeAttendanceService.DeleteAsync(
             id,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpDelete("bulk")]
+    [HttpPost("bulk/delete")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteBulk(
+        BulkEmployeeAttendanceDeleteRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await employeeAttendanceService.DeleteBulkAsync(
+            request,
             cancellationToken);
         return this.ToActionResult(result);
     }

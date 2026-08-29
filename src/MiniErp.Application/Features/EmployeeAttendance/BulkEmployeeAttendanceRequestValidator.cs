@@ -23,12 +23,12 @@ public sealed class IndividualAttendanceRecordRequestValidator
 
         RuleFor(item => item.CheckIn)
             .NotEmpty()
-            .When(item => item.Status == Domain.Enums.AttendanceStatus.Present)
+            .When(item => item.Status == Domain.Enums.EmployeeAttendanceStatus.Present)
             .WithMessage("وقت الحضور مطلوب عندما يكون الموظف حاضراً.");
 
         RuleFor(item => item.CheckOut)
             .NotEmpty()
-            .When(item => item.Status == Domain.Enums.AttendanceStatus.Present)
+            .When(item => item.Status == Domain.Enums.EmployeeAttendanceStatus.Present)
             .WithMessage("وقت الانصراف مطلوب عندما يكون الموظف حاضراً.");
 
         RuleFor(item => item.WorkDayRatio)

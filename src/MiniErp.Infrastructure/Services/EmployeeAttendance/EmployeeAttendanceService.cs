@@ -149,9 +149,9 @@ public  sealed partial class EmployeeAttendanceService(
             EmployeeId = request.EmployeeId,
             Status = request.Status,
             WorkDate = request.WorkDate,
-            CheckIn = request.Status == AttendanceStatus.Present ? request.CheckIn : null,
-            CheckOut = request.Status == AttendanceStatus.Present ? request.CheckOut : null,
-            WorkHours = request.Status == AttendanceStatus.Present ? CalculateWorkHours(request.CheckIn, request.CheckOut) : null,
+            CheckIn = request.Status == EmployeeAttendanceStatus.Present ? request.CheckIn : null,
+            CheckOut = request.Status == EmployeeAttendanceStatus.Present ? request.CheckOut : null,
+            WorkHours = request.Status == EmployeeAttendanceStatus.Present ? CalculateWorkHours(request.CheckIn, request.CheckOut) : null,
             WorkDayRatio = request.WorkDayRatio,
             WorkOverTimeRatio = request.WorkOverTimeRatio,
             WorkDaysDeductionRatio = request.WorkDaysDeductionRatio,
@@ -219,7 +219,7 @@ public  sealed partial class EmployeeAttendanceService(
         attendance.Status = request.Status ?? attendance.Status;
         attendance.WorkDate = request.WorkDate;
 
-        if (attendance.Status == AttendanceStatus.Present)
+        if (attendance.Status == EmployeeAttendanceStatus.Present)
         {
             attendance.CheckIn = request.CheckIn ?? attendance.CheckIn;
             attendance.CheckOut = request.CheckOut ?? attendance.CheckOut;
@@ -332,9 +332,9 @@ public  sealed partial class EmployeeAttendanceService(
             {
                 attendance = existingRecord;
                 attendance.Status = item.Status;
-                attendance.CheckIn = item.Status == AttendanceStatus.Present ? item.CheckIn : null;
-                attendance.CheckOut = item.Status == AttendanceStatus.Present ? item.CheckOut : null;
-                attendance.WorkHours = item.Status == AttendanceStatus.Present ? CalculateWorkHours(item.CheckIn, item.CheckOut) : null;
+                attendance.CheckIn = item.Status == EmployeeAttendanceStatus.Present ? item.CheckIn : null;
+                attendance.CheckOut = item.Status == EmployeeAttendanceStatus.Present ? item.CheckOut : null;
+                attendance.WorkHours = item.Status == EmployeeAttendanceStatus.Present ? CalculateWorkHours(item.CheckIn, item.CheckOut) : null;
                 attendance.WorkDayRatio = item.WorkDayRatio;
                 attendance.WorkOverTimeRatio = item.WorkOverTimeRatio;
                 attendance.WorkDaysDeductionRatio = item.WorkDaysDeductionRatio;
@@ -351,9 +351,9 @@ public  sealed partial class EmployeeAttendanceService(
                     EmployeeId = item.EmployeeId,
                     Status = item.Status,
                     WorkDate = item.WorkDate,
-                    CheckIn = item.Status == AttendanceStatus.Present ? item.CheckIn : null,
-                    CheckOut = item.Status == AttendanceStatus.Present ? item.CheckOut : null,
-                    WorkHours = item.Status == AttendanceStatus.Present ? CalculateWorkHours(item.CheckIn, item.CheckOut) : null,
+                    CheckIn = item.Status == EmployeeAttendanceStatus.Present ? item.CheckIn : null,
+                    CheckOut = item.Status == EmployeeAttendanceStatus.Present ? item.CheckOut : null,
+                    WorkHours = item.Status == EmployeeAttendanceStatus.Present ? CalculateWorkHours(item.CheckIn, item.CheckOut) : null,
                     WorkDayRatio = item.WorkDayRatio,
                     WorkOverTimeRatio = item.WorkOverTimeRatio,
                     WorkDaysDeductionRatio = item.WorkDaysDeductionRatio,
@@ -388,6 +388,129 @@ public  sealed partial class EmployeeAttendanceService(
         )).ToList();
 
         return Result<List<EmployeeAttendanceResponse>>.Success(responses);
+    }
+
+    public async Task<Result<List<EmployeeAttendanceResponse>>> UpdateBulkAsync(
+        BulkEmployeeAttendanceUpdateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.Attendances is null || request.Attendances.Count == 0)
+        {
+            return Result<List<EmployeeAttendanceResponse>>.Failure(
+                Error.Validation("EmployeeAttendance.EmptyBulkRequest", "يجب إرسال سجل حضور واحد على الأقل للتعديل."));
+        }
+
+        var ids = request.Attendances.Select(a => a.Id).Distinct().ToList();
+        var employeeIds = request.Attendances.Select(a => a.EmployeeId).Distinct().ToList();
+
+        var employees = await dbContext.Employees
+            .Where(e => e.CompanyId == companyId && employeeIds.Contains(e.Id))
+            .Select(e => new { e.Id, e.Name })
+            .ToDictionaryAsync(e => e.Id, e => e.Name, cancellationToken);
+
+        if (employees.Count != employeeIds.Count)
+        {
+            var missing = employeeIds.Where(id => !employees.ContainsKey(id)).ToList();
+            return Result<List<EmployeeAttendanceResponse>>.Failure(
+                Error.NotFound("Employee.NotFound", $"بعض الموظفين المحددين غير موجودين: {string.Join(", ", missing)}"));
+        }
+
+        var existingAttendances = await dbContext.EmployeeAttendances
+            .Include(a => a.Employee)
+            .Where(a => a.CompanyId == companyId && ids.Contains(a.Id))
+            .ToListAsync(cancellationToken);
+
+        var existingMap = existingAttendances.ToDictionary(a => a.Id);
+
+        if (existingAttendances.Count != ids.Count)
+        {
+            var missingIds = ids.Where(id => !existingMap.ContainsKey(id)).ToList();
+            return Result<List<EmployeeAttendanceResponse>>.Failure(
+                Error.NotFound("EmployeeAttendance.NotFound", $"بعض سجلات الحضور المحددة غير موجودة: {string.Join(", ", missingIds)}"));
+        }
+
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        foreach (var item in request.Attendances)
+        {
+            var attendance = existingMap[item.Id];
+            attendance.EmployeeId = item.EmployeeId;
+            attendance.Status = item.Status ?? attendance.Status;
+            attendance.WorkDate = item.WorkDate;
+
+            if (attendance.Status == EmployeeAttendanceStatus.Present)
+            {
+                attendance.CheckIn = item.CheckIn ?? attendance.CheckIn;
+                attendance.CheckOut = item.CheckOut ?? attendance.CheckOut;
+                attendance.WorkHours = CalculateWorkHours(attendance.CheckIn, attendance.CheckOut);
+            }
+            else
+            {
+                attendance.CheckIn = null;
+                attendance.CheckOut = null;
+                attendance.WorkHours = null;
+            }
+
+            attendance.WorkDayRatio = item.WorkDayRatio ?? attendance.WorkDayRatio;
+            attendance.WorkOverTimeRatio = item.WorkOverTimeRatio ?? attendance.WorkOverTimeRatio;
+            attendance.WorkDaysDeductionRatio = item.WorkDaysDeductionRatio ?? attendance.WorkDaysDeductionRatio;
+            attendance.WorkLocation = string.IsNullOrWhiteSpace(item.WorkLocation) ? null : item.WorkLocation.Trim();
+            attendance.Notes = string.IsNullOrWhiteSpace(item.Notes) ? null : item.Notes.Trim();
+
+            dbContext.EmployeeAttendances.Update(attendance);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        var responses = existingAttendances.Select(a => new EmployeeAttendanceResponse(
+            a.Id,
+            a.CompanyId,
+            a.EmployeeId,
+            employees.GetValueOrDefault(a.EmployeeId) ?? a.Employee?.Name ?? string.Empty,
+            a.Status,
+            a.WorkDate,
+            a.CheckIn,
+            a.CheckOut,
+            a.WorkHours,
+            a.WorkDayRatio,
+            a.WorkOverTimeRatio,
+            a.WorkDaysDeductionRatio,
+            a.WorkLocation,
+            a.Notes
+        )).ToList();
+
+        return Result<List<EmployeeAttendanceResponse>>.Success(responses);
+    }
+
+    public async Task<Result> DeleteBulkAsync(
+        BulkEmployeeAttendanceDeleteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.AttendanceIds is null || request.AttendanceIds.Count == 0)
+        {
+            return Result.Failure(
+                Error.Validation("EmployeeAttendance.EmptyBulkRequest", "يجب تحديد معرفات سجلات الحضور المراد حذفها."));
+        }
+
+        var distinctIds = request.AttendanceIds.Distinct().ToList();
+
+        var attendances = await dbContext.EmployeeAttendances
+            .Where(a => a.CompanyId == companyId && distinctIds.Contains(a.Id))
+            .ToListAsync(cancellationToken);
+
+        if (attendances.Count != distinctIds.Count)
+        {
+            var existingIds = attendances.Select(a => a.Id).ToHashSet();
+            var missingIds = distinctIds.Where(id => !existingIds.Contains(id)).ToList();
+            return Result.Failure(
+                Error.NotFound("EmployeeAttendance.NotFound", $"بعض سجلات الحضور المحددة غير موجودة: {string.Join(", ", missingIds)}"));
+        }
+
+        dbContext.EmployeeAttendances.RemoveRange(attendances);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Result.Success();
     }
 
     private static TimeOnly? CalculateWorkHours(TimeOnly? checkIn, TimeOnly? checkOut)

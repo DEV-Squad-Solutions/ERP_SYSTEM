@@ -11,11 +11,11 @@ public sealed class PayrollEntryMappingRegister : IRegister
             .Map(dest => dest.Bonus, src => src.Bonus)
             .Map(dest => dest.Deduction, src => src.Deduction)
             .Map(dest => dest.AttendanceSummary, src => new AttendanceSummary(
-                src.PresentDays,
-                src.AbsentDays,
-                src.WorkedDaysbydayunit,
-                src.Overtimebydayunit,
-                src.Deductionbydayunit
+                PresentDays: src.PresentDays,
+                AbsentDays: src.AbsentDays,
+                TotalPresentDays: src.WorkedDaysbydayunit,
+                TotalOvertimeDays: src.Overtimebydayunit,
+                TotalDeductionDays: src.Deductionbydayunit
             ));
     }
 }
