@@ -136,10 +136,13 @@ public sealed partial class PayrollEntryService
                 "PayrollEntry.AlreadyPaid",
                 $"تم تحويل راتب القيد رقم {entry.Id} إلى حساب الموظف مسبقًا.");
 
-        if (entry.NetSalary <= 0)
+        // Negative net salary indicates a data error (deductions exceed gross).
+        // Zero net salary is a valid business outcome (e.g. full-month absence)
+        // — the entry is still "paid" to record that the period was processed.
+        if (entry.NetSalary < 0)
             return Error.Validation(
-                "PayrollEntry.NoSalaryAmount",
-                $"صافي راتب القيد رقم {entry.Id} يجب أن يكون أكبر من صفر.");
+                "PayrollEntry.NegativeSalary",
+                $"صافي راتب القيد رقم {entry.Id} سالب. يرجى مراجعة الخصومات.");
 
         return null;
     }

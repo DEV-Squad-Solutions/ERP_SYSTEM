@@ -305,33 +305,39 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 return Result<PayrollEntryResponse>.Failure(exchangeRateResult.Error);
             }
 
-            var documentNumber = await EntityIdentifierGenerator.GenerateUniqueAsync(
-                dbContext,
-                prefix: "EOB",
-                companyId: companyId,
-                existingIdentifiers: dbContext.EmployeeOpeningBalances
-                    .IgnoreQueryFilters()
-                    .Where(e => e.CompanyId == companyId)
-                    .Select(e => e.DocumentNumber),
-                cancellationToken);
-
-            var openingBalance = new EmployeeOpeningBalance
+            // Only create a financial ledger entry when there is an actual amount.
+            // A zero-salary period is valid (e.g. employee was absent all month);
+            // the entry is still marked as transferred so the period is closed.
+            if (entry.NetSalary > 0)
             {
-                CompanyId = companyId,
-                EmployeeId = entry.EmployeeId,
-                PayrollEntryId = entry.Id,
-                DocumentNumber = documentNumber,
-                DocumentDate = request.PostingDate,
-                Currency = CurrencyCode.EGP,
-                BalanceType = EmployeeBalanceType.Credit,
-                Amount = entry.NetSalary,
-                Notes = request.Notes ?? $"تحويل راتب مسير رواتب #{entry.Id} للفترة من {entry.StartDate:yyyy-MM-dd} إلى {entry.EndDate:yyyy-MM-dd}"
-            };
-            openingBalance.ApplyExchangeRate(
-                exchangeRateResult.Value.ExchangeRateId,
-                exchangeRateResult.Value.Rate);
+                var documentNumber = await EntityIdentifierGenerator.GenerateUniqueAsync(
+                    dbContext,
+                    prefix: "EOB",
+                    companyId: companyId,
+                    existingIdentifiers: dbContext.EmployeeOpeningBalances
+                        .IgnoreQueryFilters()
+                        .Where(e => e.CompanyId == companyId)
+                        .Select(e => e.DocumentNumber),
+                    cancellationToken);
 
-            dbContext.EmployeeOpeningBalances.Add(openingBalance);
+                var openingBalance = new EmployeeOpeningBalance
+                {
+                    CompanyId      = companyId,
+                    EmployeeId     = entry.EmployeeId,
+                    PayrollEntryId = entry.Id,
+                    DocumentNumber = documentNumber,
+                    DocumentDate   = request.PostingDate,
+                    Currency       = CurrencyCode.EGP,
+                    BalanceType    = EmployeeBalanceType.Credit,
+                    Amount         = entry.NetSalary,
+                    Notes          = request.Notes ?? $"تحويل راتب مسير رواتب #{entry.Id} للفترة من {entry.StartDate:yyyy-MM-dd} إلى {entry.EndDate:yyyy-MM-dd}"
+                };
+                openingBalance.ApplyExchangeRate(
+                    exchangeRateResult.Value.ExchangeRateId,
+                    exchangeRateResult.Value.Rate);
+
+                dbContext.EmployeeOpeningBalances.Add(openingBalance);
+            }
 
             entry.IsSalaryMoveToEmployeeAccount = true;
             entry.SalaryMovedOn = request.PostingDate;
@@ -424,33 +430,38 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     return Result<List<PayrollEntryResponse>>.Failure(exchangeRateResult.Error);
                 }
 
-                var documentNumber = await EntityIdentifierGenerator.GenerateUniqueAsync(
-                    dbContext,
-                    prefix: "EOB",
-                    companyId: companyId,
-                    existingIdentifiers: dbContext.EmployeeOpeningBalances
-                        .IgnoreQueryFilters()
-                        .Where(e => e.CompanyId == companyId)
-                        .Select(e => e.DocumentNumber),
-                    cancellationToken);
-
-                var openingBalance = new EmployeeOpeningBalance
+                // Only create a financial ledger entry when there is an actual amount.
+                // Zero salary = period is closed with no credit (e.g. full-month absence).
+                if (entry.NetSalary > 0)
                 {
-                    CompanyId = companyId,
-                    EmployeeId = entry.EmployeeId,
-                    PayrollEntryId = entry.Id,
-                    DocumentNumber = documentNumber,
-                    DocumentDate = item.PostingDate,
-                    Currency = CurrencyCode.EGP,
-                    BalanceType = EmployeeBalanceType.Credit,
-                    Amount = entry.NetSalary,
-                    Notes = item.Notes ?? $"تحويل راتب مسير رواتب #{entry.Id} للفترة من {entry.StartDate:yyyy-MM-dd} إلى {entry.EndDate:yyyy-MM-dd}"
-                };
-                openingBalance.ApplyExchangeRate(
-                    exchangeRateResult.Value.ExchangeRateId,
-                    exchangeRateResult.Value.Rate);
+                    var documentNumber = await EntityIdentifierGenerator.GenerateUniqueAsync(
+                        dbContext,
+                        prefix: "EOB",
+                        companyId: companyId,
+                        existingIdentifiers: dbContext.EmployeeOpeningBalances
+                            .IgnoreQueryFilters()
+                            .Where(e => e.CompanyId == companyId)
+                            .Select(e => e.DocumentNumber),
+                        cancellationToken);
 
-                openingBalances.Add(openingBalance);
+                    var openingBalance = new EmployeeOpeningBalance
+                    {
+                        CompanyId      = companyId,
+                        EmployeeId     = entry.EmployeeId,
+                        PayrollEntryId = entry.Id,
+                        DocumentNumber = documentNumber,
+                        DocumentDate   = item.PostingDate,
+                        Currency       = CurrencyCode.EGP,
+                        BalanceType    = EmployeeBalanceType.Credit,
+                        Amount         = entry.NetSalary,
+                        Notes          = item.Notes ?? $"تحويل راتب مسير رواتب #{entry.Id} للفترة من {entry.StartDate:yyyy-MM-dd} إلى {entry.EndDate:yyyy-MM-dd}"
+                    };
+                    openingBalance.ApplyExchangeRate(
+                        exchangeRateResult.Value.ExchangeRateId,
+                        exchangeRateResult.Value.Rate);
+
+                    openingBalances.Add(openingBalance);
+                }
 
                 entry.IsSalaryMoveToEmployeeAccount = true;
                 entry.SalaryMovedOn = item.PostingDate;
