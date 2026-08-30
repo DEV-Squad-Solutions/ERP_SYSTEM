@@ -35,8 +35,7 @@ public sealed class PayrollEntryConfiguration
                     "([Deduction] IS NULL OR [Deduction] >= 0) AND " +
                     "([SalaryPerDay] IS NULL OR [SalaryPerDay] >= 0) AND " +
                     "[CalculatedSalary] >= 0 AND " +
-                    "[GrossSalary] >= 0 AND " +
-                    "[NetSalary] >= 0");
+                    "[GrossSalary] >= 0 ");
             });
 
         builder.HasKey(entry => entry.Id);
