@@ -16,7 +16,8 @@ public sealed record BusinessPartnerResponse(
     string? TaxNumber,
     CurrencyCode Currency,
     decimal CreditLimit,
-    bool IsActive)
+    bool IsActive,
+    bool Special)
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public StoreResponse? ContainerStore { get; init; }

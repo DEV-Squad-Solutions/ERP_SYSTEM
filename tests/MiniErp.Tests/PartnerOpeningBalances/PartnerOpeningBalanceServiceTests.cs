@@ -482,6 +482,7 @@ public sealed class PartnerOpeningBalanceServiceTests
                     Currency INTEGER NOT NULL,
                     CreditLimit NUMERIC NOT NULL,
                     IsActive INTEGER NOT NULL,
+                    Special INTEGER NOT NULL DEFAULT 0,
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
                     CreatedByPc TEXT NOT NULL,

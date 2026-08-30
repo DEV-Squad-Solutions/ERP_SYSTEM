@@ -10,4 +10,5 @@ public sealed record BusinessPartnerRequest(
     string? TaxNumber,
     CurrencyCode Currency,
     decimal CreditLimit,
-    bool IsActive = true);
+    bool IsActive = true,
+    bool Special = false);

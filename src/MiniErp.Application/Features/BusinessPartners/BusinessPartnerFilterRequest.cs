@@ -8,4 +8,5 @@ public sealed record BusinessPartnerFilterRequest(
     string? Name = null,
     string? TaxNumber = null,
     CurrencyCode? Currency = null,
-    bool? IsActive = null);
+    bool? IsActive = null,
+    bool? Special = null);

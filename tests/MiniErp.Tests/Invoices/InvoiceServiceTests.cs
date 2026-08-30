@@ -5973,6 +5973,7 @@ public sealed class InvoiceServiceTests
                     Currency INTEGER NOT NULL,
                     CreditLimit NUMERIC NOT NULL,
                     IsActive INTEGER NOT NULL,
+                    Special INTEGER NOT NULL DEFAULT 0,
                     IsDeleted INTEGER NOT NULL
                 );
 

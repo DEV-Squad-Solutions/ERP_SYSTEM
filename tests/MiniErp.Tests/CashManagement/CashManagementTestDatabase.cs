@@ -160,6 +160,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Currency INTEGER NOT NULL,
                 CreditLimit NUMERIC NOT NULL,
                 IsActive INTEGER NOT NULL DEFAULT 1,
+                Special INTEGER NOT NULL DEFAULT 0,
                 CreatedById TEXT NOT NULL,
                 CreatedOn TEXT NOT NULL,
                 CreatedByPc TEXT NOT NULL,

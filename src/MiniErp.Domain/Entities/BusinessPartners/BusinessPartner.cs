@@ -30,4 +30,10 @@ public sealed class BusinessPartner : AuditableEntity
 
     public bool IsActive { get; set; } = true;
 
+    /// <summary>
+    /// Marks partners that should be treated as special by consumers such as
+    /// the front-end. This is persisted so it can be queried and filtered.
+    /// </summary>
+    public bool Special { get; set; }
+
 }

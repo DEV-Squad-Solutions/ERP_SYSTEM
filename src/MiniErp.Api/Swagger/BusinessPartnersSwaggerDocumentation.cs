@@ -21,13 +21,13 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
                 "Get paginated business partners",
                 SwaggerOperationDescription.Create(
                     "Returns a deterministic page of shared customer/supplier records for the selected company, ordered by name and ID. Supplied filters are combined with AND. Each item also includes its active container Store and active assigned Containers.",
-                    "A bearer token containing one `company_id`. Optional query fields are `pageNumber`, `pageSize`, `search`, `code`, `name`, `taxNumber`, `currency`, and `isActive`.",
+                    "A bearer token containing one `company_id`. Optional query fields are `pageNumber`, `pageSize`, `search`, `code`, `name`, `taxNumber`, `currency`, `isActive`, and `special`.",
                     "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100; and enum values must be supported.",
                     "Invalid pagination returns 400. Pages beyond the result set are empty. Records from other companies and soft-deleted records are never returned. Partners without an active container Store or active assignments return an empty `containers` array.")),
             nameof(BusinessPartnersController.GetSelect) => (
                 "Get active business partners for selection",
                 SwaggerOperationDescription.Create(
-                    "Returns active, non-deleted business partners for the selected company as ID and name pairs.",
+                    "Returns active, non-deleted business partners for the selected company as ID, name, currency, and special-flag pairs.",
                     "A bearer token containing one `company_id`.",
                     "No request fields.",
                     "Returns an empty array when none are available. Inactive, deleted, and other-company records are excluded.")),
@@ -56,14 +56,14 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
                 "Create a business partner",
                 SwaggerOperationDescription.Create(
                     "Admin only. Creates a shared customer/supplier record in the selected company.",
-                    "`code`, `name`, `currency`, and `creditLimit`. Phone, email, address, and tax number are optional; `isActive` defaults to true.",
+                    "`code`, `name`, `currency`, and `creditLimit`. Phone, email, address, and tax number are optional; `isActive` defaults to true and `special` defaults to false.",
                     "Maximum lengths: code 50, name 200, phone 50, email 256, address 500, taxNumber 100. Email must be valid when supplied; currency must be defined; creditLimit must be non-negative with at most 18 digits and 2 decimals.",
                     "Normalized name and code must be unique per company without case sensitivity; a supplied tax number follows the same rule. Duplicates return 409. `CompanyId` always comes from the token.")),
             nameof(BusinessPartnersController.Update) => (
                 "Update a business partner",
                 SwaggerOperationDescription.Create(
                     "Admin only. Updates a business partner in the selected company while preserving identity, tenant, and creation audit fields.",
-                    "A positive route `id` and the same request fields required by create.",
+                    "A positive route `id` and the same request fields required by create, including `special`.",
                     "All create validation rules apply; duplicate checks exclude the current record. Currency may change only before the partner has any current or historical financial record.",
                     "Invalid IDs return 400; missing, deleted, and other-company records return 404; normalized name, code, or tax-number conflicts return 409. A protected currency change returns 409 (`BusinessPartners.CurrencyChangeNotAllowed`).")),
             nameof(BusinessPartnersController.Delete) => (
