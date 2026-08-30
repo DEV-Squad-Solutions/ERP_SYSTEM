@@ -136,11 +136,7 @@ public sealed partial class PayrollEntryService
                 "PayrollEntry.AlreadyPaid",
                 $"تم تحويل راتب القيد رقم {entry.Id} إلى حساب الموظف مسبقًا.");
 
-        if (entry.NetSalary <= 0)
-            return Error.Validation(
-                "PayrollEntry.NoSalaryAmount",
-                $"صافي راتب القيد رقم {entry.Id} يجب أن يكون أكبر من صفر.");
-
+ 
         return null;
     }
 
