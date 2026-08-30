@@ -86,8 +86,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 return Result<PayrollEntryResponse>.Failure(
                     Error.NotFound("Employee.NotFound", "الموظف المحدد غير موجود."));
 
-            var startDate = request.StartDate
-                ?? employee.LastDayOfReceivingSalary?.AddDays(1)
+            var startDate = employee.LastDayOfReceivingSalary?.AddDays(1)
                 ?? DateOnly.FromDateTime(employee.CreatedOn);
             var endDate = request.EndDate ?? DateOnly.FromDateTime(DateTime.Now);
 
@@ -172,10 +171,8 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             foreach (var item in request.Entries)
             {
                 var emp = employees[item.EmployeeId];
-                var startDate = item.StartDate
-                    ?? (emp.LastDayOfReceivingSalary?.AddDays(1) 
-                        ?? request.DefaultStartDate 
-                        ?? DateOnly.FromDateTime(emp.CreatedOn));
+                var startDate = (emp.LastDayOfReceivingSalary?.AddDays(1) 
+                                ?? DateOnly.FromDateTime(emp.CreatedOn));
                 var endDate = item.EndDate ?? request.DefaultEndDate ?? today;
 
                 if (startDate > endDate)
@@ -491,15 +488,18 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             var entry = await dbContext.PayrollEntries
                 .Include(e => e.Employee)
                 .FirstOrDefaultAsync(e => e.Id == id && e.CompanyId == companyId, cancellationToken);
-
             if (entry is null)
                 return Result<PayrollEntryResponse>.Failure(
                     Error.NotFound("PayrollEntry.NotFound", "لم يتم العثور على قيد الراتب المطلوب."));
 
+            if (request.EndDate != null && request.EndDate > entry.StartDate)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("PayrollEntry.InvalidDateRange", "تاريخ الانتهاء يجب أن يكون بعد تاريخ أخر تاريخ تم صرف الراتب فيه.", nameof(request.EndDate)));
+            
             var guardError = ValidateForUpdate(entry);
             if (guardError is not null)
                 return Result<PayrollEntryResponse>.Failure(guardError);
-
+            
             var employee = await dbContext.Employees
                 .FirstOrDefaultAsync(e => e.Id == request.EmployeeId && e.CompanyId == companyId, cancellationToken);
 
@@ -507,18 +507,10 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 return Result<PayrollEntryResponse>.Failure(
                     Error.NotFound("Employee.NotFound", "الموظف المحدد غير موجود."));
 
-            var startDate = request.StartDate
-                ?? employee.LastDayOfReceivingSalary?.AddDays(1)
-                ?? DateOnly.FromDateTime(employee.CreatedOn);
-            var endDate = request.EndDate ?? DateOnly.FromDateTime(DateTime.Now);
-
-            if (startDate > endDate)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation("PayrollEntry.InvalidDateRange",
-                        "تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية."));
+            var startDate = entry.StartDate;
 
             var attendanceSummary = await GetAttendanceSummaryAsync(
-                employee.Id, companyId, startDate, endDate, cancellationToken);
+                employee.Id, companyId, startDate, request.EndDate??entry.EndDate, cancellationToken);
 
             var (grossSalary, calculatedSalary) = CalculateSalary(employee, attendanceSummary);
             if (grossSalary < 0)
@@ -526,14 +518,15 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     Error.Validation("Employee.SalaryRequired",
                         "يجب تحديد الراتب أو اليومية للموظف."));
 
+            
             var netSalary = calculatedSalary + (request.Bonus ?? 0) - (request.Deduction ?? 0);
 
             entry.EmployeeId                    = employee.Id;
             entry.EmployeeCode                  = employee.Code;
             entry.EmployeeName                  = employee.Name;
             entry.EmployeeType                  = employee.Type;
-            entry.StartDate                     = startDate;
-            entry.EndDate                       = endDate;
+            entry.StartDate                     = entry.StartDate;
+            entry.EndDate                       = request.EndDate ?? entry.EndDate;
             entry.PresentDays                   = attendanceSummary.PresentDays;
             entry.AbsentDays                    = attendanceSummary.AbsentDays;
             entry.WorkedDaysbydayunit           = attendanceSummary.TotalPresentDays;
@@ -548,7 +541,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             entry.GrossSalary                   = grossSalary;
             entry.CalculatedSalary              = calculatedSalary;
             entry.NetSalary                     = netSalary;
-
+            employee.LastDayOfReceivingSalary   = request.EndDate;
             await dbContext.SaveChangesAsync(cancellationToken);
 
             return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
@@ -680,8 +673,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             foreach (var item in request.Entries)
             {
                 var emp = employees[item.EmployeeId];
-                var startDate = item.StartDate
-                    ?? emp.LastDayOfReceivingSalary?.AddDays(1)
+                var startDate = emp.LastDayOfReceivingSalary?.AddDays(1)
                     ?? DateOnly.FromDateTime(emp.CreatedOn);
                 var endDate = item.EndDate ?? today;
 
@@ -808,6 +800,151 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             dbContext.PayrollEntries.RemoveRange(entries);
             await dbContext.SaveChangesAsync(cancellationToken);
             return Result.Success();
+        }
+
+        // ─── DASHBOARD ──────────────────────────────────────────────────────────
+
+        public async Task<Result<PayrollDashboardResponse>> GetDashboardAsync(
+            PayrollDashboardFilterRequest? filters = null,
+            CancellationToken cancellationToken = default)
+        {
+            filters ??= new PayrollDashboardFilterRequest();
+
+            var payrollQuery = dbContext.PayrollEntries
+                .AsNoTracking()
+                .Where(p => p.CompanyId == companyId);
+
+            if (filters.FromDate.HasValue)
+                payrollQuery = payrollQuery.Where(p => p.StartDate >= filters.FromDate.Value);
+
+            if (filters.ToDate.HasValue)
+                payrollQuery = payrollQuery.Where(p => p.EndDate <= filters.ToDate.Value);
+
+            if (filters.EmployeeId.HasValue)
+                payrollQuery = payrollQuery.Where(p => p.EmployeeId == filters.EmployeeId.Value);
+
+            if (filters.EmployeeType.HasValue)
+                payrollQuery = payrollQuery.Where(p => p.EmployeeType == filters.EmployeeType.Value);
+
+            var payrollStats = await payrollQuery
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    TotalGross = g.Sum(p => p.GrossSalary),
+                    TotalNet = g.Sum(p => p.NetSalary),
+                    TotalMoved = g.Where(p => p.IsSalaryMoveToEmployeeAccount).Sum(p => p.NetSalary),
+                    TotalDeduction = g.Sum(p => p.Deduction ?? 0m),
+                    TotalBonus = g.Sum(p => p.Bonus ?? 0m)
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            var movementQuery = dbContext.EmployeeMovements
+                .AsNoTracking()
+                .Where(m => m.CompanyId == companyId);
+
+            if (filters.FromDate.HasValue)
+                movementQuery = movementQuery.Where(m => m.MovementDate >= filters.FromDate.Value);
+
+            if (filters.ToDate.HasValue)
+                movementQuery = movementQuery.Where(m => m.MovementDate <= filters.ToDate.Value);
+
+            if (filters.EmployeeId.HasValue)
+                movementQuery = movementQuery.Where(m => m.EmployeeId == filters.EmployeeId.Value);
+
+            var movementStats = await movementQuery
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    TotalAdvances = g.Where(m => m.Type == EmployeeMovementType.Advance).Sum(m => m.Debit),
+                    TotalMovementDeductions = g.Where(m => m.Type == EmployeeMovementType.Deduction).Sum(m => m.Debit)
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            var totalEmployeeCount = await dbContext.Employees
+                .AsNoTracking()
+                .Where(e => e.CompanyId == companyId && (!filters.EmployeeId.HasValue || e.Id == filters.EmployeeId.Value) && (!filters.EmployeeType.HasValue || e.Type == filters.EmployeeType.Value))
+                .CountAsync(cancellationToken);
+
+            var pendingPayrolls = await payrollQuery
+                .Where(p => !p.IsSalaryMoveToEmployeeAccount)
+                .OrderByDescending(p => p.EndDate)
+                .ThenByDescending(p => p.Id)
+                .Take(20)
+                .Select(p => new PayrollDashboardPendingEntryResponse(
+                    p.Id,
+                    p.EmployeeId,
+                    p.EmployeeCode,
+                    p.EmployeeName,
+                    p.EmployeeType,
+                    p.StartDate,
+                    p.EndDate,
+                    p.GrossSalary,
+                    p.NetSalary,
+                    p.Bonus,
+                    p.Deduction,
+                    p.IsSalaryMoveToEmployeeAccount))
+                .ToListAsync(cancellationToken);
+
+            var recentMovements = await movementQuery
+                .OrderByDescending(m => m.MovementDate)
+                .ThenByDescending(m => m.Id)
+                .Take(10)
+                .Select(m => new PayrollDashboardRecentOperationResponse(
+                    m.Id,
+                    m.Type.ToString(),
+                    m.Type == EmployeeMovementType.Advance ? "سلفة نقدية" :
+                    m.Type == EmployeeMovementType.Deduction ? "خصم مالي" :
+                    m.Type == EmployeeMovementType.Bonus ? "مكافأة مالية" :
+                    m.Type == EmployeeMovementType.Credit ? "حركة دائنة" : "حركة مدينة",
+                    m.EmployeeId,
+                    m.Employee.Code,
+                    m.Employee.Name,
+                    m.MovementDate,
+                    m.Type == EmployeeMovementType.Credit || m.Type == EmployeeMovementType.Bonus ? m.Credit : m.Debit,
+                    m.Currency,
+                    m.CashVoucher != null ? m.CashVoucher.VoucherNumber : $"MOV-{m.Id}",
+                    m.Notes))
+                .ToListAsync(cancellationToken);
+
+            var recentSalaryTransfers = await dbContext.EmployeeOpeningBalances
+                .AsNoTracking()
+                .Where(b => b.CompanyId == companyId && b.PayrollEntryId.HasValue)
+                .OrderByDescending(b => b.DocumentDate)
+                .ThenByDescending(b => b.Id)
+                .Take(10)
+                .Select(b => new PayrollDashboardRecentOperationResponse(
+                    b.Id,
+                    "SalaryTransfer",
+                    "تحويل راتب مسير",
+                    b.EmployeeId,
+                    b.Employee.Code,
+                    b.Employee.Name,
+                    b.DocumentDate,
+                    b.Amount,
+                    b.Currency,
+                    b.DocumentNumber,
+                    b.Notes))
+                .ToListAsync(cancellationToken);
+
+            var recentOperations = recentMovements
+                .Concat(recentSalaryTransfers)
+                .OrderByDescending(r => r.Date)
+                .Take(15)
+                .ToList();
+
+            var totalDeductions = (payrollStats?.TotalDeduction ?? 0m) + (movementStats?.TotalMovementDeductions ?? 0m);
+
+            var response = new PayrollDashboardResponse(
+                TotalPayrolls:   payrollStats?.TotalGross ?? 0m,
+                NetPayable:      payrollStats?.TotalNet ?? 0m,
+                TotalPaid:       payrollStats?.TotalMoved ?? 0m,
+                TotalDeductions: totalDeductions,
+                TotalAdvances:   movementStats?.TotalAdvances ?? 0m,
+                EmployeeCount:   totalEmployeeCount,
+                PendingPayrolls: pendingPayrolls,
+                RecentOperations: recentOperations);
+
+            return Result<PayrollDashboardResponse>.Success(response);
         }
 
         // ─── MAPPING ────────────────────────────────────────────────────────────

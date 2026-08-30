@@ -103,6 +103,13 @@ public sealed class EmployeeMovementConfiguration
             movement.Id
         });
 
+        builder.HasIndex(movement => new
+        {
+            movement.CompanyId,
+            movement.Type,
+            movement.MovementDate
+        });
+
         builder.HasOne(movement => movement.Company)
             .WithMany()
             .HasForeignKey(movement => movement.CompanyId)

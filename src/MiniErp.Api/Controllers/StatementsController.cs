@@ -122,6 +122,20 @@ public sealed class StatementsController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("employee/{employeeId:int}/account")]
+    [ProducesResponseType<EmployeeAccountSummaryResponse>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetEmployeeAccountSummary(
+        int employeeId,
+        CancellationToken cancellationToken)
+    {
+        var result = await statementService.GetEmployeeAccountSummaryAsync(
+            employeeId,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("profitability/invoices")]
     [ProducesResponseType<InvoiceProfitabilityListResponse>(
         StatusCodes.Status200OK)]

@@ -116,7 +116,6 @@ public sealed class ApplicationDbContext
     public DbSet<UserCompany> UserCompanies => Set<UserCompany>();
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
-    public DbSet<PayrollPeriod> PayrollPeriods => Set<PayrollPeriod>();
     public DbSet<PayrollEntry> PayrollEntries => Set<PayrollEntry>();
     public DbSet<Employee> Employees => Set<Employee>();
     public DbSet<EmployeeAttendance> EmployeeAttendances => Set<EmployeeAttendance>();
@@ -132,7 +131,6 @@ public sealed class ApplicationDbContext
 
         var isSqlite = Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite";
         builder.ApplyConfiguration(new Configurations.EmployeeConfiguration(isSqlite));
-        builder.ApplyConfiguration(new Configurations.PayrollPeriodConfiguration(isSqlite));
 
         builder.Entity<ApplicationUser>(entity =>
         {

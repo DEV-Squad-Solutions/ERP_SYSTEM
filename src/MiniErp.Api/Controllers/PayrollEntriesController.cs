@@ -40,6 +40,16 @@ public sealed class PayrollEntriesController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("dashboard")]
+    [ProducesResponseType<PayrollDashboardResponse>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetDashboard(
+        [FromQuery] PayrollDashboardFilterRequest filters,
+        CancellationToken cancellationToken)
+    {
+        var result = await payrollEntryService.GetDashboardAsync(filters, cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status201Created)]

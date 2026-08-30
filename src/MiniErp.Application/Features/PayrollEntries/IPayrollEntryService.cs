@@ -51,4 +51,8 @@ public interface IPayrollEntryService
     Task<Result> DeleteBulkAsync(
         BulkPayrollEntryDeleteRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<Result<PayrollDashboardResponse>> GetDashboardAsync(
+        PayrollDashboardFilterRequest? filters = null,
+        CancellationToken cancellationToken = default);
 }
