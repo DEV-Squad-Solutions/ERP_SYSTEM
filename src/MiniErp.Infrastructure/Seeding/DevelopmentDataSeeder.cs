@@ -377,21 +377,21 @@ public static class DevelopmentDataSeeder
                 company,
                 cancellationToken);
 
-            var payrollPeriod = await SeedPayrollPeriodsAsync(
-                dbContext,
-                company,
-                cancellationToken);
+            var payrollStartDate = new DateOnly(2026, 7, 1);
+            var payrollEndDate = new DateOnly(2026, 7, 31);
 
             await SeedPayrollEntriesAsync(
                 dbContext,
                 company,
-                payrollPeriod,
+                payrollStartDate,
+                payrollEndDate,
                 cancellationToken);
 
             await SeedEmployeeAccountDataAsync(
                 dbContext,
                 company,
-                payrollPeriod,
+                payrollStartDate,
+                payrollEndDate,
                 cancellationToken);
 
         }
@@ -3572,7 +3572,8 @@ public static class DevelopmentDataSeeder
     private static async Task SeedEmployeeAccountDataAsync(
         ApplicationDbContext dbContext,
         Company company,
-        PayrollPeriod payrollPeriod,
+        DateOnly startDate,
+        DateOnly endDate,
         CancellationToken cancellationToken)
     {
         var seedEmails = DefaultEmployees
@@ -3582,8 +3583,8 @@ public static class DevelopmentDataSeeder
             .Include(entry => entry.Employee)
             .Where(entry =>
                 entry.CompanyId == company.Id &&
-                entry.StartDate == payrollPeriod.StartDate &&
-                entry.EndDate == payrollPeriod.EndDate &&
+                entry.StartDate == startDate &&
+                entry.EndDate == endDate &&
                 entry.Employee.Email != null &&
                 seedEmails.Contains(entry.Employee.Email))
             .OrderBy(entry => entry.EmployeeId)
@@ -3618,8 +3619,8 @@ public static class DevelopmentDataSeeder
             if (existingOpeningBalance is not null)
             {
                 payrollEntry.IsSalaryMoveToEmployeeAccount = true;
-                payrollEntry.SalaryMovedOn ??= payrollPeriod.EndDate;
-                payrollEntry.Employee.LastDayOfReceivingSalary = payrollPeriod.EndDate;
+                payrollEntry.SalaryMovedOn ??= endDate;
+                payrollEntry.Employee.LastDayOfReceivingSalary = endDate;
                 continue;
             }
 
@@ -3629,7 +3630,7 @@ public static class DevelopmentDataSeeder
                 EmployeeId = payrollEntry.EmployeeId,
                 PayrollEntryId = payrollEntry.Id,
                 DocumentNumber = $"SEED-EOB-{company.Id}-{payrollEntry.Id}",
-                DocumentDate = payrollPeriod.EndDate,
+                DocumentDate = endDate,
                 Currency = CurrencyCode.EGP,
                 BalanceType = EmployeeBalanceType.Credit,
                 Amount = payrollEntry.NetSalary,
@@ -3642,69 +3643,18 @@ public static class DevelopmentDataSeeder
             dbContext.EmployeeOpeningBalances.Add(openingBalance);
 
             payrollEntry.IsSalaryMoveToEmployeeAccount = true;
-            payrollEntry.SalaryMovedOn = payrollPeriod.EndDate;
-            payrollEntry.Employee.LastDayOfReceivingSalary = payrollPeriod.EndDate;
+            payrollEntry.SalaryMovedOn = endDate;
+            payrollEntry.Employee.LastDayOfReceivingSalary = endDate;
         }
 
-        payrollPeriod.TotalCredits = payrollEntries.Sum(entry => entry.NetSalary);
-        payrollPeriod.TotalDebits = 0m;
-        payrollPeriod.Status = PayrollPeriodStatus.Paid;
-        payrollPeriod.PaidAt = createdOn;
         await dbContext.SaveChangesAsync(cancellationToken);
-    }
-
-    private static async Task<PayrollPeriod> SeedPayrollPeriodsAsync(
-        ApplicationDbContext dbContext,
-        Company company,
-        CancellationToken cancellationToken)
-    {
-        var startDate = new DateOnly(2026, 7, 1);
-        var endDate = new DateOnly(2026, 7, 31);
-        var existingPeriod = await dbContext.PayrollPeriods
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(
-                period =>
-                    period.CompanyId == company.Id &&
-                    period.StartDate == startDate &&
-                    period.EndDate == endDate &&
-                    !period.IsDeleted,
-                cancellationToken);
-
-        if (existingPeriod is not null)
-        {
-            return existingPeriod;
-        }
-
-        var payrollPeriod = new PayrollPeriod
-        {
-            CompanyId = company.Id,
-            Code = "PR-2026-07",
-            Name = "July 2026",
-            StartDate = startDate,
-            EndDate = endDate,
-            WorkingDaysInPeriod = 26,
-            Status = PayrollPeriodStatus.Draft,
-            CreatedById = SeedActor,
-            CreatedByPc = Environment.MachineName,
-            CreatedOn = new DateTime(
-                2026,
-                7,
-                1,
-                0,
-                0,
-                0,
-                DateTimeKind.Utc)
-        };
-        dbContext.PayrollPeriods.Add(payrollPeriod);
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return payrollPeriod;
     }
 
     private static async Task SeedPayrollEntriesAsync(
         ApplicationDbContext dbContext,
         Company company,
-        PayrollPeriod payrollPeriod,
+        DateOnly startDate,
+        DateOnly endDate,
         CancellationToken cancellationToken)
     {
         var seedEmails = DefaultEmployees
@@ -3723,8 +3673,8 @@ public static class DevelopmentDataSeeder
             .IgnoreQueryFilters()
             .Where(entry =>
                 entry.CompanyId == company.Id &&
-                entry.StartDate == payrollPeriod.StartDate &&
-                entry.EndDate == payrollPeriod.EndDate &&
+                entry.StartDate == startDate &&
+                entry.EndDate == endDate &&
                 !entry.IsDeleted)
             .Select(entry => entry.EmployeeId)
             .ToListAsync(cancellationToken))
@@ -3736,8 +3686,8 @@ public static class DevelopmentDataSeeder
             .AsNoTracking()
             .Where(attendance =>
                 attendance.CompanyId == company.Id &&
-                attendance.WorkDate >= payrollPeriod.StartDate &&
-                attendance.WorkDate <= payrollPeriod.EndDate &&
+                attendance.WorkDate >= startDate &&
+                attendance.WorkDate <= endDate &&
                 employeeIds.Contains(attendance.EmployeeId))
             .ToListAsync(cancellationToken);
         var createdOn = new DateTime(
@@ -3792,8 +3742,8 @@ public static class DevelopmentDataSeeder
 
             dbContext.PayrollEntries.Add(new PayrollEntry
             {
-                StartDate = payrollPeriod.StartDate,
-                EndDate = payrollPeriod.EndDate,
+                StartDate = startDate,
+                EndDate = endDate,
                 CompanyId = company.Id,
                 EmployeeId = employee.Id,
                 EmployeeCode = employee.Code,
@@ -3817,36 +3767,6 @@ public static class DevelopmentDataSeeder
                 CreatedOn = createdOn
             });
         }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        var periodEntries = await dbContext.PayrollEntries
-            .AsNoTracking()
-            .Where(entry =>
-                entry.CompanyId == company.Id &&
-                entry.StartDate == payrollPeriod.StartDate &&
-                entry.EndDate == payrollPeriod.EndDate)
-            .ToListAsync(cancellationToken);
-        payrollPeriod.TotalEmployees = periodEntries
-            .Select(entry => entry.EmployeeId)
-            .Distinct()
-            .Count();
-        payrollPeriod.TotalMonthlyEmployees = periodEntries.Count(entry =>
-            entry.EmployeeType == EmployeeType.Monthly);
-        payrollPeriod.TotalDailyEmployees = periodEntries.Count(entry =>
-            entry.EmployeeType == EmployeeType.Daily);
-        payrollPeriod.TotalGrossSalary = periodEntries.Sum(entry =>
-            entry.GrossSalary);
-        payrollPeriod.TotalNetSalary = periodEntries.Sum(entry =>
-            entry.NetSalary);
-        payrollPeriod.TotalWorkedDays = periodEntries.Sum(entry =>
-            entry.WorkedDaysbydayunit);
-        payrollPeriod.TotalOvertimeDays = periodEntries.Sum(entry =>
-            entry.Overtimebydayunit ?? 0m);
-        payrollPeriod.TotalAbsentDays = periodEntries.Sum(entry =>
-            entry.AbsentDays);
-        payrollPeriod.CalculatedAt = createdOn;
-        payrollPeriod.Status = PayrollPeriodStatus.Calculated;
 
         await dbContext.SaveChangesAsync(cancellationToken);
     }

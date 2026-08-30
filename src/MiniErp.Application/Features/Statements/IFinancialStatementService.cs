@@ -39,4 +39,8 @@ public interface IFinancialStatementService
     Task<Result<EmployeeAccountBalanceResponse>> GetEmployeeBalanceAsync(
         int employeeId,
         CancellationToken cancellationToken = default);
+
+    Task<Result<EmployeeAccountSummaryResponse>> GetEmployeeAccountSummaryAsync(
+        int employeeId,
+        CancellationToken cancellationToken = default);
 }

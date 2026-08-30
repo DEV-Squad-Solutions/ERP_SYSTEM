@@ -136,5 +136,17 @@ public sealed class EmployeeFinancialStatementTests
         Assert.Equal(7500m, balanceResult.Value.BalanceAmount);
         Assert.Equal(8000m, balanceResult.Value.TotalCredits);
         Assert.Equal(500m, balanceResult.Value.TotalDebits);
+
+        // Act & Assert Account Summary
+        var summaryResult = await statementService.GetEmployeeAccountSummaryAsync(1);
+        Assert.True(summaryResult.IsSuccess);
+        Assert.Equal(1, summaryResult.Value.Employee.Id);
+        Assert.Equal(5000m, summaryResult.Value.OpeningBalance);
+        Assert.Equal(7500m, summaryResult.Value.CurrentBalance);
+        Assert.Equal(8000m, summaryResult.Value.TotalCredits);
+        Assert.Equal(500m, summaryResult.Value.TotalDebits);
+        Assert.Equal(500m, summaryResult.Value.TotalAdvances);
+        Assert.Equal(1000m, summaryResult.Value.TotalBonuses);
+        Assert.Equal(2000m, summaryResult.Value.TotalSalaryMoved);
     }
 }

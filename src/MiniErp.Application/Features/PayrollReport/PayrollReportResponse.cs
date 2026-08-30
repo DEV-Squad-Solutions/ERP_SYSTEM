@@ -1,11 +1,8 @@
 using MiniErp.Domain.Enums;
 
-namespace MiniErp.Application.Features.PayrollPeriods;
+namespace MiniErp.Application.Features.PayrollReport;
 
-/// <summary>
-/// Detailed salary report line for a single employee within a payroll period or date range.
-/// </summary>
-public sealed record PayrollPeriodEmployeeReportLine(
+public sealed record PayrollEmployeeReportLine(
     int PayrollEntryId,
     int EmployeeId,
     string EmployeeCode,
@@ -25,10 +22,7 @@ public sealed record PayrollPeriodEmployeeReportLine(
     decimal NetSalary,
     bool IsPaid);
 
-/// <summary>
-/// Aggregate summary row for an entire payroll period or date range.
-/// </summary>
-public sealed record PayrollPeriodReportSummary(
+public sealed record PayrollReportSummary(
     int TotalEntries,
     int TotalEmployees,
     int MonthlyEmployeeCount,
@@ -48,15 +42,8 @@ public sealed record PayrollPeriodReportSummary(
     decimal PaidAmount,
     decimal PendingAmount);
 
-/// <summary>
-/// Full payroll period report, optionally tied to a stored PayrollPeriod entity.
-/// </summary>
-public sealed record PayrollPeriodReportResponse(
-    int? PeriodId,
-    string? PeriodCode,
-    string? PeriodName,
-    PayrollPeriodStatus? PeriodStatus,
+public sealed record PayrollReportResponse(
     DateOnly StartDate,
     DateOnly EndDate,
-    PayrollPeriodReportSummary Summary,
-    IReadOnlyList<PayrollPeriodEmployeeReportLine> Employees);
+    PayrollReportSummary Summary,
+    IReadOnlyList<PayrollEmployeeReportLine> Employees);

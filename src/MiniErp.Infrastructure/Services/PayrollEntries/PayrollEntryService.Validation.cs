@@ -45,12 +45,6 @@ public sealed partial class PayrollEntryService
                 "معرف الموظف غير صالح.",
                 nameof(request.EmployeeId));
 
-        if (request.StartDate != null && request.EndDate != null && request.StartDate > request.EndDate)
-            return Error.Validation(
-                "PayrollEntry.InvalidDateRange",
-                "تاريخ البدء لا يمكن أن يكون بعد تاريخ الانتهاء.",
-                nameof(request.StartDate));
-
         if (request.Bonus.HasValue && request.Bonus.Value < 0)
             return Error.Validation(
                 "PayrollEntry.InvalidBonus",

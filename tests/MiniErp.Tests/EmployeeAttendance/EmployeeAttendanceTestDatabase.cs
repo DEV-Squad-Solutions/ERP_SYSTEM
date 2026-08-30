@@ -70,6 +70,7 @@ internal sealed class EmployeeAttendanceTestDatabase : IAsyncDisposable
             TaxNumber = "67890",
             ManagerName = "Test Manager"
         };
+        typeof(Company).GetProperty("RowVersion")?.SetValue(company, new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 });
         context.Companies.Add(company);
 
         var emp1 = new Employee

@@ -3,16 +3,19 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Features.CashVouchers;
+using MiniErp.Application.Features.EmployeeMovements;
 using MiniErp.Application.Features.EmployeeOpeningBalances;
 using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Application.Features.PayrollEntries;
 using MiniErp.Application.Features.ProfitabilityReports;
 using MiniErp.Application.Features.Statements;
+using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Services.CashVouchers;
+using MiniErp.Infrastructure.Services.EmployeeMovements;
 using MiniErp.Infrastructure.Services.EmployeeOpeningBalances;
 using MiniErp.Infrastructure.Services.ExchangeRates;
 using MiniErp.Infrastructure.Services.Pagination;
@@ -23,7 +26,7 @@ using System.Threading.Tasks;
 
 namespace MiniErp.Tests.PayrollEntries;
 
-internal sealed class PayrollEntryTestDatabase : IAsyncDisposable
+public sealed class PayrollEntryTestDatabase : IAsyncDisposable
 {
     private readonly SqliteConnection connection;
     private readonly ServiceProvider serviceProvider;
@@ -43,7 +46,7 @@ internal sealed class PayrollEntryTestDatabase : IAsyncDisposable
         Context = context;
     }
 
-    public static async Task<PayrollEntryTestDatabase> CreateAsync(int companyId = 1)
+    public static async Task<PayrollEntryTestDatabase> CreateAsync(int companyId)
     {
         var connection = new SqliteConnection("DataSource=:memory:");
         await connection.OpenAsync();
@@ -58,6 +61,7 @@ internal sealed class PayrollEntryTestDatabase : IAsyncDisposable
         services.AddScoped<IExchangeRateResolver, ExchangeRateResolver>();
         services.AddScoped<ICashVoucherService, CashVoucherService>();
         services.AddScoped<IEmployeeOpeningBalanceService, EmployeeOpeningBalanceService>();
+        services.AddScoped<IEmployeeMovementService, EmployeeMovementService>();
         services.AddScoped<IPayrollEntryService, PayrollEntryService>();
         services.AddScoped<IFinancialStatementService, FinancialStatementService>();
         services.AddSingleton<ICurrentCompanyContext>(new TestCurrentCompanyContext(companyId));
@@ -78,24 +82,74 @@ internal sealed class PayrollEntryTestDatabase : IAsyncDisposable
 
     private static async Task SeedRequiredDataAsync(ApplicationDbContext context, int companyId)
     {
-        await context.Database.ExecuteSqlRawAsync($@"
-            INSERT INTO Companies (Id, Code, Name, BaseCurrency, IsActive, CreatedOn)
-            VALUES ({companyId}, 'COMP01', 'Test Company', 1, 1, '2026-01-01');
+        var company = new Company
+        {
+            Id = companyId,
+            Name = "Test Company",
+            Address = "123 Test St",
+            CommercialRegister = $"CR-{companyId}",
+            TaxNumber = $"TAX-{companyId}",
+            ManagerName = "Manager"
+        };
+        typeof(Company).GetProperty("RowVersion")?.SetValue(company, new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 });
+        context.Companies.Add(company);
 
-            INSERT INTO Cashboxes (Id, CompanyId, Code, Name, Currency, IsActive, OpeningBalance, BaseOpeningBalance, OpeningBalanceDate, OpeningExchangeRate, CreatedOn)
-            VALUES (1, {companyId}, 'CB01', 'Main Cashbox', 1, 1, 100000.0, 100000.0, '2026-01-01', 1.0, '2026-01-01');
+        var cashbox = new Cashbox
+        {
+            Id = 1,
+            CompanyId = companyId,
+            Code = "CB01",
+            Name = "Main Cashbox",
+            Currency = CurrencyCode.EGP,
+            OpeningBalance = 100000.0m,
+            IsActive = true
+        };
+        cashbox.ApplyOpeningExchangeRate(new DateOnly(2026, 1, 1), null, 1.0m);
+        context.Cashboxes.Add(cashbox);
 
-            INSERT INTO CashMovementTypes (Id, CompanyId, Code, Name, Classification, AllowedDirection, IsActive, CreatedOn)
-            VALUES 
-                (1, {companyId}, 'SAL_PAY', 'Payroll Salary Payment', 1, 2, 1, '2026-01-01'),
-                (2, {companyId}, 'EMP_DED', 'Employee Cash Deduction', 1, 1, 1, '2026-01-01');
-
-            INSERT INTO Employees (Id, CompanyId, Code, Name, Email, PhoneNumber, Type, MonthlySalary, DailySalary, RequiredWorkingDaysPerMonth, IsActive)
-            VALUES 
-                (1, {companyId}, 'EMP001', 'Monthly Employee', 'emp1@test.com', '0123456789', 0, 6000, NULL, 30, 1),
-                (2, {companyId}, 'EMP002', 'Daily Employee', 'emp2@test.com', '0987654321', 1, NULL, 200, NULL, 1),
-                (3, {companyId}, 'EMP003', 'Third Employee', 'emp3@test.com', '0112233445', 0, 9000, NULL, 30, 1);
-        ");
+        var employees = new[]
+        {
+            new Employee
+            {
+                Id = 1,
+                CompanyId = companyId,
+                Code = "EMP001",
+                Name = "Monthly Employee",
+                Email = "emp1@test.com",
+                PhoneNumber = "0123456789",
+                Type = EmployeeType.Monthly,
+                MonthlySalary = 6000m,
+                RequiredWorkingDaysPerMonth = 30,
+                IsActive = true
+            },
+            new Employee
+            {
+                Id = 2,
+                CompanyId = companyId,
+                Code = "EMP002",
+                Name = "Daily Employee",
+                Email = "emp2@test.com",
+                PhoneNumber = "0987654321",
+                Type = EmployeeType.Daily,
+                DailySalary = 200m,
+                IsActive = true
+            },
+            new Employee
+            {
+                Id = 3,
+                CompanyId = companyId,
+                Code = "EMP003",
+                Name = "Third Employee",
+                Email = "emp3@test.com",
+                PhoneNumber = "0112233445",
+                Type = EmployeeType.Monthly,
+                MonthlySalary = 9000m,
+                RequiredWorkingDaysPerMonth = 30,
+                IsActive = true
+            }
+        };
+        context.Employees.AddRange(employees);
+        await context.SaveChangesAsync();
     }
 
     public IPayrollEntryService CreatePayrollService()
@@ -106,6 +160,11 @@ internal sealed class PayrollEntryTestDatabase : IAsyncDisposable
     public IEmployeeOpeningBalanceService CreateOpeningBalanceService()
     {
         return scope.ServiceProvider.GetRequiredService<IEmployeeOpeningBalanceService>();
+    }
+
+    public IEmployeeMovementService CreateMovementService()
+    {
+        return scope.ServiceProvider.GetRequiredService<IEmployeeMovementService>();
     }
 
     public IFinancialStatementService CreateStatementService()

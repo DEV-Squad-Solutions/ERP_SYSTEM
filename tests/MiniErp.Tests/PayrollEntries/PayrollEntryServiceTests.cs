@@ -430,4 +430,78 @@ public sealed class PayrollEntryServiceTests
         Assert.True(deleteResult.IsFailure);
         Assert.Equal("PayrollEntry.AlreadyPaid", deleteResult.Error.Code);
     }
+
+    [Fact]
+    public async Task GetDashboardAsync_ShouldCalculateMetricsCorrectly()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreatePayrollService();
+
+        // 1. Seed attendance
+        for (int day = 1; day <= 5; day++)
+        {
+            database.Context.EmployeeAttendances.Add(new AttendanceEntity
+            {
+                CompanyId = 1,
+                EmployeeId = 1,
+                WorkDate = new DateOnly(2026, 8, day),
+                Status = EmployeeAttendanceStatus.Present,
+                WorkDayRatio = WorkDayRatio.FullDay
+            });
+        }
+        await database.Context.SaveChangesAsync();
+
+        // 2. Add payroll entry
+        var addResult = await service.AddAsync(new PayrollEntryCreateRequest(
+            StartDate: new DateOnly(2026, 8, 1),
+            EndDate: new DateOnly(2026, 8, 5),
+            EmployeeId: 1,
+            Bonus: 100m,
+            Deduction: 50m));
+        Assert.True(addResult.IsSuccess);
+
+        // 3. Move salary
+        var moveResult = await service.MoveSalaryForEmployeeAccountAsync(
+            addResult.Value.Id,
+            new PayrollEntrySalaryPaymentRequest(PostingDate: new DateOnly(2026, 8, 5)));
+        Assert.True(moveResult.IsSuccess);
+
+        // 4. Add advance movement
+        var movementService = database.CreateMovementService();
+        var cashbox = new MiniErp.Domain.Entities.CashManagement.Cashbox
+        {
+            CompanyId = 1,
+            Code = "CB-01",
+            Name = "Main Box",
+            Currency = CurrencyCode.EGP,
+            IsActive = true
+        };
+        database.Context.Cashboxes.Add(cashbox);
+        await database.Context.SaveChangesAsync();
+
+        var advanceResult = await movementService.AddAsync(new MiniErp.Application.Features.EmployeeMovements.EmployeeMovementRequest(
+            EmployeeId: 1,
+            Type: EmployeeMovementType.Advance,
+            Amount: 300m,
+            Currency: CurrencyCode.EGP,
+            MovementDate: new DateOnly(2026, 8, 6),
+            CashboxId: cashbox.Id));
+        Assert.True(advanceResult.IsSuccess);
+
+        // Act - Get Dashboard
+        var dashboardResult = await service.GetDashboardAsync(new PayrollDashboardFilterRequest());
+
+        // Assert
+        Assert.True(dashboardResult.IsSuccess);
+        var dashboard = dashboardResult.Value;
+
+        Assert.Equal(6000m, dashboard.TotalPayrolls); // Gross salary
+        Assert.Equal(1050m, dashboard.NetPayable);    // 5 days * 200 + 100 - 50 = 1050
+        Assert.Equal(1050m, dashboard.TotalPaid);     // Salary moved
+        Assert.Equal(50m, dashboard.TotalDeductions); // 50
+        Assert.Equal(300m, dashboard.TotalAdvances);  // 300
+        Assert.True(dashboard.EmployeeCount >= 1);
+        Assert.NotEmpty(dashboard.RecentOperations);
+    }
 }

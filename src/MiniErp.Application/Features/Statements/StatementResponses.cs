@@ -288,3 +288,35 @@ public sealed record EmployeeAccountBalanceResponse(
     decimal TotalCredits,
     decimal TotalDebits,
     DateOnly? LastMovementDate);
+
+public sealed record EmployeeProfileResponse(
+    int Id,
+    int CompanyId,
+    string Code,
+    string Name,
+    string? JobTitle,
+    string? PhoneNumber,
+    string? Email,
+    string? Address,
+    EmployeeType Type,
+    decimal? DailySalary,
+    decimal? MonthlySalary,
+    int? RequiredWorkingDaysPerMonth,
+    DateOnly? LastDayOfReceivingSalary,
+    bool IsActive,
+    DateTime CreatedOn);
+
+public sealed record EmployeeAccountSummaryResponse(
+    EmployeeProfileResponse Employee,
+    CurrencyCode Currency,
+    decimal OpeningBalance,
+    decimal CurrentBalance,
+    string BalanceDescription,
+    decimal TotalCredits,
+    decimal TotalDebits,
+    decimal TotalAdvances,
+    decimal TotalDeductions,
+    decimal TotalBonuses,
+    decimal TotalSalaryPosted,
+    decimal TotalSalaryMoved,
+    DateOnly? LastMovementDate);
