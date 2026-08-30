@@ -56,7 +56,17 @@ public static class ExchangeRateErrors
     public static Error Referenced() =>
         Error.Conflict(
             "ExchangeRates.Referenced",
-            "لا يمكن تعديل أو حذف سعر صرف مستخدم في مستند مالي. أضف سعرًا بتاريخ جديد بدلًا من ذلك.");
+            "سعر الصرف مستخدم في مستندات مالية؛ لا يمكن حذفه، ولتعديل قيمته فعّل خيار تحديث الحركات المرتبطة.");
+
+    public static Error ReferencedIdentityChangeNotAllowed() =>
+        Error.Conflict(
+            "ExchangeRates.ReferencedIdentityChangeNotAllowed",
+            "لا يمكن تغيير العملة أو التاريخ لسعر صرف مستخدم في مستندات مالية. يمكن تعديل قيمة السعر فقط مع تحديث الحركات المرتبطة.");
+
+    public static Error InvalidLinkedTransfer() =>
+        Error.Conflict(
+            "ExchangeRates.InvalidLinkedTransfer",
+            "تعذر تحديث سعر الصرف لأن أحد تحويلات الخزائن المرتبطة لا يحتوي على سند صرف وقبض مكتملين.");
 
     public static Error RowVersionRequired() =>
         Error.Validation(

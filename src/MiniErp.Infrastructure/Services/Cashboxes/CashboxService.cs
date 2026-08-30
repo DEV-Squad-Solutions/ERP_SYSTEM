@@ -1,5 +1,6 @@
 using System.Data;
 using static MiniErp.Application.Features.Cashboxes.CashboxErrors;
+using ExchangeRateErrors = MiniErp.Application.Features.ExchangeRates.ExchangeRateErrors;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -9,6 +10,7 @@ using MiniErp.Application.Features.Cashboxes;
 using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.ExchangeRates;
 
 namespace MiniErp.Infrastructure.Services.Cashboxes;
 
@@ -212,15 +214,57 @@ public sealed class CashboxService(
 
         var openingDate = request.OpeningBalanceDate ??
             cashbox.OpeningBalanceDate;
-        var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
-            request.Currency,
-            openingDate,
-            request.OpeningExchangeRate,
-            cancellationToken);
-        if (exchangeRateResult.IsFailure)
+        int? exchangeRateId;
+        decimal exchangeRate;
+        var keepsExistingRateReference =
+            cashbox.Currency == request.Currency &&
+            cashbox.OpeningBalanceDate == openingDate &&
+            (cashbox.OpeningExchangeRateId.HasValue ||
+             !request.OpeningExchangeRate.HasValue);
+        if (keepsExistingRateReference)
         {
-            return Result<CashboxResponse>.Failure(
-                exchangeRateResult.Error);
+            if (request.OpeningExchangeRate is decimal requestedRate &&
+                !Domain.Entities.Companies.ExchangeRateRules.IsValidRate(
+                    requestedRate))
+            {
+                return Result<CashboxResponse>.Failure(
+                    ExchangeRateErrors.InvalidRate());
+            }
+
+            exchangeRateId = cashbox.OpeningExchangeRateId;
+            exchangeRate = request.OpeningExchangeRate is decimal rate
+                ? Domain.Entities.Companies.ExchangeRateRules.RoundRate(rate)
+                : cashbox.OpeningExchangeRate;
+        }
+        else
+        {
+            var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+                request.Currency,
+                openingDate,
+                request.OpeningExchangeRate,
+                cancellationToken);
+            if (exchangeRateResult.IsFailure)
+            {
+                return Result<CashboxResponse>.Failure(
+                    exchangeRateResult.Error);
+            }
+
+            exchangeRateId = exchangeRateResult.Value.ExchangeRateId;
+            exchangeRate = exchangeRateResult.Value.Rate;
+        }
+
+        if (request.UpdateLinkedTransactions &&
+            request.OpeningExchangeRate.HasValue &&
+            exchangeRateId is int linkedExchangeRateId)
+        {
+            var cascadeError = await CascadeExchangeRateChangeAsync(
+                linkedExchangeRateId,
+                exchangeRate,
+                cancellationToken);
+            if (cascadeError is not null)
+            {
+                return Result<CashboxResponse>.Failure(cascadeError);
+            }
         }
 
         var entry = dbContext.Entry(cashbox);
@@ -231,8 +275,8 @@ public sealed class CashboxService(
         cashbox.Code = code;
         cashbox.ApplyOpeningExchangeRate(
             openingDate,
-            exchangeRateResult.Value.ExchangeRateId,
-            exchangeRateResult.Value.Rate);
+            exchangeRateId,
+            exchangeRate);
 
         try
         {
@@ -311,6 +355,19 @@ public sealed class CashboxService(
 
         return [NameExists(cashbox.Name)];
     }
+
+    private Task<Error?> CascadeExchangeRateChangeAsync(
+        int exchangeRateId,
+        decimal exchangeRate,
+        CancellationToken cancellationToken) =>
+        ExchangeRateCascadeUpdater.UpdateAsync(
+            dbContext,
+            companyId,
+            timeProvider,
+            exchangeRateId,
+            exchangeRate,
+            InvalidLinkedTransfer(),
+            cancellationToken);
 
     private async Task<bool> HasVouchersAsync(
         int cashboxId,

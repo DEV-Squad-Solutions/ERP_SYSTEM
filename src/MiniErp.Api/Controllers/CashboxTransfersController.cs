@@ -64,13 +64,12 @@ public sealed class CashboxTransfersController(
                 result.Value.Id,
                 realtime => job => job.ExecuteAsync(realtime),
                 operationId: operationId);
-            if (request.ExchangeRate.HasValue)
+            if (request.ExchangeRate.HasValue ||
+                request.DestinationExchangeRate.HasValue ||
+                request.ConversionRate.HasValue ||
+                request.DestinationAmount.HasValue)
             {
-                TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
-                    "Updated",
-                    $"{result.Value.Currency}:{result.Value.TransferDate}",
-                    realtime => job => job.ExecuteAsync(realtime),
-                    operationId: operationId);
+                EnqueueExchangeRateUpdates(result.Value, operationId);
             }
         }
         return result.IsFailure
@@ -103,13 +102,12 @@ public sealed class CashboxTransfersController(
                 id,
                 realtime => job => job.ExecuteAsync(realtime),
                 operationId: operationId);
-            if (request.ExchangeRate.HasValue)
+            if (request.ExchangeRate.HasValue ||
+                request.DestinationExchangeRate.HasValue ||
+                request.ConversionRate.HasValue ||
+                request.DestinationAmount.HasValue)
             {
-                TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
-                    "Updated",
-                    $"{result.Value.Currency}:{result.Value.TransferDate}",
-                    realtime => job => job.ExecuteAsync(realtime),
-                    operationId: operationId);
+                EnqueueExchangeRateUpdates(result.Value, operationId);
             }
         }
         return this.ToActionResult(result);
@@ -135,5 +133,23 @@ public sealed class CashboxTransfersController(
                 realtime => job => job.ExecuteAsync(realtime));
         }
         return this.ToActionResult(result);
+    }
+
+    private void EnqueueExchangeRateUpdates(
+        CashboxTransferResponse transfer,
+        Guid operationId)
+    {
+        foreach (var currency in new[]
+                 {
+                     transfer.Currency,
+                     transfer.DestinationCurrency
+                 }.Distinct())
+        {
+            TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
+                "Updated",
+                $"{currency}:{transfer.TransferDate}",
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+        }
     }
 }

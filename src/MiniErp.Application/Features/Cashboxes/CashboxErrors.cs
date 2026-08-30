@@ -46,4 +46,9 @@ public static class CashboxErrors
         Error.Conflict(
             "Cashboxes.OpeningOrCurrencyChangeNotAllowed",
             "لا يمكن تغيير الرصيد الافتتاحي أو العملة بعد إنشاء سندات على صندوق النقدية.");
+
+    public static Error InvalidLinkedTransfer() =>
+        Error.Conflict(
+            "Cashboxes.InvalidLinkedTransfer",
+            "تعذر تحديث سعر الصرف لأن أحد تحويلات الخزائن المرتبطة لا يحتوي على سند صرف وقبض مكتملين.");
 }

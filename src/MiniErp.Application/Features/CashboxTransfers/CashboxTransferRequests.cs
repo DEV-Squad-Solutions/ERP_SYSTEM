@@ -9,7 +9,8 @@ public sealed record CashboxTransferRequest(
     string? Notes,
     decimal? ExchangeRate = null,
     decimal? DestinationAmount = null,
-    decimal? ConversionRate = null)
+    decimal? ConversionRate = null,
+    decimal? DestinationExchangeRate = null)
 {
     public const int DescriptionMaximumLength = 1_000;
 
@@ -26,7 +27,8 @@ public sealed record CashboxTransferUpdateRequest(
     byte[]? RowVersion,
     decimal? ExchangeRate = null,
     decimal? DestinationAmount = null,
-    decimal? ConversionRate = null);
+    decimal? ConversionRate = null,
+    decimal? DestinationExchangeRate = null);
 
 public sealed record CashboxTransferFilterRequest(
     string? Search = null,

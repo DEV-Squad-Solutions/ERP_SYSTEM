@@ -813,6 +813,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 (4, 2, 'MAIN', 'Other Company Cashbox', 1, 1000, 1,
                  'test', '2026-01-01', 'test', 0),
                 (5, 1, 'USD', 'USD Cashbox', 2, 100, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (6, 1, 'EUR', 'EUR Cashbox', 3, 100, 1,
                  'test', '2026-01-01', 'test', 0);
 
             INSERT INTO CashMovementTypes (

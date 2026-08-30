@@ -49,8 +49,8 @@ public sealed class CashboxesSwaggerDocumentation : IOperationFilter
                 "Update a cashbox",
                 SwaggerOperationDescription.Create(
                     "Admin only. Updates a cashbox using optimistic concurrency.",
-                    "Editable fields plus the original base64 rowVersion.",
-                    "Opening balance and currency cannot change after any current or historical voucher exists.",
+                    "Editable fields plus the original base64 rowVersion. updateLinkedTransactions is optional and defaults to false.",
+                    "Opening balance and currency cannot change after any current or historical voucher exists. An edited openingExchangeRate affects this cashbox only unless updateLinkedTransactions is true; cascading updates the shared exchange-rate row and recalculates every linked financial base-currency amount atomically.",
                     "A stale token returns Cashboxes.Concurrency and requires reload.")),
             nameof(CashboxesController.Delete) => (
                 "Delete an unused cashbox",

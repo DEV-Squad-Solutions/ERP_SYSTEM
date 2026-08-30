@@ -24,4 +24,5 @@ public sealed record CashboxUpdateRequest(
     string? Notes,
     byte[]? RowVersion,
     DateOnly? OpeningBalanceDate = null,
-    decimal? OpeningExchangeRate = null);
+    decimal? OpeningExchangeRate = null,
+    bool UpdateLinkedTransactions = false);

@@ -15,4 +15,5 @@ public sealed record ExchangeRateUpdateRequest(
     decimal Rate,
     ExchangeRateSource Source,
     string? Notes,
-    byte[]? RowVersion);
+    byte[]? RowVersion,
+    bool UpdateLinkedTransactions = false);

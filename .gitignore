@@ -9,3 +9,6 @@ client/*.tsbuildinfo
 /client/
 graphify-out
 .codex-test-bin
+.artifacts
+output/pdf
+tmp/pdfs/render

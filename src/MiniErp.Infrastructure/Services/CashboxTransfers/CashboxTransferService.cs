@@ -98,7 +98,8 @@ public sealed class CashboxTransferService(
                 request.Notes,
                 request.ExchangeRate,
                 request.DestinationAmount,
-                request.ConversionRate) is { } shapeError)
+                request.ConversionRate,
+                request.DestinationExchangeRate) is { } shapeError)
         {
             return Result<CashboxTransferResponse>.Failure(shapeError);
         }
@@ -116,6 +117,7 @@ public sealed class CashboxTransferService(
             request.ExchangeRate,
             request.DestinationAmount,
             request.ConversionRate,
+            request.DestinationExchangeRate,
             currentTransfer: null,
             cancellationToken);
         if (preparation.IsFailure)
@@ -230,7 +232,8 @@ public sealed class CashboxTransferService(
                 request.Notes,
                 request.ExchangeRate,
                 request.DestinationAmount,
-                request.ConversionRate) is { } shapeError)
+                request.ConversionRate,
+                request.DestinationExchangeRate) is { } shapeError)
         {
             return Result<CashboxTransferResponse>.Failure(shapeError);
         }
@@ -273,6 +276,7 @@ public sealed class CashboxTransferService(
             request.ExchangeRate,
             request.DestinationAmount,
             request.ConversionRate,
+            request.DestinationExchangeRate,
             transfer,
             cancellationToken);
         if (preparation.IsFailure)
@@ -415,6 +419,7 @@ public sealed class CashboxTransferService(
         decimal? requestedExchangeRate,
         decimal? requestedDestinationAmount,
         decimal? requestedConversionRate,
+        decimal? requestedDestinationExchangeRate,
         CashboxTransfer? currentTransfer,
         CancellationToken cancellationToken)
     {
@@ -476,80 +481,12 @@ public sealed class CashboxTransferService(
                     nameof(CashboxTransferRequest.DestinationCashboxId)));
         }
 
-        if (sourceCashbox.Currency == destinationCashbox.Currency)
-        {
-            if (requestedConversionRate.HasValue &&
-                requestedConversionRate.Value != 1m)
-            {
-                return Result<TransferPreparation>.Failure(InvalidRequest());
-            }
-
-            var sameCurrencySourceExchangeRateResult =
-                await exchangeRateResolver.ResolveAsync(
-                sourceCashbox.Currency,
-                transferDate,
-                requestedExchangeRate,
-                cancellationToken);
-            if (sameCurrencySourceExchangeRateResult.IsFailure)
-            {
-                return Result<TransferPreparation>.Failure(
-                    sameCurrencySourceExchangeRateResult.Error);
-            }
-
-            if (requestedDestinationAmount.HasValue &&
-                requestedDestinationAmount.Value != sourceAmount)
-            {
-                return Result<TransferPreparation>.Failure(
-                    DestinationAmountMustMatchSourceAmount());
-            }
-
-            return Result<TransferPreparation>.Success(
-                new TransferPreparation(
-                    SourceCashbox: sourceCashbox,
-                    DestinationCashbox: destinationCashbox,
-                    DestinationAmount: sourceAmount,
-                    SourceExchangeRate: sameCurrencySourceExchangeRateResult.Value,
-                    DestinationExchangeRate: sameCurrencySourceExchangeRateResult.Value));
-        }
-
-        decimal? calculatedDestinationAmount = null;
-        if (requestedConversionRate.HasValue)
-        {
-            try
-            {
-                calculatedDestinationAmount = decimal.Round(
-                    sourceAmount * requestedConversionRate.Value,
-                    2,
-                    MidpointRounding.AwayFromZero);
-            }
-            catch (OverflowException)
-            {
-                return Result<TransferPreparation>.Failure(InvalidRequest());
-            }
-        }
-
-        if (requestedDestinationAmount.HasValue &&
-            calculatedDestinationAmount.HasValue &&
-            requestedDestinationAmount.Value !=
-                calculatedDestinationAmount.Value)
-        {
-            return Result<TransferPreparation>.Failure(
-                ConversionRateDoesNotMatchDestinationAmount());
-        }
-
-        var destinationAmount = calculatedDestinationAmount ??
-            requestedDestinationAmount;
-        if (!destinationAmount.HasValue || destinationAmount.Value <= 0m)
-        {
-            return Result<TransferPreparation>.Failure(
-                DestinationAmountRequired());
-        }
-
         var baseCurrency = await dbContext.CompanySettings
             .AsNoTracking()
             .Where(settings => settings.CompanyId == companyId)
             .Select(settings => (CurrencyCode?)settings.BaseCurrency)
             .SingleOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
+
         var sourceRateRequest = requestedExchangeRate ??
             (destinationCashbox.Currency == baseCurrency
                 ? requestedConversionRate
@@ -569,57 +506,238 @@ public sealed class CashboxTransferService(
         var sourceBaseAmount = ExchangeRateRules.ConvertToBase(
             sourceAmount,
             sourceExchangeRate.Rate);
-        ResolvedExchangeRate destinationExchangeRate;
-        if (destinationCashbox.Currency == sourceExchangeRate.BaseCurrency)
-        {
-            var expectedDestinationAmount = decimal.Round(
-                sourceBaseAmount,
-                2,
-                MidpointRounding.AwayFromZero);
-            if (destinationAmount.Value != expectedDestinationAmount)
-            {
-                return Result<TransferPreparation>.Failure(
-                    DestinationAmountDoesNotMatchBaseAmount());
-            }
 
-            destinationExchangeRate = new ResolvedExchangeRate(
-                ExchangeRateId: null,
-                BaseCurrency: sourceExchangeRate.BaseCurrency,
-                Currency: destinationCashbox.Currency,
-                RequestedDate: transferDate,
-                RateDate: null,
-                Rate: 1m,
-                Source: null,
-                IsBaseCurrency: true);
-        }
-        else
+        if (sourceCashbox.Currency == destinationCashbox.Currency)
         {
-            var destinationRate = ExchangeRateRules.RoundRate(
-                sourceBaseAmount / destinationAmount.Value);
-            if (!ExchangeRateRules.IsValidRate(destinationRate))
+            if (requestedDestinationExchangeRate.HasValue &&
+                requestedDestinationExchangeRate.Value !=
+                sourceExchangeRate.Rate)
             {
                 return Result<TransferPreparation>.Failure(
                     InvalidRequest());
             }
 
-            destinationExchangeRate = new ResolvedExchangeRate(
-                ExchangeRateId: null,
-                BaseCurrency: sourceExchangeRate.BaseCurrency,
-                Currency: destinationCashbox.Currency,
-                RequestedDate: transferDate,
-                RateDate: null,
-                Rate: destinationRate,
-                Source: null,
-                IsBaseCurrency: false);
+            if (requestedConversionRate.HasValue &&
+                requestedConversionRate.Value != 1m)
+            {
+                return Result<TransferPreparation>.Failure(InvalidRequest());
+            }
+
+            if (requestedDestinationAmount.HasValue &&
+                requestedDestinationAmount.Value != sourceAmount)
+            {
+                return Result<TransferPreparation>.Failure(
+                    DestinationAmountMustMatchSourceAmount());
+            }
+
+            return Result<TransferPreparation>.Success(
+                new TransferPreparation(
+                    SourceCashbox: sourceCashbox,
+                    DestinationCashbox: destinationCashbox,
+                    DestinationAmount: sourceAmount,
+                    SourceExchangeRate: sourceExchangeRate,
+                    DestinationExchangeRate: sourceExchangeRate));
+        }
+
+        ResolvedExchangeRate destinationExchangeRate;
+        decimal destinationAmount;
+        var hasManualDestinationAmount =
+            requestedDestinationAmount.HasValue ||
+            requestedConversionRate.HasValue;
+
+        if (destinationCashbox.Currency == baseCurrency)
+        {
+            var destinationExchangeRateResult =
+                await exchangeRateResolver.ResolveAsync(
+                    destinationCashbox.Currency,
+                    transferDate,
+                    requestedDestinationExchangeRate,
+                    cancellationToken);
+            if (destinationExchangeRateResult.IsFailure)
+            {
+                return Result<TransferPreparation>.Failure(
+                    destinationExchangeRateResult.Error);
+            }
+
+            destinationExchangeRate = destinationExchangeRateResult.Value;
+            destinationAmount = decimal.Round(
+                sourceBaseAmount,
+                2,
+                MidpointRounding.AwayFromZero);
+
+            var calculatedFromConversionRate =
+                CalculateDestinationAmountFromConversionRate(
+                    sourceAmount,
+                    requestedConversionRate);
+            if (calculatedFromConversionRate.IsFailure)
+            {
+                return Result<TransferPreparation>.Failure(
+                    calculatedFromConversionRate.Error);
+            }
+
+            if (requestedDestinationAmount.HasValue &&
+                calculatedFromConversionRate.Value.HasValue &&
+                requestedDestinationAmount.Value !=
+                calculatedFromConversionRate.Value.Value)
+            {
+                return Result<TransferPreparation>.Failure(
+                    ConversionRateDoesNotMatchDestinationAmount());
+            }
+
+            if (requestedDestinationAmount.HasValue &&
+                requestedDestinationAmount.Value != destinationAmount)
+            {
+                return Result<TransferPreparation>.Failure(
+                    DestinationAmountDoesNotMatchBaseAmount());
+            }
+
+            if (calculatedFromConversionRate.Value.HasValue &&
+                calculatedFromConversionRate.Value.Value != destinationAmount)
+            {
+                return Result<TransferPreparation>.Failure(
+                    DestinationAmountDoesNotMatchBaseAmount());
+            }
+        }
+        else if (hasManualDestinationAmount &&
+                 !requestedDestinationExchangeRate.HasValue)
+        {
+            var calculatedFromConversionRate =
+                CalculateDestinationAmountFromConversionRate(
+                    sourceAmount,
+                    requestedConversionRate);
+            if (calculatedFromConversionRate.IsFailure)
+            {
+                return Result<TransferPreparation>.Failure(
+                    calculatedFromConversionRate.Error);
+            }
+
+            if (requestedDestinationAmount.HasValue &&
+                calculatedFromConversionRate.Value.HasValue &&
+                requestedDestinationAmount.Value !=
+                calculatedFromConversionRate.Value.Value)
+            {
+                return Result<TransferPreparation>.Failure(
+                    ConversionRateDoesNotMatchDestinationAmount());
+            }
+
+            destinationAmount = calculatedFromConversionRate.Value ??
+                requestedDestinationAmount!.Value;
+            if (destinationAmount <= 0m)
+            {
+                return Result<TransferPreparation>.Failure(
+                    DestinationAmountRequired());
+            }
+
+            var manuallyImpliedRate = ExchangeRateRules.RoundRate(
+                sourceBaseAmount / destinationAmount);
+            if (!ExchangeRateRules.IsValidRate(manuallyImpliedRate))
+            {
+                return Result<TransferPreparation>.Failure(InvalidRequest());
+            }
+
+            var destinationExchangeRateResult =
+                await exchangeRateResolver.ResolveAsync(
+                    destinationCashbox.Currency,
+                    transferDate,
+                    manuallyImpliedRate,
+                    cancellationToken);
+            if (destinationExchangeRateResult.IsFailure)
+            {
+                return Result<TransferPreparation>.Failure(
+                    destinationExchangeRateResult.Error);
+            }
+
+            destinationExchangeRate = destinationExchangeRateResult.Value;
+        }
+        else
+        {
+            var destinationExchangeRateResult =
+                await exchangeRateResolver.ResolveAsync(
+                    destinationCashbox.Currency,
+                    transferDate,
+                    requestedDestinationExchangeRate,
+                    cancellationToken);
+            if (destinationExchangeRateResult.IsFailure)
+            {
+                return Result<TransferPreparation>.Failure(
+                    destinationExchangeRateResult.Error);
+            }
+
+            destinationExchangeRate = destinationExchangeRateResult.Value;
+            try
+            {
+                destinationAmount = ExchangeRateRules.ConvertFromBase(
+                    sourceBaseAmount,
+                    destinationExchangeRate.Rate);
+            }
+            catch (OverflowException)
+            {
+                return Result<TransferPreparation>.Failure(InvalidRequest());
+            }
+        }
+
+        if (requestedDestinationExchangeRate.HasValue &&
+            hasManualDestinationAmount)
+        {
+            var calculatedFromConversionRate =
+                CalculateDestinationAmountFromConversionRate(
+                    sourceAmount,
+                    requestedConversionRate);
+            if (calculatedFromConversionRate.IsFailure)
+            {
+                return Result<TransferPreparation>.Failure(
+                    calculatedFromConversionRate.Error);
+            }
+
+            if (requestedDestinationAmount.HasValue &&
+                calculatedFromConversionRate.Value.HasValue &&
+                requestedDestinationAmount.Value !=
+                calculatedFromConversionRate.Value.Value)
+            {
+                return Result<TransferPreparation>.Failure(
+                    ConversionRateDoesNotMatchDestinationAmount());
+            }
+
+            var manualDestinationAmount =
+                calculatedFromConversionRate.Value ??
+                requestedDestinationAmount!.Value;
+            if (manualDestinationAmount != destinationAmount)
+            {
+                return Result<TransferPreparation>.Failure(
+                    DestinationAmountDoesNotMatchExchangeRates());
+            }
         }
 
         return Result<TransferPreparation>.Success(
             new TransferPreparation(
                 SourceCashbox: sourceCashbox,
                 DestinationCashbox: destinationCashbox,
-                DestinationAmount: destinationAmount.Value,
+                DestinationAmount: destinationAmount,
                 SourceExchangeRate: sourceExchangeRate,
                 DestinationExchangeRate: destinationExchangeRate));
+    }
+
+    private static Result<decimal?>
+        CalculateDestinationAmountFromConversionRate(
+            decimal sourceAmount,
+            decimal? conversionRate)
+    {
+        if (!conversionRate.HasValue)
+        {
+            return Result<decimal?>.Success(null);
+        }
+
+        try
+        {
+            return Result<decimal?>.Success(decimal.Round(
+                sourceAmount * conversionRate.Value,
+                2,
+                MidpointRounding.AwayFromZero));
+        }
+        catch (OverflowException)
+        {
+            return Result<decimal?>.Failure(InvalidRequest());
+        }
     }
 
     private async Task<Error?> ValidateFinalBalancesAsync(
@@ -864,7 +982,8 @@ public sealed class CashboxTransferService(
         string? notes,
         decimal? exchangeRate,
         decimal? destinationAmount,
-        decimal? conversionRate)
+        decimal? conversionRate,
+        decimal? destinationExchangeRate)
     {
         if (sourceCashboxId == destinationCashboxId)
         {
@@ -886,7 +1005,9 @@ public sealed class CashboxTransferService(
             (exchangeRate.HasValue &&
              !ExchangeRateRules.IsValidRate(exchangeRate.Value)) ||
             (conversionRate.HasValue &&
-             !ExchangeRateRules.IsValidRate(conversionRate.Value)))
+             !ExchangeRateRules.IsValidRate(conversionRate.Value)) ||
+            (destinationExchangeRate.HasValue &&
+             !ExchangeRateRules.IsValidRate(destinationExchangeRate.Value)))
         {
             return InvalidRequest();
         }

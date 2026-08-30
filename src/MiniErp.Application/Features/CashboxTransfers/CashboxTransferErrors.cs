@@ -61,6 +61,12 @@ public static class CashboxTransferErrors
             "يجب أن يساوي المبلغ المستلم قيمة مبلغ المصدر بالعملة الأساسية.",
             nameof(CashboxTransferRequest.DestinationAmount));
 
+    public static Error DestinationAmountDoesNotMatchExchangeRates() =>
+        Error.Validation(
+            "CashboxTransfers.DestinationAmountDoesNotMatchExchangeRates",
+            "المبلغ المستلم لا يطابق سعري صرف عملة المصدر والوجهة.",
+            nameof(CashboxTransferRequest.DestinationAmount));
+
     public static Error InsufficientCashboxBalance(int cashboxId) =>
         Error.Conflict(
             "CashboxTransfers.InsufficientCashboxBalance",

@@ -88,7 +88,6 @@ public sealed class CashboxTransferServiceTests
 
     [Theory]
     [InlineData(1, 1, 10, "CashboxTransfers.CashboxesMustDiffer")]
-    [InlineData(1, 5, 10, "CashboxTransfers.DestinationAmountRequired")]
     [InlineData(1, 2, 1001, "CashboxTransfers.InsufficientCashboxBalance")]
     [InlineData(4, 2, 10, "CashboxTransfers.CashboxNotFound")]
     public async Task CreateRejectsInvalidOrUnsafeTransfer(
@@ -158,6 +157,34 @@ public sealed class CashboxTransferServiceTests
             .GetByIdAsync(5);
         Assert.Equal(750m, source.Value.CurrentBalance);
         Assert.Equal(105m, destination.Value.CurrentBalance);
+    }
+
+    [Fact]
+    public async Task CreateCalculatesDifferentNonBaseCurrenciesAutomatically()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateCashboxTransferService(companyId: 1);
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                sourceCashboxId: 5,
+                destinationCashboxId: 6,
+                amount: 100m) with
+            {
+                ExchangeRate = 50m,
+                DestinationExchangeRate = 55m
+            });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(100m, result.Value.Amount);
+        Assert.Equal(CurrencyCode.USD, result.Value.Currency);
+        Assert.Equal(90.91m, result.Value.DestinationAmount);
+        Assert.Equal(CurrencyCode.EUR, result.Value.DestinationCurrency);
+        Assert.Equal(50m, result.Value.ExchangeRate);
+        Assert.Equal(55m, result.Value.DestinationExchangeRate);
+        Assert.Equal(5000m, result.Value.BaseAmount);
+        Assert.Equal(5000.05m, result.Value.DestinationBaseAmount);
     }
 
     [Fact]

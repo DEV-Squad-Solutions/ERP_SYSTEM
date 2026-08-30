@@ -323,6 +323,7 @@ public sealed class ExchangeRateServiceTests
                 CREATE TABLE Invoices (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, ExchangeRateId INTEGER NULL, IsDeleted INTEGER NOT NULL);
                 CREATE TABLE CashVouchers (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, EmployeeId INTEGER NULL, ExchangeRateId INTEGER NULL, CashboxTransferId INTEGER NULL, IsDeleted INTEGER NOT NULL);
                 CREATE TABLE PartnerOpeningBalances (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, ExchangeRateId INTEGER NULL, IsDeleted INTEGER NOT NULL);
+                CREATE TABLE EmployeeOpeningBalances (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, ExchangeRateId INTEGER NULL, IsDeleted INTEGER NOT NULL);
                 CREATE TABLE Cashboxes (Id INTEGER PRIMARY KEY, CompanyId INTEGER NOT NULL, OpeningExchangeRateId INTEGER NULL, IsDeleted INTEGER NOT NULL);
                 INSERT INTO Companies (Id, Name, Address, CommercialRegister, TaxNumber, ManagerName, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
                 VALUES (1, 'Company A', '', 'CR-A', 'TX-A', 'Manager', 'test', '2026-01-01', 'test', 0),

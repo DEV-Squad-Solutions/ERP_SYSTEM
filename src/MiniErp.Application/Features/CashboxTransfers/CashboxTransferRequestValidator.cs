@@ -43,6 +43,11 @@ public sealed class CashboxTransferRequestValidator
                 !rate.HasValue ||
                 ExchangeRateRules.IsValidRate(rate.Value))
             .WithMessage("يجب أن يكون سعر التحويل أكبر من صفر.");
+        RuleFor(request => request.DestinationExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف الوجهة أكبر من صفر.");
     }
 }
 
@@ -81,6 +86,11 @@ public sealed class CashboxTransferUpdateRequestValidator
                 !rate.HasValue ||
                 ExchangeRateRules.IsValidRate(rate.Value))
             .WithMessage("يجب أن يكون سعر التحويل أكبر من صفر.");
+        RuleFor(request => request.DestinationExchangeRate)
+            .Must(rate =>
+                !rate.HasValue ||
+                ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("يجب أن يكون سعر صرف الوجهة أكبر من صفر.");
         RuleFor(request => request.RowVersion)
             .Must(rowVersion => rowVersion is { Length: 8 })
             .WithMessage("أعد تحميل التحويل ثم حاول التعديل مرة أخرى.");

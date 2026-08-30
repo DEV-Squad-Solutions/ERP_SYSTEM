@@ -47,12 +47,12 @@ public sealed class ExchangeRatesSwaggerDocumentation : IOperationFilter
                     "Rate must be positive with at most 12 decimal places. Base-currency rows are forbidden.",
                     "An active currency/date duplicate returns 409.")),
             nameof(ExchangeRatesController.Update) => (
-                "Update an unused exchange rate",
+                "Update an exchange rate",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Updates an unreferenced rate using optimistic concurrency.",
+                    "Admin only. Updates an exchange rate using optimistic concurrency.",
                     "A positive route `id`, complete fields, and the exact returned `rowVersion`.",
-                    "Rates referenced by documents are immutable.",
-                    "Stale tokens and duplicate dates return 409.")),
+                    "`updateLinkedTransactions` is optional and defaults to `false`. When it is `false`, a rate already used by financial movements keeps the existing protected behavior and returns 409 (`ExchangeRates.Referenced`). When it is `true`, the new rate is saved and all linked invoices, cash vouchers, cashbox transfers, opening balances, and dependent movements are recalculated in the same transaction.",
+                    "For a referenced rate, only the rate value may be changed; its currency and date are immutable. Stale tokens and duplicate dates also return 409.")),
             nameof(ExchangeRatesController.PreviewImport) => (
                 "Preview external exchange-rate import",
                 SwaggerOperationDescription.Create(

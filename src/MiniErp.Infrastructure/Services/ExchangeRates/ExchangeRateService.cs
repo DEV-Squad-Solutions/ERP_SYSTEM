@@ -468,9 +468,18 @@ public sealed class ExchangeRateService(
             return Result<ExchangeRateResponse>.Failure(Concurrency());
         }
 
-        if (await IsReferencedAsync(id, cancellationToken))
+        var isReferenced = await IsReferencedAsync(id, cancellationToken);
+        if (isReferenced && !request.UpdateLinkedTransactions)
         {
             return Result<ExchangeRateResponse>.Failure(Referenced());
+        }
+
+        if (isReferenced &&
+            (request.Currency != rate.Currency ||
+             request.RateDate != rate.RateDate))
+        {
+            return Result<ExchangeRateResponse>.Failure(
+                ReferencedIdentityChangeNotAllowed());
         }
 
         var baseCurrency = await GetBaseCurrencyAsync(cancellationToken);
@@ -495,6 +504,22 @@ public sealed class ExchangeRateService(
         var entry = dbContext.Entry(rate);
         entry.Property(entity => entity.RowVersion).OriginalValue =
             request.RowVersion;
+
+        if (request.UpdateLinkedTransactions)
+        {
+            var cascadeError = await ExchangeRateCascadeUpdater.UpdateAsync(
+                dbContext,
+                companyId,
+                timeProvider,
+                id,
+                request.Rate,
+                InvalidLinkedTransfer(),
+                cancellationToken);
+            if (cascadeError is not null)
+            {
+                return Result<ExchangeRateResponse>.Failure(cascadeError);
+            }
+        }
 
         rate.Currency = request.Currency;
         rate.RateDate = request.RateDate;
@@ -622,6 +647,13 @@ public sealed class ExchangeRateService(
                     voucher.ExchangeRateId == id,
                 cancellationToken) ||
         await dbContext.PartnerOpeningBalances
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                balance =>
+                    balance.CompanyId == companyId &&
+                    balance.ExchangeRateId == id,
+                cancellationToken) ||
+        await dbContext.EmployeeOpeningBalances
             .IgnoreQueryFilters()
             .AnyAsync(
                 balance =>
