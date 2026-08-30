@@ -12,3 +12,4 @@ graphify-out
 .artifacts
 output/pdf
 tmp/pdfs/render
+docs
