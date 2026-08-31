@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
@@ -277,6 +278,11 @@ public static class DevelopmentDataSeeder
             cancellationToken));
 
         await SeedCompanySettingsAsync(
+            dbContext,
+            companies,
+            cancellationToken);
+
+        await SeedFiscalYearsAsync(
             dbContext,
             companies,
             cancellationToken);
@@ -3411,6 +3417,56 @@ public static class DevelopmentDataSeeder
                 rate.Touch(DateTime.UtcNow);
                 dbContext.ExchangeRates.Add(rate);
             }
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedFiscalYearsAsync(
+        ApplicationDbContext dbContext,
+        IReadOnlyCollection<Company> companies,
+        CancellationToken cancellationToken)
+    {
+        const string name = "2026";
+        var startDate = new DateOnly(2026, 1, 1);
+        var endDate = new DateOnly(2026, 12, 31);
+
+        foreach (var company in companies)
+        {
+            var exists = await dbContext.FiscalYears
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    fiscalYear =>
+                        fiscalYear.CompanyId == company.Id &&
+                        fiscalYear.StartDate == startDate &&
+                        fiscalYear.EndDate == endDate,
+                    cancellationToken);
+            if (exists)
+            {
+                continue;
+            }
+
+            var hasCurrent = await dbContext.FiscalYears
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    fiscalYear =>
+                        fiscalYear.CompanyId == company.Id &&
+                        fiscalYear.IsCurrent &&
+                        !fiscalYear.IsDeleted,
+                    cancellationToken);
+
+            dbContext.FiscalYears.Add(new FiscalYear
+            {
+                CompanyId = company.Id,
+                Name = name,
+                StartDate = startDate,
+                EndDate = endDate,
+                Status = FiscalYearStatus.Open,
+                IsCurrent = !hasCurrent,
+                CreatedById = SeedActor,
+                CreatedByPc = Environment.MachineName,
+                CreatedOn = DateTime.UtcNow
+            });
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);

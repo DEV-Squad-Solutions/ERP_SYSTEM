@@ -13,3 +13,4 @@ graphify-out
 output/pdf
 tmp/pdfs/render
 docs
+tmp

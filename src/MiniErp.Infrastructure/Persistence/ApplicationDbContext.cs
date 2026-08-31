@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
@@ -28,6 +29,8 @@ public sealed class ApplicationDbContext
     public DbSet<Company> Companies => Set<Company>();
 
     public DbSet<CompanySettings> CompanySettings => Set<CompanySettings>();
+
+    public DbSet<FiscalYear> FiscalYears => Set<FiscalYear>();
 
     public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
 
