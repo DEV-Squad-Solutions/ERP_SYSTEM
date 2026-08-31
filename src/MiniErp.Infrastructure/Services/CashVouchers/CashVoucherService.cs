@@ -20,7 +20,8 @@ public sealed class CashVoucherService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     IExchangeRateResolver exchangeRateResolver,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     : ICashVoucherService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -254,6 +255,19 @@ public sealed class CashVoucherService(
         await using var transaction = await dbContext.Database
             .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.VoucherDate,
+                nameof(CashVoucherRequest.VoucherDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<CashVoucherResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+        }
+
         var cashbox = await dbContext.Cashboxes
             .AsNoTracking()
             .FirstOrDefaultAsync(
@@ -412,6 +426,29 @@ public sealed class CashVoucherService(
             return Result<CashVoucherResponse>.Failure(Concurrency());
         }
 
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                voucher.VoucherDate,
+                nameof(CashVoucherRequest.VoucherDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<CashVoucherResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+
+            fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.VoucherDate,
+                nameof(CashVoucherUpdateRequest.VoucherDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<CashVoucherResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+        }
+
         if (voucher.InvoiceId.HasValue)
         {
             return Result<CashVoucherResponse>.Failure(
@@ -494,6 +531,18 @@ public sealed class CashVoucherService(
             return Result.Failure(NotFound(id));
         }
 
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                voucher.VoucherDate,
+                nameof(CashVoucherRequest.VoucherDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result.Failure(fiscalYearResult.Errors);
+            }
+        }
+
         if (voucher.InvoiceId.HasValue)
         {
             return Result.Failure(InvoiceGeneratedReadOnly());
@@ -542,6 +591,19 @@ public sealed class CashVoucherService(
         CancellationToken cancellationToken)
     {
         var request = ToUpdateRequest(item.Voucher!, rowVersion: null);
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.VoucherDate,
+                nameof(CashVoucherBulkVoucherRequest.VoucherDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<CashVoucherBulkItemResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+        }
+
         var preparation = await PrepareAsync(
             request,
             currentVoucher: null,
@@ -606,6 +668,30 @@ public sealed class CashVoucherService(
             return Result<CashVoucherBulkItemResponse>.Failure(Concurrency());
         }
 
+        var request = ToUpdateRequest(item.Voucher!, item.RowVersion);
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                voucher.VoucherDate,
+                nameof(CashVoucherBulkVoucherRequest.VoucherDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<CashVoucherBulkItemResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+
+            fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.VoucherDate,
+                nameof(CashVoucherBulkVoucherRequest.VoucherDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<CashVoucherBulkItemResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+        }
+
         if (voucher.InvoiceId.HasValue)
         {
             return Result<CashVoucherBulkItemResponse>.Failure(
@@ -618,7 +704,6 @@ public sealed class CashVoucherService(
                 TransferGeneratedReadOnly());
         }
 
-        var request = ToUpdateRequest(item.Voucher!, item.RowVersion);
         var preparation = await PrepareAsync(
             request,
             voucher,
@@ -684,6 +769,19 @@ public sealed class CashVoucherService(
         if (!voucher.RowVersion.SequenceEqual(item.RowVersion!))
         {
             return Result<CashVoucherBulkItemResponse>.Failure(Concurrency());
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                voucher.VoucherDate,
+                nameof(CashVoucherBulkVoucherRequest.VoucherDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<CashVoucherBulkItemResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
         }
 
         if (voucher.InvoiceId.HasValue)

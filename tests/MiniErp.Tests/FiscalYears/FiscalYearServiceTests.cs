@@ -192,6 +192,40 @@ public sealed class FiscalYearServiceTests
                 nameof(FiscalYearUpdateRequest.RowVersion));
     }
 
+    [Fact]
+    public async Task PeriodGuard_AllowsOpenYearAndRejectsClosedOrUncoveredDates()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var guard = database.CreateGuard(companyId: 1);
+
+        var uncovered = await guard.EnsureOpenAsync(
+            new DateOnly(2025, 12, 31),
+            "InvoiceDate");
+
+        var added = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+        var open = await guard.EnsureOpenAsync(
+            new DateOnly(2026, 6, 1),
+            "InvoiceDate");
+
+        await service.CloseAsync(added.Value.Id);
+        var closed = await guard.EnsureOpenAsync(
+            new DateOnly(2026, 6, 1),
+            "InvoiceDate");
+
+        Assert.True(uncovered.IsFailure);
+        Assert.Equal("FiscalYears.DateNotCovered", uncovered.Error.Code);
+        Assert.True(added.IsSuccess);
+        Assert.True(open.IsSuccess);
+        Assert.True(closed.IsFailure);
+        Assert.Equal("FiscalYears.Closed", closed.Error.Code);
+        Assert.Equal("InvoiceDate", closed.Error.FieldName);
+    }
+
     private sealed class FiscalYearTestDatabase : IAsyncDisposable
     {
         private FiscalYearTestDatabase(
@@ -231,6 +265,11 @@ public sealed class FiscalYearServiceTests
                 new PaginationService(),
                 new TestCurrentCompanyContext(companyId),
                 TimeProvider.System);
+
+        public IFiscalYearPeriodGuard CreateGuard(int companyId) =>
+            new FiscalYearPeriodGuard(
+                Context,
+                new TestCurrentCompanyContext(companyId));
 
         public void ClearTracking() => Context.ChangeTracker.Clear();
 

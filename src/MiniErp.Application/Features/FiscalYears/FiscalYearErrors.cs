@@ -70,4 +70,21 @@ public static class FiscalYearErrors
         Error.Conflict(
             "FiscalYears.ClosedCannotBeDeleted",
             "لا يمكن حذف سنة مالية مغلقة.");
+
+    public static Error DateNotCovered(
+        DateOnly date,
+        string fieldName) =>
+        Error.Conflict(
+            "FiscalYears.DateNotCovered",
+            $"لا توجد سنة مالية تغطي تاريخ الحركة {date:yyyy-MM-dd}.",
+            fieldName);
+
+    public static Error Closed(
+        DateOnly date,
+        string fiscalYearName,
+        string fieldName) =>
+        Error.Conflict(
+            "FiscalYears.Closed",
+            $"السنة المالية '{fiscalYearName}' مغلقة، ولا يمكن تسجيل أو تعديل أو حذف حركة بتاريخ {date:yyyy-MM-dd}.",
+            fieldName);
 }

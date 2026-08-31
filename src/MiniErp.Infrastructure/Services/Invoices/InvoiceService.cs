@@ -18,7 +18,8 @@ public sealed partial class InvoiceService(
     IInvoiceQueryService invoiceQueryService,
     IExchangeRateResolver exchangeRateResolver,
     IInvoiceInventoryService invoiceInventoryService,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     : IInvoiceService, IScopedService
 {
     private static readonly ItemMovementType[] InvoiceItemMovementTypes =
@@ -41,6 +42,19 @@ public sealed partial class InvoiceService(
             .BeginTransactionAsync(
                 IsolationLevel.Serializable,
                 cancellationToken);
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                invoice.InvoiceDate,
+                nameof(InvoiceRequest.InvoiceDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<InvoiceResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+        }
 
         await invoiceInventoryService.LockCostingAsync(
             request.Lines
@@ -178,6 +192,29 @@ public sealed partial class InvoiceService(
         if (!invoice.RowVersion.SequenceEqual(request.RowVersion))
         {
             return Result<InvoiceResponse>.Failure(Concurrency());
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                invoice.InvoiceDate,
+                nameof(InvoiceRequest.InvoiceDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<InvoiceResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+
+            fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.InvoiceDate,
+                nameof(InvoiceUpdateRequest.InvoiceDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<InvoiceResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
         }
 
         if (await HasActiveLinkedReturnsAsync(
@@ -355,6 +392,18 @@ public sealed partial class InvoiceService(
         if (!invoice.RowVersion.SequenceEqual(rowVersion))
         {
             return Result.Failure(Concurrency());
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                invoice.InvoiceDate,
+                nameof(InvoiceRequest.InvoiceDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result.Failure(fiscalYearResult.Errors);
+            }
         }
 
         if (await HasCashVoucherTripReferencesAsync(id, cancellationToken))
