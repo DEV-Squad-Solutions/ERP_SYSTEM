@@ -25,4 +25,8 @@ public sealed class FiscalYear : AuditableEntity
     public DateTime? ClosedOn { get; set; }
 
     public byte[] RowVersion { get; private set; } = [];
+
+    public ICollection<FinancialStatementLine> FinancialStatementLines { get; set; } = [];
+
+    public ICollection<AccountStatementMapping> AccountStatementMappings { get; set; } = [];
 }

@@ -287,6 +287,11 @@ public static class DevelopmentDataSeeder
             companies,
             cancellationToken);
 
+        await SeedAccountingSetupAsync(
+            dbContext,
+            companies,
+            cancellationToken);
+
         await SeedExchangeRatesAsync(
             dbContext,
             companies,
@@ -3463,6 +3468,296 @@ public static class DevelopmentDataSeeder
                 EndDate = endDate,
                 Status = FiscalYearStatus.Open,
                 IsCurrent = !hasCurrent,
+                CreatedById = SeedActor,
+                CreatedByPc = Environment.MachineName,
+                CreatedOn = DateTime.UtcNow
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedAccountingSetupAsync(
+        ApplicationDbContext dbContext,
+        IReadOnlyCollection<Company> companies,
+        CancellationToken cancellationToken)
+    {
+        foreach (var company in companies)
+        {
+            var accounts = await SeedChartOfAccountsAsync(
+                dbContext,
+                company.Id,
+                cancellationToken);
+
+            var fiscalYears = await dbContext.FiscalYears
+                .Where(fiscalYear => fiscalYear.CompanyId == company.Id)
+                .OrderBy(fiscalYear => fiscalYear.StartDate)
+                .ToListAsync(cancellationToken);
+
+            foreach (var fiscalYear in fiscalYears)
+            {
+                await SeedStatementSetupAsync(
+                    dbContext,
+                    company.Id,
+                    fiscalYear.Id,
+                    accounts,
+                    cancellationToken);
+            }
+        }
+    }
+
+    private static async Task<IReadOnlyDictionary<string, Account>>
+        SeedChartOfAccountsAsync(
+            ApplicationDbContext dbContext,
+            int companyId,
+            CancellationToken cancellationToken)
+    {
+        (string Code, string Name, string? ParentCode, AccountType AccountType,
+            NormalBalance NormalBalance, bool IsPosting)[] seeds =
+        [
+            ("1000", "الأصول", null, AccountType.Asset, NormalBalance.Debit, false),
+            ("1100", "النقدية وما في حكمها", "1000", AccountType.Asset, NormalBalance.Debit, false),
+            ("1110", "الخزائن", "1100", AccountType.Asset, NormalBalance.Debit, true),
+            ("1200", "العملاء", "1000", AccountType.Asset, NormalBalance.Debit, true),
+            ("1300", "المخزون", "1000", AccountType.Asset, NormalBalance.Debit, true),
+            ("2000", "الالتزامات", null, AccountType.Liability, NormalBalance.Credit, false),
+            ("2100", "الموردون", "2000", AccountType.Liability, NormalBalance.Credit, true),
+            ("2200", "مستحقات الموظفين والسائقين", "2000", AccountType.Liability, NormalBalance.Credit, true),
+            ("3000", "حقوق الملكية", null, AccountType.Equity, NormalBalance.Credit, false),
+            ("3100", "رأس المال", "3000", AccountType.Equity, NormalBalance.Credit, true),
+            ("4000", "الإيرادات", null, AccountType.Revenue, NormalBalance.Credit, false),
+            ("4100", "إيرادات المبيعات", "4000", AccountType.Revenue, NormalBalance.Credit, true),
+            ("4200", "إيرادات أخرى", "4000", AccountType.Revenue, NormalBalance.Credit, true),
+            ("5000", "المصروفات", null, AccountType.Expense, NormalBalance.Debit, false),
+            ("5100", "تكلفة المبيعات", "5000", AccountType.Expense, NormalBalance.Debit, true),
+            ("5200", "مصروفات التشغيل", "5000", AccountType.Expense, NormalBalance.Debit, true),
+            ("5300", "مصروفات إدارية", "5000", AccountType.Expense, NormalBalance.Debit, true)
+        ];
+
+        var accounts = await dbContext.Accounts
+            .Where(account => account.CompanyId == companyId)
+            .ToDictionaryAsync(
+                account => account.Code,
+                StringComparer.OrdinalIgnoreCase,
+                cancellationToken);
+
+        var pending = seeds
+            .Where(seed => !accounts.ContainsKey(seed.Code))
+            .ToList();
+        while (pending.Count > 0)
+        {
+            var ready = pending
+                .Where(seed =>
+                    seed.ParentCode is null ||
+                    accounts.ContainsKey(seed.ParentCode))
+                .ToList();
+            if (ready.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "The development chart of accounts contains an invalid parent reference.");
+            }
+
+            foreach (var seed in ready)
+            {
+                var account = new Account
+                {
+                    CompanyId = companyId,
+                    Code = seed.Code,
+                    Name = seed.Name,
+                    ParentAccountId = seed.ParentCode is null
+                        ? null
+                        : accounts[seed.ParentCode].Id,
+                    AccountType = seed.AccountType,
+                    NormalBalance = seed.NormalBalance,
+                    IsPosting = seed.IsPosting,
+                    IsActive = true,
+                    CreatedById = SeedActor,
+                    CreatedByPc = Environment.MachineName,
+                    CreatedOn = DateTime.UtcNow
+                };
+                dbContext.Accounts.Add(account);
+                accounts.Add(seed.Code, account);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            pending.RemoveAll(seed => ready.Contains(seed));
+        }
+
+        return accounts;
+    }
+
+    private static async Task SeedStatementSetupAsync(
+        ApplicationDbContext dbContext,
+        int companyId,
+        int fiscalYearId,
+        IReadOnlyDictionary<string, Account> accounts,
+        CancellationToken cancellationToken)
+    {
+        await SeedStatementTypeAsync(
+            dbContext,
+            companyId,
+            fiscalYearId,
+            FinancialStatementType.FinancialPosition,
+            [
+                ("FP-100", "الأصول", null, 100, false),
+                ("FP-110", "النقدية وما في حكمها", "FP-100", 110, true),
+                ("FP-120", "العملاء", "FP-100", 120, true),
+                ("FP-130", "المخزون", "FP-100", 130, true),
+                ("FP-200", "الالتزامات", null, 200, false),
+                ("FP-210", "الموردون", "FP-200", 210, true),
+                ("FP-220", "مستحقات الموظفين والسائقين", "FP-200", 220, true),
+                ("FP-300", "حقوق الملكية", null, 300, false),
+                ("FP-310", "رأس المال", "FP-300", 310, true)
+            ],
+            [
+                ("1110", "FP-110"),
+                ("1200", "FP-120"),
+                ("1300", "FP-130"),
+                ("2100", "FP-210"),
+                ("2200", "FP-220"),
+                ("3100", "FP-310")
+            ],
+            accounts,
+            cancellationToken);
+
+        await SeedStatementTypeAsync(
+            dbContext,
+            companyId,
+            fiscalYearId,
+            FinancialStatementType.IncomeStatement,
+            [
+                ("IS-100", "الإيرادات", null, 100, false),
+                ("IS-110", "إيرادات المبيعات", "IS-100", 110, true),
+                ("IS-120", "إيرادات أخرى", "IS-100", 120, true),
+                ("IS-200", "المصروفات", null, 200, false),
+                ("IS-210", "تكلفة المبيعات", "IS-200", 210, true),
+                ("IS-220", "مصروفات التشغيل", "IS-200", 220, true),
+                ("IS-230", "مصروفات إدارية", "IS-200", 230, true)
+            ],
+            [
+                ("4100", "IS-110"),
+                ("4200", "IS-120"),
+                ("5100", "IS-210"),
+                ("5200", "IS-220"),
+                ("5300", "IS-230")
+            ],
+            accounts,
+            cancellationToken);
+
+        await SeedStatementTypeAsync(
+            dbContext,
+            companyId,
+            fiscalYearId,
+            FinancialStatementType.CashFlow,
+            [
+                ("CF-100", "الأنشطة التشغيلية", null, 100, false),
+                ("CF-110", "متحصلات الأنشطة التشغيلية", "CF-100", 110, true),
+                ("CF-120", "مدفوعات الأنشطة التشغيلية", "CF-100", 120, true),
+                ("CF-200", "الأنشطة الاستثمارية", null, 200, false),
+                ("CF-210", "صافي التدفقات الاستثمارية", "CF-200", 210, true),
+                ("CF-300", "الأنشطة التمويلية", null, 300, false),
+                ("CF-310", "صافي التدفقات التمويلية", "CF-300", 310, true)
+            ],
+            [
+                ("4100", "CF-110"),
+                ("4200", "CF-110"),
+                ("5100", "CF-120"),
+                ("5200", "CF-120"),
+                ("5300", "CF-120")
+            ],
+            accounts,
+            cancellationToken);
+    }
+
+    private static async Task SeedStatementTypeAsync(
+        ApplicationDbContext dbContext,
+        int companyId,
+        int fiscalYearId,
+        FinancialStatementType statementType,
+        IReadOnlyList<(string Code, string Name, string? ParentCode,
+            int DisplayOrder, bool IsAssignable)> lineSeeds,
+        IReadOnlyList<(string AccountCode, string LineCode)> mappingSeeds,
+        IReadOnlyDictionary<string, Account> accounts,
+        CancellationToken cancellationToken)
+    {
+        var lines = await dbContext.FinancialStatementLines
+            .Where(line =>
+                line.CompanyId == companyId &&
+                line.FiscalYearId == fiscalYearId &&
+                line.StatementType == statementType)
+            .ToDictionaryAsync(
+                line => line.Code,
+                StringComparer.OrdinalIgnoreCase,
+                cancellationToken);
+
+        var pending = lineSeeds
+            .Where(seed => !lines.ContainsKey(seed.Code))
+            .ToList();
+        while (pending.Count > 0)
+        {
+            var ready = pending
+                .Where(seed =>
+                    seed.ParentCode is null ||
+                    lines.ContainsKey(seed.ParentCode))
+                .ToList();
+            if (ready.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "The development financial statement setup contains an invalid parent reference.");
+            }
+
+            foreach (var seed in ready)
+            {
+                var line = new FinancialStatementLine
+                {
+                    CompanyId = companyId,
+                    FiscalYearId = fiscalYearId,
+                    StatementType = statementType,
+                    Code = seed.Code,
+                    Name = seed.Name,
+                    ParentLineId = seed.ParentCode is null
+                        ? null
+                        : lines[seed.ParentCode].Id,
+                    DisplayOrder = seed.DisplayOrder,
+                    IsAssignable = seed.IsAssignable,
+                    IsActive = true,
+                    CreatedById = SeedActor,
+                    CreatedByPc = Environment.MachineName,
+                    CreatedOn = DateTime.UtcNow
+                };
+                dbContext.FinancialStatementLines.Add(line);
+                lines.Add(seed.Code, line);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            pending.RemoveAll(seed => ready.Contains(seed));
+        }
+
+        var existingAccountIds = (await dbContext.AccountStatementMappings
+                .Where(mapping =>
+                    mapping.CompanyId == companyId &&
+                    mapping.FiscalYearId == fiscalYearId &&
+                    mapping.StatementType == statementType)
+                .Select(mapping => mapping.AccountId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        foreach (var seed in mappingSeeds)
+        {
+            if (!accounts.TryGetValue(seed.AccountCode, out var account) ||
+                !lines.TryGetValue(seed.LineCode, out var line) ||
+                existingAccountIds.Contains(account.Id))
+            {
+                continue;
+            }
+
+            dbContext.AccountStatementMappings.Add(new AccountStatementMapping
+            {
+                CompanyId = companyId,
+                FiscalYearId = fiscalYearId,
+                StatementType = statementType,
+                AccountId = account.Id,
+                FinancialStatementLineId = line.Id,
                 CreatedById = SeedActor,
                 CreatedByPc = Environment.MachineName,
                 CreatedOn = DateTime.UtcNow

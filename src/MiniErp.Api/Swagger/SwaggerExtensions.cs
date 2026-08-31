@@ -50,6 +50,7 @@ public static class SwaggerExtensions
             options.OperationFilter<DriverTripsSwaggerDocumentation>();
             options.OperationFilter<ExchangeRatesSwaggerDocumentation>();
             options.OperationFilter<FiscalYearsSwaggerDocumentation>();
+            options.OperationFilter<AccountingSetupSwaggerDocumentation>();
             options.OperationFilter<ItemsSwaggerDocumentation>();
             options.OperationFilter<ItemsCategoriesSwaggerDocumentation>();
             options.OperationFilter<ItemUnitsSwaggerDocumentation>();

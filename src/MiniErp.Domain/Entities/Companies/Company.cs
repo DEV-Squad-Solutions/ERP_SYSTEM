@@ -22,4 +22,10 @@ public sealed class Company : AuditableEntity
     public CompanySettings? Settings { get; set; }
 
     public ICollection<FiscalYear> FiscalYears { get; set; } = [];
+
+    public ICollection<Account> Accounts { get; set; } = [];
+
+    public ICollection<FinancialStatementLine> FinancialStatementLines { get; set; } = [];
+
+    public ICollection<AccountStatementMapping> AccountStatementMappings { get; set; } = [];
 }

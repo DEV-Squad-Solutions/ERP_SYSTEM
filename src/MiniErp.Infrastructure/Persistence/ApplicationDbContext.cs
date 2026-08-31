@@ -32,6 +32,14 @@ public sealed class ApplicationDbContext
 
     public DbSet<FiscalYear> FiscalYears => Set<FiscalYear>();
 
+    public DbSet<Account> Accounts => Set<Account>();
+
+    public DbSet<FinancialStatementLine> FinancialStatementLines =>
+        Set<FinancialStatementLine>();
+
+    public DbSet<AccountStatementMapping> AccountStatementMappings =>
+        Set<AccountStatementMapping>();
+
     public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
 
     public DbSet<BusinessPartner> BusinessPartners => Set<BusinessPartner>();

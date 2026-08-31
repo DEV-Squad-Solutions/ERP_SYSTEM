@@ -292,6 +292,24 @@ public sealed class FiscalYearService(
             return Result.Failure(CurrentCannotBeDeleted());
         }
 
+        if (await dbContext.FinancialStatementLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.FiscalYearId == id,
+                    cancellationToken) ||
+            await dbContext.AccountStatementMappings
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    mapping =>
+                        mapping.CompanyId == companyId &&
+                        mapping.FiscalYearId == id,
+                    cancellationToken))
+        {
+            return Result.Failure(HasAccountingSetup());
+        }
+
         dbContext.FiscalYears.Remove(fiscalYear);
         await dbContext.SaveChangesAsync(cancellationToken);
 

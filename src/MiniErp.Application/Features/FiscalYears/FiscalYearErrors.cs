@@ -71,6 +71,11 @@ public static class FiscalYearErrors
             "FiscalYears.ClosedCannotBeDeleted",
             "لا يمكن حذف سنة مالية مغلقة.");
 
+    public static Error HasAccountingSetup() =>
+        Error.Conflict(
+            "FiscalYears.HasAccountingSetup",
+            "لا يمكن حذف السنة المالية لوجود تشكيل أو روابط قوائم مالية مرتبطة بها.");
+
     public static Error DateNotCovered(
         DateOnly date,
         string fieldName) =>
