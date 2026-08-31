@@ -45,6 +45,19 @@ public static class JournalEntryErrors
             $"الحساب رقم {accountId} حساب رئيسي ولا يسمح بالتسجيل عليه.",
             $"Lines[{lineIndex}].AccountId");
 
+    public static Error AccountMustBeChild(int accountId, int lineIndex) =>
+        Error.Validation(
+            "JournalEntries.AccountMustBeChild",
+            $"الحساب رقم {accountId} حساب رئيسي. القيود اليومية تُسجل على الحسابات الفرعية فقط.",
+            $"Lines[{lineIndex}].AccountId");
+
+    public static Error AccountLinkedToOperationalData(
+        int accountId,
+        int lineIndex) => Error.Validation(
+            "JournalEntries.AccountLinkedToOperationalData",
+            $"الحساب رقم {accountId} مرتبط بعنصر تشغيلي ولا يمكن استخدامه في قيد يدوي أو تسوية.",
+            $"Lines[{lineIndex}].AccountId");
+
     public static Error Unbalanced() => Error.Validation(
         "JournalEntries.Unbalanced",
         "إجمالي المدين يجب أن يساوي إجمالي الدائن ويكون أكبر من صفر.",

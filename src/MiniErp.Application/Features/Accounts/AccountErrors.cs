@@ -41,6 +41,11 @@ public static class AccountErrors
         "لا يمكن إضافة حساب فرعي تحت حساب يسمح بالتسجيل.",
         nameof(AccountRequest.ParentAccountId));
 
+    public static Error ParentHasMovements() => Error.Conflict(
+        "Accounts.ParentHasMovements",
+        "لا يمكن إنشاء حساب فرعي تحت حساب عليه حركات مالية.",
+        nameof(AccountRequest.ParentAccountId));
+
     public static Error ParentCannotBeSelf() => Error.Validation(
         "Accounts.ParentCannotBeSelf",
         "لا يمكن اختيار الحساب نفسه كحساب أب.",
@@ -84,4 +89,9 @@ public static class AccountErrors
     public static Error HasJournalEntries() => Error.Conflict(
         "Accounts.HasJournalEntries",
         "لا يمكن حذف الحساب لوجود قيود يومية مرتبطة به. يمكن إلغاء تنشيطه بدلًا من ذلك.");
+
+    public static Error FiscalYearNotFound(int id) => Error.NotFound(
+        "Accounts.FiscalYearNotFound",
+        $"السنة المالية رقم {id} غير موجودة في الشركة الحالية.",
+        nameof(AccountSelectRequest.FiscalYearId));
 }

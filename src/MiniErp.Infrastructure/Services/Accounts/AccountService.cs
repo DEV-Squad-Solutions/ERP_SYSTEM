@@ -120,6 +120,53 @@ public sealed class AccountService(
         return Result<IReadOnlyList<AccountSelectResponse>>.Success(response);
     }
 
+    public async Task<Result<IReadOnlyList<AccountSelectResponse>>> GetJournalSelectAsync(
+        int fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        if (fiscalYearId <= 0)
+        {
+            return Result<IReadOnlyList<AccountSelectResponse>>.Failure(
+                InvalidId());
+        }
+
+        var fiscalYearExists = await dbContext.FiscalYears
+            .AsNoTracking()
+            .AnyAsync(
+                year =>
+                    year.CompanyId == companyId &&
+                    year.Id == fiscalYearId,
+                cancellationToken);
+        if (!fiscalYearExists)
+        {
+            return Result<IReadOnlyList<AccountSelectResponse>>.Failure(
+                FiscalYearNotFound(fiscalYearId));
+        }
+
+        var rows = await dbContext.Accounts
+            .AsNoTracking()
+            .Where(account =>
+                account.CompanyId == companyId &&
+                account.IsActive &&
+                account.IsPosting &&
+                account.ParentAccountId.HasValue &&
+                !dbContext.AccountMappings.Any(
+                    mapping =>
+                        mapping.CompanyId == companyId &&
+                        mapping.FiscalYearId == fiscalYearId &&
+                        mapping.AccountId == account.Id))
+            .OrderBy(account => account.Code)
+            .ThenBy(account => account.Id)
+            .Select(account => new AccountSelectResponse(
+                Id: account.Id,
+                Code: account.Code,
+                Name: account.Name,
+                AccountType: account.AccountType))
+            .ToListAsync(cancellationToken);
+
+        return Result<IReadOnlyList<AccountSelectResponse>>.Success(rows);
+    }
+
     public async Task<Result<AccountResponse>> GetByIdAsync(
         int id,
         CancellationToken cancellationToken = default)
@@ -423,6 +470,25 @@ public sealed class AccountService(
         if (parent.IsPosting)
         {
             return Result<ParentClassification?>.Failure(ParentMustBeGroup());
+        }
+
+        var parentHasCashVouchers = await dbContext.CashVouchers
+            .AsNoTracking()
+            .AnyAsync(
+                voucher =>
+                    voucher.CompanyId == companyId &&
+                    voucher.AccountId == parent.Id,
+                cancellationToken);
+        var parentHasJournalEntries = await dbContext.JournalEntryLines
+            .AsNoTracking()
+            .AnyAsync(
+                line =>
+                    line.CompanyId == companyId &&
+                    line.AccountId == parent.Id,
+                cancellationToken);
+        if (parentHasCashVouchers || parentHasJournalEntries)
+        {
+            return Result<ParentClassification?>.Failure(ParentHasMovements());
         }
 
         if (accountId.HasValue && await CreatesCycleAsync(

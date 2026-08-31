@@ -87,6 +87,35 @@ public sealed class AccountingSetupServiceTests
     }
 
     [Fact]
+    public async Task AccountWithMovements_CannotReceiveChildAccount()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var service = database.CreateAccountService(companyId: 1);
+
+        var parent = await service.AddAsync(new AccountRequest(
+            Code: "1200",
+            Name: "حساب عليه حركة",
+            ParentAccountId: null,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+
+        await database.AddCashVoucherMovementAsync(parent.Value.Id);
+        database.ClearTracking();
+
+        var result = await service.AddAsync(new AccountRequest(
+            Code: "1210",
+            Name: "حساب فرعي جديد",
+            ParentAccountId: parent.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Accounts.ParentHasMovements", result.Error.Code);
+    }
+
+    [Fact]
     public async Task MappingReplace_ReturnsAllRowErrorsAndSavesAtomically()
     {
         await using var database = await AccountingTestDatabase.CreateAsync();
@@ -269,6 +298,10 @@ public sealed class AccountingSetupServiceTests
 
         public void ClearTracking() => Context.ChangeTracker.Clear();
 
+        public Task AddCashVoucherMovementAsync(int accountId) =>
+            Context.Database.ExecuteSqlInterpolatedAsync(
+                $"INSERT INTO CashVouchers (CompanyId, AccountId, IsDeleted) VALUES (1, {accountId}, 0)");
+
         public async ValueTask DisposeAsync()
         {
             await Context.DisposeAsync();
@@ -334,6 +367,20 @@ public sealed class AccountingSetupServiceTests
 
                 CREATE UNIQUE INDEX UX_Accounts_Company_Code
                 ON Accounts (CompanyId, Code) WHERE IsDeleted = 0;
+
+                CREATE TABLE CashVouchers (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    AccountId INTEGER NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE JournalEntryLines (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    AccountId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
 
                 CREATE TABLE FinancialStatementLines (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,

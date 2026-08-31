@@ -45,6 +45,20 @@ public sealed class AccountsController(IAccountService accountService)
         return this.ToActionResult(result);
     }
 
+    [HttpGet("journal-select")]
+    [ProducesResponseType<IReadOnlyList<AccountSelectResponse>>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetJournalSelect(
+        [FromQuery] AccountSelectRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await accountService.GetJournalSelectAsync(
+            request.FiscalYearId,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("{id:int}")]
     [ProducesResponseType<AccountResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

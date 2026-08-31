@@ -128,6 +128,7 @@ public sealed class JournalEntryService(
 
         var accountValidation = await ValidateAccountsAsync(
             request.Lines,
+            request.FiscalYearId,
             cancellationToken);
         if (accountValidation.IsFailure)
         {
@@ -333,6 +334,7 @@ public sealed class JournalEntryService(
 
     private async Task<Result> ValidateAccountsAsync(
         IReadOnlyList<JournalEntryLineRequest> lines,
+        int fiscalYearId,
         CancellationToken cancellationToken)
     {
         var accountIds = lines
@@ -348,9 +350,19 @@ public sealed class JournalEntryService(
             {
                 account.Id,
                 account.IsActive,
-                account.IsPosting
+                account.IsPosting,
+                account.ParentAccountId
             })
             .ToDictionaryAsync(account => account.Id, cancellationToken);
+        var mappedAccountIds = await dbContext.AccountMappings
+            .AsNoTracking()
+            .Where(mapping =>
+                mapping.CompanyId == companyId &&
+                mapping.FiscalYearId == fiscalYearId &&
+                accountIds.Contains(mapping.AccountId))
+            .Select(mapping => mapping.AccountId)
+            .Distinct()
+            .ToHashSetAsync(cancellationToken);
         var errors = new List<Error>();
         for (var index = 0; index < lines.Count; index++)
         {
@@ -366,6 +378,14 @@ public sealed class JournalEntryService(
             else if (!account.IsPosting)
             {
                 errors.Add(AccountNotPosting(accountId, index));
+            }
+            else if (!account.ParentAccountId.HasValue)
+            {
+                errors.Add(AccountMustBeChild(accountId, index));
+            }
+            else if (mappedAccountIds.Contains(accountId))
+            {
+                errors.Add(AccountLinkedToOperationalData(accountId, index));
             }
         }
 

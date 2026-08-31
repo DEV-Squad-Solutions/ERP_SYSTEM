@@ -8,6 +8,7 @@ using MiniErp.Domain.Enums;
 
 namespace MiniErp.Api.Controllers;
 
+[ApiExplorerSettings(IgnoreApi = true)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
