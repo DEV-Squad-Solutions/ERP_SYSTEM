@@ -219,12 +219,25 @@ public sealed class AccountService(
             return Result<AccountResponse>.Failure(parentValidation.Errors);
         }
 
+        var effectiveAccountType = parentValidation.Value?.AccountType
+            ?? request.AccountType;
+        var effectiveNormalBalance = parentValidation.Value?.NormalBalance
+            ?? request.NormalBalance;
+
         var hasChildren = await dbContext.Accounts.AnyAsync(
             child => child.CompanyId == companyId && child.ParentAccountId == id,
             cancellationToken);
         if (request.IsPosting && hasChildren)
         {
             return Result<AccountResponse>.Failure(PostingAccountHasChildren());
+        }
+
+        if (hasChildren &&
+            (account.AccountType != effectiveAccountType ||
+             account.NormalBalance != effectiveNormalBalance))
+        {
+            return Result<AccountResponse>.Failure(
+                AccountWithChildrenCannotChangeClassification());
         }
 
         if (!request.IsActive && await dbContext.Accounts.AnyAsync(
@@ -242,10 +255,9 @@ public sealed class AccountService(
             .AnyAsync(
             mapping => mapping.CompanyId == companyId && mapping.AccountId == id,
             cancellationToken);
-        var effectiveAccountType = parentValidation.Value?.AccountType
-            ?? request.AccountType;
         if (hasMappings &&
             (account.AccountType != effectiveAccountType ||
+             account.NormalBalance != effectiveNormalBalance ||
              !request.IsPosting ||
              !request.IsActive))
         {
@@ -309,6 +321,39 @@ public sealed class AccountService(
                     cancellationToken))
         {
             return Result.Failure(HasStatementMappings());
+        }
+
+        if (await dbContext.AccountMappings
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    mapping =>
+                        mapping.CompanyId == companyId &&
+                        mapping.AccountId == id,
+                    cancellationToken))
+        {
+            return Result.Failure(HasStatementMappings());
+        }
+
+        if (await dbContext.CashVouchers
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    voucher =>
+                        voucher.CompanyId == companyId &&
+                        voucher.AccountId == id,
+                    cancellationToken))
+        {
+            return Result.Failure(HasCashVouchers());
+        }
+
+        if (await dbContext.JournalEntryLines
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    line =>
+                        line.CompanyId == companyId &&
+                        line.AccountId == id,
+                    cancellationToken))
+        {
+            return Result.Failure(HasJournalEntries());
         }
 
         dbContext.Accounts.Remove(account);

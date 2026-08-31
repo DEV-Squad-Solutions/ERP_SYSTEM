@@ -40,6 +40,14 @@ public sealed class ApplicationDbContext
     public DbSet<AccountStatementMapping> AccountStatementMappings =>
         Set<AccountStatementMapping>();
 
+    public DbSet<AccountMapping> AccountMappings =>
+        Set<AccountMapping>();
+
+    public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
+
+    public DbSet<JournalEntryLine> JournalEntryLines =>
+        Set<JournalEntryLine>();
+
     public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
 
     public DbSet<BusinessPartner> BusinessPartners => Set<BusinessPartner>();

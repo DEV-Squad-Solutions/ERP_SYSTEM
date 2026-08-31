@@ -1,4 +1,5 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Employees;
@@ -37,6 +38,10 @@ public sealed class CashVoucher : AuditableEntity
     public int? CashMovementTypeId { get; set; }
 
     public CashMovementType? CashMovementType { get; set; }
+
+    public int? AccountId { get; set; }
+
+    public Account? Account { get; set; }
 
     public CashPartyType PartyType { get; set; }
 

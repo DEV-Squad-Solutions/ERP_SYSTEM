@@ -148,6 +148,29 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
             );
 
+            CREATE TABLE Accounts (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                Code TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                ParentAccountId INTEGER NULL,
+                AccountType INTEGER NOT NULL,
+                NormalBalance INTEGER NOT NULL,
+                IsPosting INTEGER NOT NULL,
+                IsActive INTEGER NOT NULL,
+                RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                CreatedById TEXT NOT NULL DEFAULT 'test',
+                CreatedOn TEXT NOT NULL DEFAULT '2026-01-01',
+                CreatedByPc TEXT NOT NULL DEFAULT 'test',
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
             CREATE TABLE BusinessPartners (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,
@@ -514,6 +537,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Direction INTEGER NOT NULL,
                 CashboxId INTEGER NULL,
                 CashMovementTypeId INTEGER NULL,
+                AccountId INTEGER NULL,
                 PartyType INTEGER NOT NULL,
                 EmployeeId INTEGER NULL,
                 BusinessPartnerId INTEGER NULL,
@@ -556,6 +580,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                      DriverId IS NULL AND DriverTripId IS NULL AND ExternalPartyName IS NULL)),
                 CONSTRAINT CK_CashVouchers_PostingReferencesTogether CHECK (
                     CashMovementTypeId IS NULL OR CashboxId IS NOT NULL),
+                CONSTRAINT CK_CashVouchers_AccountTargetShape CHECK (
+                    AccountId IS NULL OR (PartyType = 1 AND InvoiceId IS NULL AND CashboxTransferId IS NULL)),
                 CONSTRAINT CK_CashVouchers_TransferShape CHECK (
                     CashboxTransferId IS NULL OR
                     (CashboxId IS NOT NULL AND
@@ -573,6 +599,9 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
 
             CREATE INDEX IX_CashVouchers_Company_Employee_Date
             ON CashVouchers (CompanyId, EmployeeId, VoucherDate, Id);
+
+            CREATE INDEX IX_CashVouchers_Company_Account_Date
+            ON CashVouchers (CompanyId, AccountId, VoucherDate, Id);
 
             CREATE TABLE EmployeeTransactions (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -705,6 +734,14 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                  'test', '2026-01-01', 'test', 0),
                 (2, 'Company B', '', 'CR-B', 'TX-B', 'Manager',
                  'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO Accounts (
+                Id, CompanyId, Code, Name, ParentAccountId, AccountType,
+                NormalBalance, IsPosting, IsActive, IsDeleted)
+            VALUES
+                (1, 1, '4200', 'Other Revenue', NULL, 4, 2, 1, 1, 0),
+                (2, 1, '5200', 'Operating Expenses', NULL, 5, 1, 1, 1, 0),
+                (3, 2, '4200', 'Other Company Revenue', NULL, 4, 2, 1, 1, 0);
 
             INSERT INTO BusinessPartners (
                 Id, CompanyId, Code, Name, Currency, CreditLimit, IsActive,

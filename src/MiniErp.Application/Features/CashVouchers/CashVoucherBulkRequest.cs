@@ -51,7 +51,8 @@ public sealed record CashVoucherBulkVoucherRequest(
     string? ReferenceNumber,
     string? Description,
     string? Notes,
-    decimal? ExchangeRate);
+    decimal? ExchangeRate,
+    int? AccountId = null);
 
 public sealed record CashVoucherBulkResponse(
     IReadOnlyList<CashVoucherBulkItemResponse> Items,

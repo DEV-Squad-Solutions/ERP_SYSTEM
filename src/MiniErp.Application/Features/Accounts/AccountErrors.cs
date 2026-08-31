@@ -65,6 +65,10 @@ public static class AccountErrors
         "Accounts.MappedAccountCannotChangeClassification",
         "لا يمكن تغيير نوع الحساب أو جعله حسابًا رئيسيًا لوجود ربط قائم بالقوائم المالية.");
 
+    public static Error AccountWithChildrenCannotChangeClassification() => Error.Conflict(
+        "Accounts.AccountWithChildrenCannotChangeClassification",
+        "لا يمكن تغيير نوع أو طبيعة حساب رئيسي يحتوي على حسابات فرعية.");
+
     public static Error HasChildren() => Error.Conflict(
         "Accounts.HasChildren",
         "لا يمكن حذف الحساب لوجود حسابات فرعية مرتبطة به.");
@@ -72,4 +76,12 @@ public static class AccountErrors
     public static Error HasStatementMappings() => Error.Conflict(
         "Accounts.HasStatementMappings",
         "لا يمكن حذف الحساب لوجود ربط حالي أو تاريخي بالقوائم المالية. يمكن إلغاء تنشيطه بدلًا من ذلك.");
+
+    public static Error HasCashVouchers() => Error.Conflict(
+        "Accounts.HasCashVouchers",
+        "لا يمكن حذف الحساب لوجود سندات قبض أو صرف مرتبطة به. يمكن إلغاء تنشيطه بدلًا من ذلك.");
+
+    public static Error HasJournalEntries() => Error.Conflict(
+        "Accounts.HasJournalEntries",
+        "لا يمكن حذف الحساب لوجود قيود يومية مرتبطة به. يمكن إلغاء تنشيطه بدلًا من ذلك.");
 }

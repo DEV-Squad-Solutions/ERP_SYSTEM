@@ -378,6 +378,11 @@ public static class DevelopmentDataSeeder
                 company,
                 cancellationToken);
 
+            await SeedAccountMappingsAsync(
+                dbContext,
+                company,
+                cancellationToken);
+
             await SeedEmployeesAsync(
                 dbContext,
                 company,
@@ -3502,6 +3507,125 @@ public static class DevelopmentDataSeeder
                     fiscalYear.Id,
                     accounts,
                     cancellationToken);
+            }
+        }
+    }
+
+    private static async Task SeedAccountMappingsAsync(
+        ApplicationDbContext dbContext,
+        Company company,
+        CancellationToken cancellationToken)
+    {
+        var fiscalYears = await dbContext.FiscalYears
+            .Where(year => year.CompanyId == company.Id)
+            .OrderBy(year => year.StartDate)
+            .ToListAsync(cancellationToken);
+        var accounts = await dbContext.Accounts
+            .Where(account => account.CompanyId == company.Id)
+            .ToDictionaryAsync(
+                account => account.Code,
+                StringComparer.OrdinalIgnoreCase,
+                cancellationToken);
+        var cashboxes = await dbContext.Cashboxes
+            .Where(cashbox => cashbox.CompanyId == company.Id)
+            .Select(cashbox => cashbox.Id)
+            .ToListAsync(cancellationToken);
+        var movementTypes = await dbContext.CashMovementTypes
+            .Where(movementType => movementType.CompanyId == company.Id)
+            .Select(movementType => new
+            {
+                movementType.Id,
+                movementType.Classification,
+                movementType.Direction
+            })
+            .ToListAsync(cancellationToken);
+
+        var requiredAccountCodes = new[]
+        {
+            "1110", "1200", "1300", "2100", "2200", "4100", "4200",
+            "5100", "5200"
+        };
+        if (requiredAccountCodes.Any(code => !accounts.ContainsKey(code)))
+        {
+            return;
+        }
+
+        foreach (var fiscalYear in fiscalYears)
+        {
+            var existing = await dbContext.AccountMappings
+                .Where(mapping =>
+                    mapping.CompanyId == company.Id &&
+                    mapping.FiscalYearId == fiscalYear.Id)
+                .Select(mapping => new
+                {
+                    mapping.MappingType,
+                    mapping.SourceId
+                })
+                .ToListAsync(cancellationToken);
+            var existingKeys = existing
+                .Select(mapping => (mapping.MappingType, mapping.SourceId))
+                .ToHashSet();
+            var pending = new List<AccountMapping>();
+
+            void Add(
+                AccountingMappingType mappingType,
+                int? sourceId,
+                string accountCode)
+            {
+                if (existingKeys.Add((mappingType, sourceId)))
+                {
+                    pending.Add(new AccountMapping
+                    {
+                        CompanyId = company.Id,
+                        FiscalYearId = fiscalYear.Id,
+                        MappingType = mappingType,
+                        SourceId = sourceId,
+                        AccountId = accounts[accountCode].Id,
+                        CreatedById = SeedActor,
+                        CreatedByPc = Environment.MachineName,
+                        CreatedOn = DateTime.UtcNow
+                    });
+                }
+            }
+
+            foreach (var cashboxId in cashboxes)
+            {
+                Add(AccountingMappingType.Cashbox, cashboxId, "1110");
+            }
+
+            foreach (var movementType in movementTypes)
+            {
+                var accountCode = movementType.Classification switch
+                {
+                    CashMovementClassification.Expense => "5200",
+                    CashMovementClassification.Revenue => "4200",
+                    CashMovementClassification.PartnerSettlement =>
+                        movementType.Direction == CashDirection.Payment
+                            ? "2100"
+                            : "1200",
+                    _ => "5200"
+                };
+                Add(
+                    AccountingMappingType.CashMovementType,
+                    movementType.Id,
+                    accountCode);
+            }
+
+            Add(AccountingMappingType.Sales, null, "4100");
+            Add(AccountingMappingType.Purchase, null, "1300");
+            Add(AccountingMappingType.SalesReturn, null, "4200");
+            Add(AccountingMappingType.PurchaseReturn, null, "1300");
+            Add(AccountingMappingType.Inventory, null, "1300");
+            Add(AccountingMappingType.CostOfGoodsSold, null, "5100");
+            Add(AccountingMappingType.CustomerControl, null, "1200");
+            Add(AccountingMappingType.SupplierControl, null, "2100");
+            Add(AccountingMappingType.EmployeeControl, null, "2200");
+            Add(AccountingMappingType.DriverControl, null, "2200");
+
+            if (pending.Count > 0)
+            {
+                dbContext.AccountMappings.AddRange(pending);
+                await dbContext.SaveChangesAsync(cancellationToken);
             }
         }
     }

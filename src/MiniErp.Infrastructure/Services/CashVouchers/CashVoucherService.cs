@@ -9,6 +9,7 @@ using MiniErp.Application.Features.CashVouchers;
 using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.CashManagement;
+using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Entities.Logistics;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -55,6 +56,9 @@ public sealed class CashVoucherService(
                 (voucher.Driver != null &&
                  (voucher.Driver.Code.Contains(search) ||
                   voucher.Driver.Name.Contains(search))) ||
+                (voucher.Account != null &&
+                 (voucher.Account.Code.Contains(search) ||
+                  voucher.Account.Name.Contains(search))) ||
                 (voucher.DriverTrip != null &&
                  voucher.DriverTrip.InvoiceNumber.Contains(search)) ||
                 (voucher.Invoice != null &&
@@ -101,6 +105,9 @@ public sealed class CashVoucherService(
             .Where(voucher =>
                 !filters.EmployeeId.HasValue ||
                 voucher.EmployeeId == filters.EmployeeId.Value)
+            .Where(voucher =>
+                !filters.AccountId.HasValue ||
+                voucher.AccountId == filters.AccountId.Value)
             .Where(voucher =>
                 !filters.IsDraft.HasValue ||
                 filters.IsDraft.Value ==
@@ -186,25 +193,22 @@ public sealed class CashVoucherService(
             })
             .ToListAsync(cancellationToken);
 
-        var cashMovementRows = await dbContext.CashMovementTypes
+        var accountRows = await dbContext.Accounts
             .AsNoTracking()
-            .Where(movementType =>
-                movementType.CompanyId == companyId &&
-                movementType.IsActive &&
-                movementType.PartnerEffect == PartnerAccountEffect.None &&
-                ((movementType.Classification ==
-                      CashMovementClassification.Expense &&
-                  movementType.Direction == CashDirection.Payment) ||
-                 (movementType.Classification ==
-                      CashMovementClassification.Revenue &&
-                  movementType.Direction == CashDirection.Receipt)))
-            .OrderBy(movementType => movementType.Name)
-            .ThenBy(movementType => movementType.Id)
-            .Select(movementType => new
+            .Where(account =>
+                account.CompanyId == companyId &&
+                account.IsActive &&
+                account.IsPosting &&
+                (account.AccountType == AccountType.Expense ||
+                 account.AccountType == AccountType.Revenue))
+            .OrderBy(account => account.Name)
+            .ThenBy(account => account.Id)
+            .Select(account => new
             {
-                movementType.Id,
-                movementType.Name,
-                movementType.Classification
+                account.Id,
+                account.Code,
+                account.Name,
+                account.AccountType
             })
             .ToListAsync(cancellationToken);
 
@@ -224,25 +228,25 @@ public sealed class CashVoucherService(
                     Id: employee.Id,
                     Name: employee.Name))
                 .ToList(),
-            Expenses: cashMovementRows
-                .Where(movementType =>
-                    movementType.Classification ==
-                    CashMovementClassification.Expense)
-                .Select(movementType =>
-                    new CashVoucherCashMovementSelectResponse(
-                        Id: movementType.Id,
-                        Name: movementType.Name,
-                        Classification: movementType.Classification))
+            Expenses: accountRows
+                .Where(account => account.AccountType == AccountType.Expense)
+                .Select(account =>
+                    new CashVoucherAccountSelectResponse(
+                        Id: account.Id,
+                        Name: account.Name,
+                        Classification: CashMovementClassification.Expense,
+                        Code: account.Code,
+                        AccountType: account.AccountType))
                 .ToList(),
-            Revenues: cashMovementRows
-                .Where(movementType =>
-                    movementType.Classification ==
-                    CashMovementClassification.Revenue)
-                .Select(movementType =>
-                    new CashVoucherCashMovementSelectResponse(
-                        Id: movementType.Id,
-                        Name: movementType.Name,
-                        Classification: movementType.Classification))
+            Revenues: accountRows
+                .Where(account => account.AccountType == AccountType.Revenue)
+                .Select(account =>
+                    new CashVoucherAccountSelectResponse(
+                        Id: account.Id,
+                        Name: account.Name,
+                        Classification: CashMovementClassification.Revenue,
+                        Code: account.Code,
+                        AccountType: account.AccountType))
                 .ToList());
 
         return Result<CashVoucherPartySelectResponse>.Success(response);
@@ -607,7 +611,7 @@ public sealed class CashVoucherService(
         var preparation = await PrepareAsync(
             request,
             currentVoucher: null,
-            enforceManualPostingTarget: false,
+            enforceManualPostingTarget: true,
             cancellationToken: cancellationToken);
         if (preparation.IsFailure)
         {
@@ -707,7 +711,7 @@ public sealed class CashVoucherService(
         var preparation = await PrepareAsync(
             request,
             voucher,
-            enforceManualPostingTarget: false,
+            enforceManualPostingTarget: true,
             cancellationToken: cancellationToken);
         if (preparation.IsFailure)
         {
@@ -870,7 +874,8 @@ public sealed class CashVoucherService(
             Description: request.Description,
             Notes: request.Notes,
             RowVersion: rowVersion,
-            ExchangeRate: request.ExchangeRate);
+            ExchangeRate: request.ExchangeRate,
+            AccountId: request.AccountId);
 
     private async Task<Result<VoucherPreparation>> PrepareAsync(
         CashVoucherUpdateRequest request,
@@ -892,7 +897,7 @@ public sealed class CashVoucherService(
                 PartySelectionMustBeExclusive());
         }
 
-        if (!enforceManualPostingTarget && !HasAtMostOneParty(request))
+        if (!enforceManualPostingTarget && !HasAtMostOneTarget(request))
         {
             return Result<VoucherPreparation>.Failure(
                 PartySelectionMustBeExclusive());
@@ -966,27 +971,45 @@ public sealed class CashVoucherService(
                     MovementTypeDirectionMismatch());
             }
 
-            if (enforceManualPostingTarget &&
-                (movementType.PartnerEffect != PartnerAccountEffect.None ||
-                 !IsManualMovementTypePair(
-                     request.Direction,
-                     movementType.Classification)))
+        }
+
+        Account? account = null;
+        if (request.AccountId is int accountId)
+        {
+            account = await dbContext.Accounts
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    entity =>
+                        entity.CompanyId == companyId &&
+                        entity.Id == accountId,
+                    cancellationToken);
+            if (account is null)
             {
                 return Result<VoucherPreparation>.Failure(
-                    MovementTypeNotAllowedForManualVoucher());
+                    AccountNotFound(accountId));
+            }
+
+            if (!account.IsActive || !account.IsPosting)
+            {
+                return Result<VoucherPreparation>.Failure(
+                    AccountInactiveOrNotPosting());
+            }
+
+            var accountMatchesDirection =
+                (request.Direction == CashDirection.Payment &&
+                 account.AccountType == AccountType.Expense) ||
+                (request.Direction == CashDirection.Receipt &&
+                 account.AccountType == AccountType.Revenue);
+            if (!accountMatchesDirection)
+            {
+                return Result<VoucherPreparation>.Failure(
+                    AccountDirectionMismatch());
             }
         }
 
         BusinessPartner? partner = null;
         if (partyType == CashPartyType.Partner)
         {
-            if (movementType is not null &&
-                movementType.PartnerEffect == PartnerAccountEffect.None)
-            {
-                return Result<VoucherPreparation>.Failure(
-                    MovementTypeNotForPartner());
-            }
-
             partner = await dbContext.BusinessPartners
                 .AsNoTracking()
                 .FirstOrDefaultAsync(
@@ -1249,6 +1272,7 @@ public sealed class CashVoucherService(
 
         voucher.CashboxId = null;
         voucher.CashMovementTypeId = null;
+        voucher.AccountId = null;
         voucher.PartyType = CashPartyType.None;
         voucher.EmployeeId = null;
         voucher.BusinessPartnerId = null;
@@ -1283,9 +1307,10 @@ public sealed class CashVoucherService(
                         ? CashPartyType.Other
                         : CashPartyType.None;
 
-    private static bool HasAtMostOneParty(CashVoucherUpdateRequest request)
+    private static bool HasAtMostOneTarget(CashVoucherUpdateRequest request)
     {
         var selectedPartyCount =
+            (request.AccountId.HasValue ? 1 : 0) +
             (request.EmployeeId.HasValue ? 1 : 0) +
             (request.BusinessPartnerId.HasValue ? 1 : 0) +
             (request.DriverId.HasValue ? 1 : 0) +
@@ -1298,7 +1323,7 @@ public sealed class CashVoucherService(
         CashVoucherUpdateRequest request)
     {
         var selectedTargetCount =
-            (request.CashMovementTypeId.HasValue ? 1 : 0) +
+            (request.AccountId.HasValue ? 1 : 0) +
             (request.EmployeeId.HasValue ? 1 : 0) +
             (request.BusinessPartnerId.HasValue ? 1 : 0) +
             (request.DriverId.HasValue ? 1 : 0) +
@@ -1306,13 +1331,5 @@ public sealed class CashVoucherService(
 
         return selectedTargetCount == 1;
     }
-
-    private static bool IsManualMovementTypePair(
-        CashDirection direction,
-        CashMovementClassification classification) =>
-        (direction == CashDirection.Payment &&
-         classification == CashMovementClassification.Expense) ||
-        (direction == CashDirection.Receipt &&
-         classification == CashMovementClassification.Revenue);
 
 }

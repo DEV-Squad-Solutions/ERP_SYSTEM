@@ -1,4 +1,5 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 
@@ -33,4 +34,6 @@ public sealed class Account : AuditableEntity
     public ICollection<Account> Children { get; set; } = [];
 
     public ICollection<AccountStatementMapping> StatementMappings { get; set; } = [];
+
+    public ICollection<CashVoucher> CashVouchers { get; set; } = [];
 }

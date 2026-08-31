@@ -688,6 +688,7 @@ public sealed class CompanyServiceTests
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
                     EmployeeId INTEGER NULL,
+                    AccountId INTEGER NULL,
                     CashboxTransferId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );

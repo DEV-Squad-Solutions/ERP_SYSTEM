@@ -222,6 +222,76 @@ public sealed partial class FinancialStatementService
     }
 
     private async Task<IReadOnlyList<OperationalAccountBalance>>
+        LoadAccountBalancesAsync(
+            OperationalTrialBalanceFilterRequest filters,
+            OperationalTrialBalanceCategory category,
+            CashMovementClassification classification,
+            CancellationToken cancellationToken)
+    {
+        var accountType = classification == CashMovementClassification.Expense
+            ? AccountType.Expense
+            : AccountType.Revenue;
+        var accounts = (await dbContext.Accounts
+                .AsNoTracking()
+                .Where(account =>
+                    account.CompanyId == companyId &&
+                    account.AccountType == accountType)
+                .Select(account => new
+                {
+                    account.Id,
+                    account.Code,
+                    account.Name
+                })
+                .ToListAsync(cancellationToken))
+            .ToDictionary(
+                account => account.Id,
+                account => new OperationalAccountBalance(
+                    category: category,
+                    categoryName: CategoryName(category),
+                    accountId: account.Id,
+                    accountCode: account.Code,
+                    accountName: account.Name));
+
+        var voucherGroups = await dbContext.CashVouchers
+            .AsNoTracking()
+            .Where(voucher =>
+                voucher.CompanyId == companyId &&
+                voucher.IsPosted &&
+                voucher.AccountId.HasValue &&
+                voucher.Account != null &&
+                voucher.Account.AccountType == accountType &&
+                voucher.VoucherDate <= filters.ToDate)
+            .GroupBy(voucher => new
+            {
+                AccountId = voucher.AccountId!.Value,
+                IsOpening = voucher.VoucherDate < filters.FromDate
+            })
+            .Select(group => new
+            {
+                group.Key.AccountId,
+                group.Key.IsOpening,
+                Debit = group.Sum(voucher =>
+                    voucher.Direction == CashDirection.Payment
+                        ? voucher.BaseAmount
+                        : 0m),
+                Credit = group.Sum(voucher =>
+                    voucher.Direction == CashDirection.Receipt
+                        ? voucher.BaseAmount
+                        : 0m)
+            })
+            .ToListAsync(cancellationToken);
+
+        ApplyGroups(accounts, voucherGroups.Select(group =>
+            new AccountMovementGroup(
+                AccountId: group.AccountId,
+                IsOpening: group.IsOpening,
+                Debit: group.Debit,
+                Credit: group.Credit)));
+
+        return accounts.Values.ToArray();
+    }
+
+    private async Task<IReadOnlyList<OperationalAccountBalance>>
         LoadPartnerBalancesAsync(
             OperationalTrialBalanceFilterRequest filters,
             CancellationToken cancellationToken)
@@ -551,6 +621,7 @@ public sealed partial class FinancialStatementService
                 voucher.CompanyId == companyId &&
                 voucher.IsPosted &&
                 voucher.CashMovementTypeId.HasValue &&
+                !voucher.AccountId.HasValue &&
                 voucher.CashMovementType != null &&
                 voucher.CashMovementType.Classification == classification &&
                 voucher.VoucherDate <= filters.ToDate)
@@ -581,7 +652,16 @@ public sealed partial class FinancialStatementService
                 Debit: group.Debit,
                 Credit: group.Credit)));
 
-        return accounts.Values.ToArray();
+        var movementTypeBalances = accounts.Values.ToArray();
+        var accountBalances = await LoadAccountBalancesAsync(
+            filters,
+            category,
+            classification,
+            cancellationToken);
+
+        return movementTypeBalances
+            .Concat(accountBalances)
+            .ToArray();
     }
 
     private static bool ShouldLoadCategory(

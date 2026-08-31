@@ -305,6 +305,13 @@ public sealed class FiscalYearService(
                     mapping =>
                         mapping.CompanyId == companyId &&
                         mapping.FiscalYearId == id,
+                    cancellationToken) ||
+            await dbContext.AccountMappings
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    mapping =>
+                        mapping.CompanyId == companyId &&
+                        mapping.FiscalYearId == id,
                     cancellationToken))
         {
             return Result.Failure(HasAccountingSetup());

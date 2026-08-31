@@ -13,6 +13,7 @@ public sealed class CashVoucherMappingRegister : IRegister
             .Ignore(voucher => voucher.ExchangeRate)
             .Ignore(voucher => voucher.BaseAmount)
             .Ignore(voucher => voucher.InvoicePayment)
+            .Ignore(voucher => voucher.Account)
             .Map(
                 voucher => voucher.Description,
                 request => Normalize(request.Description));
@@ -24,6 +25,7 @@ public sealed class CashVoucherMappingRegister : IRegister
             .Ignore(voucher => voucher.ExchangeRate)
             .Ignore(voucher => voucher.BaseAmount)
             .Ignore(voucher => voucher.InvoicePayment)
+            .Ignore(voucher => voucher.Account)
             .Map(
                 voucher => voucher.ExternalPartyName,
                 request => Normalize(request.ExternalPartyName))
@@ -69,6 +71,21 @@ public sealed class CashVoucherMappingRegister : IRegister
                 voucher => voucher.CashMovementType == null
                     ? null
                     : voucher.CashMovementType.Name)
+            .Map(
+                response => response.AccountCode,
+                voucher => voucher.Account == null
+                    ? null
+                    : voucher.Account.Code)
+            .Map(
+                response => response.AccountName,
+                voucher => voucher.Account == null
+                    ? null
+                    : voucher.Account.Name)
+            .Map(
+                response => response.AccountType,
+                voucher => voucher.Account == null
+                    ? null
+                    : (Domain.Enums.AccountType?)voucher.Account.AccountType)
             .Map(
                 response => response.Classification,
                 voucher => voucher.CashMovementType == null

@@ -322,6 +322,7 @@ public sealed class BusinessPartnerIntegrityServiceTests
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
                     BusinessPartnerId INTEGER NULL,
+                    AccountId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );
                 """);

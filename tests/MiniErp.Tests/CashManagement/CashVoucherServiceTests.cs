@@ -89,10 +89,10 @@ public sealed class CashVoucherServiceTests
             ["Employee One"],
             result.Value.Employees.Select(item => item.Name));
         Assert.Equal(
-            [101, 10],
+            [2],
             result.Value.Expenses.Select(item => item.Id));
         Assert.Equal(
-            ["Advertising Expense", "Office Expense"],
+            ["Operating Expenses"],
             result.Value.Expenses.Select(item => item.Name));
         Assert.All(
             result.Value.Expenses,
@@ -100,10 +100,10 @@ public sealed class CashVoucherServiceTests
                 CashMovementClassification.Expense,
                 item.Classification));
         Assert.Equal(
-            [103, 9],
+            [1],
             result.Value.Revenues.Select(item => item.Id));
         Assert.Equal(
-            ["Advertising Revenue", "Consulting Revenue"],
+            ["Other Revenue"],
             result.Value.Revenues.Select(item => item.Name));
         Assert.All(
             result.Value.Revenues,
@@ -313,6 +313,50 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
+    public async Task EditingDraftWithExpenseOrRevenueAccountPostsAndKeepsDescriptorOptional()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var created = await database.CreateVoucherService(1).AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 8, 3),
+                Direction: CashDirection.Receipt,
+                CashboxId: 1,
+                Amount: 75m,
+                Description: "Account-targeted receipt"));
+
+        await using var updateContext = database.CreateAdditionalContext();
+        var updated = await database.CreateVoucherService(1, updateContext)
+            .UpdateAsync(
+                created.Value.Id,
+                new CashVoucherUpdateRequest(
+                    VoucherDate: created.Value.VoucherDate,
+                    Direction: created.Value.Direction,
+                    CashboxId: 1,
+                    CashMovementTypeId: 9,
+                    EmployeeId: null,
+                    BusinessPartnerId: null,
+                    DriverId: null,
+                    DriverTripId: null,
+                    ExternalPartyName: null,
+                    Amount: created.Value.Amount,
+                    ReferenceNumber: null,
+                    Description: created.Value.Description,
+                    Notes: null,
+                    RowVersion: created.Value.RowVersion,
+                    AccountId: 1));
+
+        Assert.True(updated.IsSuccess);
+        Assert.False(updated.Value.IsDraft);
+        Assert.Equal(1, updated.Value.AccountId);
+        Assert.Equal("4200", updated.Value.AccountCode);
+        Assert.Equal("Other Revenue", updated.Value.AccountName);
+        Assert.Equal(AccountType.Revenue, updated.Value.AccountType);
+        Assert.Equal(9, updated.Value.CashMovementTypeId);
+        Assert.Equal(75m, updated.Value.BaseAmount);
+    }
+
+    [Fact]
     public async Task UpdateWithoutAnyPostingTargetIsRejectedAndRemainsDraft()
     {
         await using var database =
@@ -483,7 +527,7 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
-    public async Task VoucherRejectsPartyAndMovementTogether()
+    public async Task VoucherAllowsPartyWithOptionalMovementDescriptor()
     {
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
@@ -500,15 +544,15 @@ public sealed class CashVoucherServiceTests
                 CashMovementTypeId = 9
             });
 
-        Assert.Equal(
-            "CashVouchers.PartySelectionMustBeExclusive",
-            result.Error.Code);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CashPartyType.Partner, result.Value.PartyType);
+        Assert.Equal(9, result.Value.CashMovementTypeId);
     }
 
     [Theory]
-    [InlineData(1)]
     [InlineData(3)]
-    public async Task VoucherRejectsMovementOutsideManualClassification(
+    [InlineData(9)]
+    public async Task VoucherAllowsMovementDescriptorWithDirectAccount(
         int movementTypeId)
     {
         await using var database =
@@ -523,13 +567,13 @@ public sealed class CashVoucherServiceTests
                 movementTypeId: movementTypeId,
                 amount: 10m));
 
-        Assert.Equal(
-            "CashVouchers.MovementTypeNotAllowedForManualVoucher",
-            result.Error.Code);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value.AccountId);
+        Assert.Equal(movementTypeId, result.Value.CashMovementTypeId);
     }
 
     [Fact]
-    public async Task VoucherRejectsClassificationThatDoesNotMatchDirection()
+    public async Task VoucherAllowsDescriptorClassificationIndependentOfDirection()
     {
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
@@ -564,12 +608,12 @@ public sealed class CashVoucherServiceTests
                 movementTypeId: 102,
                 amount: 10m));
 
-        Assert.Equal(
-            "CashVouchers.MovementTypeNotAllowedForManualVoucher",
-            receiptExpense.Error.Code);
-        Assert.Equal(
-            "CashVouchers.MovementTypeNotAllowedForManualVoucher",
-            paymentRevenue.Error.Code);
+        Assert.True(receiptExpense.IsSuccess);
+        Assert.Equal(1, receiptExpense.Value.AccountId);
+        Assert.Equal(101, receiptExpense.Value.CashMovementTypeId);
+        Assert.True(paymentRevenue.IsSuccess);
+        Assert.Equal(2, paymentRevenue.Value.AccountId);
+        Assert.Equal(102, paymentRevenue.Value.CashMovementTypeId);
     }
 
     [Fact]
@@ -585,6 +629,7 @@ public sealed class CashVoucherServiceTests
                 CashDirection.Receipt,
                 movementTypeId: 9,
                 amount: 10m));
+        Assert.True(original.IsSuccess);
         await database.Context.Database.ExecuteSqlRawAsync(
             "UPDATE CashMovementTypes SET IsActive = 0 WHERE Id = 9;");
         database.Context.ChangeTracker.Clear();
@@ -1141,11 +1186,14 @@ public sealed class CashVoucherServiceTests
         var service = database.CreateVoucherService(companyId: 1);
         var original = await AddVoucherAsync(
             service,
-            CreateRequest(
+            CreatePartnerRequest(
                 "BULK-CLEAR-TYPE",
                 CashDirection.Receipt,
-                movementTypeId: 9,
-                amount: 10m));
+                partnerId: 1,
+                amount: 10m) with
+            {
+                CashMovementTypeId = 9
+            });
 
         var result = await service.BulkAsync(
             new CashVoucherBulkRequest(
@@ -1156,6 +1204,7 @@ public sealed class CashVoucherServiceTests
                     Voucher: CreateBulkVoucher(
                         direction: CashDirection.Receipt,
                         movementTypeId: null,
+                        partnerId: 1,
                         amount: 30m))
             ]));
         var item = Assert.Single(result.Value.Items);
@@ -1356,7 +1405,7 @@ public sealed class CashVoucherServiceTests
         CashDirection direction,
         int cashboxId = 1,
         int? movementTypeId = 3,
-        int? partnerId = null,
+        int? partnerId = 1,
         decimal amount = 10m,
         decimal? exchangeRate = null) =>
         new(
@@ -1380,7 +1429,8 @@ public sealed class CashVoucherServiceTests
         CashDirection direction,
         int cashboxId = 1,
         int? movementTypeId = null,
-        decimal amount = 10m) =>
+        decimal amount = 10m,
+        int? accountId = null) =>
         new(
             VoucherDate: new DateOnly(2026, 7, 27),
             Direction: direction,
@@ -1395,7 +1445,9 @@ public sealed class CashVoucherServiceTests
             Amount: amount,
             ReferenceNumber: null,
             Description: null,
-            Notes: null);
+            Notes: null,
+            AccountId: accountId ??
+                (direction == CashDirection.Receipt ? 1 : 2));
 
     private static VoucherTestRequest CreatePartnerRequest(
         string number,
@@ -1477,7 +1529,8 @@ public sealed class CashVoucherServiceTests
             ReferenceNumber: original.ReferenceNumber,
             Description: original.Description,
             Notes: original.Notes,
-            RowVersion: original.RowVersion);
+            RowVersion: original.RowVersion,
+            AccountId: original.AccountId);
 
     private static async Task<Result<CashVoucherResponse>> AddVoucherAsync(
         ICashVoucherService service,
@@ -1512,7 +1565,8 @@ public sealed class CashVoucherServiceTests
                 Description: request.Description,
                 Notes: request.Notes,
                 RowVersion: draft.Value.RowVersion,
-                ExchangeRate: request.ExchangeRate));
+                ExchangeRate: request.ExchangeRate,
+                AccountId: request.AccountId));
     }
 
     private sealed record VoucherTestRequest(
@@ -1529,5 +1583,6 @@ public sealed class CashVoucherServiceTests
         string? ReferenceNumber,
         string? Description,
         string? Notes,
-        decimal? ExchangeRate = null);
+        decimal? ExchangeRate = null,
+        int? AccountId = null);
 }
