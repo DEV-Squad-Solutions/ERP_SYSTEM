@@ -6,13 +6,16 @@ using MiniErp.Api.Features.PayrollEntries.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.PayrollEntries;
 
+using MiniErp.Application.Features.PayrollReport;
+
 namespace MiniErp.Api.Controllers;
 
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
 public sealed class PayrollEntriesController(
-    IPayrollEntryService payrollEntryService)
+    IPayrollEntryService payrollEntryService,
+    IPayrollReportService payrollReportService)
     : ApiControllerBase
 {
     [HttpGet]
@@ -47,6 +50,20 @@ public sealed class PayrollEntriesController(
         CancellationToken cancellationToken)
     {
         var result = await payrollEntryService.GetDashboardAsync(filters, cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [HttpGet("report")]
+    [ProducesResponseType<PayrollReportResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetReport(
+        [FromQuery] PayrollPeriodReportByDateRangeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await payrollReportService.BuildReportAsync(
+            request.StartDate,
+            request.EndDate,
+            cancellationToken);
         return this.ToActionResult(result);
     }
 

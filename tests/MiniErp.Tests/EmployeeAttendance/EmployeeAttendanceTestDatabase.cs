@@ -54,6 +54,7 @@ internal sealed class EmployeeAttendanceTestDatabase : IAsyncDisposable
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
         await context.Database.EnsureCreatedAsync();
+        await context.Database.ExecuteSqlRawAsync("DROP TABLE IF EXISTS Companies; CREATE TABLE Companies (Id INTEGER PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL, Address TEXT NOT NULL, CommercialRegister TEXT NOT NULL, TaxNumber TEXT NOT NULL, ManagerName TEXT NOT NULL, RowVersion BLOB NOT NULL DEFAULT (X'0102030405060708'), CreatedById TEXT NOT NULL DEFAULT '', CreatedOn TEXT NOT NULL DEFAULT '2026-01-01', CreatedByPc TEXT NOT NULL DEFAULT '', UpdatedById TEXT NULL, UpdatedOn TEXT NULL, UpdatedByPc TEXT NULL, DeletedById TEXT NULL, DeletedOn TEXT NULL, DeletedByPc TEXT NULL, IsDeleted INTEGER NOT NULL DEFAULT 0);");
         await SeedDataAsync(context, companyId);
 
         return new EmployeeAttendanceTestDatabase(connection, serviceProvider, scope, context);
@@ -70,8 +71,8 @@ internal sealed class EmployeeAttendanceTestDatabase : IAsyncDisposable
             TaxNumber = "67890",
             ManagerName = "Test Manager"
         };
-        typeof(Company).GetProperty("RowVersion")?.SetValue(company, new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 });
         context.Companies.Add(company);
+        context.Entry(company).Property(c => c.RowVersion).CurrentValue = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 };
 
         var emp1 = new Employee
         {

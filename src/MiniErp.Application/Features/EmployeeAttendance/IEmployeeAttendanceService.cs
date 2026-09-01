@@ -38,4 +38,8 @@ public interface IEmployeeAttendanceService
     Task<Result> DeleteBulkAsync(
         BulkEmployeeAttendanceDeleteRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<Result<EmployeeAttendanceReportResponse>> GetReportAsync(
+        EmployeeAttendanceReportRequest request,
+        CancellationToken cancellationToken = default);
 }

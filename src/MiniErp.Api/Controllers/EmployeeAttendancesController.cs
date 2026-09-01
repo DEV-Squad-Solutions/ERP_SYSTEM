@@ -27,6 +27,19 @@ public sealed class EmployeeAttendancesController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("report")]
+    [ProducesResponseType<EmployeeAttendanceReportResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetReport(
+        [FromQuery] EmployeeAttendanceReportRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await employeeAttendanceService.GetReportAsync(
+            request,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("{id:int}")]
     [ProducesResponseType<EmployeeAttendanceResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

@@ -71,6 +71,78 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
         await context.Database.EnsureCreatedAsync();
+        await context.Database.ExecuteSqlRawAsync("""
+            DROP TABLE IF EXISTS Companies;
+            CREATE TABLE Companies (Id INTEGER PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL, Address TEXT NOT NULL, CommercialRegister TEXT NOT NULL, TaxNumber TEXT NOT NULL, ManagerName TEXT NOT NULL, RowVersion BLOB NOT NULL DEFAULT (randomblob(8)), CreatedById TEXT NOT NULL DEFAULT '', CreatedOn TEXT NOT NULL DEFAULT '2026-01-01', CreatedByPc TEXT NOT NULL DEFAULT '', UpdatedById TEXT NULL, UpdatedOn TEXT NULL, UpdatedByPc TEXT NULL, DeletedById TEXT NULL, DeletedOn TEXT NULL, DeletedByPc TEXT NULL, IsDeleted INTEGER NOT NULL DEFAULT 0);
+
+            DROP TABLE IF EXISTS Cashboxes;
+            CREATE TABLE Cashboxes (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                Code TEXT NOT NULL COLLATE NOCASE,
+                Name TEXT NOT NULL COLLATE NOCASE,
+                Currency INTEGER NOT NULL,
+                OpeningBalance NUMERIC NOT NULL,
+                OpeningBalanceDate TEXT NOT NULL DEFAULT '2026-01-01',
+                OpeningExchangeRateId INTEGER NULL,
+                OpeningExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                BaseOpeningBalance NUMERIC NOT NULL DEFAULT 0,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                Notes TEXT NULL,
+                RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                CreatedById TEXT NOT NULL DEFAULT '',
+                CreatedOn TEXT NOT NULL DEFAULT '2026-01-01',
+                CreatedByPc TEXT NOT NULL DEFAULT '',
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL DEFAULT 0
+            );
+
+            DROP TABLE IF EXISTS CashVouchers;
+            CREATE TABLE CashVouchers (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                InvoiceId INTEGER NULL,
+                CashboxTransferId INTEGER NULL,
+                VoucherNumber TEXT NOT NULL COLLATE NOCASE,
+                VoucherDate TEXT NOT NULL,
+                Direction INTEGER NOT NULL,
+                CashboxId INTEGER NULL,
+                CashMovementTypeId INTEGER NULL,
+                AccountId INTEGER NULL,
+                PartyType INTEGER NOT NULL,
+                EmployeeId INTEGER NULL,
+                BusinessPartnerId INTEGER NULL,
+                DriverId INTEGER NULL,
+                DriverTripId INTEGER NULL,
+                ExternalPartyName TEXT NULL,
+                Amount NUMERIC NOT NULL,
+                Currency INTEGER NOT NULL,
+                ExchangeRateId INTEGER NULL,
+                ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                BaseAmount NUMERIC NOT NULL DEFAULT 0,
+                IsPosted INTEGER NOT NULL DEFAULT 0,
+                ReferenceNumber TEXT NULL,
+                Description TEXT NULL,
+                Notes TEXT NULL,
+                LastModifiedAt TEXT NOT NULL DEFAULT '2026-01-01',
+                RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                CreatedById TEXT NOT NULL DEFAULT '',
+                CreatedOn TEXT NOT NULL DEFAULT '2026-01-01',
+                CreatedByPc TEXT NOT NULL DEFAULT '',
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL DEFAULT 0
+            );
+        """);
         await SeedRequiredDataAsync(context, companyId);
 
         return new PayrollEntryTestDatabase(
@@ -91,8 +163,8 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
             TaxNumber = $"TAX-{companyId}",
             ManagerName = "Manager"
         };
-        typeof(Company).GetProperty("RowVersion")?.SetValue(company, new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 });
         context.Companies.Add(company);
+        context.Entry(company).Property(c => c.RowVersion).CurrentValue = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 };
 
         var cashbox = new Cashbox
         {

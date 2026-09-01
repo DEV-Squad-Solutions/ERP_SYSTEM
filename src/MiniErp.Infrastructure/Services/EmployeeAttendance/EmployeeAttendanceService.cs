@@ -86,7 +86,7 @@ public  sealed partial class EmployeeAttendanceService(
         int id,
         CancellationToken cancellationToken = default)
     {
-        if(id <= 0)
+        if (id <= 0)
         {
             return Result<EmployeeAttendanceResponse>.Failure(
                 Error.Validation(
@@ -95,7 +95,11 @@ public  sealed partial class EmployeeAttendanceService(
         }
 
         var attendance = await dbContext.EmployeeAttendances
-            .AsNoTracking().FirstOrDefaultAsync(employeeAttendance => employeeAttendance.Id == id && employeeAttendance.CompanyId == companyId, cancellationToken);
+            .AsNoTracking()
+            .Include(a => a.Employee)
+            .FirstOrDefaultAsync(
+                employeeAttendance => employeeAttendance.Id == id && employeeAttendance.CompanyId == companyId,
+                cancellationToken);
 
         if (attendance is null)
         {
@@ -107,20 +111,20 @@ public  sealed partial class EmployeeAttendanceService(
 
         return Result<EmployeeAttendanceResponse>.Success(
             new EmployeeAttendanceResponse(
-                attendance.Id,
-                attendance.CompanyId,
-                attendance.EmployeeId,
-                attendance.Employee.Name,
-                attendance.Status,
-                attendance.WorkDate,
-                attendance.CheckIn,
-                attendance.CheckOut,
-                attendance.WorkHours,
-                attendance.WorkDayRatio,
-                attendance.WorkOverTimeRatio,
-                attendance.WorkDaysDeductionRatio,
-                attendance.WorkLocation,
-                attendance.Notes));
+                Id: attendance.Id,
+                CompanyId: attendance.CompanyId,
+                EmployeeId: attendance.EmployeeId,
+                EmployeeName: attendance.Employee.Name,
+                Status: attendance.Status,
+                WorkDate: attendance.WorkDate,
+                CheckIn: attendance.CheckIn,
+                CheckOut: attendance.CheckOut,
+                WorkHours: attendance.WorkHours,
+                WorkDayRatio: attendance.WorkDayRatio,
+                WorkOverTimeRatio: attendance.WorkOverTimeRatio,
+                WorkDaysDeductionRatio: attendance.WorkDaysDeductionRatio,
+                WorkLocation: attendance.WorkLocation,
+                Notes: attendance.Notes));
     }
 
     public async Task<Result<EmployeeAttendanceResponse>> AddAsync(
@@ -132,6 +136,7 @@ public  sealed partial class EmployeeAttendanceService(
         {
             return Result<EmployeeAttendanceResponse>.Failure(validationError);
         }
+
         var employee = await dbContext.Employees
             .FirstOrDefaultAsync(e => e.Id == request.EmployeeId && e.CompanyId == companyId, cancellationToken);
 
@@ -164,20 +169,20 @@ public  sealed partial class EmployeeAttendanceService(
 
         return Result<EmployeeAttendanceResponse>.Success(
             new EmployeeAttendanceResponse(
-                attendance.Id,
-                attendance.CompanyId,
-                attendance.EmployeeId,
-                employee.Name,
-                attendance.Status,
-                attendance.WorkDate,
-                attendance.CheckIn,
-                attendance.CheckOut,
-                attendance.WorkHours,
-                attendance.WorkDayRatio,
-                attendance.WorkOverTimeRatio,
-                attendance.WorkDaysDeductionRatio,
-                attendance.WorkLocation,
-                attendance.Notes));
+                Id: attendance.Id,
+                CompanyId: attendance.CompanyId,
+                EmployeeId: attendance.EmployeeId,
+                EmployeeName: employee.Name,
+                Status: attendance.Status,
+                WorkDate: attendance.WorkDate,
+                CheckIn: attendance.CheckIn,
+                CheckOut: attendance.CheckOut,
+                WorkHours: attendance.WorkHours,
+                WorkDayRatio: attendance.WorkDayRatio,
+                WorkOverTimeRatio: attendance.WorkOverTimeRatio,
+                WorkDaysDeductionRatio: attendance.WorkDaysDeductionRatio,
+                WorkLocation: attendance.WorkLocation,
+                Notes: attendance.Notes));
     }
 
     public async Task<Result<EmployeeAttendanceResponse>> UpdateAsync(
@@ -190,7 +195,9 @@ public  sealed partial class EmployeeAttendanceService(
         {
             return Result<EmployeeAttendanceResponse>.Failure(validationError);
         }
+
         var attendance = await dbContext.EmployeeAttendances
+            .Include(a => a.Employee)
             .FirstOrDefaultAsync(a => a.Id == id && a.CompanyId == companyId, cancellationToken);
 
         if (attendance is null)
@@ -201,9 +208,10 @@ public  sealed partial class EmployeeAttendanceService(
                     "لم يتم العثور على سجل الحضور المطلوب."));
         }
 
+        var employeeName = attendance.Employee.Name;
         if (attendance.EmployeeId != request.EmployeeId)
         {
-            var employee = await dbContext.Employees.Select(employee => new { employee.Id, employee.CompanyId, employee.Name })
+            var employee = await dbContext.Employees
                 .FirstOrDefaultAsync(e => e.Id == request.EmployeeId && e.CompanyId == companyId, cancellationToken);
 
             if (employee is null)
@@ -213,6 +221,8 @@ public  sealed partial class EmployeeAttendanceService(
                         "Employee.NotFound",
                         "الموظف المحدد غير موجود."));
             }
+
+            employeeName = employee.Name;
         }
 
         attendance.EmployeeId = request.EmployeeId;
@@ -243,20 +253,20 @@ public  sealed partial class EmployeeAttendanceService(
 
         return Result<EmployeeAttendanceResponse>.Success(
             new EmployeeAttendanceResponse(
-                attendance.Id,
-                attendance.CompanyId,
-                attendance.EmployeeId,
-                attendance.Employee.Name,
-                attendance.Status,
-                attendance.WorkDate,
-                attendance.CheckIn,
-                attendance.CheckOut,
-                attendance.WorkHours,
-                attendance.WorkDayRatio,
-                attendance.WorkOverTimeRatio,
-                attendance.WorkDaysDeductionRatio,
-                attendance.WorkLocation,
-                attendance.Notes));
+                Id: attendance.Id,
+                CompanyId: attendance.CompanyId,
+                EmployeeId: attendance.EmployeeId,
+                EmployeeName: employeeName,
+                Status: attendance.Status,
+                WorkDate: attendance.WorkDate,
+                CheckIn: attendance.CheckIn,
+                CheckOut: attendance.CheckOut,
+                WorkHours: attendance.WorkHours,
+                WorkDayRatio: attendance.WorkDayRatio,
+                WorkOverTimeRatio: attendance.WorkOverTimeRatio,
+                WorkDaysDeductionRatio: attendance.WorkDaysDeductionRatio,
+                WorkLocation: attendance.WorkLocation,
+                Notes: attendance.Notes));
     }
 
     public async Task<Result> DeleteAsync(
@@ -512,6 +522,81 @@ public  sealed partial class EmployeeAttendanceService(
 
         return Result.Success();
     }
+
+    public async Task<Result<EmployeeAttendanceReportResponse>> GetReportAsync(
+        EmployeeAttendanceReportRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.StartDate > request.EndDate)
+        {
+            return Result<EmployeeAttendanceReportResponse>.Failure(
+                Error.Validation(
+                    "EmployeeAttendance.InvalidDateRange",
+                    "تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية."));
+        }
+
+        var query = dbContext.EmployeeAttendances
+            .AsNoTracking()
+            .Where(a => a.CompanyId == companyId &&
+                        a.WorkDate >= request.StartDate &&
+                        a.WorkDate <= request.EndDate);
+
+        if (request.EmployeeId.HasValue)
+        {
+            query = query.Where(a => a.EmployeeId == request.EmployeeId.Value);
+        }
+
+        var attendances = await query
+            .Select(a => new
+            {
+                a.EmployeeId,
+                a.Employee.Code,
+                a.Employee.Name,
+                a.Status,
+                a.WorkDayRatio,
+                a.WorkOverTimeRatio,
+                a.WorkDaysDeductionRatio
+            })
+            .ToListAsync(cancellationToken);
+
+        var employeeGroups = attendances
+            .GroupBy(a => (a.EmployeeId, a.Code, a.Name))
+            .Select(g => new EmployeeAttendanceReportLine(
+                EmployeeId: g.Key.EmployeeId,
+                EmployeeCode: g.Key.Code,
+                EmployeeName: g.Key.Name,
+                PresentDays: g.Count(a => a.Status == EmployeeAttendanceStatus.Present),
+                AbsentDays: g.Count(a => a.Status == EmployeeAttendanceStatus.Absent),
+                WorkedUnits: g.Where(a => a.Status == EmployeeAttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkDayRatio)),
+                OvertimeUnits: g.Where(a => a.Status == EmployeeAttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkOverTimeRatio)),
+                DeductionUnits: g.Where(a => a.Status == EmployeeAttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkDaysDeductionRatio))))
+            .OrderBy(e => e.EmployeeName)
+            .ToList();
+
+        var response = new EmployeeAttendanceReportResponse(
+            StartDate: request.StartDate,
+            EndDate: request.EndDate,
+            TotalEmployees: employeeGroups.Count,
+            TotalPresentDays: employeeGroups.Sum(e => e.PresentDays),
+            TotalAbsentDays: employeeGroups.Sum(e => e.AbsentDays),
+            TotalWorkedUnits: employeeGroups.Sum(e => e.WorkedUnits),
+            TotalOvertimeUnits: employeeGroups.Sum(e => e.OvertimeUnits),
+            TotalDeductionUnits: employeeGroups.Sum(e => e.DeductionUnits),
+            Employees: employeeGroups);
+
+        return Result<EmployeeAttendanceReportResponse>.Success(response);
+    }
+
+    private static decimal GetRatioValue(WorkDayRatio? ratio) =>
+        ratio switch
+        {
+            WorkDayRatio.FullDay         => 1m,
+            WorkDayRatio.ThreeQuarterDay => 0.75m,
+            WorkDayRatio.HalfDay         => 0.5m,
+            WorkDayRatio.ThirdDay        => 1m / 3m,
+            WorkDayRatio.QuarterDay      => 0.25m,
+            _                            => 0m
+        };
 
     private static TimeOnly? CalculateWorkHours(TimeOnly? checkIn, TimeOnly? checkOut)
     {
