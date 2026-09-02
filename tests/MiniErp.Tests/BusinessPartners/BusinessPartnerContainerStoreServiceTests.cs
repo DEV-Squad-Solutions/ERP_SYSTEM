@@ -71,6 +71,28 @@ public sealed class BusinessPartnerContainerStoreServiceTests
     }
 
     [Fact]
+    public async Task GetAll_FiltersBySpecialFlag()
+    {
+        await using var database =
+            await BusinessPartnerContainerStoreTestDatabase.CreateAsync();
+        await database.SetSpecialAsync(1, isSpecial: true);
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.GetAllAsync(
+            new PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new BusinessPartnerFilterRequest(Special: true));
+
+        Assert.True(result.IsSuccess);
+        var partner = Assert.Single(result.Value.Items);
+        Assert.Equal(1, partner.Id);
+        Assert.True(partner.Special);
+    }
+
+    [Fact]
     public async Task GetById_WorkspaceIncludesInactiveAssignedContainer()
     {
         await using var database =
@@ -385,6 +407,10 @@ public sealed class BusinessPartnerContainerStoreServiceTests
             Context.Database.ExecuteSqlInterpolatedAsync(
                 $"UPDATE BusinessPartners SET TaxNumber = {taxNumber} WHERE Id = 1");
 
+        public Task SetSpecialAsync(int id, bool isSpecial) =>
+            Context.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE BusinessPartners SET Special = {isSpecial} WHERE Id = {id}");
+
         public async ValueTask DisposeAsync()
         {
             await Context.DisposeAsync();
@@ -408,6 +434,7 @@ public sealed class BusinessPartnerContainerStoreServiceTests
                     Currency INTEGER NOT NULL,
                     CreditLimit NUMERIC NOT NULL,
                     IsActive INTEGER NOT NULL,
+                    Special INTEGER NOT NULL DEFAULT 0,
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
                     CreatedByPc TEXT NOT NULL,

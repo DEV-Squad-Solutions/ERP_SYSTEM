@@ -1,0 +1,338 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using MiniErp.Application.Common.Abstractions;
+using MiniErp.Application.Common.Mappings;
+using MiniErp.Application.Common.Models;
+using MiniErp.Application.Features.FiscalYears;
+using MiniErp.Domain.Enums;
+using MiniErp.Infrastructure;
+using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Persistence.Interceptors;
+using MiniErp.Infrastructure.Services.FiscalYears;
+using MiniErp.Infrastructure.Services.Pagination;
+
+namespace MiniErp.Tests.FiscalYears;
+
+public sealed class FiscalYearServiceTests
+{
+    static FiscalYearServiceTests()
+    {
+        MappingConfiguration.Register(
+            typeof(InfrastructureAssemblyMarker).Assembly);
+    }
+
+    [Fact]
+    public async Task Add_TrimsNameAndMakesFirstYearCurrent()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.AddAsync(
+            new FiscalYearRequest(
+                "  2026  ",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("2026", result.Value.Name);
+        Assert.Equal(FiscalYearStatus.Open, result.Value.Status);
+        Assert.True(result.Value.IsCurrent);
+    }
+
+    [Fact]
+    public async Task Add_RejectsOverlappingPeriodInSameCompany()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+
+        var first = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+        var overlapping = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026/2027",
+                new DateOnly(2026, 12, 1),
+                new DateOnly(2027, 11, 30),
+                IsCurrent: false));
+
+        Assert.True(first.IsSuccess);
+        Assert.True(overlapping.IsFailure);
+        Assert.Equal(
+            "FiscalYears.DateRangeOverlaps",
+            overlapping.Error.Code);
+    }
+
+    [Fact]
+    public async Task CurrentYear_IsScopedPerCompanyAndCanBeSwitched()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var companyOne = database.CreateService(companyId: 1);
+        var companyTwo = database.CreateService(companyId: 2);
+
+        var first = await companyOne.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+        var second = await companyOne.AddAsync(
+            new FiscalYearRequest(
+                "2027",
+                new DateOnly(2027, 1, 1),
+                new DateOnly(2027, 12, 31),
+                IsCurrent: true));
+        var otherCompany = await companyTwo.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+
+        Assert.True(first.IsSuccess);
+        Assert.True(second.IsSuccess);
+        Assert.True(otherCompany.IsSuccess);
+        Assert.False((await companyOne.GetByIdAsync(first.Value.Id)).Value.IsCurrent);
+        Assert.True((await companyOne.GetCurrentAsync()).Value.Id == second.Value.Id);
+        Assert.True((await companyTwo.GetCurrentAsync()).Value.Id == otherCompany.Value.Id);
+    }
+
+    [Fact]
+    public async Task Update_UsesRowVersionAndClosedYearCannotBeModified()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var added = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+
+        var closed = await service.CloseAsync(added.Value.Id);
+        var update = await service.UpdateAsync(
+            added.Value.Id,
+            new FiscalYearUpdateRequest(
+                "2026 Updated",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31),
+                true,
+                closed.Value.RowVersion));
+
+        Assert.True(closed.IsSuccess);
+        Assert.Equal(FiscalYearStatus.Closed, closed.Value.Status);
+        Assert.True(update.IsFailure);
+        Assert.Equal(
+            "FiscalYears.ClosedCannotBeModified",
+            update.Error.Code);
+    }
+
+    [Fact]
+    public async Task Reopen_ReturnsOpenYearAndDeleteBlocksCurrentYear()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var added = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+
+        var closed = await service.CloseAsync(added.Value.Id);
+        database.ClearTracking();
+        var reopened = await service.ReopenAsync(added.Value.Id);
+        var delete = await service.DeleteAsync(added.Value.Id);
+
+        Assert.True(closed.IsSuccess);
+        Assert.True(reopened.IsSuccess);
+        Assert.Equal(FiscalYearStatus.Open, reopened.Value.Status);
+        Assert.Null(reopened.Value.ClosedOn);
+        Assert.True(delete.IsFailure);
+        Assert.Equal(
+            "FiscalYears.CurrentCannotBeDeleted",
+            delete.Error.Code);
+    }
+
+    [Fact]
+    public async Task OtherCompanyYear_IsNotVisibleOrMutable()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var otherCompany = database.CreateService(companyId: 2);
+        var added = await otherCompany.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+
+        var get = await service.GetByIdAsync(added.Value.Id);
+        var close = await service.CloseAsync(added.Value.Id);
+        var delete = await service.DeleteAsync(added.Value.Id);
+
+        Assert.Equal("FiscalYears.NotFound", get.Error.Code);
+        Assert.Equal("FiscalYears.NotFound", close.Error.Code);
+        Assert.Equal("FiscalYears.NotFound", delete.Error.Code);
+    }
+
+    [Fact]
+    public void UpdateValidator_RequiresEightByteRowVersion()
+    {
+        var validator = new FiscalYearUpdateRequestValidator();
+        var result = validator.Validate(
+            new FiscalYearUpdateRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31),
+                true,
+                [1, 2]));
+
+        Assert.Contains(
+            result.Errors,
+            error =>
+                error.PropertyName ==
+                nameof(FiscalYearUpdateRequest.RowVersion));
+    }
+
+    [Fact]
+    public async Task PeriodGuard_AllowsOpenYearAndRejectsClosedOrUncoveredDates()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var guard = database.CreateGuard(companyId: 1);
+
+        var uncovered = await guard.EnsureOpenAsync(
+            new DateOnly(2025, 12, 31),
+            "InvoiceDate");
+
+        var added = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+        var open = await guard.EnsureOpenAsync(
+            new DateOnly(2026, 6, 1),
+            "InvoiceDate");
+
+        await service.CloseAsync(added.Value.Id);
+        var closed = await guard.EnsureOpenAsync(
+            new DateOnly(2026, 6, 1),
+            "InvoiceDate");
+
+        Assert.True(uncovered.IsFailure);
+        Assert.Equal("FiscalYears.DateNotCovered", uncovered.Error.Code);
+        Assert.True(added.IsSuccess);
+        Assert.True(open.IsSuccess);
+        Assert.True(closed.IsFailure);
+        Assert.Equal("FiscalYears.Closed", closed.Error.Code);
+        Assert.Equal("InvoiceDate", closed.Error.FieldName);
+    }
+
+    private sealed class FiscalYearTestDatabase : IAsyncDisposable
+    {
+        private FiscalYearTestDatabase(
+            SqliteConnection connection,
+            ApplicationDbContext context)
+        {
+            Connection = connection;
+            Context = context;
+        }
+
+        private SqliteConnection Connection { get; }
+
+        private ApplicationDbContext Context { get; }
+
+        public static async Task<FiscalYearTestDatabase> CreateAsync()
+        {
+            var connection = new SqliteConnection("Data Source=:memory:");
+            await connection.OpenAsync();
+
+            var auditInterceptor = new AuditableEntityInterceptor(
+                new HttpContextAccessor(),
+                TimeProvider.System);
+            var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseSqlite(connection)
+                .AddInterceptors(auditInterceptor)
+                .Options;
+            var context = new ApplicationDbContext(options);
+
+            await CreateSchemaAsync(context);
+
+            return new FiscalYearTestDatabase(connection, context);
+        }
+
+        public FiscalYearService CreateService(int companyId) =>
+            new(
+                Context,
+                new PaginationService(),
+                new TestCurrentCompanyContext(companyId),
+                TimeProvider.System);
+
+        public IFiscalYearPeriodGuard CreateGuard(int companyId) =>
+            new FiscalYearPeriodGuard(
+                Context,
+                new TestCurrentCompanyContext(companyId));
+
+        public void ClearTracking() => Context.ChangeTracker.Clear();
+
+        public async ValueTask DisposeAsync()
+        {
+            await Context.DisposeAsync();
+            await Connection.DisposeAsync();
+        }
+
+        private static Task CreateSchemaAsync(ApplicationDbContext context) =>
+            context.Database.ExecuteSqlRawAsync(
+                """
+                PRAGMA foreign_keys = ON;
+
+                CREATE TABLE Companies (
+                    Id INTEGER PRIMARY KEY,
+                    Name TEXT NULL
+                );
+
+                CREATE TABLE FiscalYears (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    Name TEXT NOT NULL,
+                    StartDate TEXT NOT NULL,
+                    EndDate TEXT NOT NULL,
+                    Status INTEGER NOT NULL,
+                    IsCurrent INTEGER NOT NULL DEFAULT 0,
+                    ClosedOn TEXT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (CompanyId) REFERENCES Companies (Id)
+                );
+
+                CREATE UNIQUE INDEX UX_FiscalYears_Company_Name
+                ON FiscalYears (CompanyId, Name)
+                WHERE IsDeleted = 0;
+
+                CREATE UNIQUE INDEX UX_FiscalYears_Company_Current
+                ON FiscalYears (CompanyId, IsCurrent)
+                WHERE IsCurrent = 1 AND IsDeleted = 0;
+
+                CREATE TRIGGER AdvanceFiscalYearRowVersion
+                AFTER UPDATE ON FiscalYears
+                BEGIN
+                    UPDATE FiscalYears
+                    SET RowVersion = randomblob(8)
+                    WHERE Id = NEW.Id;
+                END;
+
+                INSERT INTO Companies (Id, Name)
+                VALUES (1, 'Company 1'), (2, 'Company 2');
+                """);
+
+        private sealed record TestCurrentCompanyContext(int CompanyId)
+            : ICurrentCompanyContext;
+    }
+}

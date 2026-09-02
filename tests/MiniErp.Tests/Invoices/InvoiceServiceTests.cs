@@ -5965,6 +5965,19 @@ public sealed class InvoiceServiceTests
                     FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
                 );
 
+                CREATE TABLE Accounts (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    Code TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    AccountType INTEGER NOT NULL,
+                    NormalBalance INTEGER NOT NULL,
+                    IsPosting INTEGER NOT NULL,
+                    IsActive INTEGER NOT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    IsDeleted INTEGER NOT NULL
+                );
+
                 CREATE TABLE BusinessPartners (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
@@ -5973,6 +5986,7 @@ public sealed class InvoiceServiceTests
                     Currency INTEGER NOT NULL,
                     CreditLimit NUMERIC NOT NULL,
                     IsActive INTEGER NOT NULL,
+                    Special INTEGER NOT NULL DEFAULT 0,
                     IsDeleted INTEGER NOT NULL
                 );
 
@@ -6444,6 +6458,7 @@ public sealed class InvoiceServiceTests
                     Direction INTEGER NOT NULL,
                     CashboxId INTEGER NOT NULL,
                     CashMovementTypeId INTEGER NOT NULL,
+                    AccountId INTEGER NULL,
                     PartyType INTEGER NOT NULL,
                     EmployeeId INTEGER NULL,
                     BusinessPartnerId INTEGER NULL,

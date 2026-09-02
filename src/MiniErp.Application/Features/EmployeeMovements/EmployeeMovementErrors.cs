@@ -44,6 +44,16 @@ public static class EmployeeMovementErrors
             "EmployeeMovements.ExchangeRateRequired",
             "سعر الصرف مطلوب ويجب أن يكون أكبر من صفر للعملات الأجنبية.");
 
+    public static Error CashboxMustBeEgp() =>
+        Error.Validation(
+            "EmployeeMovements.CashboxMustBeEgp",
+            "يجب أن تكون الخزينة المحددة لحركات الموظف بالجنيه المصري (EGP).");
+
+    public static Error InsufficientCashboxBalance(int cashboxId) =>
+        Error.Conflict(
+            "CashVouchers.InsufficientBalance",
+            $"Cashbox {cashboxId} does not have enough balance.");
+
     public static Error InvalidAmount() =>
         Error.Validation(
             "EmployeeMovements.InvalidAmount",

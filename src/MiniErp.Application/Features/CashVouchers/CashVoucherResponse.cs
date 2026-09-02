@@ -48,4 +48,12 @@ public sealed record CashVoucherResponse(
     public decimal? AppliedBaseAmount { get; init; }
 
     public decimal? RealizedExchangeDifference { get; init; }
+
+    public int? AccountId { get; init; }
+
+    public string? AccountCode { get; init; }
+
+    public string? AccountName { get; init; }
+
+    public AccountType? AccountType { get; init; }
 }

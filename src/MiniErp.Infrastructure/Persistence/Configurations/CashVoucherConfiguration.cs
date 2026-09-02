@@ -44,6 +44,9 @@ public sealed class CashVoucherConfiguration
                     "CK_CashVouchers_PostingReferencesTogether",
                     "[CashMovementTypeId] IS NULL OR [CashboxId] IS NOT NULL");
                 table.HasCheckConstraint(
+                    "CK_CashVouchers_AccountTargetShape",
+                    "[AccountId] IS NULL OR ([PartyType] = 1 AND [InvoiceId] IS NULL AND [CashboxTransferId] IS NULL)");
+                table.HasCheckConstraint(
                     "CK_CashVouchers_TransferShape",
                     "[CashboxTransferId] IS NULL OR " +
                     "([CashboxId] IS NOT NULL AND " +
@@ -109,6 +112,8 @@ public sealed class CashVoucherConfiguration
             .HasConversion<int>()
             .IsRequired();
 
+        builder.Property(voucher => voucher.AccountId);
+
         builder.Property(voucher => voucher.ExternalPartyName)
             .HasMaxLength(200);
 
@@ -169,6 +174,14 @@ public sealed class CashVoucherConfiguration
         {
             voucher.CompanyId,
             voucher.CashMovementTypeId,
+            voucher.VoucherDate,
+            voucher.Id
+        });
+
+        builder.HasIndex(voucher => new
+        {
+            voucher.CompanyId,
+            voucher.AccountId,
             voucher.VoucherDate,
             voucher.Id
         });
@@ -272,6 +285,21 @@ public sealed class CashVoucherConfiguration
             {
                 movementType.CompanyId,
                 movementType.Id
+            })
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(voucher => voucher.Account)
+            .WithMany(account => account.CashVouchers)
+            .HasForeignKey(voucher => new
+            {
+                voucher.CompanyId,
+                voucher.AccountId
+            })
+            .HasPrincipalKey(account => new
+            {
+                account.CompanyId,
+                account.Id
             })
             .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);

@@ -27,7 +27,7 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
             nameof(CashVouchersController.GetById) => (
                 "Get a cash voucher",
                 SwaggerOperationDescription.Create(
-                    "Returns one voucher with its draft status, optional cashbox, optional movement type, party, optional source invoice, transaction/base amounts, resolved exchange-rate snapshot, and concurrency token.",
+                    "Returns one voucher with its draft status, optional cashbox, optional movement descriptor, optional expense/revenue account, party, optional source invoice, transaction/base amounts, resolved exchange-rate snapshot, and concurrency token.",
                     "A positive route id.",
                     "Currency is the selected cashbox currency. When it matches baseCurrency, exchangeRate is 1 and baseAmount equals amount. Foreign-currency vouchers return the original amount/currency and its converted baseAmount/baseCurrency snapshot.",
                     "Missing or other-company vouchers return 404.")),
@@ -36,8 +36,8 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Returns the active business partners, drivers, employees, expenses, and revenues available to cash vouchers for the selected company.",
                     "No request parameters.",
-                    "Party collections contain id and name. expenses contain Payment movements classified Expense; revenues contain Receipt movements classified Revenue. Both contain id, name, and classification. Every collection is ordered by name then id. Active drivers remain available even when their license is expired.",
-                    "Cash movements with a partner effect, inactive records, and other-company records are excluded.")),
+                    "Party collections contain id and name. expenses and revenues contain active posting accounts with id, code, name, and accountType. Every collection is ordered by name then id. Active drivers remain available even when their license is expired.",
+                    "Expense accounts are used with Payment vouchers and revenue accounts with Receipt vouchers. Movement descriptors are loaded separately from CashMovementTypes/select.")),
             nameof(CashVouchersController.Create) => (
                 "Create a cash voucher",
                 SwaggerOperationDescription.Create(
@@ -50,14 +50,14 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Admin only. Applies up to 100 ordered Add, Update, and Delete cash-voucher items as one atomic transaction.",
                     "Each item uses action as its discriminator. Add accepts action and voucher; Update accepts action, id, original base64 rowVersion, and voucher; Delete accepts action, id, and original base64 rowVersion only. cashMovementTypeId is optional for Add and Update.",
-                    "The server generates voucher numbers and derives partyType from employeeId, businessPartnerId, driverId, or externalPartyName. A supplied cashMovementTypeId must be active, belong to the selected company, and match the voucher direction and party. Omitting it or sending null still creates or updates a completed, posted voucher with its normal cashbox and partner effects. An item cannot target an invoice-generated or cashbox-transfer-generated voucher. If any item fails, every item is rolled back.",
+                    "The server generates voucher numbers and derives partyType from employeeId, businessPartnerId, driverId, or externalPartyName. Select at most one posting target from those fields or accountId; cashMovementTypeId is an optional descriptor and must match the voucher direction. An accountId must be an active posting Expense account for Payment or Revenue account for Receipt. An item cannot target an invoice-generated or cashbox-transfer-generated voucher. If any item fails, every item is rolled back.",
                     "The response preserves request order and returns one result per request item, including the created or updated voucher; deleted items return voucher as null. Runtime failures identify their Items[index] location.")),
             nameof(CashVouchersController.Update) => (
                 "Update a cash voucher",
                 SwaggerOperationDescription.Create(
                     "Admin only. Replaces a manual draft or completed voucher and all derived effects, including its base-currency snapshot, atomically.",
-                    "All voucher fields plus the original base64 rowVersion. Voucher number is server-generated, immutable, and is not sent. Send exactly one posting target: employeeId, businessPartnerId, driverId, externalPartyName, or cashMovementTypeId. driverTripId is allowed only with driverId.",
-                    "An active cashbox is required. A cashMovementTypeId target must be an active non-partner type from the selected company and use the matching pair: Receipt with Revenue or Payment with Expense. A party target requires cashMovementTypeId to be null and still saves a completed, posted voucher with its normal cashbox and partner effects. For a foreign-currency cashbox, send exchangeRate or omit it to use the registered rate for the voucher date.",
+                    "All voucher fields plus the original base64 rowVersion. Voucher number is server-generated, immutable, and is not sent. Send exactly one posting target: employeeId, businessPartnerId, driverId, externalPartyName, or accountId. cashMovementTypeId is optional and can be sent with the target as an additional descriptor. driverTripId is allowed only with driverId.",
+                    "An active cashbox is required. An accountId must be an active posting Expense account for Payment or Revenue account for Receipt. A supplied cashMovementTypeId must be active and match the voucher direction. For a foreign-currency cashbox, send exchangeRate or omit it to use the registered rate for the voucher date.",
                     "A stale token returns CashVouchers.Concurrency. An invoice-generated voucher returns CashVouchers.InvoiceGeneratedReadOnly and must be changed through its invoice.")),
             nameof(CashVouchersController.Delete) => (
                 "Delete a cash voucher",

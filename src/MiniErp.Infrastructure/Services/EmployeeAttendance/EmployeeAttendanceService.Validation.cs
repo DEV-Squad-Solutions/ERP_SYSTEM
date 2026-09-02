@@ -1,4 +1,4 @@
-﻿using MiniErp.Application.Common.Results;
+using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.EmployeeAttendance;
 using MiniErp.Application.Features.Employees;
 using MiniErp.Domain.Enums;
@@ -71,36 +71,26 @@ namespace MiniErp.Infrastructure.Services.EmployeeAttendance
             if (filters.EmployeeId <= 0)
                 return Error.Validation(
                     "EmployeeAttendance.InvalidEmployeeId",
-                    "معرف الموظف غير صالح."
-                    , nameof(filters.EmployeeId));
+                    "معرف الموظف غير صالح.",
+                    nameof(filters.EmployeeId));
+
             if (filters.WorkDate == default)
                 return Error.Validation(
                     "EmployeeAttendance.InvalidWorkDate",
-                    "تاريخ العمل غير صالح."
-                    , nameof(filters.WorkDate));
-            if (filters.Status != null&& !Enum.IsDefined(typeof(EmployeeAttendanceStatus), filters.Status))
+                    "تاريخ العمل غير صالح.",
+                    nameof(filters.WorkDate));
+
+            if (filters.Status != null && !Enum.IsDefined(typeof(EmployeeAttendanceStatus), filters.Status))
                 return Error.Validation(
                     "EmployeeAttendance.InvalidStatus",
-                    "حالة الحضور المحددة غير صالحة."
-                    , nameof(filters.Status));
-            if (filters.Status == EmployeeAttendanceStatus.Present)
-            {
-                if (filters.CheckIn == null)
-                    return Error.Validation(
-                        "EmployeeAttendance.MissingCheckIn",
-                        "وقت تسجيل الدخول مفقود."
-                        , nameof(filters.CheckIn));
-                if (filters.CheckOut == null)
-                    return Error.Validation(
-                        "EmployeeAttendance.MissingCheckOut",
-                        "وقت تسجيل الخروج مفقود."
-                        , nameof(filters.CheckOut));
-            }
-            if(filters.CheckOut != null && filters.CheckIn != null && filters.CheckOut < filters.CheckIn)
+                    "حالة الحضور المحددة غير صالحة.",
+                    nameof(filters.Status));
+
+            if (filters.CheckOut != null && filters.CheckIn != null && filters.CheckOut < filters.CheckIn)
                 return Error.Validation(
                     "EmployeeAttendance.InvalidCheckOutTime",
-                    "وقت تسجيل الخروج يجب أن يكون بعد وقت تسجيل الدخول."
-                    , nameof(filters.CheckOut));
+                    "وقت تسجيل الخروج يجب أن يكون بعد وقت تسجيل الدخول.",
+                    nameof(filters.CheckOut));
 
             return null;
         }

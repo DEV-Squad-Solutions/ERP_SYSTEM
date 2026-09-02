@@ -92,6 +92,19 @@ public sealed class StatementsController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("trial-balance")]
+    [ProducesResponseType<TrialBalanceResponse>(
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetTrialBalance(
+        [FromQuery] TrialBalanceFilterRequest filters,
+        CancellationToken cancellationToken)
+    {
+        var result = await statementService.GetTrialBalanceAsync(
+            filters,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("employee")]
     [ProducesResponseType<EmployeeStatementResponse>(
         StatusCodes.Status200OK)]

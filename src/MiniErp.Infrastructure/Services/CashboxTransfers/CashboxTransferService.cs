@@ -18,7 +18,8 @@ public sealed class CashboxTransferService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     IExchangeRateResolver exchangeRateResolver,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     : ICashboxTransferService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -108,6 +109,19 @@ public sealed class CashboxTransferService(
             .BeginTransactionAsync(
                 IsolationLevel.Serializable,
                 cancellationToken);
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.TransferDate,
+                nameof(CashboxTransferRequest.TransferDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<CashboxTransferResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+        }
 
         var preparation = await PrepareAsync(
             request.TransferDate,
@@ -259,6 +273,29 @@ public sealed class CashboxTransferService(
             return Result<CashboxTransferResponse>.Failure(Concurrency());
         }
 
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                transfer.TransferDate,
+                nameof(CashboxTransferRequest.TransferDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<CashboxTransferResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+
+            fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.TransferDate,
+                nameof(CashboxTransferUpdateRequest.TransferDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<CashboxTransferResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+        }
+
         if (!TryGetVoucherPair(
                 transfer.Vouchers,
                 out var paymentVoucher,
@@ -374,6 +411,18 @@ public sealed class CashboxTransferService(
         if (transfer is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                transfer.TransferDate,
+                nameof(CashboxTransferRequest.TransferDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result.Failure(fiscalYearResult.Errors);
+            }
         }
 
         if (!TryGetVoucherPair(

@@ -62,6 +62,9 @@ public sealed class BusinessPartnerConfiguration
         builder.Property(partner => partner.CreditLimit)
             .HasPrecision(18, 2);
 
+        builder.Property(partner => partner.Special)
+            .IsRequired();
+
         builder.HasOne(partner => partner.Company)
             .WithMany()
             .HasForeignKey(partner => partner.CompanyId)

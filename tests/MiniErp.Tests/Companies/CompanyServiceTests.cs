@@ -643,6 +643,7 @@ public sealed class CompanyServiceTests
                 CREATE TABLE BusinessPartners (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    Special INTEGER NOT NULL DEFAULT 0,
                     IsDeleted INTEGER NOT NULL
                 );
 
@@ -687,6 +688,7 @@ public sealed class CompanyServiceTests
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
                     EmployeeId INTEGER NULL,
+                    AccountId INTEGER NULL,
                     CashboxTransferId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );

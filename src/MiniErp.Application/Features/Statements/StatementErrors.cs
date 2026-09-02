@@ -33,4 +33,11 @@ public static class StatementErrors
         Error.NotFound(
             "Statements.EmployeeNotFound",
             $"لم يتم العثور على الموظف رقم {id}.");
+
+    public static Error FiscalYearNotFound(int? id) =>
+        Error.NotFound(
+            "Statements.FiscalYearNotFound",
+            id.HasValue
+                ? $"لم يتم العثور على السنة المالية رقم {id.Value} أو لا تغطي الفترة المطلوبة."
+                : "لم يتم العثور على سنة مالية تغطي الفترة المطلوبة.");
 }

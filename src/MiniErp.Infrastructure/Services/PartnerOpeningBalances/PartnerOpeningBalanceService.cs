@@ -17,7 +17,8 @@ public sealed class PartnerOpeningBalanceService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
-    IExchangeRateResolver exchangeRateResolver)
+    IExchangeRateResolver exchangeRateResolver,
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     : IPartnerOpeningBalanceService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -86,6 +87,19 @@ public sealed class PartnerOpeningBalanceService(
             .BeginTransactionAsync(
                 IsolationLevel.Serializable,
                 cancellationToken);
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.DocumentDate,
+                nameof(PartnerOpeningBalanceRequest.DocumentDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<PartnerOpeningBalanceResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+        }
 
         var normalized = request.Adapt<PartnerOpeningBalance>();
 
@@ -173,6 +187,29 @@ public sealed class PartnerOpeningBalanceService(
             return Result<PartnerOpeningBalanceResponse>.Failure(Concurrency());
         }
 
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                openingBalance.DocumentDate,
+                nameof(PartnerOpeningBalanceRequest.DocumentDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<PartnerOpeningBalanceResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+
+            fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.DocumentDate,
+                nameof(PartnerOpeningBalanceUpdateRequest.DocumentDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<PartnerOpeningBalanceResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+        }
+
         var partnerError = await ValidateBusinessPartnerAsync(
             normalized.BusinessPartnerId,
             normalized.Currency,
@@ -245,6 +282,18 @@ public sealed class PartnerOpeningBalanceService(
         if (openingBalance is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                openingBalance.DocumentDate,
+                nameof(PartnerOpeningBalanceRequest.DocumentDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result.Failure(fiscalYearResult.Errors);
+            }
         }
 
         dbContext.PartnerOpeningBalances.Remove(openingBalance);

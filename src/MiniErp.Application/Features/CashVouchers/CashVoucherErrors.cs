@@ -83,10 +83,28 @@ public static class CashVoucherErrors
             "نوع الحركة النقدية للسند اليدوي يجب أن يكون إيراداً لسند القبض أو مصروفاً لسند الصرف وغير مرتبط بحساب عميل أو مورد.",
             nameof(CashVoucherUpdateRequest.CashMovementTypeId));
 
+    public static Error AccountNotFound(int id) =>
+        Error.NotFound(
+            "CashVouchers.AccountNotFound",
+            $"لم يتم العثور على الحساب رقم {id}.",
+            nameof(CashVoucherUpdateRequest.AccountId));
+
+    public static Error AccountInactiveOrNotPosting() =>
+        Error.Conflict(
+            "CashVouchers.AccountInactiveOrNotPosting",
+            "الحساب المختار يجب أن يكون فعالاً وتفصيلياً ويسمح بالتسجيل.",
+            nameof(CashVoucherUpdateRequest.AccountId));
+
+    public static Error AccountDirectionMismatch() =>
+        Error.Conflict(
+            "CashVouchers.AccountDirectionMismatch",
+            "اختر حساب مصروف لسند الصرف أو حساب إيراد لسند القبض.",
+            nameof(CashVoucherUpdateRequest.AccountId));
+
     public static Error PartySelectionMustBeExclusive() =>
         Error.Validation(
             "CashVouchers.PartySelectionMustBeExclusive",
-            "اختر طرفاً واحداً فقط للسند.");
+            "اختر طرفاً واحداً أو حساب مصروف أو إيراد واحداً فقط للسند.");
 
     public static Error DriverTripRequiresDriver() =>
         Error.Validation(

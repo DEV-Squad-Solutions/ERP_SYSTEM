@@ -60,6 +60,7 @@ public sealed class AuthenticationService(
         if (companies.Count > 1)
         {
             return Result<LoginResponse>.Success(new LoginResponse(
+                UserId: user.Id,
                 RequiresCompanySelection: true,
                 SelectionToken: CreateCompanySelectionToken(user),
                 AccessToken: null,
@@ -76,6 +77,7 @@ public sealed class AuthenticationService(
             cancellationToken);
 
         return Result<LoginResponse>.Success(new LoginResponse(
+            UserId: user.Id,
             RequiresCompanySelection: false,
             SelectionToken: null,
             AccessToken: tokenResult.Value.AccessToken,
@@ -233,7 +235,10 @@ public sealed class AuthenticationService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<TokenResponse>.Success(
-            new TokenResponse(accessToken, rawRefreshToken));
+            new TokenResponse(
+                UserId: user.Id,
+                AccessToken: accessToken,
+                RefreshToken: rawRefreshToken));
     }
 
     private async Task<string> CreateAccessTokenAsync(

@@ -17,3 +17,29 @@ public sealed record EmployeeAttendanceResponse(
     WorkDayRatio? WorkDaysDeductionRatio,
     string? WorkLocation,
     string? Notes);
+
+public sealed record EmployeeAttendanceReportRequest(
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int? EmployeeId = null);
+
+public sealed record EmployeeAttendanceReportLine(
+    int EmployeeId,
+    string EmployeeCode,
+    string EmployeeName,
+    int PresentDays,
+    int AbsentDays,
+    decimal WorkedUnits,
+    decimal OvertimeUnits,
+    decimal DeductionUnits);
+
+public sealed record EmployeeAttendanceReportResponse(
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int TotalEmployees,
+    int TotalPresentDays,
+    int TotalAbsentDays,
+    decimal TotalWorkedUnits,
+    decimal TotalOvertimeUnits,
+    decimal TotalDeductionUnits,
+    IReadOnlyList<EmployeeAttendanceReportLine> Employees);

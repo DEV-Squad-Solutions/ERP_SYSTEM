@@ -145,6 +145,7 @@ public sealed class InvoiceItemPricingServiceTests
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
                     Name TEXT NOT NULL,
+                    Special INTEGER NOT NULL DEFAULT 0,
                     IsDeleted INTEGER NOT NULL
                 );
 

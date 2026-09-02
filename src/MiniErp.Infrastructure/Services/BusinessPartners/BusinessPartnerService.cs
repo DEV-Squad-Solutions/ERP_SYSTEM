@@ -138,6 +138,11 @@ public sealed class BusinessPartnerService(
             query = query.Where(partner => partner.IsActive == filters.IsActive.Value);
         }
 
+        if (filters.Special.HasValue)
+        {
+            query = query.Where(partner => partner.Special == filters.Special.Value);
+        }
+
         return query;
     }
 

@@ -260,6 +260,7 @@ public sealed class BusinessPartnerIntegrityServiceTests
                     Currency INTEGER NOT NULL,
                     CreditLimit NUMERIC NOT NULL,
                     IsActive INTEGER NOT NULL,
+                    Special INTEGER NOT NULL DEFAULT 0,
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
                     CreatedByPc TEXT NOT NULL,
@@ -321,6 +322,7 @@ public sealed class BusinessPartnerIntegrityServiceTests
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
                     BusinessPartnerId INTEGER NULL,
+                    AccountId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );
                 """);

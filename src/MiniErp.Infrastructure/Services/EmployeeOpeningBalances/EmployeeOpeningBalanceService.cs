@@ -17,7 +17,8 @@ public sealed class EmployeeOpeningBalanceService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
-    IExchangeRateResolver exchangeRateResolver)
+    IExchangeRateResolver exchangeRateResolver,
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     : IEmployeeOpeningBalanceService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -95,6 +96,19 @@ public sealed class EmployeeOpeningBalanceService(
             .BeginTransactionAsync(
                 IsolationLevel.Serializable,
                 cancellationToken);
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.DocumentDate,
+                nameof(EmployeeOpeningBalanceRequest.DocumentDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<EmployeeOpeningBalanceResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+        }
 
         var normalized = request.Adapt<EmployeeOpeningBalance>();
 
@@ -194,6 +208,29 @@ public sealed class EmployeeOpeningBalanceService(
             return Result<EmployeeOpeningBalanceResponse>.Failure(Concurrency());
         }
 
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                openingBalance.DocumentDate,
+                nameof(EmployeeOpeningBalanceRequest.DocumentDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<EmployeeOpeningBalanceResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+
+            fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.DocumentDate,
+                nameof(EmployeeOpeningBalanceUpdateRequest.DocumentDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<EmployeeOpeningBalanceResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+        }
+
         if (normalized.Currency != CurrencyCode.EGP)
         {
             return Result<EmployeeOpeningBalanceResponse>.Failure(
@@ -271,6 +308,18 @@ public sealed class EmployeeOpeningBalanceService(
         if (openingBalance is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                openingBalance.DocumentDate,
+                nameof(EmployeeOpeningBalanceRequest.DocumentDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result.Failure(fiscalYearResult.Errors);
+            }
         }
 
         if (openingBalance.PayrollEntryId.HasValue)

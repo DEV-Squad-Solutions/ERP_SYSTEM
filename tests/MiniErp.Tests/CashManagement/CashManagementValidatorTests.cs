@@ -155,7 +155,7 @@ public sealed class CashManagementValidatorTests
     }
 
     [Fact]
-    public void UpdateAcceptsPartyWithNullMovementAndBulkStillAcceptsNoTarget()
+    public void UpdateAcceptsPartyWithNullMovementAndBulkRequiresTarget()
     {
         var updateResult = new CashVoucherUpdateRequestValidator().Validate(
             CreateVoucher(
@@ -174,7 +174,7 @@ public sealed class CashManagementValidatorTests
             });
 
         Assert.True(updateResult.IsValid);
-        Assert.True(bulkResult.IsValid);
+        Assert.False(bulkResult.IsValid);
     }
 
     [Theory]
@@ -251,7 +251,7 @@ public sealed class CashManagementValidatorTests
     }
 
     [Fact]
-    public void CashVoucherUpdateValidator_AcceptsMovementAsOnlyTarget()
+    public void CashVoucherUpdateValidator_RejectsMovementAsOnlyTarget()
     {
         var result = new CashVoucherUpdateRequestValidator().Validate(
             CreateVoucher(
@@ -261,11 +261,11 @@ public sealed class CashManagementValidatorTests
                 tripId: null,
                 externalPartyName: null));
 
-        Assert.True(result.IsValid);
+        Assert.False(result.IsValid);
     }
 
     [Fact]
-    public void CashVoucherUpdateValidator_RejectsNoTargetAndPartyWithMovement()
+    public void CashVoucherUpdateValidator_RejectsNoTargetAndAcceptsPartyWithDescriptor()
     {
         var noTarget = new CashVoucherUpdateRequestValidator().Validate(
             CreateVoucher(
@@ -292,10 +292,7 @@ public sealed class CashManagementValidatorTests
             noTarget.Errors,
             error => error.PropertyName ==
                 nameof(CashVoucherUpdateRequest.EmployeeId));
-        Assert.Contains(
-            partyAndMovement.Errors,
-            error => error.PropertyName ==
-                nameof(CashVoucherUpdateRequest.EmployeeId));
+        Assert.True(partyAndMovement.IsValid);
     }
 
     [Fact]

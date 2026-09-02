@@ -153,6 +153,673 @@ namespace MiniErp.Infrastructure.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.Account", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AccountType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsPosting")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("NormalBalance")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ParentAccountId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Accounts_Company_Code")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "ParentAccountId", "AccountType", "IsActive", "Code")
+                        .HasDatabaseName("IX_Accounts_Company_Hierarchy");
+
+                    b.ToTable("Accounts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Accounts_AccountType", "[AccountType] IN (1, 2, 3, 4, 5)");
+
+                            t.HasCheckConstraint("CK_Accounts_NormalBalance", "[NormalBalance] IN (1, 2)");
+                        });
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.AccountMapping", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AccountId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("MappingType")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int?>("SourceId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("CompanyId", "Id");
+
+                    b.HasIndex("CompanyId", "AccountId");
+
+                    b.HasIndex("CompanyId", "FiscalYearId", "AccountId")
+                        .HasDatabaseName("IX_AccountMappings_Scope_Account");
+
+                    b.HasIndex("CompanyId", "FiscalYearId", "MappingType", "SourceId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_AccountMappings_Scope_Type_Source")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("AccountMappings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountMappings_MappingType", "[MappingType] IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)");
+
+                            t.HasCheckConstraint("CK_AccountMappings_SourceShape", "(([MappingType] IN (1, 2) AND [SourceId] IS NOT NULL) OR ([MappingType] NOT IN (1, 2) AND [SourceId] IS NULL))");
+                        });
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.AccountStatementMapping", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AccountId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("FinancialStatementLineId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("StatementType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "AccountId");
+
+                    b.HasIndex("CompanyId", "FiscalYearId", "StatementType", "AccountId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_AccountStatementMappings_Scope_Account")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "FiscalYearId", "StatementType", "FinancialStatementLineId")
+                        .HasDatabaseName("IX_AccountStatementMappings_Line");
+
+                    b.ToTable("AccountStatementMappings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountStatementMappings_StatementType", "[StatementType] IN (1, 2, 3)");
+                        });
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.FinancialStatementLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("IsAssignable")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("ParentLineId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("StatementType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "FiscalYearId", "StatementType", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("UX_FinancialStatementLines_Scope_Code")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "FiscalYearId", "StatementType", "ParentLineId", "DisplayOrder", "Id")
+                        .HasDatabaseName("IX_FinancialStatementLines_Hierarchy");
+
+                    b.ToTable("FinancialStatementLines", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_FinancialStatementLines_StatementType", "[StatementType] IN (1, 2, 3)");
+                        });
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.FiscalYear", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("ClosedOn")
+                        .HasColumnType("datetime2(7)");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateOnly>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsCurrent")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "IsCurrent")
+                        .IsUnique()
+                        .HasDatabaseName("UX_FiscalYears_Company_Current")
+                        .HasFilter("[IsCurrent] = 1 AND [IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("UX_FiscalYears_Company_Name")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "StartDate", "EndDate", "Id")
+                        .HasDatabaseName("IX_FiscalYears_Company_DateRange");
+
+                    b.ToTable("FiscalYears", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_FiscalYears_DateRange", "[StartDate] < [EndDate]");
+
+                            t.HasCheckConstraint("CK_FiscalYears_Status", "[Status] IN (1, 2)");
+                        });
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.JournalEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateOnly>("EntryDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("EntryNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("EntryType")
+                        .HasColumnType("int");
+
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("PostedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ReversalOfEntryId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ReversedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "EntryNumber")
+                        .IsUnique()
+                        .HasDatabaseName("UX_JournalEntries_Company_Number")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "ReversalOfEntryId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_JournalEntries_Company_ReversalOf")
+                        .HasFilter("[ReversalOfEntryId] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "FiscalYearId", "EntryDate", "EntryType", "Status")
+                        .HasDatabaseName("IX_JournalEntries_Company_FiscalYear_Date");
+
+                    b.ToTable("JournalEntries", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_JournalEntries_EntryType", "[EntryType] IN (1, 2, 3)");
+
+                            t.HasCheckConstraint("CK_JournalEntries_NotSelfReversal", "[ReversalOfEntryId] IS NULL OR [ReversalOfEntryId] <> [Id]");
+
+                            t.HasCheckConstraint("CK_JournalEntries_ReversalState", "(([Status] = 1 AND [ReversedOn] IS NULL) OR ([Status] = 2 AND [ReversedOn] IS NOT NULL))");
+
+                            t.HasCheckConstraint("CK_JournalEntries_Status", "[Status] IN (1, 2)");
+                        });
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.JournalEntryLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AccountId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("Credit")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<decimal>("Debit")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("JournalEntryId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "AccountId", "JournalEntryId")
+                        .HasDatabaseName("IX_JournalEntryLines_Company_Account");
+
+                    b.HasIndex("CompanyId", "JournalEntryId", "Id")
+                        .HasDatabaseName("IX_JournalEntryLines_Company_Entry");
+
+                    b.ToTable("JournalEntryLines", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_JournalEntryLines_DebitCredit", "(([Debit] > 0 AND [Credit] = 0) OR ([Credit] > 0 AND [Debit] = 0))");
+                        });
+                });
+
             modelBuilder.Entity("MiniErp.Domain.Entities.BusinessPartners.BusinessPartner", b =>
                 {
                     b.Property<int>("Id")
@@ -222,6 +889,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Property<string>("PhoneNumber")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<bool>("Special")
+                        .HasColumnType("bit");
 
                     b.Property<string>("TaxNumber")
                         .HasMaxLength(100)
@@ -636,6 +1306,9 @@ namespace MiniErp.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AccountId")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("Amount")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
@@ -781,6 +1454,8 @@ namespace MiniErp.Infrastructure.Migrations
                         .IsUnique()
                         .HasFilter("[CashboxTransferId] IS NOT NULL AND [IsDeleted] = 0");
 
+                    b.HasIndex("CompanyId", "AccountId", "VoucherDate", "Id");
+
                     b.HasIndex("CompanyId", "BusinessPartnerId", "VoucherDate", "Id");
 
                     b.HasIndex("CompanyId", "CashMovementTypeId", "VoucherDate", "Id");
@@ -795,6 +1470,8 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.ToTable("CashVouchers", null, t =>
                         {
+                            t.HasCheckConstraint("CK_CashVouchers_AccountTargetShape", "[AccountId] IS NULL OR ([PartyType] = 1 AND [InvoiceId] IS NULL AND [CashboxTransferId] IS NULL)");
+
                             t.HasCheckConstraint("CK_CashVouchers_Amount_Positive", "[Amount] > 0");
 
                             t.HasCheckConstraint("CK_CashVouchers_Direction", "[Direction] IN (1, 2)");
@@ -4216,7 +4893,7 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.ToTable("PayrollEntries", null, t =>
                         {
-                            t.HasCheckConstraint("CK_PayrollEntries_Amounts_NonNegative", "([Overtimebydayunit] IS NULL OR [Overtimebydayunit] >= 0) AND ([Deductionbydayunit] IS NULL OR [Deductionbydayunit] >= 0) AND ([RequiredWorkingDays] IS NULL OR [RequiredWorkingDays] >= 0) AND ([Bonus] IS NULL OR [Bonus] >= 0) AND ([Deduction] IS NULL OR [Deduction] >= 0) AND ([SalaryPerDay] IS NULL OR [SalaryPerDay] >= 0) AND [CalculatedSalary] >= 0 AND [GrossSalary] >= 0 AND [NetSalary] >= 0");
+                            t.HasCheckConstraint("CK_PayrollEntries_Amounts_NonNegative", "([Overtimebydayunit] IS NULL OR [Overtimebydayunit] >= 0) AND ([Deductionbydayunit] IS NULL OR [Deductionbydayunit] >= 0) AND ([RequiredWorkingDays] IS NULL OR [RequiredWorkingDays] >= 0) AND ([Bonus] IS NULL OR [Bonus] >= 0) AND ([Deduction] IS NULL OR [Deduction] >= 0) AND ([SalaryPerDay] IS NULL OR [SalaryPerDay] >= 0) AND [CalculatedSalary] >= 0 AND [GrossSalary] >= 0 ");
 
                             t.HasCheckConstraint("CK_PayrollEntries_Dates", "[StartDate] <= [EndDate]");
 
@@ -4520,6 +5197,186 @@ namespace MiniErp.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.Account", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany("Accounts")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.Account", "ParentAccount")
+                        .WithMany("Children")
+                        .HasForeignKey("CompanyId", "ParentAccountId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Company");
+
+                    b.Navigation("ParentAccount");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.AccountMapping", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.Account", "Account")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "AccountId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Account");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("FiscalYear");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.AccountStatementMapping", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany("AccountStatementMappings")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.Account", "Account")
+                        .WithMany("StatementMappings")
+                        .HasForeignKey("CompanyId", "AccountId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany("AccountStatementMappings")
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FinancialStatementLine", "FinancialStatementLine")
+                        .WithMany("AccountMappings")
+                        .HasForeignKey("CompanyId", "FiscalYearId", "StatementType", "FinancialStatementLineId")
+                        .HasPrincipalKey("CompanyId", "FiscalYearId", "StatementType", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Account");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("FinancialStatementLine");
+
+                    b.Navigation("FiscalYear");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.FinancialStatementLine", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany("FinancialStatementLines")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany("FinancialStatementLines")
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FinancialStatementLine", "ParentLine")
+                        .WithMany("Children")
+                        .HasForeignKey("CompanyId", "FiscalYearId", "StatementType", "ParentLineId")
+                        .HasPrincipalKey("CompanyId", "FiscalYearId", "StatementType", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Company");
+
+                    b.Navigation("FiscalYear");
+
+                    b.Navigation("ParentLine");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.FiscalYear", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany("FiscalYears")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.JournalEntry", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "ReversalOfEntryId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Company");
+
+                    b.Navigation("FiscalYear");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.JournalEntryLine", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.Account", "Account")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "AccountId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.JournalEntry", "JournalEntry")
+                        .WithMany("Lines")
+                        .HasForeignKey("CompanyId", "JournalEntryId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Account");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("JournalEntry");
+                });
+
             modelBuilder.Entity("MiniErp.Domain.Entities.BusinessPartners.BusinessPartner", b =>
                 {
                     b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
@@ -4614,6 +5471,12 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.Account", "Account")
+                        .WithMany("CashVouchers")
+                        .HasForeignKey("CompanyId", "AccountId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("MiniErp.Domain.Entities.BusinessPartners.BusinessPartner", "BusinessPartner")
                         .WithMany()
                         .HasForeignKey("CompanyId", "BusinessPartnerId")
@@ -4667,6 +5530,8 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasForeignKey("CompanyId", "InvoiceId")
                         .HasPrincipalKey("CompanyId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Account");
 
                     b.Navigation("BusinessPartner");
 
@@ -5659,6 +6524,34 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.Account", b =>
+                {
+                    b.Navigation("CashVouchers");
+
+                    b.Navigation("Children");
+
+                    b.Navigation("StatementMappings");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.FinancialStatementLine", b =>
+                {
+                    b.Navigation("AccountMappings");
+
+                    b.Navigation("Children");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.FiscalYear", b =>
+                {
+                    b.Navigation("AccountStatementMappings");
+
+                    b.Navigation("FinancialStatementLines");
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.JournalEntry", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
             modelBuilder.Entity("MiniErp.Domain.Entities.CashManagement.CashMovementType", b =>
                 {
                     b.Navigation("Vouchers");
@@ -5691,6 +6584,14 @@ namespace MiniErp.Infrastructure.Migrations
 
             modelBuilder.Entity("MiniErp.Domain.Entities.Companies.Company", b =>
                 {
+                    b.Navigation("AccountStatementMappings");
+
+                    b.Navigation("Accounts");
+
+                    b.Navigation("FinancialStatementLines");
+
+                    b.Navigation("FiscalYears");
+
                     b.Navigation("Settings");
                 });
 
