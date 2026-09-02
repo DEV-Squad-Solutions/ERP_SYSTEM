@@ -6,6 +6,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.StockAdjustments;
+using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -18,7 +19,8 @@ public sealed class StockAdjustmentService(
     ICurrentCompanyContext currentCompanyContext,
     IInventoryStockService inventoryStockService,
     IInventoryCostingService inventoryCostingService,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IInventoryPostingService? inventoryPostingService = null)
     : IStockAdjustmentService, IScopedService
 {
     private static readonly ItemMovementType[] AdjustmentMovementTypes =
@@ -185,6 +187,21 @@ public sealed class StockAdjustmentService(
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (inventoryPostingService is not null)
+            {
+                var postingResult = await inventoryPostingService
+                    .SynchronizeStockAdjustmentAsync(
+                        requested.Id,
+                        cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result<StockAdjustmentResponse>.Failure(
+                        postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateException exception)
             when (IsDocumentNumberConflict(exception))
@@ -313,6 +330,21 @@ public sealed class StockAdjustmentService(
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (inventoryPostingService is not null)
+            {
+                var postingResult = await inventoryPostingService
+                    .SynchronizeStockAdjustmentAsync(
+                        adjustment.Id,
+                        cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result<StockAdjustmentResponse>.Failure(
+                        postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -411,6 +443,20 @@ public sealed class StockAdjustmentService(
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (inventoryPostingService is not null)
+            {
+                var postingResult = await inventoryPostingService.DeleteAsync(
+                    JournalEntrySourceType.StockAdjustment,
+                    adjustment.Id,
+                    cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result.Failure(postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {

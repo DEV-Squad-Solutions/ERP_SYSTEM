@@ -3542,7 +3542,7 @@ public static class DevelopmentDataSeeder
 
         var requiredAccountCodes = new[]
         {
-            "1110", "1200", "1300", "2100", "2200", "4100", "4200",
+            "1110", "1200", "1300", "2100", "2200", "3100", "4100", "4200",
             "5100", "5200"
         };
         if (requiredAccountCodes.Any(code => !accounts.ContainsKey(code)))
@@ -3621,6 +3621,13 @@ public static class DevelopmentDataSeeder
             Add(AccountingMappingType.SupplierControl, null, "2100");
             Add(AccountingMappingType.EmployeeControl, null, "2200");
             Add(AccountingMappingType.DriverControl, null, "2200");
+            Add(AccountingMappingType.ExchangeGain, null, "4200");
+            Add(AccountingMappingType.ExchangeLoss, null, "5200");
+            Add(AccountingMappingType.InventoryAdjustmentGain, null, "4200");
+            Add(AccountingMappingType.InventoryAdjustmentLoss, null, "5200");
+            Add(AccountingMappingType.OpeningBalanceEquity, null, "3100");
+            Add(AccountingMappingType.EmployeeReceivable, null, "1200");
+            Add(AccountingMappingType.DriverTripExpense, null, "5200");
 
             if (pending.Count > 0)
             {

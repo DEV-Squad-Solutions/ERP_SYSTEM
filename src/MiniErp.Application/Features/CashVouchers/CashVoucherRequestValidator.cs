@@ -166,8 +166,8 @@ public sealed class CashVoucherBulkVoucherRequestValidator
             .Must(name => name is null || !string.IsNullOrWhiteSpace(name))
             .WithMessage("اسم الطرف الخارجي لا يمكن أن يكون فارغاً.");
         RuleFor(request => request)
-            .Must(HasExactlyOneTarget)
-            .WithMessage("اختر طرفاً واحداً أو حساباً واحداً للسند المرحّل.")
+            .Must(HasAtMostOneTarget)
+            .WithMessage("لا يمكن اختيار أكثر من طرف أو حساب للسند المرحّل.")
             .OverridePropertyName(nameof(CashVoucherBulkVoucherRequest.EmployeeId));
         RuleFor(request => request.Amount)
             .GreaterThan(0)
@@ -184,7 +184,7 @@ public sealed class CashVoucherBulkVoucherRequestValidator
             .WithMessage("يجب أن يكون سعر صرف سند النقدية أكبر من صفر.");
     }
 
-    private static bool HasExactlyOneTarget(CashVoucherBulkVoucherRequest request)
+    private static bool HasAtMostOneTarget(CashVoucherBulkVoucherRequest request)
     {
         var selectedTargetCount =
             (request.AccountId.HasValue ? 1 : 0) +
@@ -193,7 +193,7 @@ public sealed class CashVoucherBulkVoucherRequestValidator
             (request.DriverId.HasValue ? 1 : 0) +
             (!string.IsNullOrWhiteSpace(request.ExternalPartyName) ? 1 : 0);
 
-        return selectedTargetCount == 1;
+        return selectedTargetCount <= 1;
     }
 }
 

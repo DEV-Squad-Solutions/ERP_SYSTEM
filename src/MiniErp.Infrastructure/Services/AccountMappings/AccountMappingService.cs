@@ -94,7 +94,8 @@ public sealed class AccountMappingService(
                 account.Id,
                 account.AccountType,
                 account.IsActive,
-                account.IsPosting
+                account.IsPosting,
+                account.ParentAccountId
             })
             .ToDictionaryAsync(account => account.Id, cancellationToken);
 
@@ -156,7 +157,9 @@ public sealed class AccountMappingService(
             {
                 errors.Add(AccountNotFound(row.AccountId, index));
             }
-            else if (!account.IsActive || !account.IsPosting)
+            else if (!account.IsActive ||
+                     !account.IsPosting ||
+                     !account.ParentAccountId.HasValue)
             {
                 errors.Add(AccountNotPostingOrInactive(row.AccountId, index));
             }
@@ -346,14 +349,25 @@ public sealed class AccountMappingService(
         {
             AccountingMappingType.Cashbox or
             AccountingMappingType.Inventory or
-            AccountingMappingType.CustomerControl => accountType == AccountType.Asset,
+            AccountingMappingType.CustomerControl or
+            AccountingMappingType.EmployeeReceivable =>
+                accountType == AccountType.Asset,
             AccountingMappingType.SupplierControl or
             AccountingMappingType.EmployeeControl or
             AccountingMappingType.DriverControl =>
                 accountType == AccountType.Liability,
             AccountingMappingType.Sales or
-            AccountingMappingType.SalesReturn => accountType == AccountType.Revenue,
-            AccountingMappingType.CostOfGoodsSold => accountType == AccountType.Expense,
+            AccountingMappingType.SalesReturn or
+            AccountingMappingType.ExchangeGain or
+            AccountingMappingType.InventoryAdjustmentGain =>
+                accountType == AccountType.Revenue,
+            AccountingMappingType.CostOfGoodsSold or
+            AccountingMappingType.ExchangeLoss or
+            AccountingMappingType.InventoryAdjustmentLoss or
+            AccountingMappingType.DriverTripExpense =>
+                accountType == AccountType.Expense,
+            AccountingMappingType.OpeningBalanceEquity =>
+                accountType == AccountType.Equity,
             AccountingMappingType.Purchase =>
                 accountType is AccountType.Asset or AccountType.Expense,
             AccountingMappingType.PurchaseReturn =>

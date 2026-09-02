@@ -1,5 +1,6 @@
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.Statements;
 
@@ -34,6 +35,12 @@ public interface IFinancialStatementService
     Task<Result<TrialBalanceResponse>>
         GetTrialBalanceAsync(
             TrialBalanceFilterRequest filters,
+            CancellationToken cancellationToken = default);
+
+    Task<Result<FinancialStatementReportResponse>>
+        GetFinancialStatementReportAsync(
+            FinancialStatementType statementType,
+            FinancialStatementReportRequest request,
             CancellationToken cancellationToken = default);
 
     Task<Result<EmployeeStatementResponse>> GetEmployeeStatementAsync(

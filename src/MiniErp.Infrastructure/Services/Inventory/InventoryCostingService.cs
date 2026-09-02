@@ -13,7 +13,9 @@ namespace MiniErp.Infrastructure.Services.Inventory;
 public sealed class InventoryCostingService(
     ApplicationDbContext dbContext,
     ICurrentCompanyContext currentCompanyContext,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IInventoryCostPostingSynchronizer?
+        inventoryCostPostingSynchronizer = null)
     : IInventoryCostingService
 {
     private const string CostFieldName = "unitCost";
@@ -49,6 +51,7 @@ public sealed class InventoryCostingService(
                 : left.ItemId.CompareTo(right.ItemId);
         });
         var pendingKeys = new SortedSet<InventoryCostingKey>(keys, keyComparer);
+        var recalculatedKeys = new HashSet<InventoryCostingKey>();
 
         await LockAsync(pendingKeys.ToArray(), cancellationToken);
 
@@ -56,6 +59,7 @@ public sealed class InventoryCostingService(
         {
             var key = pendingKeys.Min!;
             pendingKeys.Remove(key);
+            recalculatedKeys.Add(key);
             var balance = await LockBalanceAsync(
                 key,
                 createIfMissing: true,
@@ -83,6 +87,18 @@ public sealed class InventoryCostingService(
             {
                 pendingKeys.Add(dependentKey);
             }
+        }
+
+        if (inventoryCostPostingSynchronizer is not null &&
+            recalculatedKeys.Count > 0)
+        {
+            // Posting services read persisted movement costs. The save remains
+            // inside the caller's transaction, so costing and journals commit
+            // or roll back together.
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return await inventoryCostPostingSynchronizer.SynchronizeAsync(
+                recalculatedKeys,
+                cancellationToken);
         }
 
         return null;

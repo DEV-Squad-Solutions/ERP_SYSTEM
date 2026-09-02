@@ -18,7 +18,9 @@ public sealed class ExchangeRateService(
     ICurrentCompanyContext currentCompanyContext,
     TimeProvider timeProvider,
     IExchangeRateResolver exchangeRateResolver,
-    IExchangeRateProvider? exchangeRateProvider = null)
+    IExchangeRateProvider? exchangeRateProvider = null,
+    IExchangeRatePostingSynchronizer? exchangeRatePostingSynchronizer = null,
+    IInventoryCostingService? inventoryCostingService = null)
     : IExchangeRateService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -533,6 +535,45 @@ public sealed class ExchangeRateService(
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (request.UpdateLinkedTransactions &&
+                inventoryCostingService is not null)
+            {
+                var costingKeys = await dbContext.InvoiceLines
+                    .AsNoTracking()
+                    .Where(line =>
+                        line.CompanyId == companyId &&
+                        line.ItemId.HasValue &&
+                        line.Invoice.ExchangeRateId == id &&
+                        line.Invoice.InvoiceType == InvoiceType.Purchase)
+                    .Select(line => new InventoryCostingKey(
+                        line.Invoice.StoreId,
+                        line.ItemId!.Value))
+                    .Distinct()
+                    .ToArrayAsync(cancellationToken);
+                var costingError = await inventoryCostingService
+                    .RecalculateAsync(costingKeys, cancellationToken);
+                if (costingError is not null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result<ExchangeRateResponse>.Failure(costingError);
+                }
+            }
+
+            if (request.UpdateLinkedTransactions &&
+                exchangeRatePostingSynchronizer is not null)
+            {
+                var postingResult = await exchangeRatePostingSynchronizer
+                    .SynchronizeAsync(id, cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result<ExchangeRateResponse>.Failure(
+                        postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {

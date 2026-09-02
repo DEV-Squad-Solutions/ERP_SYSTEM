@@ -55,6 +55,13 @@ public sealed class AccountingSetupSwaggerDocumentation : IOperationFilter
                     "لا توجد حقول مطلوبة.",
                     "لا توجد قواعد تحقق إضافية.",
                     "يعيد `id`, `code`, `name`, `accountType`.")),
+            nameof(AccountsController.GetJournalSelect) => (
+                "تحميل حسابات القيود اليدوية",
+                SwaggerOperationDescription.Create(
+                    "يعيد الحسابات الفرعية الفعالة المتاحة للقيد اليدوي أو التسوية أو القيد الافتتاحي في سنة مالية محددة.",
+                    "أرسل `fiscalYearId` في query.",
+                    "السنة يجب أن تكون موجودة في الشركة الحالية. الحسابات المرتبطة بعناصر تشغيلية لا تظهر حتى لا يتم تجاوز الحركة المصدر.",
+                    "القائمة مخصصة لشاشة القيود اليدوية، أما القيود التلقائية فتستخدم روابط المستندات الداخلية.")),
             nameof(AccountsController.GetById) => (
                 "عرض حساب",
                 "يعرض حسابًا واحدًا من الشركة الحالية بواسطة `id`."),
@@ -62,8 +69,8 @@ public sealed class AccountingSetupSwaggerDocumentation : IOperationFilter
                 "إضافة حساب",
                 SwaggerOperationDescription.Create(
                     "للمسؤول فقط. يضيف حسابًا رئيسيًا أو فرعيًا إلى دليل الشركة.",
-                    "`code`, `name`, `accountType`, `normalBalance`, `isPosting`، واختياريًا `parentAccountId` و`isActive`.",
-                    "الكود فريد داخل الشركة. عند اختيار أب يجب أن يكون فعالًا ورئيسيًا، ويأخذ الحساب الفرعي نوع الحساب وطبيعة الرصيد من الأب تلقائيًا بغض النظر عن القيم المرسلة.",
+                    "`name`, `accountType`, `normalBalance`, `isPosting`، واختياريًا `parentAccountId` و`isActive`. يمكن ترك `code` فارغًا أو إرساله بقيمة null؛ ينشئ الخادم كودًا رقميًا هرميًا فريدًا داخل الشركة (مثل 1000 للحساب الرئيسي و1100 للحساب الفرعي). إذا أُرسل code عند الإضافة يتم تجاهله.",
+                    "عند اختيار أب يجب أن يكون فعالًا ورئيسيًا، ويأخذ الحساب الفرعي نوع الحساب وطبيعة الرصيد من الأب تلقائيًا بغض النظر عن القيم المرسلة.",
                     "الحساب القابل للتسجيل لا يمكن أن يصبح أبًا لحسابات أخرى.")),
             nameof(AccountsController.Update) => (
                 "تعديل حساب",

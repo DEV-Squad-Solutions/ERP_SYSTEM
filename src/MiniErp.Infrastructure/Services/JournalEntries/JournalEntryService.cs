@@ -106,6 +106,12 @@ public sealed class JournalEntryService(
         JournalEntryRequest request,
         CancellationToken cancellationToken = default)
     {
+        if (request.EntryType == JournalEntryType.Automatic)
+        {
+            return Result<JournalEntryResponse>.Failure(
+                AutomaticCannotBeCreatedManually());
+        }
+
         var balanceValidation = ValidateBalance(request.Lines);
         if (balanceValidation.IsFailure)
         {
@@ -176,9 +182,9 @@ public sealed class JournalEntryService(
         return Result<JournalEntryResponse>.Success(response);
     }
 
-    public async Task<Result<JournalEntryResponse>> ReverseAsync(
+    public async Task<Result<JournalEntryResponse>> UpdateAsync(
         int id,
-        JournalEntryReverseRequest request,
+        JournalEntryUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -191,8 +197,16 @@ public sealed class JournalEntryService(
             return Result<JournalEntryResponse>.Failure(RowVersionRequired());
         }
 
+        var balanceValidation = ValidateBalance(request.Lines);
+        if (balanceValidation.IsFailure)
+        {
+            return Result<JournalEntryResponse>.Failure(
+                balanceValidation.Errors);
+        }
+
         await using var transaction = await dbContext.Database
             .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
         var entry = await dbContext.JournalEntries
             .Include(journalEntry => journalEntry.FiscalYear)
             .Include(journalEntry => journalEntry.Lines)
@@ -211,81 +225,76 @@ public sealed class JournalEntryService(
             return Result<JournalEntryResponse>.Failure(Concurrency());
         }
 
-        if (entry.Status == JournalEntryStatus.Reversed)
+        if (entry.EntryType == JournalEntryType.Automatic)
         {
-            return Result<JournalEntryResponse>.Failure(AlreadyReversed());
+            return Result<JournalEntryResponse>.Failure(AutomaticReadOnly());
         }
 
-        if (entry.ReversalOfEntryId.HasValue)
+        if (entry.Status == JournalEntryStatus.Reversed ||
+            entry.ReversalOfEntryId.HasValue)
         {
-            return Result<JournalEntryResponse>.Failure(CannotReverseReversal());
+            return Result<JournalEntryResponse>.Failure(ReversedReadOnly());
         }
 
-        if (request.ReversalDate < entry.EntryDate)
-        {
-            return Result<JournalEntryResponse>.Failure(
-                ReversalDateBeforeEntry());
-        }
-
-        if (entry.FiscalYear.Status == FiscalYearStatus.Closed)
-        {
-            return Result<JournalEntryResponse>.Failure(FiscalYearClosed());
-        }
-
-        if (request.ReversalDate < entry.FiscalYear.StartDate ||
-            request.ReversalDate > entry.FiscalYear.EndDate)
-        {
-            return Result<JournalEntryResponse>.Failure(
-                EntryDateOutsideFiscalYear());
-        }
-
-        var reversalNumber = await EntityIdentifierGenerator.GenerateUniqueAsync(
-            dbContext,
-            prefix: "JV",
-            companyId,
-            dbContext.JournalEntries
-                .IgnoreQueryFilters()
-                .Where(journalEntry => journalEntry.CompanyId == companyId)
-                .Select(journalEntry => journalEntry.EntryNumber),
+        var fiscalYearValidation = await ValidateFiscalYearAsync(
+            request.FiscalYearId,
+            request.EntryDate,
             cancellationToken);
-        var now = timeProvider.GetUtcNow().UtcDateTime;
-        var reversal = new JournalEntry
+        if (fiscalYearValidation.IsFailure)
+        {
+            return Result<JournalEntryResponse>.Failure(
+                fiscalYearValidation.Errors);
+        }
+
+        if (entry.FiscalYearId != request.FiscalYearId ||
+            entry.EntryDate != request.EntryDate ||
+            entry.FiscalYear.Status != FiscalYearStatus.Open)
+        {
+            var oldFiscalYearValidation = await ValidateFiscalYearAsync(
+                entry.FiscalYearId,
+                entry.EntryDate,
+                cancellationToken);
+            if (oldFiscalYearValidation.IsFailure)
+            {
+                return Result<JournalEntryResponse>.Failure(
+                    oldFiscalYearValidation.Errors);
+            }
+        }
+
+        var accountValidation = await ValidateAccountsAsync(
+            request.Lines,
+            request.FiscalYearId,
+            cancellationToken);
+        if (accountValidation.IsFailure)
+        {
+            return Result<JournalEntryResponse>.Failure(
+                accountValidation.Errors);
+        }
+
+        var entryState = dbContext.Entry(entry);
+        entryState.Property(journalEntry => journalEntry.RowVersion)
+            .OriginalValue = request.RowVersion;
+        entry.FiscalYearId = request.FiscalYearId;
+        entry.EntryDate = request.EntryDate;
+        entry.Description = request.Description.Trim();
+
+        dbContext.JournalEntryLines.RemoveRange(entry.Lines);
+        entry.Lines = request.Lines.Select(line => new JournalEntryLine
         {
             CompanyId = companyId,
-            FiscalYearId = entry.FiscalYearId,
-            EntryNumber = reversalNumber,
-            EntryDate = request.ReversalDate,
-            Description = string.IsNullOrWhiteSpace(request.Description)
-                ? $"عكس القيد {entry.EntryNumber}: {entry.Description}"
-                : request.Description.Trim(),
-            EntryType = entry.EntryType,
-            Status = JournalEntryStatus.Posted,
-            PostedOn = now,
-            ReversalOfEntryId = entry.Id,
-            Lines = entry.Lines
-                .OrderBy(line => line.Id)
-                .Select(line => new JournalEntryLine
-                {
-                    CompanyId = companyId,
-                    AccountId = line.AccountId,
-                    Description = line.Description,
-                    Debit = line.Credit,
-                    Credit = line.Debit
-                })
-                .ToList()
-        };
-
-        entry.Status = JournalEntryStatus.Reversed;
-        entry.ReversedOn = now;
-        dbContext.Entry(entry)
-            .Property(journalEntry => journalEntry.RowVersion)
-            .OriginalValue = request.RowVersion;
-        dbContext.JournalEntries.Add(reversal);
+            AccountId = line.AccountId,
+            Description = NormalizeOptional(line.Description),
+            Debit = line.Debit,
+            Credit = line.Credit
+        }).ToList();
 
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
+            var response = (await LoadResponsesAsync([id], cancellationToken))
+                .Single();
             await transaction.CommitAsync(cancellationToken);
+            return Result<JournalEntryResponse>.Success(response);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -293,11 +302,79 @@ public sealed class JournalEntryService(
             dbContext.ChangeTracker.Clear();
             return Result<JournalEntryResponse>.Failure(Concurrency());
         }
+    }
 
-        var response = (await LoadResponsesAsync(
-            [reversal.Id],
-            cancellationToken)).Single();
-        return Result<JournalEntryResponse>.Success(response);
+    public async Task<Result> DeleteAsync(
+        int id,
+        byte[]? rowVersion,
+        CancellationToken cancellationToken = default)
+    {
+        if (id <= 0)
+        {
+            return Result.Failure(InvalidId());
+        }
+
+        if (rowVersion is not { Length: 8 })
+        {
+            return Result.Failure(RowVersionRequired());
+        }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+        var entry = await dbContext.JournalEntries
+            .Include(journalEntry => journalEntry.FiscalYear)
+            .Include(journalEntry => journalEntry.Lines)
+            .FirstOrDefaultAsync(
+                journalEntry =>
+                    journalEntry.CompanyId == companyId &&
+                    journalEntry.Id == id,
+                cancellationToken);
+        if (entry is null)
+        {
+            return Result.Failure(NotFound(id));
+        }
+
+        if (!entry.RowVersion.SequenceEqual(rowVersion))
+        {
+            return Result.Failure(Concurrency());
+        }
+
+        if (entry.EntryType == JournalEntryType.Automatic)
+        {
+            return Result.Failure(AutomaticReadOnly());
+        }
+
+        if (entry.Status == JournalEntryStatus.Reversed ||
+            entry.ReversalOfEntryId.HasValue)
+        {
+            return Result.Failure(ReversedReadOnly());
+        }
+
+        var fiscalYearValidation = await ValidateFiscalYearAsync(
+            entry.FiscalYearId,
+            entry.EntryDate,
+            cancellationToken);
+        if (fiscalYearValidation.IsFailure)
+        {
+            return Result.Failure(fiscalYearValidation.Errors);
+        }
+
+        dbContext.JournalEntryLines.RemoveRange(entry.Lines);
+        dbContext.JournalEntries.Remove(entry);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return Result.Success();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result.Failure(Concurrency());
+        }
     }
 
     private async Task<Result> ValidateFiscalYearAsync(
@@ -479,6 +556,9 @@ public sealed class JournalEntryService(
                     EntryDate: entry.EntryDate,
                     Description: entry.Description,
                     EntryType: entry.EntryType,
+                    SourceType: entry.SourceType,
+                    SourceId: entry.SourceId,
+                    SourceNumber: entry.SourceNumber,
                     Status: entry.Status,
                     TotalDebit: lines.Sum(line => line.Debit),
                     TotalCredit: lines.Sum(line => line.Credit),

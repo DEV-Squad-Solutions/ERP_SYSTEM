@@ -26,6 +26,93 @@ public sealed class AccountingSetupServiceTests
     }
 
     [Fact]
+    public async Task NewAccounts_GenerateCompanyScopedUniqueCodes()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var service = database.CreateAccountService(companyId: 1);
+
+        var first = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حساب تلقائي أول",
+            ParentAccountId: null,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+        var second = await service.AddAsync(new AccountRequest(
+            Code: "IGNORED-CODE",
+            Name: "حساب تلقائي ثان",
+            ParentAccountId: null,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+        var child = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "ابن تلقائي",
+            ParentAccountId: first.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+        var child2 = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "ابن تلقائي ثان",
+            ParentAccountId: second.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+        var child3 = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "ابن تلقائي ثالث",
+            ParentAccountId: second.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+        var grandchild = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حفيد تلقائي",
+            ParentAccountId: child2.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+
+        Assert.True(first.IsSuccess);
+        Assert.True(second.IsSuccess);
+        Assert.Equal("1000", first.Value.Code);
+        Assert.Equal("2000", second.Value.Code);
+        Assert.Equal("1100", child.Value.Code);
+        Assert.Equal("2100", child2.Value.Code);
+        Assert.Equal("2200", child3.Value.Code);
+        Assert.Equal("2110", grandchild.Value.Code);
+    }
+
+    [Fact]
+    public async Task NewAccount_ReusesCodeOfSoftDeletedAccount()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var service = database.CreateAccountService(companyId: 1);
+
+        var deletedAccount = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حساب سيُحذف",
+            ParentAccountId: null,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+        await database.SoftDeleteAccountAsync(deletedAccount.Value.Id);
+        database.ClearTracking();
+        var replacementAccount = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حساب بديل",
+            ParentAccountId: null,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+
+        Assert.True(replacementAccount.IsSuccess);
+        Assert.Equal(deletedAccount.Value.Code, replacementAccount.Value.Code);
+        Assert.Equal("1000", replacementAccount.Value.Code);
+    }
+
+    [Fact]
     public async Task Accounts_InheritParentClassificationAndPreventHierarchyCycles()
     {
         await using var database = await AccountingTestDatabase.CreateAsync();
@@ -301,6 +388,10 @@ public sealed class AccountingSetupServiceTests
         public Task AddCashVoucherMovementAsync(int accountId) =>
             Context.Database.ExecuteSqlInterpolatedAsync(
                 $"INSERT INTO CashVouchers (CompanyId, AccountId, IsDeleted) VALUES (1, {accountId}, 0)");
+
+        public Task SoftDeleteAccountAsync(int accountId) =>
+            Context.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE Accounts SET IsDeleted = 1 WHERE Id = {accountId}");
 
         public async ValueTask DisposeAsync()
         {

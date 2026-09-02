@@ -8,7 +8,9 @@ using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Cashboxes;
 using MiniErp.Application.Features.ExchangeRates;
+using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.CashManagement;
+using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Services.ExchangeRates;
 
@@ -19,7 +21,9 @@ public sealed class CashboxService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     IExchangeRateResolver exchangeRateResolver,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IOpeningBalancePostingService? openingBalancePostingService = null,
+    IExchangeRatePostingSynchronizer? exchangeRatePostingSynchronizer = null)
     : ICashboxService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -151,6 +155,18 @@ public sealed class CashboxService(
         dbContext.Cashboxes.Add(cashbox);
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        if (openingBalancePostingService is not null)
+        {
+            var postingResult = await openingBalancePostingService
+                .SynchronizeCashboxAsync(cashbox.Id, cancellationToken);
+            if (postingResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<CashboxResponse>.Failure(postingResult.Errors);
+            }
+        }
+
         var response = await ProjectResponseQuery(cashbox.Id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
@@ -281,6 +297,36 @@ public sealed class CashboxService(
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (openingBalancePostingService is not null)
+            {
+                var postingResult = await openingBalancePostingService
+                    .SynchronizeCashboxAsync(cashbox.Id, cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result<CashboxResponse>.Failure(
+                        postingResult.Errors);
+                }
+            }
+
+            if (request.UpdateLinkedTransactions &&
+                exchangeRateId.HasValue &&
+                exchangeRatePostingSynchronizer is not null)
+            {
+                var postingResult = await exchangeRatePostingSynchronizer
+                    .SynchronizeAsync(
+                        exchangeRateId.Value,
+                        cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result<CashboxResponse>.Failure(
+                        postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -304,6 +350,11 @@ public sealed class CashboxService(
             return Result.Failure(InvalidId());
         }
 
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
         var cashbox = await dbContext.Cashboxes.FirstOrDefaultAsync(
             entity =>
                 entity.Id == id &&
@@ -322,6 +373,22 @@ public sealed class CashboxService(
         cashbox.IsActive = false;
         dbContext.Cashboxes.Remove(cashbox);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (openingBalancePostingService is not null)
+        {
+            var postingResult = await openingBalancePostingService.DeleteAsync(
+                JournalEntrySourceType.CashboxOpeningBalance,
+                cashbox.Id,
+                cancellationToken);
+            if (postingResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result.Failure(postingResult.Errors);
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken);
         return Result.Success();
     }
 

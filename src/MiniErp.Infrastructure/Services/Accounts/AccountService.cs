@@ -8,6 +8,7 @@ using MiniErp.Application.Features.Accounts;
 using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services;
 using static MiniErp.Application.Features.Accounts.AccountErrors;
 
 namespace MiniErp.Infrastructure.Services.Accounts;
@@ -191,12 +192,6 @@ public sealed class AccountService(
         await using var transaction = await dbContext.Database
             .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
-        var normalizedCode = request.Code.Trim();
-        if (await CodeExistsAsync(normalizedCode, excludedId: null, cancellationToken))
-        {
-            return Result<AccountResponse>.Failure(CodeExists(normalizedCode));
-        }
-
         var parentValidation = await ValidateParentAsync(
             request.ParentAccountId,
             accountId: null,
@@ -206,7 +201,15 @@ public sealed class AccountService(
             return Result<AccountResponse>.Failure(parentValidation.Errors);
         }
 
-        var account = request.Adapt<Account>();
+        var generatedCode = await GenerateAccountCodeAsync(
+            request.ParentAccountId,
+            cancellationToken);
+        if (generatedCode is null)
+        {
+            return Result<AccountResponse>.Failure(AutomaticCodeUnavailable());
+        }
+
+        var account = (request with { Code = generatedCode }).Adapt<Account>();
         account.CompanyId = companyId;
         ApplyInheritedClassification(account, parentValidation.Value);
         dbContext.Accounts.Add(account);
@@ -217,6 +220,45 @@ public sealed class AccountService(
         await transaction.CommitAsync(cancellationToken);
 
         return Result<AccountResponse>.Success(response);
+    }
+
+    private async Task<string?> GenerateAccountCodeAsync(
+        int? parentAccountId,
+        CancellationToken cancellationToken)
+    {
+        // Soft-deleted accounts intentionally do not reserve their former code.
+        var accounts = dbContext.Accounts
+            .Where(account => account.CompanyId == companyId);
+        var parentCode = parentAccountId.HasValue
+            ? await accounts.Where(account => account.Id == parentAccountId.Value)
+                .Select(account => account.Code).FirstOrDefaultAsync(cancellationToken)
+            : null;
+        var parsedParent = 0;
+        if (parentAccountId.HasValue &&
+            (!int.TryParse(parentCode, out parsedParent) ||
+             parentCode!.Length != 4 ||
+             parsedParent is < 1000 or > 9999))
+            return null;
+        var allCodes = await accounts.Select(account => account.Code).ToListAsync(cancellationToken);
+        var used = allCodes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var step = parentAccountId.HasValue ? GetHierarchyStep(parsedParent) : 1000;
+        if (step <= 0) return null;
+        var candidate = parentAccountId.HasValue ? parsedParent + step : 1000;
+        var limit = parentAccountId.HasValue
+            ? parsedParent + 9 * step
+            : 9000;
+        while (candidate <= limit && used.Contains(candidate.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+        {
+            candidate += step;
+        }
+        return candidate <= limit ? candidate.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
+    }
+
+    private static int GetHierarchyStep(int parentCode)
+    {
+        var text = parentCode.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var trailingZeros = text.Length - text.TrimEnd('0').Length;
+        return trailingZeros switch { >= 3 => 100, 2 => 10, 1 => 1, _ => 0 };
     }
 
     public async Task<Result<AccountResponse>> UpdateAsync(

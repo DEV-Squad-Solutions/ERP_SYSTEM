@@ -24,7 +24,7 @@ public static class JournalEntryErrors
 
     public static Error FiscalYearClosed() => Error.Conflict(
         "JournalEntries.FiscalYearClosed",
-        "لا يمكن تسجيل أو عكس قيد داخل سنة مالية مغلقة.",
+        "لا يمكن إضافة أو تعديل أو حذف قيد داخل سنة مالية مغلقة.",
         nameof(JournalEntryRequest.FiscalYearId));
 
     public static Error AccountNotFound(int accountId, int lineIndex) =>
@@ -63,25 +63,33 @@ public static class JournalEntryErrors
         "إجمالي المدين يجب أن يساوي إجمالي الدائن ويكون أكبر من صفر.",
         nameof(JournalEntryRequest.Lines));
 
-    public static Error AlreadyReversed() => Error.Conflict(
-        "JournalEntries.AlreadyReversed",
-        "تم عكس هذا القيد بالفعل.");
-
-    public static Error CannotReverseReversal() => Error.Conflict(
-        "JournalEntries.CannotReverseReversal",
-        "لا يمكن عكس قيد عكسي. أنشئ قيدًا جديدًا إذا لزم التصحيح.");
-
-    public static Error ReversalDateBeforeEntry() => Error.Validation(
-        "JournalEntries.ReversalDateBeforeEntry",
-        "تاريخ العكس لا يمكن أن يسبق تاريخ القيد الأصلي.",
-        nameof(JournalEntryReverseRequest.ReversalDate));
-
     public static Error RowVersionRequired() => Error.Validation(
         "JournalEntries.RowVersionRequired",
-        "يجب إرسال إصدار القيد الحالي قبل عكسه.",
-        nameof(JournalEntryReverseRequest.RowVersion));
+        "يجب إرسال إصدار القيد الحالي قبل تعديله أو حذفه.",
+        nameof(JournalEntryUpdateRequest.RowVersion));
 
     public static Error Concurrency() => Error.Conflict(
         "JournalEntries.Concurrency",
         "تغير القيد بواسطة مستخدم آخر. أعد تحميل البيانات ثم حاول مرة أخرى.");
+
+    public static Error AutomaticReadOnly() => Error.Conflict(
+        "JournalEntries.AutomaticReadOnly",
+        "لا يمكن تعديل أو حذف القيد التلقائي مباشرة. عدّل الحركة المصدر أولًا.");
+
+    public static Error AutomaticCannotBeCreatedManually() => Error.Validation(
+        "JournalEntries.AutomaticCannotBeCreatedManually",
+        "القيد التلقائي يتم إنشاؤه من الحركة المصدر فقط.",
+        nameof(JournalEntryRequest.EntryType));
+
+    public static Error AutomaticSourceRequired() => Error.Validation(
+        "JournalEntries.AutomaticSourceRequired",
+        "يجب تحديد مصدر القيد التلقائي ورقم الحركة.");
+
+    public static Error AutomaticDuplicate() => Error.Conflict(
+        "JournalEntries.AutomaticDuplicate",
+        "يوجد قيد تلقائي فعال لنفس الحركة بالفعل.");
+
+    public static Error ReversedReadOnly() => Error.Conflict(
+        "JournalEntries.ReversedReadOnly",
+        "لا يمكن تعديل أو حذف قيد تم عكسه.");
 }

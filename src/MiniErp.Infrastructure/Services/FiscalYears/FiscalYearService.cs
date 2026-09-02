@@ -6,6 +6,8 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.FiscalYears;
+using MiniErp.Application.Features.AccountingReadiness;
+using MiniErp.Application.Features.AccountMappings;
 using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -16,7 +18,8 @@ public sealed class FiscalYearService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IAccountingReadinessService? accountingReadinessService = null)
     : IFiscalYearService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -352,6 +355,55 @@ public sealed class FiscalYearService(
                     : AlreadyOpen());
         }
 
+        if (status == FiscalYearStatus.Closed)
+        {
+            var readiness = accountingReadinessService is null
+                ? null
+                : await accountingReadinessService.GetAsync(
+                    fiscalYear.Id,
+                    cancellationToken);
+            if (readiness is { IsFailure: true })
+            {
+                return Result<FiscalYearResponse>.Failure(readiness.Errors);
+            }
+
+            if (readiness is { Value.IsReady: false })
+            {
+                var errors = new List<Error>
+                {
+                    ClosingNotReady(
+                        fiscalYear.Name,
+                        readiness.Value.Issues.Count)
+                };
+                errors.AddRange(readiness.Value.Issues.Select(issue =>
+                    Error.Conflict(
+                        "FiscalYears.ClosingIssue",
+                        issue.Message,
+                        issue.IssueType)));
+                return Result<FiscalYearResponse>.Failure(errors);
+            }
+
+            await using var transaction = await dbContext.Database
+                .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            var transfer = await TransferClosingBalancesAsync(
+                fiscalYear,
+                cancellationToken);
+            if (transfer.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Result<FiscalYearResponse>.Failure(transfer.Errors);
+            }
+
+            fiscalYear.Status = status;
+            fiscalYear.ClosedOn = timeProvider.GetUtcNow().UtcDateTime;
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            var closedResponse = await ProjectResponseQuery(id)
+                .FirstAsync(cancellationToken);
+            return Result<FiscalYearResponse>.Success(closedResponse);
+        }
+
         fiscalYear.Status = status;
         fiscalYear.ClosedOn = status == FiscalYearStatus.Closed
             ? timeProvider.GetUtcNow().UtcDateTime
@@ -363,6 +415,144 @@ public sealed class FiscalYearService(
             .FirstAsync(cancellationToken);
 
         return Result<FiscalYearResponse>.Success(response);
+    }
+
+    private async Task<Result> TransferClosingBalancesAsync(
+        FiscalYear fiscalYear,
+        CancellationToken cancellationToken)
+    {
+        var nextYear = await dbContext.FiscalYears
+            .AsNoTracking()
+            .Where(year =>
+                year.CompanyId == companyId &&
+                year.StartDate > fiscalYear.EndDate)
+            .OrderBy(year => year.StartDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // A terminal year has no destination for opening balances.
+        if (nextYear is null)
+        {
+            return Result.Success();
+        }
+        if (nextYear.Status != FiscalYearStatus.Open)
+        {
+            return Result.Failure(NextFiscalYearClosed(nextYear.Name));
+        }
+
+        var existingTransfer = await dbContext.JournalEntries
+            .Include(entry => entry.Lines)
+            .SingleOrDefaultAsync(entry =>
+                entry.CompanyId == companyId &&
+                entry.EntryType == JournalEntryType.Opening &&
+                entry.SourceType == JournalEntrySourceType.FiscalYearClosing &&
+                entry.SourceId == fiscalYear.Id,
+                cancellationToken);
+
+        var balances = await dbContext.JournalEntryLines
+            .AsNoTracking()
+            .Where(line =>
+                line.CompanyId == companyId &&
+                line.JournalEntry.FiscalYearId == fiscalYear.Id &&
+                line.JournalEntry.Status == JournalEntryStatus.Posted &&
+                line.JournalEntry.ReversalOfEntryId == null &&
+                line.Account.AccountType != AccountType.Revenue &&
+                line.Account.AccountType != AccountType.Expense)
+            .GroupBy(line => new { line.AccountId, line.Account.Code, line.Account.Name })
+            .Select(group => new
+            {
+                group.Key.AccountId,
+                group.Key.Code,
+                group.Key.Name,
+                Balance = group.Sum(line => line.Debit - line.Credit)
+            })
+            .Where(row => row.Balance != 0m)
+            .ToListAsync(cancellationToken);
+
+        if (balances.Count == 0)
+        {
+            if (existingTransfer is not null)
+            {
+                dbContext.JournalEntryLines.RemoveRange(existingTransfer.Lines);
+                dbContext.JournalEntries.Remove(existingTransfer);
+            }
+            return Result.Success();
+        }
+
+        var lines = balances
+            .Select(balance => new JournalEntryLine
+            {
+                CompanyId = companyId,
+                AccountId = balance.AccountId,
+                Description = $"ترحيل رصيد {balance.Code} - {balance.Name}",
+                Debit = balance.Balance > 0m ? balance.Balance : 0m,
+                Credit = balance.Balance < 0m ? -balance.Balance : 0m
+            })
+            .ToList();
+        var net = lines.Sum(line => line.Debit - line.Credit);
+        if (net != 0m)
+        {
+            var equityAccountId = await dbContext.AccountMappings
+                .AsNoTracking()
+                .Where(mapping =>
+                    mapping.CompanyId == companyId &&
+                    mapping.FiscalYearId == nextYear.Id &&
+                    mapping.MappingType == AccountingMappingType.OpeningBalanceEquity &&
+                    mapping.SourceId == null)
+                .Select(mapping => (int?)mapping.AccountId)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (!equityAccountId.HasValue)
+            {
+                return Result.Failure(
+                    OpeningBalanceAccountMissing(nextYear.Name));
+            }
+
+            lines.Add(new JournalEntryLine
+            {
+                CompanyId = companyId,
+                AccountId = equityAccountId.Value,
+                Description = "مقابل ترحيل أرصدة المركز المالي",
+                Debit = net < 0m ? -net : 0m,
+                Credit = net > 0m ? net : 0m
+            });
+        }
+
+        if (existingTransfer is not null)
+        {
+            dbContext.JournalEntryLines.RemoveRange(existingTransfer.Lines);
+            existingTransfer.FiscalYearId = nextYear.Id;
+            existingTransfer.EntryDate = nextYear.StartDate;
+            existingTransfer.Description = $"أرصدة افتتاحية مرحّلة من السنة المالية {fiscalYear.Name}";
+            existingTransfer.SourceNumber = fiscalYear.Name;
+            existingTransfer.PostedOn = timeProvider.GetUtcNow().UtcDateTime;
+            existingTransfer.Lines = lines;
+            return Result.Success();
+        }
+
+        var entryNumber = await EntityIdentifierGenerator.GenerateUniqueAsync(
+            dbContext,
+            prefix: "OB",
+            companyId,
+            dbContext.JournalEntries
+                .IgnoreQueryFilters()
+                .Where(entry => entry.CompanyId == companyId)
+                .Select(entry => entry.EntryNumber),
+            cancellationToken);
+        dbContext.JournalEntries.Add(new JournalEntry
+        {
+            CompanyId = companyId,
+            FiscalYearId = nextYear.Id,
+            EntryNumber = entryNumber,
+            EntryDate = nextYear.StartDate,
+            Description = $"أرصدة افتتاحية مرحّلة من السنة المالية {fiscalYear.Name}",
+            EntryType = JournalEntryType.Opening,
+            SourceType = JournalEntrySourceType.FiscalYearClosing,
+            SourceId = fiscalYear.Id,
+            SourceNumber = fiscalYear.Name,
+            Status = JournalEntryStatus.Posted,
+            PostedOn = timeProvider.GetUtcNow().UtcDateTime,
+            Lines = lines
+        });
+        return Result.Success();
     }
 
     private IQueryable<FiscalYearResponse> ProjectResponseQuery(

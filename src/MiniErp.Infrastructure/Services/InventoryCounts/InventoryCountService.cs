@@ -6,6 +6,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.InventoryCounts;
+using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -18,7 +19,8 @@ public sealed class InventoryCountService(
     ICurrentCompanyContext currentCompanyContext,
     IInventoryStockService inventoryStockService,
     IInventoryCostingService inventoryCostingService,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IInventoryPostingService? inventoryPostingService = null)
     : IInventoryCountService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -475,6 +477,28 @@ public sealed class InventoryCountService(
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (inventoryPostingService is not null)
+            {
+                foreach (var generatedAdjustment in new[]
+                         {
+                             increase,
+                             decrease
+                         }.Where(adjustment => adjustment is not null))
+                {
+                    var postingResult = await inventoryPostingService
+                        .SynchronizeStockAdjustmentAsync(
+                            generatedAdjustment!.Id,
+                            cancellationToken);
+                    if (postingResult.IsFailure)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        dbContext.ChangeTracker.Clear();
+                        return Result<InventoryCountResponse>.Failure(
+                            postingResult.Errors);
+                    }
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
