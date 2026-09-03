@@ -16,7 +16,9 @@ namespace MiniErp.Infrastructure.Services.Companies;
 public sealed class CompanyService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentUserService currentUserService)
+    ICurrentUserService currentUserService,
+    IDefaultAccountingSetupService defaultAccountingSetupService,
+    TimeProvider timeProvider)
     : ICompanyService, IScopedService
 {
     public async Task<Result<PagedResponse<CompanyResponse>>> GetAllAsync(
@@ -113,6 +115,11 @@ public sealed class CompanyService(
             return Result<CompanyResponse>.Failure(currentUserResult.Error);
         }
 
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
         dbContext.Companies.Add(company);
         company.Settings = new CompanySettings
         {
@@ -120,8 +127,20 @@ public sealed class CompanyService(
             StockBalanceCheckMode = request.StockBalanceCheckMode ??
                 StockBalanceCheckMode.None
         };
+        dbContext.UserCompanies.Add(new UserCompany
+        {
+            UserId = currentUserResult.Value,
+            Company = company
+        });
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        await defaultAccountingSetupService.InitializeCompanyAsync(
+            company.Id,
+            DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime),
+            cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
 
         return Result<CompanyResponse>.Success(company.Adapt<CompanyResponse>());
     }

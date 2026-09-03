@@ -104,6 +104,8 @@ public sealed partial class FinancialStatementService
             .Where(line =>
                 line.CompanyId == companyId &&
                 line.JournalEntry.FiscalYearId == fiscalYearId &&
+                line.JournalEntry.Status == JournalEntryStatus.Posted &&
+                line.JournalEntry.ReversalOfEntryId == null &&
                 line.JournalEntry.EntryDate <= filters.ToDate &&
                 (includeAdjustments ||
                  line.JournalEntry.EntryType != JournalEntryType.Adjustment))

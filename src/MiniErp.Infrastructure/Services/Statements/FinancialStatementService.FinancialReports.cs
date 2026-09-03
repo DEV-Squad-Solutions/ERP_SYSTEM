@@ -90,12 +90,18 @@ public sealed partial class FinancialStatementService
                 statementType,
                 request,
                 mappings);
-        var unmappedAccounts = BuildUnmappedAccounts(
-            journalLines,
-            statementType,
-            request,
-            mappings,
-            cashAccountIds);
+        var unmappedAccounts = statementType ==
+            FinancialStatementType.CashFlow
+            ? BuildCashFlowUnmappedAccounts(
+                journalLines,
+                request,
+                mappings,
+                cashAccountIds)
+            : BuildUnmappedAccounts(
+                journalLines,
+                statementType,
+                request,
+                mappings);
         var items = request.ViewMode == TrialBalanceViewMode.Summary
             ? SummarizeItems(lines)
             : lines
@@ -108,6 +114,26 @@ public sealed partial class FinancialStatementService
             journalLines,
             request,
             unmappedAccounts);
+        var hasBlockingInventoryIssues = await dbContext.ItemMovements
+            .AsNoTracking()
+            .AnyAsync(movement =>
+                movement.CompanyId == companyId &&
+                movement.MovementDate >= fiscalYear.StartDate &&
+                movement.MovementDate <= request.ToDate &&
+                (movement.CostStatus == InventoryCostStatus.Pending ||
+                 movement.CostStatus == InventoryCostStatus.PartiallyCosted),
+                cancellationToken) ||
+            await dbContext.InventoryCounts
+                .AsNoTracking()
+                .AnyAsync(count =>
+                    count.CompanyId == companyId &&
+                    count.CountDate >= fiscalYear.StartDate &&
+                    count.CountDate <= request.ToDate &&
+                    !count.ReconciledAt.HasValue &&
+                    count.Lines.Any(line =>
+                        line.PhysicalQuantity.HasValue &&
+                        line.PhysicalQuantity.Value != line.SystemQuantity),
+                    cancellationToken);
 
         var baseCurrency = await dbContext.CompanySettings
             .AsNoTracking()
@@ -125,7 +151,10 @@ public sealed partial class FinancialStatementService
                 BaseCurrency: baseCurrency,
                 ViewMode: request.ViewMode,
                 AdjustmentView: request.AdjustmentView,
-                IsReadyForReporting: unmappedAccounts.Count == 0,
+                IsReadyForReporting:
+                    unmappedAccounts.Count == 0 &&
+                    totals.IsBalanced &&
+                    !hasBlockingInventoryIssues,
                 Items: items,
                 Totals: totals,
                 UnmappedAccounts: request.IncludeUnmapped
@@ -144,6 +173,8 @@ public sealed partial class FinancialStatementService
             .Where(line =>
                 line.CompanyId == companyId &&
                 line.JournalEntry.FiscalYearId == fiscalYearId &&
+                line.JournalEntry.Status == JournalEntryStatus.Posted &&
+                line.JournalEntry.ReversalOfEntryId == null &&
                 line.JournalEntry.EntryDate <= request.ToDate &&
                 (includeAdjustments ||
                  line.JournalEntry.EntryType != JournalEntryType.Adjustment))
@@ -302,12 +333,103 @@ public sealed partial class FinancialStatementService
     }
 
     private static IReadOnlyList<FinancialStatementUnmappedAccountResponse>
+        BuildCashFlowUnmappedAccounts(
+            IReadOnlyList<ReportJournalLine> journalLines,
+            FinancialStatementReportRequest request,
+            IReadOnlyList<ReportMappingRow> mappings,
+            IReadOnlySet<int> cashAccountIds)
+    {
+        var mappedAccountIds = mappings
+            .Select(mapping => mapping.AccountId)
+            .ToHashSet();
+        var accountLookup = journalLines
+            .GroupBy(line => line.AccountId)
+            .ToDictionary(group => group.Key, group => group.First());
+        var amounts = new Dictionary<int, ReportAmount>();
+
+        foreach (var entry in journalLines
+                     .Where(line => line.EntryDate >= request.FromDate)
+                     .GroupBy(line => line.JournalEntryId))
+        {
+            var cashEffect = entry
+                .Where(line => cashAccountIds.Contains(line.AccountId))
+                .Sum(line => line.Debit - line.Credit);
+            if (cashEffect == 0m)
+            {
+                continue;
+            }
+
+            var counterparts = entry
+                .Where(line => !cashAccountIds.Contains(line.AccountId))
+                .ToArray();
+            var totalWeight = counterparts.Sum(line =>
+                Math.Abs(line.Debit - line.Credit));
+            if (totalWeight == 0m)
+            {
+                continue;
+            }
+
+            foreach (var counterpart in counterparts)
+            {
+                if (mappedAccountIds.Contains(counterpart.AccountId))
+                {
+                    continue;
+                }
+
+                var weight = Math.Abs(
+                    counterpart.Debit - counterpart.Credit) /
+                    totalWeight;
+                var effect = decimal.Round(
+                    cashEffect * weight,
+                    8,
+                    MidpointRounding.AwayFromZero);
+                if (effect == 0m)
+                {
+                    continue;
+                }
+
+                var amount = amounts.GetValueOrDefault(
+                    counterpart.AccountId) ?? new ReportAmount();
+                if (effect >= 0m)
+                {
+                    amount.PeriodDebit += effect;
+                }
+                else
+                {
+                    amount.PeriodCredit += -effect;
+                }
+
+                amounts[counterpart.AccountId] = amount;
+            }
+        }
+
+        return amounts
+            .Select(pair =>
+            {
+                var account = accountLookup[pair.Key];
+                var amount = pair.Value;
+                return new FinancialStatementUnmappedAccountResponse(
+                    AccountId: account.AccountId,
+                    AccountCode: account.AccountCode,
+                    AccountName: account.AccountName,
+                    AccountType: account.AccountType,
+                    OpeningDebit: 0m,
+                    OpeningCredit: 0m,
+                    PeriodDebit: amount.PeriodDebit,
+                    PeriodCredit: amount.PeriodCredit,
+                    ClosingDebit: amount.ClosingDebit,
+                    ClosingCredit: amount.ClosingCredit);
+            })
+            .OrderBy(item => item.AccountCode)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FinancialStatementUnmappedAccountResponse>
         BuildUnmappedAccounts(
             IReadOnlyList<ReportJournalLine> journalLines,
             FinancialStatementType statementType,
             FinancialStatementReportRequest request,
-            IReadOnlyList<ReportMappingRow> mappings,
-            IReadOnlySet<int>? ignoredAccountIds = null)
+            IReadOnlyList<ReportMappingRow> mappings)
     {
         var mappedAccountIds = mappings
             .Select(mapping => mapping.AccountId)
@@ -316,7 +438,6 @@ public sealed partial class FinancialStatementService
         foreach (var line in journalLines)
         {
             if (mappedAccountIds.Contains(line.AccountId) ||
-                ignoredAccountIds?.Contains(line.AccountId) == true ||
                 !IsAccountInStatement(line.AccountType, statementType) ||
                 (line.EntryDate < request.FromDate &&
                  statementType != FinancialStatementType.FinancialPosition))
@@ -409,13 +530,15 @@ public sealed partial class FinancialStatementService
         var periodCredit = items.Sum(item => item.PeriodCredit);
         var closingDebit = items.Sum(item => item.ClosingDebit);
         var closingCredit = items.Sum(item => item.ClosingCredit);
-        var periodNetResult = journalLines
+        var revenueNet = journalLines
             .Where(line => line.EntryDate >= request.FromDate)
-            .Sum(line => line.AccountType == AccountType.Revenue
-                ? line.Credit - line.Debit
-                : line.AccountType == AccountType.Expense
-                    ? line.Debit - line.Credit
-                    : 0m);
+            .Where(line => line.AccountType == AccountType.Revenue)
+            .Sum(line => line.Credit - line.Debit);
+        var expenseNet = journalLines
+            .Where(line => line.EntryDate >= request.FromDate)
+            .Where(line => line.AccountType == AccountType.Expense)
+            .Sum(line => line.Debit - line.Credit);
+        var periodNetResult = revenueNet - expenseNet;
         var netResult = statementType is
             FinancialStatementType.IncomeStatement or
             FinancialStatementType.FinancialPosition
@@ -435,7 +558,8 @@ public sealed partial class FinancialStatementService
                     + periodNetResult
                 : 0m;
         var netCashFlow = statementType == FinancialStatementType.CashFlow
-            ? items.Sum(item => item.PeriodDebit - item.PeriodCredit)
+            ? items.Sum(item => item.PeriodDebit - item.PeriodCredit) +
+              unmapped.Sum(item => item.PeriodDebit - item.PeriodCredit)
             : 0m;
         var reportLines = journalLines
             .Where(line => line.EntryDate >= request.FromDate)

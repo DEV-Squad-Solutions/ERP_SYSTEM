@@ -28,7 +28,7 @@ public sealed class AccountingReadinessSwaggerDocumentation : IOperationFilter
             nameof(AccountingReadinessController.Backfill) => (
                 "إنشاء أو تحديث قيود البيانات القديمة",
                 SwaggerOperationDescription.Create(
-                    "للمسؤول فقط. يعيد حساب تكلفة المخزون ثم ينشئ أو يحدّث القيود التلقائية للمصادر القديمة داخل السنة، ويعيد تقرير الجاهزية بعد التنفيذ.",
+                    "للمسؤول فقط. يستكمل بصورة idempotent الحسابات والروابط وتصميم القوائم الافتراضي الناقص للسنة، ثم يعيد حساب تكلفة المخزون وينشئ أو يحدّث القيود التلقائية للمصادر القديمة، ويعيد تقرير الجاهزية بعد التنفيذ.",
                     "أرسل `fiscalYearId` لسنة مفتوحة في query. لا يوجد body.",
                     "العملية ذرية: عند فشل أي مصدر يتم Rollback ولا تظل قيود جزئية. إعادة نفس الطلب لا تكرر القيود، والمرتبات لا تدخل في العملية.",
                     "ترجع أعداد `processedSources`, `createdJournals`, `updatedJournals` وتقرير `readiness` النهائي. السنة المغلقة أو نقص الربط يرجع استجابة الخطأ الموحدة.")),

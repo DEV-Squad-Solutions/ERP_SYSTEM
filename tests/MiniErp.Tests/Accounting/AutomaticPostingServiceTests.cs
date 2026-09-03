@@ -67,6 +67,40 @@ public sealed class AutomaticPostingServiceTests
     }
 
     [Fact]
+    public async Task Posting_IgnoresZeroValueLinesAndPersistsOnlyEffectiveLines()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var companyContext = new TestCurrentCompanyContext(1);
+        var service = new AutomaticPostingService(
+            database.Context,
+            companyContext,
+            TimeProvider.System,
+            NullLogger<AutomaticPostingService>.Instance);
+        var request = CreateRequest(125m) with
+        {
+            SourceId = 9042,
+            Lines =
+            [
+                new JournalEntryLineRequest(2, "سطر صفري", 0m, 0m),
+                new JournalEntryLineRequest(2, "مدين", 125m, 0m),
+                new JournalEntryLineRequest(3, "دائن", 0m, 125m),
+                new JournalEntryLineRequest(3, "سطر صفري", 0m, 0m)
+            ]
+        };
+
+        var result = await service.CreateOrUpdateAsync(request);
+
+        Assert.True(result.IsSuccess);
+        var lines = await database.Context.JournalEntryLines
+            .AsNoTracking()
+            .Where(line => line.JournalEntryId == result.Value.JournalEntryId)
+            .ToListAsync();
+        Assert.Equal(2, lines.Count);
+        Assert.All(lines, line => Assert.True(
+            (line.Debit > 0m) != (line.Credit > 0m)));
+    }
+
+    [Fact]
     public async Task Delete_IsIdempotent_AndRemovesSourceEntry()
     {
         await using var database = await TestDatabase.CreateAsync();

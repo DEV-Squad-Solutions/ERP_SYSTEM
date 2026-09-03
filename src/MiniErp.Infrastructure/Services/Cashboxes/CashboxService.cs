@@ -7,6 +7,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Cashboxes;
+using MiniErp.Application.Features.Companies;
 using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.CashManagement;
@@ -23,7 +24,8 @@ public sealed class CashboxService(
     IExchangeRateResolver exchangeRateResolver,
     TimeProvider timeProvider,
     IOpeningBalancePostingService? openingBalancePostingService = null,
-    IExchangeRatePostingSynchronizer? exchangeRatePostingSynchronizer = null)
+    IExchangeRatePostingSynchronizer? exchangeRatePostingSynchronizer = null,
+    IDefaultAccountingSetupService? defaultAccountingSetupService = null)
     : ICashboxService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -154,6 +156,14 @@ public sealed class CashboxService(
 
         dbContext.Cashboxes.Add(cashbox);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (defaultAccountingSetupService is not null)
+        {
+            await defaultAccountingSetupService.EnsureCashboxAsync(
+                companyId,
+                cashbox.Id,
+                cancellationToken);
+        }
 
         if (openingBalancePostingService is not null)
         {

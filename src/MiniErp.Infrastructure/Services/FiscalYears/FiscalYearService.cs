@@ -8,6 +8,7 @@ using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.FiscalYears;
 using MiniErp.Application.Features.AccountingReadiness;
 using MiniErp.Application.Features.AccountMappings;
+using MiniErp.Application.Features.Companies;
 using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -19,7 +20,8 @@ public sealed class FiscalYearService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     TimeProvider timeProvider,
-    IAccountingReadinessService? accountingReadinessService = null)
+    IAccountingReadinessService? accountingReadinessService = null,
+    IDefaultAccountingSetupService? defaultAccountingSetupService = null)
     : IFiscalYearService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -147,6 +149,14 @@ public sealed class FiscalYearService(
 
         dbContext.FiscalYears.Add(fiscalYear);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (defaultAccountingSetupService is not null)
+        {
+            await defaultAccountingSetupService.EnsureFiscalYearAsync(
+                companyId,
+                fiscalYear.Id,
+                cancellationToken);
+        }
 
         var response = await ProjectResponseQuery(fiscalYear.Id)
             .FirstAsync(cancellationToken);

@@ -7,6 +7,7 @@ using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.AccountingReadiness;
 using MiniErp.Application.Features.CashboxTransfers;
 using MiniErp.Application.Features.CashVouchers;
+using MiniErp.Application.Features.Companies;
 using MiniErp.Application.Features.DriverTrips;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Application.Features.JournalEntries;
@@ -26,7 +27,8 @@ public sealed class AccountingReadinessService(
     IInventoryPostingService inventoryPostingService,
     IOpeningBalancePostingService openingBalancePostingService,
     IDriverTripPostingService driverTripPostingService,
-    ILogger<AccountingReadinessService> logger)
+    ILogger<AccountingReadinessService> logger,
+    IDefaultAccountingSetupService? defaultAccountingSetupService = null)
     : IAccountingReadinessService
 {
     private const string MeterName = "MiniErp.Accounting";
@@ -451,6 +453,15 @@ public sealed class AccountingReadinessService(
             .BeginTransactionAsync(
                 IsolationLevel.Serializable,
                 cancellationToken);
+
+        if (defaultAccountingSetupService is not null)
+        {
+            await defaultAccountingSetupService.EnsureFiscalYearAsync(
+                companyId,
+                fiscalYear.Id,
+                cancellationToken);
+        }
+
         var sources = await LoadSourcesAsync(
             fiscalYear.StartDate,
             fiscalYear.EndDate,

@@ -494,14 +494,17 @@ public sealed class AutomaticPostingService(
 
     private List<JournalEntryLine> BuildLines(
         IReadOnlyList<JournalEntryLineRequest> lines) =>
-        lines.Select(line => new JournalEntryLine
-        {
-            CompanyId = companyId,
-            AccountId = line.AccountId,
-            Description = NormalizeOptional(line.Description),
-            Debit = line.Debit,
-            Credit = line.Credit
-        }).ToList();
+        lines
+            .Where(line => line.Debit > 0m || line.Credit > 0m)
+            .Select(line => new JournalEntryLine
+            {
+                CompanyId = companyId,
+                AccountId = line.AccountId,
+                Description = NormalizeOptional(line.Description),
+                Debit = line.Debit,
+                Credit = line.Credit
+            })
+            .ToList();
 
     private async Task<Error?> ValidateAccountsAsync(
         IReadOnlyList<JournalEntryLineRequest> lines,
@@ -563,13 +566,24 @@ public sealed class AutomaticPostingService(
     private static Error? ValidateBalance(
         IReadOnlyList<JournalEntryLineRequest>? lines)
     {
-        if (lines is null || lines.Count < 2)
+        if (lines is null)
         {
             return Unbalanced();
         }
 
-        var totalDebit = lines.Sum(line => line.Debit);
-        var totalCredit = lines.Sum(line => line.Credit);
+        var effectiveLines = lines
+            .Where(line => line.Debit != 0m || line.Credit != 0m)
+            .ToArray();
+        if (effectiveLines.Length < 2 || effectiveLines.Any(line =>
+                line.Debit < 0m ||
+                line.Credit < 0m ||
+                (line.Debit > 0m) == (line.Credit > 0m)))
+        {
+            return Unbalanced();
+        }
+
+        var totalDebit = effectiveLines.Sum(line => line.Debit);
+        var totalCredit = effectiveLines.Sum(line => line.Credit);
         return totalDebit > 0m && totalDebit == totalCredit
             ? null
             : Unbalanced();

@@ -6,6 +6,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.CashMovementTypes;
+using MiniErp.Application.Features.Companies;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -15,7 +16,8 @@ namespace MiniErp.Infrastructure.Services.CashMovementTypes;
 public sealed class CashMovementTypeService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    IDefaultAccountingSetupService? defaultAccountingSetupService = null)
     : ICashMovementTypeService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -154,6 +156,14 @@ public sealed class CashMovementTypeService(
 
         dbContext.CashMovementTypes.Add(movementType);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (defaultAccountingSetupService is not null)
+        {
+            await defaultAccountingSetupService.EnsureCashMovementTypeAsync(
+                companyId,
+                movementType.Id,
+                cancellationToken);
+        }
+
         var response = await ProjectResponseQuery(movementType.Id)
             .FirstAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
