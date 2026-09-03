@@ -48,8 +48,13 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
 
     public static async Task<PayrollEntryTestDatabase> CreateAsync(int companyId)
     {
-        var connection = new SqliteConnection("DataSource=:memory:");
+        var connection = new SqliteConnection("DataSource=:memory:;Foreign Keys=False");
         await connection.OpenAsync();
+        await using (var cmd = connection.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA foreign_keys = OFF;";
+            await cmd.ExecuteNonQueryAsync();
+        }
 
         var services = new ServiceCollection();
 
@@ -72,6 +77,7 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
 
         await context.Database.EnsureCreatedAsync();
         await context.Database.ExecuteSqlRawAsync("""
+            PRAGMA foreign_keys = OFF;
             DROP TABLE IF EXISTS Companies;
             CREATE TABLE Companies (Id INTEGER PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL, Address TEXT NOT NULL, CommercialRegister TEXT NOT NULL, TaxNumber TEXT NOT NULL, ManagerName TEXT NOT NULL, RowVersion BLOB NOT NULL DEFAULT (randomblob(8)), CreatedById TEXT NOT NULL DEFAULT '', CreatedOn TEXT NOT NULL DEFAULT '2026-01-01', CreatedByPc TEXT NOT NULL DEFAULT '', UpdatedById TEXT NULL, UpdatedOn TEXT NULL, UpdatedByPc TEXT NULL, DeletedById TEXT NULL, DeletedOn TEXT NULL, DeletedByPc TEXT NULL, IsDeleted INTEGER NOT NULL DEFAULT 0);
 
@@ -131,6 +137,61 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
                 Notes TEXT NULL,
                 LastModifiedAt TEXT NOT NULL DEFAULT '2026-01-01',
                 RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                CreatedById TEXT NOT NULL DEFAULT '',
+                CreatedOn TEXT NOT NULL DEFAULT '2026-01-01',
+                CreatedByPc TEXT NOT NULL DEFAULT '',
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL DEFAULT 0
+            );
+
+            DROP TABLE IF EXISTS EmployeeOpeningBalances;
+            CREATE TABLE EmployeeOpeningBalances (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                EmployeeId INTEGER NOT NULL,
+                PayrollEntryId INTEGER NULL,
+                DocumentNumber TEXT NOT NULL COLLATE NOCASE,
+                DocumentDate TEXT NOT NULL,
+                Currency INTEGER NOT NULL,
+                ExchangeRateId INTEGER NULL,
+                ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                BalanceType INTEGER NOT NULL,
+                Amount NUMERIC NOT NULL,
+                BaseAmount NUMERIC NOT NULL DEFAULT 0,
+                Notes TEXT NULL,
+                RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                CreatedById TEXT NOT NULL DEFAULT '',
+                CreatedOn TEXT NOT NULL DEFAULT '2026-01-01',
+                CreatedByPc TEXT NOT NULL DEFAULT '',
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL DEFAULT 0
+            );
+
+            DROP TABLE IF EXISTS EmployeeMovements;
+            CREATE TABLE EmployeeMovements (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                EmployeeId INTEGER NOT NULL,
+                CashVoucherId INTEGER NULL,
+                Type INTEGER NOT NULL,
+                MovementDate TEXT NOT NULL,
+                Currency INTEGER NOT NULL,
+                Debit NUMERIC NOT NULL DEFAULT 0,
+                Credit NUMERIC NOT NULL DEFAULT 0,
+                ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                BaseDebit NUMERIC NOT NULL DEFAULT 0,
+                BaseCredit NUMERIC NOT NULL DEFAULT 0,
+                Notes TEXT NULL,
                 CreatedById TEXT NOT NULL DEFAULT '',
                 CreatedOn TEXT NOT NULL DEFAULT '2026-01-01',
                 CreatedByPc TEXT NOT NULL DEFAULT '',

@@ -293,6 +293,15 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 return Result<PayrollEntryResponse>.Failure(guardError);
             }
 
+            var isAlreadyTransferred = await dbContext.EmployeeOpeningBalances
+                .AnyAsync(b => b.CompanyId == companyId && b.PayrollEntryId == id, cancellationToken);
+            if (isAlreadyTransferred)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Conflict("PayrollEntry.AlreadyPaid", $"تم تحويل راتب القيد رقم {entry.Id} إلى حساب الموظف مسبقًا."));
+            }
+
             var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
                 CurrencyCode.EGP,
                 request.PostingDate,
@@ -410,6 +419,18 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     await transaction.RollbackAsync(cancellationToken);
                     return Result<List<PayrollEntryResponse>>.Failure(guardError);
                 }
+            }
+
+            var existingTransfers = await dbContext.EmployeeOpeningBalances
+                .Where(b => b.CompanyId == companyId && b.PayrollEntryId.HasValue && entryIds.Contains(b.PayrollEntryId.Value))
+                .Select(b => b.PayrollEntryId!.Value)
+                .ToListAsync(cancellationToken);
+            if (existingTransfers.Count > 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.Conflict("PayrollEntry.AlreadyPaid",
+                        $"تم تحويل راتب بعض القيود إلى حساب الموظف مسبقًا: {string.Join(", ", existingTransfers)}"));
             }
 
             var openingBalances = new List<EmployeeOpeningBalance>(requestedItems.Count);
@@ -904,6 +925,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     m.Id,
                     m.Type.ToString(),
                     m.Type == EmployeeMovementType.Advance ? "سلفة نقدية" :
+                    m.Type == EmployeeMovementType.Withdrawal ? "مسحوبات نقدية" :
                     m.Type == EmployeeMovementType.Deduction ? "خصم مالي" :
                     m.Type == EmployeeMovementType.Bonus ? "مكافأة مالية" :
                     m.Type == EmployeeMovementType.Credit ? "حركة دائنة" : "حركة مدينة",
@@ -937,8 +959,29 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     b.Notes))
                 .ToListAsync(cancellationToken);
 
+            var recentOpeningBalances = await dbContext.EmployeeOpeningBalances
+                .AsNoTracking()
+                .Where(b => b.CompanyId == companyId && !b.PayrollEntryId.HasValue)
+                .OrderByDescending(b => b.DocumentDate)
+                .ThenByDescending(b => b.Id)
+                .Take(5)
+                .Select(b => new PayrollDashboardRecentOperationResponse(
+                    b.Id,
+                    "OpeningBalance",
+                    b.BalanceType == EmployeeBalanceType.Credit ? "رصيد دائن افتتاحي" : "رصيد مدين افتتاحي",
+                    b.EmployeeId,
+                    b.Employee.Code,
+                    b.Employee.Name,
+                    b.DocumentDate,
+                    b.Amount,
+                    b.Currency,
+                    b.DocumentNumber,
+                    b.Notes))
+                .ToListAsync(cancellationToken);
+
             var recentOperations = recentMovements
                 .Concat(recentSalaryTransfers)
+                .Concat(recentOpeningBalances)
                 .OrderByDescending(r => r.Date)
                 .Take(15)
                 .ToList();
