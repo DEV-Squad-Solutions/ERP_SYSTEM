@@ -10,6 +10,7 @@ using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
+using MiniErp.Infrastructure.Services.AccountingSetup;
 using MiniErp.Infrastructure.Services.AccountStatementMappings;
 using MiniErp.Infrastructure.Services.Accounts;
 using MiniErp.Infrastructure.Services.FinancialStatementLines;
@@ -23,6 +24,141 @@ public sealed class AccountingSetupServiceTests
     {
         MappingConfiguration.Register(
             typeof(InfrastructureAssemblyMarker).Assembly);
+    }
+
+    [Fact]
+    public async Task DefaultSetup_CreatesCompleteIdempotentCompanyAccountingSetup()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var service = database.CreateDefaultAccountingSetupService();
+        await database.AddCashSetupSourcesAsync();
+
+        await service.InitializeCompanyAsync(
+            companyId: 1,
+            effectiveDate: new DateOnly(2026, 9, 2));
+        await service.InitializeCompanyAsync(
+            companyId: 1,
+            effectiveDate: new DateOnly(2026, 9, 2));
+
+        var counts = await database.GetDefaultSetupCountsAsync();
+
+        Assert.Equal(23, counts.Accounts);
+        Assert.Equal(19, counts.AccountMappings);
+        Assert.Equal(34, counts.StatementLines);
+        Assert.Equal(33, counts.StatementMappings);
+        Assert.Equal(1, counts.FiscalYears);
+    }
+
+    [Fact]
+    public async Task DefaultSetup_ExtendsNewFiscalYearsAndCashSourcesWithoutDuplicates()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var service = database.CreateDefaultAccountingSetupService();
+
+        await service.InitializeCompanyAsync(
+            companyId: 1,
+            effectiveDate: new DateOnly(2026, 9, 2));
+        await database.AddFutureFiscalYearAndCashSetupSourcesAsync();
+
+        await service.EnsureFiscalYearAsync(companyId: 1, fiscalYearId: 3);
+        await service.EnsureCashboxAsync(companyId: 1, cashboxId: 1);
+        await service.EnsureCashMovementTypeAsync(
+            companyId: 1,
+            cashMovementTypeId: 1);
+        await service.EnsureFiscalYearAsync(companyId: 1, fiscalYearId: 3);
+
+        var counts = await database.GetFiscalYearSetupCountsAsync(3);
+
+        Assert.Equal(19, counts.AccountMappings);
+        Assert.Equal(34, counts.StatementLines);
+        Assert.Equal(33, counts.StatementMappings);
+    }
+
+    [Fact]
+    public async Task NewAccounts_GenerateCompanyScopedUniqueCodes()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var service = database.CreateAccountService(companyId: 1);
+
+        var first = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حساب تلقائي أول",
+            ParentAccountId: null,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+        var second = await service.AddAsync(new AccountRequest(
+            Code: "IGNORED-CODE",
+            Name: "حساب تلقائي ثان",
+            ParentAccountId: null,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+        var child = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "ابن تلقائي",
+            ParentAccountId: first.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+        var child2 = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "ابن تلقائي ثان",
+            ParentAccountId: second.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+        var child3 = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "ابن تلقائي ثالث",
+            ParentAccountId: second.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+        var grandchild = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حفيد تلقائي",
+            ParentAccountId: child2.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+
+        Assert.True(first.IsSuccess);
+        Assert.True(second.IsSuccess);
+        Assert.Equal("1000", first.Value.Code);
+        Assert.Equal("2000", second.Value.Code);
+        Assert.Equal("1100", child.Value.Code);
+        Assert.Equal("2100", child2.Value.Code);
+        Assert.Equal("2200", child3.Value.Code);
+        Assert.Equal("2110", grandchild.Value.Code);
+    }
+
+    [Fact]
+    public async Task NewAccount_ReusesCodeOfSoftDeletedAccount()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var service = database.CreateAccountService(companyId: 1);
+
+        var deletedAccount = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حساب سيُحذف",
+            ParentAccountId: null,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+        await database.SoftDeleteAccountAsync(deletedAccount.Value.Id);
+        database.ClearTracking();
+        var replacementAccount = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حساب بديل",
+            ParentAccountId: null,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+
+        Assert.True(replacementAccount.IsSuccess);
+        Assert.Equal(deletedAccount.Value.Code, replacementAccount.Value.Code);
+        Assert.Equal("1000", replacementAccount.Value.Code);
     }
 
     [Fact]
@@ -292,6 +428,69 @@ public sealed class AccountingSetupServiceTests
         public AccountStatementMappingService CreateMappingService(int companyId) =>
             new(Context, new TestCurrentCompanyContext(companyId));
 
+        public DefaultAccountingSetupService
+            CreateDefaultAccountingSetupService() => new(Context);
+
+        public Task AddCashSetupSourcesAsync() =>
+            Context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO Cashboxes (Id, CompanyId, IsDeleted)
+                VALUES (1, 1, 0);
+
+                INSERT INTO CashMovementTypes (
+                    Id, CompanyId, Direction, Classification, IsDeleted)
+                VALUES (1, 1, 2, 2, 0);
+                """);
+
+        public Task AddFutureFiscalYearAndCashSetupSourcesAsync() =>
+            Context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO FiscalYears (
+                    Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES (
+                    3, 1, '2027', '2027-01-01', '2027-12-31', 1, 0,
+                    'test', CURRENT_TIMESTAMP, 'test', 0);
+
+                INSERT INTO Cashboxes (Id, CompanyId, IsDeleted)
+                VALUES (1, 1, 0);
+
+                INSERT INTO CashMovementTypes (
+                    Id, CompanyId, Direction, Classification, IsDeleted)
+                VALUES (1, 1, 2, 2, 0);
+                """);
+
+        public async Task<(int Accounts, int AccountMappings,
+            int StatementLines, int StatementMappings, int FiscalYears)>
+            GetDefaultSetupCountsAsync() =>
+            (
+                await Context.Accounts.CountAsync(
+                    account => account.CompanyId == 1),
+                await Context.AccountMappings.CountAsync(
+                    mapping => mapping.CompanyId == 1),
+                await Context.FinancialStatementLines.CountAsync(
+                    line => line.CompanyId == 1),
+                await Context.AccountStatementMappings.CountAsync(
+                    mapping => mapping.CompanyId == 1),
+                await Context.FiscalYears.CountAsync(
+                    year => year.CompanyId == 1)
+            );
+
+        public async Task<(int AccountMappings, int StatementLines,
+            int StatementMappings)> GetFiscalYearSetupCountsAsync(
+            int fiscalYearId) =>
+            (
+                await Context.AccountMappings.CountAsync(mapping =>
+                    mapping.CompanyId == 1 &&
+                    mapping.FiscalYearId == fiscalYearId),
+                await Context.FinancialStatementLines.CountAsync(line =>
+                    line.CompanyId == 1 &&
+                    line.FiscalYearId == fiscalYearId),
+                await Context.AccountStatementMappings.CountAsync(mapping =>
+                    mapping.CompanyId == 1 &&
+                    mapping.FiscalYearId == fiscalYearId)
+            );
+
         public Task CloseFiscalYearAsync(int fiscalYearId) =>
             Context.Database.ExecuteSqlInterpolatedAsync(
                 $"UPDATE FiscalYears SET Status = 2 WHERE Id = {fiscalYearId}");
@@ -301,6 +500,10 @@ public sealed class AccountingSetupServiceTests
         public Task AddCashVoucherMovementAsync(int accountId) =>
             Context.Database.ExecuteSqlInterpolatedAsync(
                 $"INSERT INTO CashVouchers (CompanyId, AccountId, IsDeleted) VALUES (1, {accountId}, 0)");
+
+        public Task SoftDeleteAccountAsync(int accountId) =>
+            Context.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE Accounts SET IsDeleted = 1 WHERE Id = {accountId}");
 
         public async ValueTask DisposeAsync()
         {
@@ -367,6 +570,48 @@ public sealed class AccountingSetupServiceTests
 
                 CREATE UNIQUE INDEX UX_Accounts_Company_Code
                 ON Accounts (CompanyId, Code) WHERE IsDeleted = 0;
+
+                CREATE TABLE AccountMappings (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL,
+                    MappingType INTEGER NOT NULL,
+                    SourceId INTEGER NULL,
+                    AccountId INTEGER NOT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (CompanyId) REFERENCES Companies (Id),
+                    FOREIGN KEY (FiscalYearId) REFERENCES FiscalYears (Id),
+                    FOREIGN KEY (AccountId) REFERENCES Accounts (Id)
+                );
+
+                CREATE UNIQUE INDEX UX_AccountMappings_Scope_Type_Source
+                ON AccountMappings (
+                    CompanyId, FiscalYearId, MappingType, SourceId)
+                WHERE IsDeleted = 0;
+
+                CREATE TABLE Cashboxes (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE CashMovementTypes (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    Direction INTEGER NOT NULL,
+                    Classification INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
 
                 CREATE TABLE CashVouchers (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,

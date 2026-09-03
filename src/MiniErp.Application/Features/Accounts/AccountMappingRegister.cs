@@ -15,7 +15,7 @@ public sealed class AccountMappingRegister : IRegister
             .Ignore(account => account.Children)
             .Ignore(account => account.StatementMappings)
             .Ignore(account => account.RowVersion)
-            .Map(account => account.Code, request => request.Code.Trim())
+            .Map(account => account.Code, request => request.Code == null ? string.Empty : request.Code.Trim())
             .Map(account => account.Name, request => request.Name.Trim());
 
         config.ForType<AccountUpdateRequest, Account>()

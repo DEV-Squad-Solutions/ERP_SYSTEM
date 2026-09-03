@@ -153,6 +153,11 @@ public static class CashVoucherErrors
             "CashVouchers.InsufficientCashboxBalance",
             $"الرصيد المتاح في صندوق النقدية رقم {cashboxId} لا يسمح بهذه العملية.");
 
+    public static Error PostingAccountRequired() =>
+        Error.Conflict(
+            "CashVouchers.PostingAccountRequired",
+            "لا يمكن إنشاء القيد لعدم تحديد حساب مقابل للسند. اختر حساباً أو طرفاً مربوطاً محاسبياً.");
+
     public static Error BulkItemFailure(
         int index,
         Error error,

@@ -6,6 +6,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Application.Features.Invoices;
+using MiniErp.Application.Features.DriverTrips;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -19,7 +20,9 @@ public sealed partial class InvoiceService(
     IExchangeRateResolver exchangeRateResolver,
     IInvoiceInventoryService invoiceInventoryService,
     TimeProvider timeProvider,
-    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
+    IInvoicePostingService? invoicePostingService = null,
+    IDriverTripPostingService? driverTripPostingService = null)
     : IInvoiceService, IScopedService
 {
     private static readonly ItemMovementType[] InvoiceItemMovementTypes =
@@ -146,6 +149,19 @@ public sealed partial class InvoiceService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (invoicePostingService is not null)
+        {
+            var postingResult = await invoicePostingService.SynchronizeAsync(
+                invoice.Id,
+                cancellationToken);
+            if (postingResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<InvoiceResponse>.Failure(postingResult.Errors);
+            }
+        }
 
         var responseResult = await invoiceQueryService.GetByIdAsync(
             invoice.Id,
@@ -316,10 +332,16 @@ public sealed partial class InvoiceService(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            await RemoveSideEffectsAsync(
+            var removalResult = await RemoveSideEffectsAsync(
                 invoice,
                 removeItemMovements: false,
                 cancellationToken);
+            if (removalResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<InvoiceResponse>.Failure(removalResult.Errors);
+            }
             await dbContext.SaveChangesAsync(cancellationToken);
 
             await SaveSideEffectsAsync(
@@ -341,6 +363,20 @@ public sealed partial class InvoiceService(
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (invoicePostingService is not null)
+            {
+                var postingResult = await invoicePostingService.SynchronizeAsync(
+                    invoice.Id,
+                    cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result<InvoiceResponse>.Failure(
+                        postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -446,10 +482,16 @@ public sealed partial class InvoiceService(
             return Result.Failure(paymentError);
         }
 
-        await RemoveSideEffectsAsync(
+        var removalResult = await RemoveSideEffectsAsync(
             invoice,
             removeItemMovements: true,
             cancellationToken);
+        if (removalResult.IsFailure)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result.Failure(removalResult.Errors);
+        }
 
         var entry = dbContext.Entry(invoice);
         entry.Property(item => item.RowVersion).OriginalValue = rowVersion;
@@ -472,6 +514,19 @@ public sealed partial class InvoiceService(
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (invoicePostingService is not null)
+            {
+                var postingResult = await invoicePostingService.DeleteAsync(
+                    invoice.Id,
+                    cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result.Failure(postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {

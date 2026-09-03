@@ -22,7 +22,8 @@ public sealed class CashVoucherService(
     ICurrentCompanyContext currentCompanyContext,
     IExchangeRateResolver exchangeRateResolver,
     TimeProvider timeProvider,
-    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
+    ICashVoucherPostingService? cashVoucherPostingService = null)
     : ICashVoucherService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -497,6 +498,19 @@ public sealed class CashVoucherService(
                 preparation.Value.BusinessPartner is not null,
                 cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (cashVoucherPostingService is not null)
+            {
+                var postingResult = await cashVoucherPostingService
+                    .SynchronizeAsync(voucher, cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result<CashVoucherResponse>.Failure(
+                        postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -579,6 +593,20 @@ public sealed class CashVoucherService(
             dbContext.BusinessPartnerMovements.RemoveRange(partnerMovements);
             dbContext.CashVouchers.Remove(voucher);
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (cashVoucherPostingService is not null)
+            {
+                var postingResult = await cashVoucherPostingService.DeleteAsync(
+                    voucher.Id,
+                    cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result.Failure(postingResult.Errors);
+                }
+            }
+
             await transaction.CommitAsync(cancellationToken);
             return Result.Success();
         }
@@ -611,7 +639,9 @@ public sealed class CashVoucherService(
         var preparation = await PrepareAsync(
             request,
             currentVoucher: null,
-            enforceManualPostingTarget: true,
+            // Bulk keeps its legacy behavior and may contain an
+            // unclassified posted cash movement.
+            enforceManualPostingTarget: false,
             cancellationToken: cancellationToken);
         if (preparation.IsFailure)
         {
@@ -639,6 +669,17 @@ public sealed class CashVoucherService(
             preparation.Value.BusinessPartner is not null,
             cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (cashVoucherPostingService is not null)
+        {
+            var postingResult = await cashVoucherPostingService
+                .SynchronizeAsync(voucher, cancellationToken);
+            if (postingResult.IsFailure)
+            {
+                return Result<CashVoucherBulkItemResponse>.Failure(
+                    postingResult.Errors);
+            }
+        }
 
         var response = await ProjectResponseQuery(voucher.Id)
             .AsNoTracking()
@@ -711,7 +752,9 @@ public sealed class CashVoucherService(
         var preparation = await PrepareAsync(
             request,
             voucher,
-            enforceManualPostingTarget: true,
+            // Bulk keeps its legacy behavior and may contain an
+            // unclassified posted cash movement.
+            enforceManualPostingTarget: false,
             cancellationToken: cancellationToken);
         if (preparation.IsFailure)
         {
@@ -736,6 +779,17 @@ public sealed class CashVoucherService(
                 preparation.Value.BusinessPartner is not null,
                 cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (cashVoucherPostingService is not null)
+            {
+                var postingResult = await cashVoucherPostingService
+                    .SynchronizeAsync(voucher, cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    return Result<CashVoucherBulkItemResponse>.Failure(
+                        postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -825,6 +879,18 @@ public sealed class CashVoucherService(
             dbContext.BusinessPartnerMovements.RemoveRange(partnerMovements);
             dbContext.CashVouchers.Remove(voucher);
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (cashVoucherPostingService is not null)
+            {
+                var postingResult = await cashVoucherPostingService.DeleteAsync(
+                    voucher.Id,
+                    cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    return Result<CashVoucherBulkItemResponse>.Failure(
+                        postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -1322,14 +1388,16 @@ public sealed class CashVoucherService(
     private static bool HasExactlyOnePostingTarget(
         CashVoucherUpdateRequest request)
     {
-        var selectedTargetCount =
+        var selectedPartyOrAccountCount =
             (request.AccountId.HasValue ? 1 : 0) +
             (request.EmployeeId.HasValue ? 1 : 0) +
             (request.BusinessPartnerId.HasValue ? 1 : 0) +
             (request.DriverId.HasValue ? 1 : 0) +
             (!string.IsNullOrWhiteSpace(request.ExternalPartyName) ? 1 : 0);
 
-        return selectedTargetCount == 1;
+        return selectedPartyOrAccountCount == 1 ||
+            (selectedPartyOrAccountCount == 0 &&
+             request.CashMovementTypeId.HasValue);
     }
 
 }

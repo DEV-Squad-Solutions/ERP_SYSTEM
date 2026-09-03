@@ -12,6 +12,13 @@ public sealed record JournalEntryRequest(
     public const int DescriptionMaximumLength = 500;
 }
 
+public sealed record JournalEntryUpdateRequest(
+    int FiscalYearId,
+    DateOnly EntryDate,
+    string Description,
+    IReadOnlyList<JournalEntryLineRequest> Lines,
+    byte[]? RowVersion);
+
 public sealed record JournalEntryLineRequest(
     int AccountId,
     string? Description,
@@ -20,8 +27,3 @@ public sealed record JournalEntryLineRequest(
 {
     public const int DescriptionMaximumLength = 300;
 }
-
-public sealed record JournalEntryReverseRequest(
-    DateOnly ReversalDate,
-    string? Description,
-    byte[]? RowVersion);

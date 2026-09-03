@@ -1,4 +1,5 @@
 using MiniErp.Application.Common.Results;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.Statements;
 
@@ -40,4 +41,9 @@ public static class StatementErrors
             id.HasValue
                 ? $"لم يتم العثور على السنة المالية رقم {id.Value} أو لا تغطي الفترة المطلوبة."
                 : "لم يتم العثور على سنة مالية تغطي الفترة المطلوبة.");
+
+    public static Error InvalidStatementType(FinancialStatementType type) =>
+        Error.Validation(
+            "Statements.InvalidStatementType",
+            $"نوع القائمة المالية {type} غير مدعوم.");
 }

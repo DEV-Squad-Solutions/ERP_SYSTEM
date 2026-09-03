@@ -7,6 +7,7 @@ using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.PartnerOpeningBalances;
 using MiniErp.Application.Features.ExchangeRates;
+using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -18,7 +19,8 @@ public sealed class PartnerOpeningBalanceService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     IExchangeRateResolver exchangeRateResolver,
-    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
+    IOpeningBalancePostingService? openingBalancePostingService = null)
     : IPartnerOpeningBalanceService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -140,6 +142,19 @@ public sealed class PartnerOpeningBalanceService(
         dbContext.PartnerOpeningBalances.Add(normalized);
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        if (openingBalancePostingService is not null)
+        {
+            var postingResult = await openingBalancePostingService
+                .SynchronizePartnerAsync(normalized.Id, cancellationToken);
+            if (postingResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<PartnerOpeningBalanceResponse>.Failure(
+                    postingResult.Errors);
+            }
+        }
+
         var response = await ProjectResponseQuery(normalized.Id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
@@ -248,6 +263,19 @@ public sealed class PartnerOpeningBalanceService(
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (openingBalancePostingService is not null)
+            {
+                var postingResult = await openingBalancePostingService
+                    .SynchronizePartnerAsync(id, cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result<PartnerOpeningBalanceResponse>.Failure(
+                        postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -272,6 +300,11 @@ public sealed class PartnerOpeningBalanceService(
         {
             return Result.Failure(InvalidId());
         }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var openingBalance = await dbContext.PartnerOpeningBalances
             .FirstOrDefaultAsync(
@@ -301,6 +334,21 @@ public sealed class PartnerOpeningBalanceService(
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (openingBalancePostingService is not null)
+            {
+                var postingResult = await openingBalancePostingService
+                    .DeleteAsync(
+                        JournalEntrySourceType.PartnerOpeningBalance,
+                        openingBalance.Id,
+                        cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result.Failure(postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -308,6 +356,7 @@ public sealed class PartnerOpeningBalanceService(
             return Result.Failure(Concurrency());
         }
 
+        await transaction.CommitAsync(cancellationToken);
         return Result.Success();
     }
 

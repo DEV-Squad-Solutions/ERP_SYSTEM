@@ -3,7 +3,7 @@ using MiniErp.Domain.Enums;
 namespace MiniErp.Application.Features.Accounts;
 
 public sealed record AccountRequest(
-    string Code,
+    string? Code,
     string Name,
     int? ParentAccountId,
     AccountType AccountType,

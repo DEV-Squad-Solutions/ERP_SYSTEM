@@ -18,8 +18,13 @@ public interface IJournalEntryService
         JournalEntryRequest request,
         CancellationToken cancellationToken = default);
 
-    Task<Result<JournalEntryResponse>> ReverseAsync(
+    Task<Result<JournalEntryResponse>> UpdateAsync(
         int id,
-        JournalEntryReverseRequest request,
+        JournalEntryUpdateRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result> DeleteAsync(
+        int id,
+        byte[]? rowVersion,
         CancellationToken cancellationToken = default);
 }

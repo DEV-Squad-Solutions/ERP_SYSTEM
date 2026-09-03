@@ -7,6 +7,7 @@ using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.EmployeeOpeningBalances;
 using MiniErp.Application.Features.ExchangeRates;
+using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -18,7 +19,8 @@ public sealed class EmployeeOpeningBalanceService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     IExchangeRateResolver exchangeRateResolver,
-    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
+    IOpeningBalancePostingService? openingBalancePostingService = null)
     : IEmployeeOpeningBalanceService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -155,6 +157,19 @@ public sealed class EmployeeOpeningBalanceService(
         dbContext.EmployeeOpeningBalances.Add(normalized);
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        if (openingBalancePostingService is not null)
+        {
+            var postingResult = await openingBalancePostingService
+                .SynchronizeEmployeeAsync(normalized.Id, cancellationToken);
+            if (postingResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<EmployeeOpeningBalanceResponse>.Failure(
+                    postingResult.Errors);
+            }
+        }
+
         var response = await ProjectResponseQuery(normalized.Id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
@@ -274,6 +289,19 @@ public sealed class EmployeeOpeningBalanceService(
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (openingBalancePostingService is not null)
+            {
+                var postingResult = await openingBalancePostingService
+                    .SynchronizeEmployeeAsync(id, cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result<EmployeeOpeningBalanceResponse>.Failure(
+                        postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -298,6 +326,11 @@ public sealed class EmployeeOpeningBalanceService(
         {
             return Result.Failure(InvalidId());
         }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
 
         var openingBalance = await dbContext.EmployeeOpeningBalances
             .FirstOrDefaultAsync(
@@ -332,6 +365,21 @@ public sealed class EmployeeOpeningBalanceService(
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (openingBalancePostingService is not null)
+            {
+                var postingResult = await openingBalancePostingService
+                    .DeleteAsync(
+                        JournalEntrySourceType.EmployeeOpeningBalance,
+                        openingBalance.Id,
+                        cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result.Failure(postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -339,6 +387,7 @@ public sealed class EmployeeOpeningBalanceService(
             return Result.Failure(Concurrency());
         }
 
+        await transaction.CommitAsync(cancellationToken);
         return Result.Success();
     }
 

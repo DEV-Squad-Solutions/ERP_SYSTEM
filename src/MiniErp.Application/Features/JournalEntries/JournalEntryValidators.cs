@@ -1,4 +1,5 @@
 using FluentValidation;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.JournalEntries;
 
@@ -12,7 +13,13 @@ public sealed class JournalEntryRequestValidator
         RuleFor(request => request.Description)
             .NotEmpty()
             .MaximumLength(JournalEntryRequest.DescriptionMaximumLength);
-        RuleFor(request => request.EntryType).IsInEnum();
+        RuleFor(request => request.EntryType)
+            .IsInEnum()
+            .Must(type => type is
+                JournalEntryType.Manual or
+                JournalEntryType.Adjustment or
+                JournalEntryType.Opening)
+            .WithMessage("لا يمكن إنشاء القيد التلقائي يدويًا.");
         RuleFor(request => request.Lines)
             .NotNull()
             .Must(lines => lines is { Count: >= 2 })
@@ -36,6 +43,33 @@ public sealed class JournalEntryRequestValidator
     }
 }
 
+public sealed class JournalEntryUpdateRequestValidator
+    : AbstractValidator<JournalEntryUpdateRequest>
+{
+    public JournalEntryUpdateRequestValidator()
+    {
+        RuleFor(request => request.FiscalYearId).GreaterThan(0);
+        RuleFor(request => request.EntryDate).NotEqual(default(DateOnly));
+        RuleFor(request => request.Description)
+            .NotEmpty()
+            .MaximumLength(JournalEntryRequest.DescriptionMaximumLength);
+        RuleFor(request => request.Lines)
+            .NotNull()
+            .Must(lines => lines is { Count: >= 2 })
+            .WithMessage("يجب أن يحتوي القيد على سطرين على الأقل.")
+            .Must(lines => lines is not null &&
+                lines.Sum(line => line.Debit) > 0m &&
+                lines.Sum(line => line.Debit) == lines.Sum(line => line.Credit))
+            .WithMessage("إجمالي المدين يجب أن يساوي إجمالي الدائن ويكون أكبر من صفر.");
+        RuleFor(request => request.RowVersion)
+            .NotNull()
+            .Must(rowVersion => rowVersion is { Length: 8 })
+            .WithMessage("يجب إرسال إصدار القيد الحالي قبل تعديله.");
+        RuleForEach(request => request.Lines)
+            .SetValidator(new JournalEntryLineRequestValidator());
+    }
+}
+
 public sealed class JournalEntryLineRequestValidator
     : AbstractValidator<JournalEntryLineRequest>
 {
@@ -56,21 +90,5 @@ public sealed class JournalEntryLineRequestValidator
                 (line.Credit > 0m && line.Debit == 0m))
             .WithName("Amount")
             .WithMessage("يجب إدخال مبلغ مدين أو دائن فقط لكل سطر.");
-    }
-}
-
-public sealed class JournalEntryReverseRequestValidator
-    : AbstractValidator<JournalEntryReverseRequest>
-{
-    public JournalEntryReverseRequestValidator()
-    {
-        RuleFor(request => request.ReversalDate)
-            .NotEqual(default(DateOnly));
-        RuleFor(request => request.Description)
-            .MaximumLength(JournalEntryRequest.DescriptionMaximumLength);
-        RuleFor(request => request.RowVersion)
-            .NotNull()
-            .Must(rowVersion => rowVersion is { Length: 8 })
-            .WithMessage("يجب إرسال إصدار القيد الحالي قبل عكسه.");
     }
 }

@@ -19,7 +19,8 @@ public sealed class CashboxTransferService(
     ICurrentCompanyContext currentCompanyContext,
     IExchangeRateResolver exchangeRateResolver,
     TimeProvider timeProvider,
-    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
+    ICashboxTransferPostingService? cashboxTransferPostingService = null)
     : ICashboxTransferService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -214,6 +215,19 @@ public sealed class CashboxTransferService(
                 now));
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        if (cashboxTransferPostingService is not null)
+        {
+            var postingResult = await cashboxTransferPostingService
+                .SynchronizeAsync(transfer.Id, cancellationToken);
+            if (postingResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<CashboxTransferResponse>.Failure(
+                    postingResult.Errors);
+            }
+        }
+
         var response = await BuildResponseAsync(
             transfer.Id,
             cancellationToken);
@@ -383,6 +397,19 @@ public sealed class CashboxTransferService(
             return Result<CashboxTransferResponse>.Failure(Concurrency());
         }
 
+        if (cashboxTransferPostingService is not null)
+        {
+            var postingResult = await cashboxTransferPostingService
+                .SynchronizeAsync(transfer.Id, cancellationToken);
+            if (postingResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<CashboxTransferResponse>.Failure(
+                    postingResult.Errors);
+            }
+        }
+
         var response = await BuildResponseAsync(id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return Result<CashboxTransferResponse>.Success(response!);
@@ -449,6 +476,19 @@ public sealed class CashboxTransferService(
                 receiptVoucher);
             dbContext.CashboxTransfers.Remove(transfer);
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (cashboxTransferPostingService is not null)
+            {
+                var postingResult = await cashboxTransferPostingService
+                    .DeleteAsync(transfer.Id, cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result.Failure(postingResult.Errors);
+                }
+            }
+
             await transaction.CommitAsync(cancellationToken);
             return Result.Success();
         }

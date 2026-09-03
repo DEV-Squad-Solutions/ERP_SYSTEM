@@ -53,6 +53,7 @@ public static class SwaggerExtensions
             options.OperationFilter<JournalEntriesSwaggerDocumentation>();
             options.OperationFilter<AccountingSetupSwaggerDocumentation>();
             options.OperationFilter<AccountMappingsSwaggerDocumentation>();
+            options.OperationFilter<AccountingReadinessSwaggerDocumentation>();
             options.OperationFilter<ItemsSwaggerDocumentation>();
             options.OperationFilter<ItemsCategoriesSwaggerDocumentation>();
             options.OperationFilter<ItemUnitsSwaggerDocumentation>();

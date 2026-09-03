@@ -55,18 +55,36 @@ public sealed class JournalEntryValidatorTests
     }
 
     [Fact]
-    public void ReverseValidator_RequiresEightByteRowVersion()
+    public void RequestValidator_RejectsAutomaticEntryFromManualEndpoint()
     {
-        var result = new JournalEntryReverseRequestValidator().Validate(
-            new JournalEntryReverseRequest(
-                ReversalDate: new DateOnly(2026, 8, 31),
-                Description: null,
+        var result = new JournalEntryRequestValidator().Validate(
+            CreateRequest(100m, 100m) with
+            {
+                EntryType = JournalEntryType.Automatic
+            });
+
+        Assert.Contains(
+            result.Errors,
+            error => error.ErrorMessage.Contains(
+                "التلقائي",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void UpdateValidator_RequiresRowVersion()
+    {
+        var result = new JournalEntryUpdateRequestValidator().Validate(
+            new JournalEntryUpdateRequest(
+                FiscalYearId: 1,
+                EntryDate: new DateOnly(2026, 8, 31),
+                Description: "تعديل اختبار",
+                Lines: CreateRequest(100m, 100m).Lines,
                 RowVersion: [1]));
 
         Assert.Contains(
             result.Errors,
             error => error.PropertyName ==
-                nameof(JournalEntryReverseRequest.RowVersion));
+                nameof(JournalEntryUpdateRequest.RowVersion));
     }
 
     private static JournalEntryRequest CreateRequest(

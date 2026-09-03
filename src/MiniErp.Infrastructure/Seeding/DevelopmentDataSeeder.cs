@@ -3542,8 +3542,8 @@ public static class DevelopmentDataSeeder
 
         var requiredAccountCodes = new[]
         {
-            "1110", "1200", "1300", "2100", "2200", "4100", "4200",
-            "5100", "5200"
+            "1110", "1200", "1300", "1400", "2100", "2200", "3100", "3200",
+            "4100", "4200", "4300", "4400", "5100", "5200", "5400", "5500"
         };
         if (requiredAccountCodes.Any(code => !accounts.ContainsKey(code)))
         {
@@ -3621,6 +3621,13 @@ public static class DevelopmentDataSeeder
             Add(AccountingMappingType.SupplierControl, null, "2100");
             Add(AccountingMappingType.EmployeeControl, null, "2200");
             Add(AccountingMappingType.DriverControl, null, "2200");
+            Add(AccountingMappingType.ExchangeGain, null, "4300");
+            Add(AccountingMappingType.ExchangeLoss, null, "5400");
+            Add(AccountingMappingType.InventoryAdjustmentGain, null, "4400");
+            Add(AccountingMappingType.InventoryAdjustmentLoss, null, "5500");
+            Add(AccountingMappingType.OpeningBalanceEquity, null, "3200");
+            Add(AccountingMappingType.EmployeeReceivable, null, "1400");
+            Add(AccountingMappingType.DriverTripExpense, null, "5200");
 
             if (pending.Count > 0)
             {
@@ -3644,18 +3651,24 @@ public static class DevelopmentDataSeeder
             ("1110", "الخزائن", "1100", AccountType.Asset, NormalBalance.Debit, true),
             ("1200", "العملاء", "1000", AccountType.Asset, NormalBalance.Debit, true),
             ("1300", "المخزون", "1000", AccountType.Asset, NormalBalance.Debit, true),
+            ("1400", "ذمم الموظفين المدينة", "1000", AccountType.Asset, NormalBalance.Debit, true),
             ("2000", "الالتزامات", null, AccountType.Liability, NormalBalance.Credit, false),
             ("2100", "الموردون", "2000", AccountType.Liability, NormalBalance.Credit, true),
             ("2200", "مستحقات الموظفين والسائقين", "2000", AccountType.Liability, NormalBalance.Credit, true),
             ("3000", "حقوق الملكية", null, AccountType.Equity, NormalBalance.Credit, false),
             ("3100", "رأس المال", "3000", AccountType.Equity, NormalBalance.Credit, true),
+            ("3200", "مقابل الأرصدة الافتتاحية", "3000", AccountType.Equity, NormalBalance.Credit, true),
             ("4000", "الإيرادات", null, AccountType.Revenue, NormalBalance.Credit, false),
             ("4100", "إيرادات المبيعات", "4000", AccountType.Revenue, NormalBalance.Credit, true),
             ("4200", "إيرادات أخرى", "4000", AccountType.Revenue, NormalBalance.Credit, true),
+            ("4300", "أرباح فروق العملات", "4000", AccountType.Revenue, NormalBalance.Credit, true),
+            ("4400", "أرباح زيادة المخزون", "4000", AccountType.Revenue, NormalBalance.Credit, true),
             ("5000", "المصروفات", null, AccountType.Expense, NormalBalance.Debit, false),
             ("5100", "تكلفة المبيعات", "5000", AccountType.Expense, NormalBalance.Debit, true),
             ("5200", "مصروفات التشغيل", "5000", AccountType.Expense, NormalBalance.Debit, true),
-            ("5300", "مصروفات إدارية", "5000", AccountType.Expense, NormalBalance.Debit, true)
+            ("5300", "مصروفات إدارية", "5000", AccountType.Expense, NormalBalance.Debit, true),
+            ("5400", "خسائر فروق العملات", "5000", AccountType.Expense, NormalBalance.Debit, true),
+            ("5500", "خسائر عجز المخزون", "5000", AccountType.Expense, NormalBalance.Debit, true)
         ];
 
         var accounts = await dbContext.Accounts
@@ -3727,19 +3740,23 @@ public static class DevelopmentDataSeeder
                 ("FP-110", "النقدية وما في حكمها", "FP-100", 110, true),
                 ("FP-120", "العملاء", "FP-100", 120, true),
                 ("FP-130", "المخزون", "FP-100", 130, true),
+                ("FP-140", "ذمم الموظفين المدينة", "FP-100", 140, true),
                 ("FP-200", "الالتزامات", null, 200, false),
                 ("FP-210", "الموردون", "FP-200", 210, true),
                 ("FP-220", "مستحقات الموظفين والسائقين", "FP-200", 220, true),
                 ("FP-300", "حقوق الملكية", null, 300, false),
-                ("FP-310", "رأس المال", "FP-300", 310, true)
+                ("FP-310", "رأس المال", "FP-300", 310, true),
+                ("FP-320", "مقابل الأرصدة الافتتاحية", "FP-300", 320, true)
             ],
             [
                 ("1110", "FP-110"),
                 ("1200", "FP-120"),
                 ("1300", "FP-130"),
+                ("1400", "FP-140"),
                 ("2100", "FP-210"),
                 ("2200", "FP-220"),
-                ("3100", "FP-310")
+                ("3100", "FP-310"),
+                ("3200", "FP-320")
             ],
             accounts,
             cancellationToken);
@@ -3753,17 +3770,25 @@ public static class DevelopmentDataSeeder
                 ("IS-100", "الإيرادات", null, 100, false),
                 ("IS-110", "إيرادات المبيعات", "IS-100", 110, true),
                 ("IS-120", "إيرادات أخرى", "IS-100", 120, true),
+                ("IS-130", "أرباح فروق العملات", "IS-100", 130, true),
+                ("IS-140", "أرباح زيادة المخزون", "IS-100", 140, true),
                 ("IS-200", "المصروفات", null, 200, false),
                 ("IS-210", "تكلفة المبيعات", "IS-200", 210, true),
                 ("IS-220", "مصروفات التشغيل", "IS-200", 220, true),
-                ("IS-230", "مصروفات إدارية", "IS-200", 230, true)
+                ("IS-230", "مصروفات إدارية", "IS-200", 230, true),
+                ("IS-240", "خسائر فروق العملات", "IS-200", 240, true),
+                ("IS-250", "خسائر عجز المخزون", "IS-200", 250, true)
             ],
             [
                 ("4100", "IS-110"),
                 ("4200", "IS-120"),
+                ("4300", "IS-130"),
+                ("4400", "IS-140"),
                 ("5100", "IS-210"),
                 ("5200", "IS-220"),
-                ("5300", "IS-230")
+                ("5300", "IS-230"),
+                ("5400", "IS-240"),
+                ("5500", "IS-250")
             ],
             accounts,
             cancellationToken);
@@ -3775,19 +3800,35 @@ public static class DevelopmentDataSeeder
             FinancialStatementType.CashFlow,
             [
                 ("CF-100", "الأنشطة التشغيلية", null, 100, false),
-                ("CF-110", "متحصلات الأنشطة التشغيلية", "CF-100", 110, true),
-                ("CF-120", "مدفوعات الأنشطة التشغيلية", "CF-100", 120, true),
+                ("CF-110", "متحصلات العملاء والمبيعات", "CF-100", 110, true),
+                ("CF-120", "مدفوعات الموردين والمخزون", "CF-100", 120, true),
+                ("CF-130", "مدفوعات التشغيل والإدارة", "CF-100", 130, true),
+                ("CF-140", "تدفقات تشغيلية أخرى", "CF-100", 140, true),
                 ("CF-200", "الأنشطة الاستثمارية", null, 200, false),
-                ("CF-210", "صافي التدفقات الاستثمارية", "CF-200", 210, true),
+                ("CF-210", "شراء أصول ثابتة", "CF-200", 210, true),
+                ("CF-220", "بيع أصول ثابتة", "CF-200", 220, true),
                 ("CF-300", "الأنشطة التمويلية", null, 300, false),
-                ("CF-310", "صافي التدفقات التمويلية", "CF-300", 310, true)
+                ("CF-310", "مساهمات وزيادات رأس المال", "CF-300", 310, true),
+                ("CF-320", "متحصلات القروض", "CF-300", 320, true),
+                ("CF-330", "سداد القروض والتوزيعات", "CF-300", 330, true)
             ],
             [
+                ("1200", "CF-110"),
                 ("4100", "CF-110"),
-                ("4200", "CF-110"),
-                ("5100", "CF-120"),
-                ("5200", "CF-120"),
-                ("5300", "CF-120")
+                ("1300", "CF-120"),
+                ("2100", "CF-120"),
+                ("1400", "CF-140"),
+                ("2200", "CF-130"),
+                ("4200", "CF-140"),
+                ("4300", "CF-140"),
+                ("4400", "CF-140"),
+                ("5100", "CF-130"),
+                ("5200", "CF-130"),
+                ("5300", "CF-130"),
+                ("5400", "CF-140"),
+                ("5500", "CF-140"),
+                ("3100", "CF-310"),
+                ("3200", "CF-310")
             ],
             accounts,
             cancellationToken);

@@ -24,6 +24,12 @@ public sealed class JournalEntry : AuditableEntity
 
     public JournalEntryType EntryType { get; set; }
 
+    public JournalEntrySourceType? SourceType { get; set; }
+
+    public int? SourceId { get; set; }
+
+    public string? SourceNumber { get; set; }
+
     public JournalEntryStatus Status { get; set; } = JournalEntryStatus.Posted;
 
     public DateTime PostedOn { get; set; }
