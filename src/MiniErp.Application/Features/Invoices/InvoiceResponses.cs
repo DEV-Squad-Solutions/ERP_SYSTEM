@@ -1,4 +1,5 @@
 using MiniErp.Domain.Enums;
+using MiniErp.Application.Features.Items;
 
 namespace MiniErp.Application.Features.Invoices;
 
@@ -144,6 +145,12 @@ public sealed record InvoiceItemBalanceResponse(
     decimal InventoryValue)
 {
     public decimal CurrentQuantity => Balance;
+
+    /// <summary>
+    /// Advisory per-unit item expenses. These values are not included in
+    /// inventory valuation or accounting entries.
+    /// </summary>
+    public IReadOnlyList<ItemPricingExpenseResponse> PricingExpenses { get; init; } = [];
 }
 
 public sealed record InvoicePagedResponse(

@@ -14,27 +14,35 @@ namespace MiniErp.Tests.Invoices;
 public sealed class InvoiceItemPricingServiceTests
 {
     [Fact]
-    public async Task ExpensesAreAdvisoryPerInvoiceLineAndDoNotChangeInventoryCost()
+    public async Task ExpensesAreAdvisoryPerItemUnitAndDoNotChangeInventoryCost()
     {
         await using var database = await PricingTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
 
         var replaceResult = await service.ReplaceExpensesAsync(
-            invoiceLineId: 1,
-            new ReplaceInvoiceLinePricingExpensesRequest(
+            itemId: 1,
+            new ReplaceItemPricingExpensesRequest(
                 Expenses:
                 [
-                    new InvoiceLinePricingExpenseRequest(
+                    new ItemPricingExpenseRequest(
                         Name: "نقل",
                         Amount: 15m),
-                    new InvoiceLinePricingExpenseRequest(
+                    new ItemPricingExpenseRequest(
                         Name: "تحميل",
                         Amount: 5m,
                         Notes: "لأغراض التسعير فقط")
                 ]));
 
         Assert.True(replaceResult.IsSuccess, replaceResult.Error.Description);
-        var row = replaceResult.Value;
+        Assert.Equal(1, replaceResult.Value.ItemId);
+        Assert.Equal(20m, replaceResult.Value.ExpensesPerUnit);
+        Assert.Equal(2, replaceResult.Value.Expenses.Count);
+
+        var reportResult = await service.GetAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new InvoiceItemPricingFilterRequest(ItemId: 1));
+        Assert.True(reportResult.IsSuccess, reportResult.Error.Description);
+        var row = Assert.Single(reportResult.Value.Items);
         Assert.Equal(1, row.InvoiceLineId);
         Assert.Equal(1, row.InvoiceId);
         Assert.Equal("INV-001", row.InvoiceNumber);
@@ -42,10 +50,10 @@ public sealed class InvoiceItemPricingServiceTests
         Assert.Equal("ITEM-1", row.ItemCode);
         Assert.Equal(10m, row.Quantity);
         Assert.Equal(12m, row.AverageCost);
-        Assert.Equal(20m, row.ManualExpensesTotal);
-        Assert.Equal(2m, row.ManualExpensesPerUnit);
-        Assert.Equal(14m, row.IndicativeUnitCost);
-        Assert.Equal(140m, row.IndicativeTotalCost);
+        Assert.Equal(200m, row.ManualExpensesTotal);
+        Assert.Equal(20m, row.ManualExpensesPerUnit);
+        Assert.Equal(32m, row.IndicativeUnitCost);
+        Assert.Equal(320m, row.IndicativeTotalCost);
         Assert.Equal(2, row.Expenses.Count);
 
         var movement = await database.Context.ItemMovements
@@ -83,6 +91,50 @@ public sealed class InvoiceItemPricingServiceTests
         Assert.Equal("INV-OTHER", companyTwoResult.Value.Items[0].InvoiceNumber);
         Assert.Equal(CurrencyCode.EGP, companyOneResult.Value.BaseCurrency);
         Assert.Equal(CurrencyCode.USD, companyTwoResult.Value.BaseCurrency);
+    }
+
+    [Fact]
+    public async Task ItemExpensesApplyToEveryInvoiceLineForTheSameItem()
+    {
+        await using var database = await PricingTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO InvoiceLines (
+                Id, CompanyId, InvoiceId, ItemId, ItemUnitId, Quantity,
+                Price, BaseUnitPrice, IsDeleted)
+            VALUES (3, 1, 1, 1, 1, 5, 31, 31, 0);
+            """);
+        var service = database.CreateService(companyId: 1);
+        var replaceResult = await service.ReplaceExpensesAsync(
+            itemId: 1,
+            new ReplaceItemPricingExpensesRequest(
+                Expenses:
+                [
+                    new ItemPricingExpenseRequest(
+                        Name: "تعبئة",
+                        Amount: 2m)
+                ]));
+
+        Assert.True(replaceResult.IsSuccess, replaceResult.Error.Description);
+        var reportResult = await service.GetAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new InvoiceItemPricingFilterRequest(ItemId: 1));
+
+        Assert.True(reportResult.IsSuccess, reportResult.Error.Description);
+        Assert.Equal(2, reportResult.Value.Items.Count);
+        Assert.All(reportResult.Value.Items, row =>
+        {
+            Assert.Equal(2m, row.ManualExpensesPerUnit);
+            var expense = Assert.Single(row.Expenses);
+            Assert.Equal("تعبئة", expense.Name);
+            Assert.Equal(2m, expense.Amount);
+        });
+        Assert.Contains(
+            reportResult.Value.Items,
+            row => row.Quantity == 10m && row.ManualExpensesTotal == 20m);
+        Assert.Contains(
+            reportResult.Value.Items,
+            row => row.Quantity == 5m && row.ManualExpensesTotal == 10m);
     }
 
     private sealed class PricingTestDatabase : IAsyncDisposable
@@ -208,10 +260,10 @@ public sealed class InvoiceItemPricingServiceTests
                     IsDeleted INTEGER NOT NULL
                 );
 
-                CREATE TABLE InvoiceLinePricingExpenses (
+                CREATE TABLE ItemPricingExpenses (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
-                    InvoiceLineId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
                     Name TEXT NOT NULL,
                     Amount NUMERIC NOT NULL,
                     Notes TEXT NULL,

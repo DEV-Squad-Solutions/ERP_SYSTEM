@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
+using MiniErp.Application.Features.Items;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -234,6 +235,21 @@ public sealed class InvoiceInventoryService(
             cancellationToken);
         var costSnapshot = costSnapshots[itemId];
 
+        var pricingExpenses = await dbContext.ItemPricingExpenses
+            .AsNoTracking()
+            .Where(expense =>
+                expense.CompanyId == companyId &&
+                expense.ItemId == itemId)
+            .OrderBy(expense => expense.Id)
+            .Select(expense => new
+            {
+                expense.Id,
+                expense.Name,
+                expense.Amount,
+                expense.Notes
+            })
+            .ToListAsync(cancellationToken);
+
         return Result<InvoiceItemBalanceResponse>.Success(
             new InvoiceItemBalanceResponse(
                 StoreId: storeId,
@@ -245,6 +261,15 @@ public sealed class InvoiceInventoryService(
                 AsOfDate: asOfDate,
                 Balance: balances[itemId],
                 AverageCost: costSnapshot.AverageCost,
-                InventoryValue: costSnapshot.InventoryValue));
+                InventoryValue: costSnapshot.InventoryValue)
+            {
+                PricingExpenses = pricingExpenses
+                    .Select(expense => new ItemPricingExpenseResponse(
+                        Id: expense.Id,
+                        Name: expense.Name,
+                        Amount: expense.Amount,
+                        Notes: expense.Notes))
+                    .ToArray()
+            });
     }
 }

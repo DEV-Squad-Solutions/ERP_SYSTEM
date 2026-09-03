@@ -4357,6 +4357,61 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public async Task GetItemBalance_ReturnsEveryAdvisoryExpenseForSelectedItem()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var transport = new ItemPricingExpense
+        {
+            CompanyId = 1,
+            ItemId = 1,
+            Name = "نقل",
+            Amount = 3.5m
+        };
+        var loading = new ItemPricingExpense
+        {
+            CompanyId = 1,
+            ItemId = 1,
+            Name = "تحميل",
+            Amount = 1.25m,
+            Notes = "استرشادي فقط"
+        };
+        database.Context.ItemPricingExpenses.AddRange(transport, loading);
+        await database.Context.SaveChangesAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO ItemPricingExpenses (
+                CompanyId, ItemId, Name, Amount, Notes, IsDeleted)
+            VALUES (2, 1, 'Other company expense', 99, NULL, 0);
+            """);
+        database.Context.ChangeTracker.Clear();
+
+        var result = await database.CreateQueryService().GetItemBalanceAsync(
+            storeId: 1,
+            itemId: 1,
+            asOfDate: new DateOnly(2026, 7, 25));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Collection(
+            result.Value.PricingExpenses,
+            expense =>
+            {
+                Assert.Equal(transport.Id, expense.Id);
+                Assert.Equal("نقل", expense.Name);
+                Assert.Equal(3.5m, expense.Amount);
+                Assert.Null(expense.Notes);
+            },
+            expense =>
+            {
+                Assert.Equal(loading.Id, expense.Id);
+                Assert.Equal("تحميل", expense.Name);
+                Assert.Equal(1.25m, expense.Amount);
+                Assert.Equal("استرشادي فقط", expense.Notes);
+            });
+        Assert.Equal(0m, result.Value.AverageCost);
+        Assert.Equal(0m, result.Value.InventoryValue);
+    }
+
+    [Fact]
     public async Task GetItemBalance_CanExcludeTheInvoiceBeingEdited()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
@@ -6028,6 +6083,25 @@ public sealed class InvoiceServiceTests
                     Description TEXT NULL,
                     IsActive INTEGER NOT NULL,
                     IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE ItemPricingExpenses (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    ItemId INTEGER NOT NULL,
+                    Name TEXT NOT NULL,
+                    Amount NUMERIC NOT NULL,
+                    Notes TEXT NULL,
+                    CreatedById TEXT NOT NULL DEFAULT '',
+                    CreatedOn TEXT NOT NULL DEFAULT '2026-01-01',
+                    CreatedByPc TEXT NOT NULL DEFAULT '',
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE Countries (

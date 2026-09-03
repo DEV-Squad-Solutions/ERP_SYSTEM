@@ -23,4 +23,5 @@ public sealed class Item : AuditableEntity
 
     public bool IsActive { get; set; } = true;
 
+    public ICollection<ItemPricingExpense> PricingExpenses { get; set; } = [];
 }

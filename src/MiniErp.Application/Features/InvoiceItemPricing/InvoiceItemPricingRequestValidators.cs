@@ -33,10 +33,10 @@ public sealed class InvoiceItemPricingFilterRequestValidator
     }
 }
 
-public sealed class InvoiceLinePricingExpenseRequestValidator
-    : AbstractValidator<InvoiceLinePricingExpenseRequest>
+public sealed class ItemPricingExpenseRequestValidator
+    : AbstractValidator<ItemPricingExpenseRequest>
 {
-    public InvoiceLinePricingExpenseRequestValidator()
+    public ItemPricingExpenseRequestValidator()
     {
         RuleFor(expense => expense.Name)
             .NotEmpty()
@@ -54,24 +54,24 @@ public sealed class InvoiceLinePricingExpenseRequestValidator
     }
 }
 
-public sealed class ReplaceInvoiceLinePricingExpensesRequestValidator
-    : AbstractValidator<ReplaceInvoiceLinePricingExpensesRequest>
+public sealed class ReplaceItemPricingExpensesRequestValidator
+    : AbstractValidator<ReplaceItemPricingExpensesRequest>
 {
-    public ReplaceInvoiceLinePricingExpensesRequestValidator()
+    public ReplaceItemPricingExpensesRequestValidator()
     {
         RuleFor(request => request.Expenses)
             .NotNull()
             .Must(expenses => expenses is { Count: <= 25 })
-            .WithMessage("لا يمكن إضافة أكثر من 25 مصروفًا استرشاديًا للسطر.")
+            .WithMessage("لا يمكن إضافة أكثر من 25 مصروفًا استرشاديًا للصنف.")
             .Must(HaveUniqueNames)
-            .WithMessage("لا يمكن تكرار اسم المصروف داخل سطر الفاتورة.");
+            .WithMessage("لا يمكن تكرار اسم المصروف داخل الصنف.");
 
         RuleForEach(request => request.Expenses!)
-            .SetValidator(new InvoiceLinePricingExpenseRequestValidator());
+            .SetValidator(new ItemPricingExpenseRequestValidator());
     }
 
     private static bool HaveUniqueNames(
-        IReadOnlyList<InvoiceLinePricingExpenseRequest>? expenses)
+        IReadOnlyList<ItemPricingExpenseRequest>? expenses)
     {
         if (expenses is null)
         {

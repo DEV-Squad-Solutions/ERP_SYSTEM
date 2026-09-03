@@ -48,8 +48,6 @@ public sealed class InvoiceLine : AuditableEntity
 
     public string? Notes { get; set; }
 
-    public ICollection<InvoiceLinePricingExpense> PricingExpenses { get; set; } = [];
-
     public void CalculateAmounts()
     {
         if (!InvoiceAmountRules.TryCalculate(

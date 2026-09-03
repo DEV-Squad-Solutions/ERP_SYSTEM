@@ -4,6 +4,8 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.InvoiceItemPricing;
+using MiniErp.Application.Features.Items;
+using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
@@ -67,23 +69,23 @@ public sealed class InvoiceItemPricingService(
                     totalCount / (double)pagination.PageSize)));
     }
 
-    public async Task<Result<InvoiceItemPricingRowResponse>> ReplaceExpensesAsync(
-        int invoiceLineId,
-        ReplaceInvoiceLinePricingExpensesRequest request,
+    public async Task<Result<ItemPricingExpensesResponse>> ReplaceExpensesAsync(
+        int itemId,
+        ReplaceItemPricingExpensesRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (invoiceLineId <= 0)
+        if (itemId <= 0)
         {
-            return Result<InvoiceItemPricingRowResponse>.Failure(
-                InvalidInvoiceLineId());
+            return Result<ItemPricingExpensesResponse>.Failure(
+                InvalidItemId());
         }
 
         var requestedExpenses = request.Expenses ?? [];
         if (requestedExpenses.Count > 25)
         {
-            return Result<InvoiceItemPricingRowResponse>.Failure(
+            return Result<ItemPricingExpensesResponse>.Failure(
                 InvalidFilters(
-                    "لا يمكن إضافة أكثر من 25 مصروفًا استرشاديًا للسطر.",
+                    "لا يمكن إضافة أكثر من 25 مصروفًا استرشاديًا للصنف.",
                     nameof(request.Expenses)));
         }
 
@@ -93,9 +95,9 @@ public sealed class InvoiceItemPricingService(
             .Count() != requestedExpenses.Count;
         if (duplicateNames)
         {
-            return Result<InvoiceItemPricingRowResponse>.Failure(
+            return Result<ItemPricingExpensesResponse>.Failure(
                 InvalidFilters(
-                    "لا يمكن تكرار اسم المصروف داخل سطر الفاتورة.",
+                    "لا يمكن تكرار اسم المصروف داخل الصنف.",
                     nameof(request.Expenses)));
         }
 
@@ -104,31 +106,33 @@ public sealed class InvoiceItemPricingService(
                 IsolationLevel.Serializable,
                 cancellationToken);
 
-        var lineExists = await CreateLineQuery()
-            .AnyAsync(line => line.Id == invoiceLineId, cancellationToken);
-        if (!lineExists)
+        var itemExists = await dbContext.Items
+            .AnyAsync(item =>
+                item.CompanyId == companyId && item.Id == itemId,
+                cancellationToken);
+        if (!itemExists)
         {
-            return Result<InvoiceItemPricingRowResponse>.Failure(
-                InvoiceLineNotFound(invoiceLineId));
+            return Result<ItemPricingExpensesResponse>.Failure(
+                ItemNotFound(itemId));
         }
 
-        var currentExpenses = await dbContext.InvoiceLinePricingExpenses
+        var currentExpenses = await dbContext.ItemPricingExpenses
             .Where(expense =>
                 expense.CompanyId == companyId &&
-                expense.InvoiceLineId == invoiceLineId)
+                expense.ItemId == itemId)
             .ToListAsync(cancellationToken);
 
         if (currentExpenses.Count > 0)
         {
-            dbContext.InvoiceLinePricingExpenses.RemoveRange(currentExpenses);
+            dbContext.ItemPricingExpenses.RemoveRange(currentExpenses);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
         var newExpenses = requestedExpenses
-            .Select(expense => new InvoiceLinePricingExpense
+            .Select(expense => new ItemPricingExpense
             {
                 CompanyId = companyId,
-                InvoiceLineId = invoiceLineId,
+                ItemId = itemId,
                 Name = expense.Name.Trim(),
                 Amount = InventoryCostRules.RoundValue(expense.Amount),
                 Notes = string.IsNullOrWhiteSpace(expense.Notes)
@@ -139,23 +143,20 @@ public sealed class InvoiceItemPricingService(
 
         if (newExpenses.Length > 0)
         {
-            dbContext.InvoiceLinePricingExpenses.AddRange(newExpenses);
+            dbContext.ItemPricingExpenses.AddRange(newExpenses);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
         await transaction.CommitAsync(cancellationToken);
 
-        var line = await ProjectLines(
-                CreateLineQuery().Where(entity => entity.Id == invoiceLineId))
-            .SingleOrDefaultAsync(cancellationToken);
-        if (line is null)
-        {
-            return Result<InvoiceItemPricingRowResponse>.Failure(
-                InvoiceLineNotFound(invoiceLineId));
-        }
-
-        var rows = await BuildRowsAsync([line], cancellationToken);
-        return Result<InvoiceItemPricingRowResponse>.Success(rows[0]);
+        var expenses = await LoadItemExpensesAsync([itemId], cancellationToken);
+        var responseExpenses = expenses.GetValueOrDefault(itemId, []);
+        return Result<ItemPricingExpensesResponse>.Success(
+            new ItemPricingExpensesResponse(
+                ItemId: itemId,
+                ExpensesPerUnit: InventoryCostRules.RoundValue(
+                    responseExpenses.Sum(expense => expense.Amount)),
+                Expenses: responseExpenses));
     }
 
     private IQueryable<InvoiceLine> CreateLineQuery() =>
@@ -256,9 +257,6 @@ public sealed class InvoiceItemPricingService(
             .Select(line => line.ItemId)
             .Distinct()
             .ToArray();
-        var invoiceLineIds = lines
-            .Select(line => line.InvoiceLineId)
-            .ToArray();
         var movementTypes = InvoiceMovementTypes;
 
         var movements = await dbContext.ItemMovements
@@ -285,25 +283,9 @@ public sealed class InvoiceItemPricingService(
                 movement.ItemId,
                 movement.MovementType));
 
-        var expenses = await dbContext.InvoiceLinePricingExpenses
-            .AsNoTracking()
-            .Where(expense =>
-                expense.CompanyId == companyId &&
-                invoiceLineIds.Contains(expense.InvoiceLineId))
-            .OrderBy(expense => expense.Id)
-            .Select(expense => new ExpenseProjection
-            {
-                Id = expense.Id,
-                InvoiceLineId = expense.InvoiceLineId,
-                Name = expense.Name,
-                Amount = expense.Amount,
-                Notes = expense.Notes
-            })
-            .ToListAsync(cancellationToken);
-
-        var expensesByLine = expenses
-            .GroupBy(expense => expense.InvoiceLineId)
-            .ToDictionary(group => group.Key, group => group.ToArray());
+        var expensesByItem = await LoadItemExpensesAsync(
+            itemIds,
+            cancellationToken);
 
         return lines
             .Select(line =>
@@ -315,14 +297,12 @@ public sealed class InvoiceItemPricingService(
                         InvoiceMovementRules.GetItemMovementType(
                             line.InvoiceType)),
                     out var movement);
-                expensesByLine.TryGetValue(
-                    line.InvoiceLineId,
-                    out var lineExpenses);
+                expensesByItem.TryGetValue(line.ItemId, out var itemExpenses);
 
                 return BuildRow(
                     line,
                     movement,
-                    lineExpenses ?? []);
+                    itemExpenses ?? []);
             })
             .ToArray();
     }
@@ -330,22 +310,14 @@ public sealed class InvoiceItemPricingService(
     private static InvoiceItemPricingRowResponse BuildRow(
         LineProjection line,
         MovementProjection? movement,
-        IReadOnlyList<ExpenseProjection> expenses)
+        IReadOnlyList<ItemPricingExpenseResponse> expenses)
     {
-        var expenseResponses = expenses
-            .Select(expense => new InvoiceLinePricingExpenseResponse(
-                Id: expense.Id,
-                Name: expense.Name,
-                Amount: expense.Amount,
-                Notes: expense.Notes))
-            .ToArray();
-        var manualExpensesTotal = InventoryCostRules.RoundValue(
+        var expenseResponses = expenses.ToArray();
+        var manualExpensesPerUnit = InventoryCostRules.RoundValue(
             expenseResponses.Sum(expense => expense.Amount));
-        var manualExpensesPerUnit = manualExpensesTotal == 0m
-            ? 0m
-            : InventoryCostRules.CalculateAverage(
-                manualExpensesTotal,
-                line.Quantity);
+        var manualExpensesTotal = InventoryCostRules.CalculateTotal(
+            line.Quantity,
+            manualExpensesPerUnit);
 
         decimal? averageCost = null;
         if (movement is not null)
@@ -484,12 +456,37 @@ public sealed class InvoiceItemPricingService(
         public decimal AverageCostAfter { get; init; }
     }
 
-    private sealed class ExpenseProjection
+    private async Task<Dictionary<int, IReadOnlyList<ItemPricingExpenseResponse>>>
+        LoadItemExpensesAsync(
+            IReadOnlyCollection<int> itemIds,
+            CancellationToken cancellationToken)
     {
-        public int Id { get; init; }
-        public int InvoiceLineId { get; init; }
-        public string Name { get; init; } = string.Empty;
-        public decimal Amount { get; init; }
-        public string? Notes { get; init; }
+        var expenses = await dbContext.ItemPricingExpenses
+            .AsNoTracking()
+            .Where(expense =>
+                expense.CompanyId == companyId &&
+                itemIds.Contains(expense.ItemId))
+            .OrderBy(expense => expense.Id)
+            .Select(expense => new
+            {
+                expense.ItemId,
+                expense.Id,
+                expense.Name,
+                expense.Amount,
+                expense.Notes
+            })
+            .ToListAsync(cancellationToken);
+
+        return expenses
+            .GroupBy(expense => expense.ItemId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<ItemPricingExpenseResponse>)group
+                    .Select(expense => new ItemPricingExpenseResponse(
+                        Id: expense.Id,
+                        Name: expense.Name,
+                        Amount: expense.Amount,
+                        Notes: expense.Notes))
+                    .ToArray());
     }
 }

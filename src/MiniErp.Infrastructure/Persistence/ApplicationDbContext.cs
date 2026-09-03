@@ -108,8 +108,8 @@ public sealed class ApplicationDbContext
 
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
 
-    public DbSet<InvoiceLinePricingExpense> InvoiceLinePricingExpenses =>
-        Set<InvoiceLinePricingExpense>();
+    public DbSet<ItemPricingExpense> ItemPricingExpenses =>
+        Set<ItemPricingExpense>();
 
     public DbSet<InvoiceContainerLine> InvoiceContainerLines =>
         Set<InvoiceContainerLine>();
