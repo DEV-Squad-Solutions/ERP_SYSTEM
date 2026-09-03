@@ -6,6 +6,7 @@ using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Features.AccountStatementMappings;
 using MiniErp.Application.Features.Accounts;
 using MiniErp.Application.Features.FinancialStatementLines;
+using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
@@ -47,6 +48,18 @@ public sealed class AccountingSetupServiceTests
         Assert.Equal(34, counts.StatementLines);
         Assert.Equal(33, counts.StatementMappings);
         Assert.Equal(1, counts.FiscalYears);
+        Assert.True(await database.HasDefaultAccountClassificationAsync(
+            accountCode: "1200",
+            statementType: FinancialStatementType.FinancialPosition,
+            lineCode: "FP-120"));
+        Assert.True(await database.HasDefaultAccountClassificationAsync(
+            accountCode: "4100",
+            statementType: FinancialStatementType.IncomeStatement,
+            lineCode: "IS-110"));
+        Assert.True(await database.HasDefaultAccountClassificationAsync(
+            accountCode: "4100",
+            statementType: FinancialStatementType.CashFlow,
+            lineCode: "CF-110"));
     }
 
     [Fact]
@@ -72,6 +85,26 @@ public sealed class AccountingSetupServiceTests
         Assert.Equal(19, counts.AccountMappings);
         Assert.Equal(34, counts.StatementLines);
         Assert.Equal(33, counts.StatementMappings);
+    }
+
+    [Fact]
+    public async Task DefaultSetup_CopiesCustomAccountClassificationToNewFiscalYear()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var service = database.CreateDefaultAccountingSetupService();
+        await service.InitializeCompanyAsync(
+            companyId: 1,
+            effectiveDate: new DateOnly(2026, 9, 2));
+        var customAccountId = await database.AddCustomStatementMappingAsync();
+        await database.AddFutureFiscalYearAndCashSetupSourcesAsync();
+
+        await service.EnsureFiscalYearAsync(companyId: 1, fiscalYearId: 3);
+
+        Assert.True(await database.HasStatementMappingAsync(
+            fiscalYearId: 3,
+            statementType: FinancialStatementType.IncomeStatement,
+            accountId: customAccountId,
+            lineCode: "IS-230"));
     }
 
     [Fact]
@@ -459,6 +492,63 @@ public sealed class AccountingSetupServiceTests
                     Id, CompanyId, Direction, Classification, IsDeleted)
                 VALUES (1, 1, 2, 2, 0);
                 """);
+
+        public async Task<int> AddCustomStatementMappingAsync()
+        {
+            var account = new Account
+            {
+                CompanyId = 1,
+                Code = "5600",
+                Name = "مصروف مخصص",
+                AccountType = AccountType.Expense,
+                NormalBalance = NormalBalance.Debit,
+                IsPosting = true,
+                IsActive = true
+            };
+            Context.Accounts.Add(account);
+            await Context.SaveChangesAsync();
+            var lineId = await Context.FinancialStatementLines
+                .Where(line =>
+                    line.CompanyId == 1 &&
+                    line.FiscalYearId == 1 &&
+                    line.StatementType == FinancialStatementType.IncomeStatement &&
+                    line.Code == "IS-230")
+                .Select(line => line.Id)
+                .SingleAsync();
+            Context.AccountStatementMappings.Add(new AccountStatementMapping
+            {
+                CompanyId = 1,
+                FiscalYearId = 1,
+                StatementType = FinancialStatementType.IncomeStatement,
+                AccountId = account.Id,
+                FinancialStatementLineId = lineId
+            });
+            await Context.SaveChangesAsync();
+            return account.Id;
+        }
+
+        public Task<bool> HasStatementMappingAsync(
+            int fiscalYearId,
+            FinancialStatementType statementType,
+            int accountId,
+            string lineCode) =>
+            Context.AccountStatementMappings.AnyAsync(mapping =>
+                mapping.CompanyId == 1 &&
+                mapping.FiscalYearId == fiscalYearId &&
+                mapping.StatementType == statementType &&
+                mapping.AccountId == accountId &&
+                mapping.FinancialStatementLine.Code == lineCode);
+
+        public Task<bool> HasDefaultAccountClassificationAsync(
+            string accountCode,
+            FinancialStatementType statementType,
+            string lineCode) =>
+            Context.AccountStatementMappings.AnyAsync(mapping =>
+                mapping.CompanyId == 1 &&
+                mapping.FiscalYearId == 1 &&
+                mapping.StatementType == statementType &&
+                mapping.Account.Code == accountCode &&
+                mapping.FinancialStatementLine.Code == lineCode);
 
         public async Task<(int Accounts, int AccountMappings,
             int StatementLines, int StatementMappings, int FiscalYears)>

@@ -350,6 +350,13 @@ public sealed class DefaultAccountingSetupService(
         IReadOnlyDictionary<string, Account> accounts,
         CancellationToken cancellationToken)
     {
+        var isNewStatementSetup = !await dbContext.AccountStatementMappings
+            .AnyAsync(
+                mapping =>
+                    mapping.CompanyId == companyId &&
+                    mapping.FiscalYearId == fiscalYearId,
+                cancellationToken);
+
         foreach (var seed in GeneralMappingSeeds)
         {
             await EnsureMappingAsync(
@@ -415,6 +422,101 @@ public sealed class DefaultAccountingSetupService(
                 accounts,
                 cancellationToken);
         }
+
+        if (isNewStatementSetup)
+        {
+            await CopyPreviousStatementMappingsAsync(
+                companyId,
+                fiscalYearId,
+                cancellationToken);
+        }
+    }
+
+    private async Task CopyPreviousStatementMappingsAsync(
+        int companyId,
+        int fiscalYearId,
+        CancellationToken cancellationToken)
+    {
+        var targetYear = await dbContext.FiscalYears
+            .AsNoTracking()
+            .Where(year =>
+                year.CompanyId == companyId &&
+                year.Id == fiscalYearId)
+            .Select(year => new { year.StartDate })
+            .SingleAsync(cancellationToken);
+        var previousFiscalYearId = await dbContext.FiscalYears
+            .AsNoTracking()
+            .Where(year =>
+                year.CompanyId == companyId &&
+                year.Id != fiscalYearId &&
+                year.StartDate < targetYear.StartDate)
+            .OrderByDescending(year => year.StartDate)
+            .Select(year => (int?)year.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!previousFiscalYearId.HasValue)
+        {
+            return;
+        }
+
+        foreach (var statementType in Enum.GetValues<FinancialStatementType>())
+        {
+            var targetLinesByCode = await dbContext.FinancialStatementLines
+                .AsNoTracking()
+                .Where(line =>
+                    line.CompanyId == companyId &&
+                    line.FiscalYearId == fiscalYearId &&
+                    line.StatementType == statementType &&
+                    line.IsAssignable &&
+                    line.IsActive)
+                .ToDictionaryAsync(
+                    line => line.Code,
+                    line => line.Id,
+                    StringComparer.OrdinalIgnoreCase,
+                    cancellationToken);
+            var mappedAccountIds = (await dbContext.AccountStatementMappings
+                    .Where(mapping =>
+                        mapping.CompanyId == companyId &&
+                        mapping.FiscalYearId == fiscalYearId &&
+                        mapping.StatementType == statementType)
+                    .Select(mapping => mapping.AccountId)
+                    .ToListAsync(cancellationToken))
+                .ToHashSet();
+            var previousMappings = await dbContext.AccountStatementMappings
+                .AsNoTracking()
+                .Where(mapping =>
+                    mapping.CompanyId == companyId &&
+                    mapping.FiscalYearId == previousFiscalYearId.Value &&
+                    mapping.StatementType == statementType)
+                .Select(mapping => new
+                {
+                    mapping.AccountId,
+                    LineCode = mapping.FinancialStatementLine.Code
+                })
+                .ToListAsync(cancellationToken);
+
+            foreach (var previous in previousMappings)
+            {
+                if (!mappedAccountIds.Add(previous.AccountId) ||
+                    !targetLinesByCode.TryGetValue(
+                        previous.LineCode,
+                        out var targetLineId))
+                {
+                    continue;
+                }
+
+                dbContext.AccountStatementMappings.Add(
+                    new AccountStatementMapping
+                    {
+                        CompanyId = companyId,
+                        FiscalYearId = fiscalYearId,
+                        StatementType = statementType,
+                        AccountId = previous.AccountId,
+                        FinancialStatementLineId = targetLineId
+                    });
+            }
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private async Task EnsureMappingAsync(
