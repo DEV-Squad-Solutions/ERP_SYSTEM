@@ -63,6 +63,8 @@ public sealed class PayrollEntriesController(
         var result = await payrollReportService.BuildReportAsync(
             request.StartDate,
             request.EndDate,
+            request.EmployeeId,
+            request.IsMoved,
             cancellationToken);
         return this.ToActionResult(result);
     }
@@ -157,7 +159,6 @@ public sealed class PayrollEntriesController(
 
     [Authorize(Roles = "Admin")]
     [HttpPost("bulk/move-salary")]
-    [HttpPost("move-salary/bulk")]
     [ProducesResponseType<List<PayrollEntryResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -276,7 +277,6 @@ public sealed class PayrollEntriesController(
 
     [Authorize(Roles = "Admin")]
     [HttpDelete("bulk")]
-    [HttpPost("bulk/delete")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

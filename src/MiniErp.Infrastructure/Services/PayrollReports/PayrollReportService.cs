@@ -11,7 +11,6 @@ namespace MiniErp.Infrastructure.Services.PayrollReports;
 
 public sealed class PayrollReportService(
     ApplicationDbContext dbContext,
-    IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext)
     : IPayrollReportService, IScopedService
 {
@@ -23,14 +22,28 @@ public sealed class PayrollReportService(
     public async Task<Result<PayrollReportResponse>> BuildReportAsync(
         DateOnly startDate,
         DateOnly endDate,
-        CancellationToken cancellationToken)
+        int? employeeId = null,
+        bool? isMoved = null,
+        CancellationToken cancellationToken = default)
     {
-        var entries = await dbContext.PayrollEntries
+        var query = dbContext.PayrollEntries
             .AsNoTracking()
             .Where(e =>
                 e.CompanyId == companyId &&
                 e.StartDate >= startDate &&
-                e.EndDate <= endDate)
+                e.EndDate <= endDate);
+
+        if (employeeId.HasValue)
+        {
+            query = query.Where(e => e.EmployeeId == employeeId.Value);
+        }
+
+        if (isMoved.HasValue)
+        {
+            query = query.Where(e => e.IsSalaryMoveToEmployeeAccount == isMoved.Value);
+        }
+
+        var entries = await query
             .OrderBy(e => e.EmployeeName)
             .Select(e => new
             {
