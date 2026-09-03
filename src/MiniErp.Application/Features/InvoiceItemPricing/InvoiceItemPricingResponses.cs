@@ -1,12 +1,12 @@
 using MiniErp.Domain.Enums;
+using MiniErp.Application.Features.Items;
 
 namespace MiniErp.Application.Features.InvoiceItemPricing;
 
-public sealed record InvoiceLinePricingExpenseResponse(
-    int Id,
-    string Name,
-    decimal Amount,
-    string? Notes);
+public sealed record ItemPricingExpensesResponse(
+    int ItemId,
+    decimal ExpensesPerUnit,
+    IReadOnlyList<ItemPricingExpenseResponse> Expenses);
 
 public sealed record InvoiceItemPricingRowResponse(
     int InvoiceLineId,
@@ -33,7 +33,7 @@ public sealed record InvoiceItemPricingRowResponse(
     decimal ManualExpensesPerUnit,
     decimal? IndicativeUnitCost,
     decimal? IndicativeTotalCost,
-    IReadOnlyList<InvoiceLinePricingExpenseResponse> Expenses);
+    IReadOnlyList<ItemPricingExpenseResponse> Expenses);
 
 public sealed record InvoiceItemPricingPagedResponse(
     CurrencyCode BaseCurrency,

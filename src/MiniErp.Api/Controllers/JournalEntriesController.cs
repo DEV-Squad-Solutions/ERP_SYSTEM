@@ -7,7 +7,6 @@ using MiniErp.Application.Features.JournalEntries;
 
 namespace MiniErp.Api.Controllers;
 
-[ApiExplorerSettings(IgnoreApi = true)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
@@ -71,27 +70,53 @@ public sealed class JournalEntriesController(
     }
 
     [Authorize(Roles = "Admin")]
-    [HttpPost("{id:int}/reverse")]
+    [HttpPut("{id:int}")]
     [ProducesResponseType<JournalEntryResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> Reverse(
+    public async Task<IActionResult> Update(
         int id,
-        JournalEntryReverseRequest request,
+        JournalEntryUpdateRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await journalEntryService.ReverseAsync(
+        var result = await journalEntryService.UpdateAsync(
             id,
             request,
             cancellationToken);
         if (result.IsSuccess)
         {
             TryEnqueueRealtime<JournalEntriesRealtimeJob>(
-                "Reversed",
+                "Updated",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
+
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpDelete("{id:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Delete(
+        int id,
+        [FromQuery] byte[]? rowVersion,
+        CancellationToken cancellationToken)
+    {
+        var result = await journalEntryService.DeleteAsync(
+            id,
+            rowVersion,
+            cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<JournalEntriesRealtimeJob>(
+                "Deleted",
                 id,
                 realtime => job => job.ExecuteAsync(realtime));
         }
 
         return this.ToActionResult(result);
     }
+
 }

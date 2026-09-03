@@ -3,6 +3,7 @@ using MiniErp.Api.Extensions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.ProfitabilityReports;
 using MiniErp.Application.Features.Statements;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Api.Controllers;
 
@@ -101,6 +102,48 @@ public sealed class StatementsController(
     {
         var result = await statementService.GetTrialBalanceAsync(
             filters,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [HttpGet("income-statement")]
+    [ProducesResponseType<FinancialStatementReportResponse>(
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetIncomeStatement(
+        [FromQuery] FinancialStatementReportRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await statementService.GetFinancialStatementReportAsync(
+            FinancialStatementType.IncomeStatement,
+            request,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [HttpGet("financial-position")]
+    [ProducesResponseType<FinancialStatementReportResponse>(
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetFinancialPosition(
+        [FromQuery] FinancialStatementReportRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await statementService.GetFinancialStatementReportAsync(
+            FinancialStatementType.FinancialPosition,
+            request,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
+    [HttpGet("cash-flow")]
+    [ProducesResponseType<FinancialStatementReportResponse>(
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetCashFlow(
+        [FromQuery] FinancialStatementReportRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await statementService.GetFinancialStatementReportAsync(
+            FinancialStatementType.CashFlow,
+            request,
             cancellationToken);
         return this.ToActionResult(result);
     }

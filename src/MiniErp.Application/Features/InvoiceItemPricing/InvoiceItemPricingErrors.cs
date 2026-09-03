@@ -10,15 +10,15 @@ public static class InvoiceItemPricingErrors
             description,
             fieldName);
 
-    public static Error InvalidInvoiceLineId() =>
+    public static Error InvalidItemId() =>
         Error.Validation(
-            "InvoiceItemPricing.InvalidInvoiceLineId",
-            "يجب تحديد سطر فاتورة صالح.",
-            "InvoiceLineId");
+            "InvoiceItemPricing.InvalidItemId",
+            "يجب تحديد صنف صالح.",
+            "ItemId");
 
-    public static Error InvoiceLineNotFound(int invoiceLineId) =>
+    public static Error ItemNotFound(int itemId) =>
         Error.NotFound(
-            "InvoiceItemPricing.InvoiceLineNotFound",
-            $"سطر الفاتورة رقم {invoiceLineId} غير موجود أو لا يحتوي على صنف.",
-            "InvoiceLineId");
+            "InvoiceItemPricing.ItemNotFound",
+            $"الصنف رقم {itemId} غير موجود.",
+            "ItemId");
 }

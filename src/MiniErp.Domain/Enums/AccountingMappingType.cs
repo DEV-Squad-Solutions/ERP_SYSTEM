@@ -13,5 +13,12 @@ public enum AccountingMappingType
     CustomerControl = 9,
     SupplierControl = 10,
     EmployeeControl = 11,
-    DriverControl = 12
+    DriverControl = 12,
+    ExchangeGain = 13,
+    ExchangeLoss = 14,
+    InventoryAdjustmentGain = 15,
+    InventoryAdjustmentLoss = 16,
+    OpeningBalanceEquity = 17,
+    EmployeeReceivable = 18,
+    DriverTripExpense = 19
 }

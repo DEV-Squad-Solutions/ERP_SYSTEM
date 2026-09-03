@@ -338,7 +338,7 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.ToTable("AccountMappings", null, t =>
                         {
-                            t.HasCheckConstraint("CK_AccountMappings_MappingType", "[MappingType] IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)");
+                            t.HasCheckConstraint("CK_AccountMappings_MappingType", "[MappingType] IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)");
 
                             t.HasCheckConstraint("CK_AccountMappings_SourceShape", "(([MappingType] IN (1, 2) AND [SourceId] IS NOT NULL) OR ([MappingType] NOT IN (1, 2) AND [SourceId] IS NULL))");
                         });
@@ -698,6 +698,16 @@ namespace MiniErp.Infrastructure.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
+                    b.Property<int?>("SourceId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int?>("SourceType")
+                        .HasColumnType("int");
+
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
@@ -724,16 +734,23 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasDatabaseName("UX_JournalEntries_Company_ReversalOf")
                         .HasFilter("[ReversalOfEntryId] IS NOT NULL AND [IsDeleted] = 0");
 
+                    b.HasIndex("CompanyId", "SourceType", "SourceId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_JournalEntries_Company_FiscalYearClosing")
+                        .HasFilter("[EntryType] = 3 AND [SourceType] = 13 AND [SourceId] IS NOT NULL AND [IsDeleted] = 0");
+
                     b.HasIndex("CompanyId", "FiscalYearId", "EntryDate", "EntryType", "Status")
                         .HasDatabaseName("IX_JournalEntries_Company_FiscalYear_Date");
 
                     b.ToTable("JournalEntries", null, t =>
                         {
-                            t.HasCheckConstraint("CK_JournalEntries_EntryType", "[EntryType] IN (1, 2, 3)");
+                            t.HasCheckConstraint("CK_JournalEntries_EntryType", "[EntryType] IN (1, 2, 3, 4)");
 
                             t.HasCheckConstraint("CK_JournalEntries_NotSelfReversal", "[ReversalOfEntryId] IS NULL OR [ReversalOfEntryId] <> [Id]");
 
                             t.HasCheckConstraint("CK_JournalEntries_ReversalState", "(([Status] = 1 AND [ReversedOn] IS NULL) OR ([Status] = 2 AND [ReversedOn] IS NOT NULL))");
+
+                            t.HasCheckConstraint("CK_JournalEntries_Source", "(([EntryType] = 4 AND [SourceType] IS NOT NULL AND [SourceId] IS NOT NULL) OR ([EntryType] = 3 AND (([SourceType] = 13 AND [SourceId] IS NOT NULL) OR ([SourceType] IS NULL AND [SourceId] IS NULL))) OR ([EntryType] IN (1, 2) AND [SourceType] IS NULL AND [SourceId] IS NULL))");
 
                             t.HasCheckConstraint("CK_JournalEntries_Status", "[Status] IN (1, 2)");
                         });
@@ -1779,6 +1796,83 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasIndex("CompanyId", "ItemUnitId");
 
                     b.ToTable("Items", (string)null);
+                });
+
+            modelBuilder.Entity("MiniErp.Domain.Entities.Catalog.ItemPricingExpense", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "ItemId", "Name")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("ItemPricingExpenses", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ItemPricingExpenses_Amount_Positive", "[Amount] > 0");
+                        });
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.Catalog.ItemUnit", b =>
@@ -4365,83 +4459,6 @@ namespace MiniErp.Infrastructure.Migrations
                         });
                 });
 
-            modelBuilder.Entity("MiniErp.Domain.Entities.Invoicing.InvoiceLinePricingExpense", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<decimal>("Amount")
-                        .HasPrecision(28, 8)
-                        .HasColumnType("decimal(28,8)");
-
-                    b.Property<int>("CompanyId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("CreatedById")
-                        .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("CreatedByPc")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<DateTime>("CreatedOn")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedById")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("DeletedByPc")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<DateTime?>("DeletedOn")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("InvoiceLineId")
-                        .HasColumnType("int");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<string>("UpdatedById")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("UpdatedByPc")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<DateTime?>("UpdatedOn")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CompanyId", "InvoiceLineId", "Name")
-                        .IsUnique()
-                        .HasFilter("[IsDeleted] = 0");
-
-                    b.ToTable("InvoiceLinePricingExpenses", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_InvoiceLinePricingExpenses_Amount_Positive", "[Amount] > 0");
-                        });
-                });
-
             modelBuilder.Entity("MiniErp.Domain.Entities.Invoicing.InvoicePayment", b =>
                 {
                     b.Property<int>("Id")
@@ -5622,6 +5639,26 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("ItemUnit");
                 });
 
+            modelBuilder.Entity("MiniErp.Domain.Entities.Catalog.ItemPricingExpense", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Catalog.Item", "Item")
+                        .WithMany("PricingExpenses")
+                        .HasForeignKey("CompanyId", "ItemId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Item");
+                });
+
             modelBuilder.Entity("MiniErp.Domain.Entities.Catalog.ItemUnit", b =>
                 {
                     b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
@@ -6369,26 +6406,6 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("SourceInvoiceLine");
                 });
 
-            modelBuilder.Entity("MiniErp.Domain.Entities.Invoicing.InvoiceLinePricingExpense", b =>
-                {
-                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("MiniErp.Domain.Entities.Invoicing.InvoiceLine", "InvoiceLine")
-                        .WithMany("PricingExpenses")
-                        .HasForeignKey("CompanyId", "InvoiceLineId")
-                        .HasPrincipalKey("CompanyId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Company");
-
-                    b.Navigation("InvoiceLine");
-                });
-
             modelBuilder.Entity("MiniErp.Domain.Entities.Invoicing.InvoicePayment", b =>
                 {
                     b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
@@ -6572,6 +6589,11 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("Vouchers");
                 });
 
+            modelBuilder.Entity("MiniErp.Domain.Entities.Catalog.Item", b =>
+                {
+                    b.Navigation("PricingExpenses");
+                });
+
             modelBuilder.Entity("MiniErp.Domain.Entities.Catalog.ItemUnit", b =>
                 {
                     b.Navigation("Items");
@@ -6643,11 +6665,6 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("PaymentVouchers");
 
                     b.Navigation("Payments");
-                });
-
-            modelBuilder.Entity("MiniErp.Domain.Entities.Invoicing.InvoiceLine", b =>
-                {
-                    b.Navigation("PricingExpenses");
                 });
 
             modelBuilder.Entity("MiniErp.Infrastructure.Identity.ApplicationUser", b =>

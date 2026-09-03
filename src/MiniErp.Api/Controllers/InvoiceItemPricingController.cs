@@ -27,17 +27,22 @@ public sealed class InvoiceItemPricingController(
         return this.ToActionResult(result);
     }
 
-    [HttpPut("{invoiceLineId:int}/expenses")]
-    [ProducesResponseType<InvoiceItemPricingRowResponse>(
+    /// <summary>Replaces the advisory per-unit expenses of an item.</summary>
+    /// <remarks>
+    /// The amounts are pricing hints only. They do not update inventory cost,
+    /// inventory valuation, invoices, or accounting entries.
+    /// </remarks>
+    [HttpPut("items/{itemId:int}/expenses")]
+    [ProducesResponseType<ItemPricingExpensesResponse>(
         StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ReplaceExpenses(
-        int invoiceLineId,
-        ReplaceInvoiceLinePricingExpensesRequest request,
+        int itemId,
+        ReplaceItemPricingExpensesRequest request,
         CancellationToken cancellationToken)
     {
         var result = await pricingService.ReplaceExpensesAsync(
-            invoiceLineId,
+            itemId,
             request,
             cancellationToken);
         return this.ToActionResult(result);

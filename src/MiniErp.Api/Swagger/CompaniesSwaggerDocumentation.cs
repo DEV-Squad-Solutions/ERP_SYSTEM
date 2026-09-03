@@ -41,10 +41,10 @@ public sealed class CompaniesSwaggerDocumentation : IOperationFilter
             nameof(CompaniesController.Create) => (
                 "Create a company",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Creates a company and grants the authenticated admin access to it atomically.",
+                    "Admin only. Atomically creates a company, grants the authenticated admin access, and provisions the current fiscal year, the default numeric chart of accounts, operational account mappings, and accounts already classified in the three fixed financial statements.",
                     "`name`, `address`, `commercialRegister`, `taxNumber`, and `managerName`. Optional `stockBalanceCheckMode` is `None`, `DateCheck`, `FinalCheck`, or `Both`; optional `baseCurrency` defaults to `EGP`.",
                     "Required strings are trimmed and cannot be empty. Maximum lengths: name and managerName 200; address 500; commercialRegister and taxNumber 50.",
-                    "Duplicate commercial-register or tax-number values return 409. The entire create-and-assign operation rolls back on failure. The admin must log in again before selecting the new company.")),
+                    "Duplicate commercial-register or tax-number values return 409. The entire company, assignment, and accounting setup rolls back on failure. Setup is idempotent; later fiscal years inherit custom account classifications and cashboxes and cash-movement types receive their missing default mappings automatically. The admin must log in again before selecting the new company.")),
             nameof(CompaniesController.Update) => (
                 "Update a company",
                 SwaggerOperationDescription.Create(

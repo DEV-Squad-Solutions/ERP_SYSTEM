@@ -28,6 +28,11 @@ public enum InvoiceContainerStoreRequirement
 
 public static class InvoiceErrors
 {
+    public static Error PostingCashboxRequired() =>
+        Error.Conflict(
+            "Invoices.PostingCashboxRequired",
+            "لا يمكن إنشاء قيد سداد الفاتورة لعدم تحديد الخزينة المرتبطة بالسداد.");
+
     public static Error InvoiceNumberFilterInvalid() =>
         Error.Validation(
             "Invoices.InvoiceNumberFilterInvalid",

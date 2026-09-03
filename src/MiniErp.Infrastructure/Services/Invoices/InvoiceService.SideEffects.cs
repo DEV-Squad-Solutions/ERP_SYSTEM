@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
+using MiniErp.Application.Common.Results;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Containers;
@@ -93,7 +94,7 @@ public sealed partial class InvoiceService
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task RemoveSideEffectsAsync(
+    private async Task<Result> RemoveSideEffectsAsync(
         Invoice invoice,
         bool removeItemMovements,
         CancellationToken cancellationToken)
@@ -116,6 +117,20 @@ public sealed partial class InvoiceService
                 trip.CompanyId == companyId &&
                 trip.InvoiceId == invoice.Id)
             .ToListAsync(cancellationToken);
+
+        if (driverTripPostingService is not null)
+        {
+            foreach (var driverTrip in driverTrips)
+            {
+                var postingResult = await driverTripPostingService.DeleteAsync(
+                    driverTrip.Id,
+                    cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    return Result.Failure(postingResult.Errors);
+                }
+            }
+        }
 
         var paymentVouchers = removeItemMovements
             ? await dbContext.CashVouchers
@@ -150,6 +165,7 @@ public sealed partial class InvoiceService
         dbContext.InvoicePayments.RemoveRange(invoicePayments);
         dbContext.CashVouchers.RemoveRange(paymentVouchers);
         dbContext.DriverTrips.RemoveRange(driverTrips);
+        return Result.Success();
     }
 
     private async Task SynchronizePaymentVoucherAsync(

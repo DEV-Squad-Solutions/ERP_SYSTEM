@@ -57,6 +57,31 @@ public sealed class CompanyServiceTests
     }
 
     [Fact]
+    public async Task Add_InitializesAccountingSetupForTheCreatedCompany()
+    {
+        await using var database = await CompanyTestDatabase.CreateAsync();
+        var setup = new RecordingDefaultAccountingSetupService();
+        var now = new DateTimeOffset(2026, 9, 2, 10, 30, 0, TimeSpan.Zero);
+        var service = database.CreateService(
+            CurrentUserId,
+            setup,
+            new FixedTimeProvider(now));
+
+        var result = await service.AddAsync(
+            new CompanyRequest(
+                "New Company",
+                "New Address",
+                "CR-NEW",
+                "TAX-NEW",
+                "New Manager"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(result.Value.Id, setup.CompanyId);
+        Assert.Equal(new DateOnly(2026, 9, 2), setup.EffectiveDate);
+        Assert.Equal(1, setup.InitializeCalls);
+    }
+
+    [Fact]
     public async Task AddAndUpdate_PersistTheCompanyStockBalanceCheckMode()
     {
         await using var database = await CompanyTestDatabase.CreateAsync();
@@ -521,11 +546,17 @@ public sealed class CompanyServiceTests
             return new CompanyTestDatabase(connection, context, connectionString);
         }
 
-        public CompanyService CreateService(Guid currentUserId) =>
+        public CompanyService CreateService(
+            Guid currentUserId,
+            IDefaultAccountingSetupService? accountingSetupService = null,
+            TimeProvider? timeProvider = null) =>
             new(
                 Context,
                 new PaginationService(),
-                new TestCurrentUserService(currentUserId));
+                new TestCurrentUserService(currentUserId),
+                accountingSetupService ??
+                    new NoOpDefaultAccountingSetupService(),
+                timeProvider ?? TimeProvider.System);
 
         public async Task<ApplicationDbContext> CreateSiblingContextAsync()
         {
@@ -749,6 +780,78 @@ public sealed class CompanyServiceTests
                 TaxNumber = taxNumber,
                 ManagerName = $"{name} Manager"
             };
+    }
+
+    private sealed class NoOpDefaultAccountingSetupService
+        : IDefaultAccountingSetupService
+    {
+        public Task InitializeCompanyAsync(
+            int companyId,
+            DateOnly effectiveDate,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task EnsureFiscalYearAsync(
+            int companyId,
+            int fiscalYearId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task EnsureCashboxAsync(
+            int companyId,
+            int cashboxId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task EnsureCashMovementTypeAsync(
+            int companyId,
+            int cashMovementTypeId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class RecordingDefaultAccountingSetupService
+        : IDefaultAccountingSetupService
+    {
+        public int InitializeCalls { get; private set; }
+
+        public int? CompanyId { get; private set; }
+
+        public DateOnly? EffectiveDate { get; private set; }
+
+        public Task InitializeCompanyAsync(
+            int companyId,
+            DateOnly effectiveDate,
+            CancellationToken cancellationToken = default)
+        {
+            InitializeCalls++;
+            CompanyId = companyId;
+            EffectiveDate = effectiveDate;
+            return Task.CompletedTask;
+        }
+
+        public Task EnsureFiscalYearAsync(
+            int companyId,
+            int fiscalYearId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task EnsureCashboxAsync(
+            int companyId,
+            int cashboxId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task EnsureCashMovementTypeAsync(
+            int companyId,
+            int cashMovementTypeId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private sealed class TestCurrentUserService(Guid userId)

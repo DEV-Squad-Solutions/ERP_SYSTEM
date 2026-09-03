@@ -57,7 +57,6 @@ internal sealed class AccountFieldsValidator : AbstractValidator<AccountRequest>
     public AccountFieldsValidator()
     {
         RuleFor(request => request.Code)
-            .NotEmpty()
             .MaximumLength(AccountRequest.CodeMaximumLength);
         RuleFor(request => request.Name)
             .NotEmpty()

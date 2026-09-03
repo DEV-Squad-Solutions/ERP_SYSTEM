@@ -13,7 +13,8 @@ namespace MiniErp.Infrastructure.Services.DriverTrips;
 public sealed class DriverTripService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    IDriverTripPostingService? driverTripPostingService = null)
     : IDriverTripService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -144,6 +145,22 @@ public sealed class DriverTripService(
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (driverTripPostingService is not null)
+            {
+                foreach (var trip in trips)
+                {
+                    var postingResult = await driverTripPostingService
+                        .SynchronizeAsync(trip.Id, cancellationToken);
+                    if (postingResult.IsFailure)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        dbContext.ChangeTracker.Clear();
+                        return Result<DriverTripBulkCostUpdateResponse>.Failure(
+                            postingResult.Errors);
+                    }
+                }
+            }
         }
         catch (DbUpdateConcurrencyException exception)
         {

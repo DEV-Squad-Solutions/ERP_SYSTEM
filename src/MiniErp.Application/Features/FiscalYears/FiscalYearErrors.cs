@@ -61,6 +61,21 @@ public static class FiscalYearErrors
             "FiscalYears.AlreadyOpen",
             "السنة المالية مفتوحة بالفعل.");
 
+    public static Error ClosingNotReady(string fiscalYearName, int issueCount) =>
+        Error.Conflict(
+            "FiscalYears.ClosingNotReady",
+            $"لا يمكن إقفال السنة المالية '{fiscalYearName}' لوجود {issueCount} مشكلة محاسبية يجب معالجتها أولًا.");
+
+    public static Error OpeningBalanceAccountMissing(string fiscalYearName) =>
+        Error.Conflict(
+            "FiscalYears.OpeningBalanceAccountMissing",
+            $"لا يوجد حساب حقوق ملكية لترحيل أرصدة السنة المالية إلى '{fiscalYearName}'.");
+
+    public static Error NextFiscalYearClosed(string fiscalYearName) =>
+        Error.Conflict(
+            "FiscalYears.NextFiscalYearClosed",
+            $"السنة المالية التالية '{fiscalYearName}' مغلقة، ولا يمكن ترحيل الأرصدة الافتتاحية إليها.");
+
     public static Error CurrentCannotBeDeleted() =>
         Error.Conflict(
             "FiscalYears.CurrentCannotBeDeleted",

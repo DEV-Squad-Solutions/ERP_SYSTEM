@@ -65,4 +65,18 @@ public static class AccountMappingErrors
     public static Error ReplaceConflict() => Error.Conflict(
         "AccountMappings.ReplaceConflict",
         "تعذر حفظ الربط المحاسبي بسبب تعديل متزامن. أعد تحميل البيانات ثم حاول مرة أخرى.");
+
+    public static Error MappingNotFound(
+        int fiscalYearId,
+        AccountingMappingType mappingType,
+        int? sourceId) => Error.Conflict(
+        "AccountMappings.MappingNotFound",
+        sourceId.HasValue
+            ? $"لا يوجد حساب مربوط بنوع الربط '{mappingType}' والمصدر رقم {sourceId.Value} في السنة المالية {fiscalYearId}."
+            : $"لا يوجد حساب مربوط بنوع الربط '{mappingType}' في السنة المالية {fiscalYearId}.");
+
+    public static Error InvalidResolverSource(
+        AccountingMappingType mappingType) => Error.Validation(
+        "AccountMappings.InvalidResolverSource",
+        $"نوع الربط '{mappingType}' لا يقبل مصدرًا بهذه الطريقة.");
 }

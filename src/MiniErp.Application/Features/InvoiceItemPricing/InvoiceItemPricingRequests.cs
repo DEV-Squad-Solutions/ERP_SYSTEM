@@ -10,10 +10,13 @@ public sealed record InvoiceItemPricingFilterRequest(
     DateOnly? FromDate = null,
     DateOnly? ToDate = null);
 
-public sealed record InvoiceLinePricingExpenseRequest(
+/// <summary>
+/// Defines one advisory item expense. Amount is the expense for one item unit.
+/// </summary>
+public sealed record ItemPricingExpenseRequest(
     string Name,
     decimal Amount,
     string? Notes = null);
 
-public sealed record ReplaceInvoiceLinePricingExpensesRequest(
-    IReadOnlyList<InvoiceLinePricingExpenseRequest>? Expenses);
+public sealed record ReplaceItemPricingExpensesRequest(
+    IReadOnlyList<ItemPricingExpenseRequest>? Expenses);

@@ -17,6 +17,11 @@ public static class AccountErrors
         $"كود الحساب '{code}' مستخدم بالفعل في نفس الشركة.",
         nameof(AccountRequest.Code));
 
+    public static Error AutomaticCodeUnavailable() => Error.Validation(
+        "Accounts.AutomaticCodeUnavailable",
+        "تعذر توليد كود رقمي تلقائي لهذا المستوى من دليل الحسابات.",
+        nameof(AccountRequest.ParentAccountId));
+
     public static Error RowVersionRequired() => Error.Validation(
         "Accounts.RowVersionRequired",
         "يجب إرسال إصدار الحساب الحالي للتعديل.",

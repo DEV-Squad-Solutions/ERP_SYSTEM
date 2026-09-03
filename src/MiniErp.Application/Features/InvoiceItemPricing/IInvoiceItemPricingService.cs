@@ -10,8 +10,8 @@ public interface IInvoiceItemPricingService
         InvoiceItemPricingFilterRequest filters,
         CancellationToken cancellationToken = default);
 
-    Task<Result<InvoiceItemPricingRowResponse>> ReplaceExpensesAsync(
-        int invoiceLineId,
-        ReplaceInvoiceLinePricingExpensesRequest request,
+    Task<Result<ItemPricingExpensesResponse>> ReplaceExpensesAsync(
+        int itemId,
+        ReplaceItemPricingExpensesRequest request,
         CancellationToken cancellationToken = default);
 }

@@ -147,16 +147,38 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<UpdatesHub>("/hubs/updates");
-app.MapGet("/health/live", () => Results.Ok(new { Status = "Live" }))
-    .AllowAnonymous();
+app.MapGet(
+        "/health/live",
+        () => Results.Ok(new HealthStatusResponse("Live")))
+    .AllowAnonymous()
+    .WithName("Health_Live")
+    .WithTags("Health")
+    .WithSummary("فحص تشغيل الـAPI")
+    .WithDescription(
+        "يرجع 200 عندما تكون عملية الـAPI نفسها تعمل. لا يفحص اتصال قاعدة البيانات.")
+    .Produces<HealthStatusResponse>(StatusCodes.Status200OK);
 app.MapGet(
         "/health/ready",
         (StartupDatabaseStatus status) => DatabaseHealthResult(status))
-    .AllowAnonymous();
+    .AllowAnonymous()
+    .WithName("Health_Ready")
+    .WithTags("Health")
+    .WithSummary("فحص جاهزية التطبيق")
+    .WithDescription(
+        "يرجع 200 عند جاهزية قاعدة البيانات، أو 503 أثناء التعافي أو فشل الاتصال.")
+    .Produces<HealthStatusResponse>(StatusCodes.Status200OK)
+    .Produces<HealthStatusResponse>(StatusCodes.Status503ServiceUnavailable);
 app.MapGet(
         "/health/database",
         (StartupDatabaseStatus status) => DatabaseHealthResult(status))
-    .AllowAnonymous();
+    .AllowAnonymous()
+    .WithName("Health_Database")
+    .WithTags("Health")
+    .WithSummary("فحص اتصال قاعدة البيانات")
+    .WithDescription(
+        "يعرض حالة تهيئة واتصال قاعدة البيانات الحالية؛ يرجع 503 عندما لا تكون جاهزة.")
+    .Produces<HealthStatusResponse>(StatusCodes.Status200OK)
+    .Produces<HealthStatusResponse>(StatusCodes.Status503ServiceUnavailable);
 
 app.Run();
 
@@ -164,8 +186,10 @@ static IResult DatabaseHealthResult(StartupDatabaseStatus status)
 {
     var snapshot = status.GetSnapshot();
     return snapshot.IsReady
-        ? Results.Ok(new { Status = snapshot.State })
+        ? Results.Ok(new HealthStatusResponse(snapshot.State))
         : Results.Json(
-            new { Status = snapshot.State },
+            new HealthStatusResponse(snapshot.State),
             statusCode: StatusCodes.Status503ServiceUnavailable);
 }
+
+public sealed record HealthStatusResponse(string Status);

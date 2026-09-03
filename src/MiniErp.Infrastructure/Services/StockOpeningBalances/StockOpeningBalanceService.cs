@@ -6,6 +6,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.StockOpeningBalances;
+using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -17,7 +18,8 @@ public sealed class StockOpeningBalanceService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     IInventoryCostingService inventoryCostingService,
-    IInventoryStockService inventoryStockService)
+    IInventoryStockService inventoryStockService,
+    IInventoryPostingService? inventoryPostingService = null)
     : IStockOpeningBalanceService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -159,6 +161,21 @@ public sealed class StockOpeningBalanceService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        if (inventoryPostingService is not null)
+        {
+            var postingResult = await inventoryPostingService
+                .SynchronizeStockOpeningBalanceAsync(
+                    openingBalance.Id,
+                    cancellationToken);
+            if (postingResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<StockOpeningBalanceResponse>.Failure(
+                    postingResult.Errors);
+            }
+        }
+
         var response = await ProjectResponseQuery(openingBalance.Id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
@@ -270,6 +287,21 @@ public sealed class StockOpeningBalanceService(
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (inventoryPostingService is not null)
+            {
+                var postingResult = await inventoryPostingService
+                    .SynchronizeStockOpeningBalanceAsync(
+                        openingBalance.Id,
+                        cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result<StockOpeningBalanceResponse>.Failure(
+                        postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -342,6 +374,20 @@ public sealed class StockOpeningBalanceService(
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (inventoryPostingService is not null)
+            {
+                var postingResult = await inventoryPostingService.DeleteAsync(
+                    JournalEntrySourceType.StockOpeningBalance,
+                    openingBalance.Id,
+                    cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result.Failure(postingResult.Errors);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException)
         {

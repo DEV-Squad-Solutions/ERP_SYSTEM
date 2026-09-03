@@ -5,6 +5,8 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.FiscalYears;
+using MiniErp.Application.Features.AccountingReadiness;
+using MiniErp.Application.Common.Results;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
@@ -127,6 +129,66 @@ public sealed class FiscalYearServiceTests
     }
 
     [Fact]
+    public async Task Close_BlocksWhenAccountingReadinessHasIssues()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(
+            companyId: 1,
+            accountingReadinessService: new BlockedReadinessService());
+        var added = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+
+        var close = await service.CloseAsync(added.Value.Id);
+
+        Assert.True(close.IsFailure);
+        Assert.Equal("FiscalYears.ClosingNotReady", close.Error.Code);
+        Assert.Equal(
+            FiscalYearStatus.Open,
+            (await service.GetByIdAsync(added.Value.Id)).Value.Status);
+    }
+
+    [Fact]
+    public async Task Close_TransfersFinancialPositionOnceAcrossReopen()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(
+            companyId: 1,
+            accountingReadinessService: new ReadyReadinessService());
+        var first = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+        var next = await service.AddAsync(
+            new FiscalYearRequest(
+                "2027",
+                new DateOnly(2027, 1, 1),
+                new DateOnly(2027, 12, 31),
+                IsCurrent: true));
+        await database.SeedClosingLedgerAsync(
+            first.Value.Id,
+            next.Value.Id);
+        database.ClearTracking();
+
+        Assert.True((await service.CloseAsync(first.Value.Id)).IsSuccess);
+        database.ClearTracking();
+        Assert.True((await service.ReopenAsync(first.Value.Id)).IsSuccess);
+        await database.ChangeClosingAssetBalanceAsync(120m);
+        database.ClearTracking();
+        Assert.True((await service.CloseAsync(first.Value.Id)).IsSuccess);
+
+        var transfers = await database.LoadClosingTransfersAsync(
+            first.Value.Id);
+        Assert.Single(transfers);
+        Assert.Equal(next.Value.Id, transfers[0].FiscalYearId);
+        Assert.Equal(120m, transfers[0].Debit);
+        Assert.Equal(120m, transfers[0].Credit);
+    }
+
+    [Fact]
     public async Task Reopen_ReturnsOpenYearAndDeleteBlocksCurrentYear()
     {
         await using var database = await FiscalYearTestDatabase.CreateAsync();
@@ -226,6 +288,76 @@ public sealed class FiscalYearServiceTests
         Assert.Equal("InvoiceDate", closed.Error.FieldName);
     }
 
+    private sealed class BlockedReadinessService : IAccountingReadinessService
+    {
+        public Task<Result<AccountingReadinessResponse>> GetAsync(
+            int fiscalYearId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(
+                    Result<AccountingReadinessResponse>.Success(
+                        new AccountingReadinessResponse(
+                        FiscalYearId: fiscalYearId,
+                        FiscalYearName: "2026",
+                        StartDate: new DateOnly(2026, 1, 1),
+                        EndDate: new DateOnly(2026, 12, 31),
+                        IsReady: false,
+                        TotalSources: 1,
+                        PostedSources: 0,
+                        MissingJournalSources: 1,
+                        OrphanAutomaticJournals: 0,
+                        DuplicateAutomaticJournals: 0,
+                        UnbalancedAutomaticJournals: 0,
+                        PendingInventoryCosts: 0,
+                        MissingOrInvalidMappings: 0,
+                        DeferredPayrollSources: 0,
+                        Sources: [],
+                        Issues: [new AccountingReadinessIssue(
+                            IssueType: "MissingJournal",
+                            SourceType: null,
+                            SourceId: null,
+                            SourceNumber: null,
+                            SourceDate: null,
+                            MappingType: null,
+                            MappingSourceId: null,
+                            Message: "missing")])));
+
+        public Task<Result<AccountingBackfillResponse>> BackfillAsync(
+            int fiscalYearId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class ReadyReadinessService : IAccountingReadinessService
+    {
+        public Task<Result<AccountingReadinessResponse>> GetAsync(
+            int fiscalYearId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(
+                    Result<AccountingReadinessResponse>.Success(
+                        new AccountingReadinessResponse(
+                        FiscalYearId: fiscalYearId,
+                        FiscalYearName: "2026",
+                        StartDate: new DateOnly(2026, 1, 1),
+                        EndDate: new DateOnly(2026, 12, 31),
+                        IsReady: true,
+                        TotalSources: 0,
+                        PostedSources: 0,
+                        MissingJournalSources: 0,
+                        OrphanAutomaticJournals: 0,
+                        DuplicateAutomaticJournals: 0,
+                        UnbalancedAutomaticJournals: 0,
+                        PendingInventoryCosts: 0,
+                        MissingOrInvalidMappings: 0,
+                        DeferredPayrollSources: 0,
+                        Sources: [],
+                        Issues: [])));
+
+        public Task<Result<AccountingBackfillResponse>> BackfillAsync(
+            int fiscalYearId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
     private sealed class FiscalYearTestDatabase : IAsyncDisposable
     {
         private FiscalYearTestDatabase(
@@ -259,12 +391,15 @@ public sealed class FiscalYearServiceTests
             return new FiscalYearTestDatabase(connection, context);
         }
 
-        public FiscalYearService CreateService(int companyId) =>
+        public FiscalYearService CreateService(
+            int companyId,
+            IAccountingReadinessService? accountingReadinessService = null) =>
             new(
                 Context,
                 new PaginationService(),
                 new TestCurrentCompanyContext(companyId),
-                TimeProvider.System);
+                TimeProvider.System,
+                accountingReadinessService);
 
         public IFiscalYearPeriodGuard CreateGuard(int companyId) =>
             new FiscalYearPeriodGuard(
@@ -272,6 +407,65 @@ public sealed class FiscalYearServiceTests
                 new TestCurrentCompanyContext(companyId));
 
         public void ClearTracking() => Context.ChangeTracker.Clear();
+
+        public Task SeedClosingLedgerAsync(
+            int fiscalYearId,
+            int nextFiscalYearId) =>
+            Context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO Accounts (
+                    Id, CompanyId, Code, Name, AccountType, NormalBalance,
+                    IsPosting, IsActive, RowVersion, CreatedById, CreatedOn,
+                    CreatedByPc, IsDeleted)
+                VALUES
+                    (10, 1, '1100', 'Cash', 1, 1, 1, 1, randomblob(8),
+                     '', '2026-01-01', '', 0),
+                    (20, 1, '4100', 'Revenue', 4, 2, 1, 1, randomblob(8),
+                     '', '2026-01-01', '', 0),
+                    (30, 1, '3100', 'Opening equity', 3, 2, 1, 1, randomblob(8),
+                     '', '2026-01-01', '', 0);
+
+                INSERT INTO AccountMappings (
+                    CompanyId, FiscalYearId, MappingType, SourceId, AccountId,
+                    RowVersion, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES (
+                    1, {nextFiscalYearId}, 17, NULL, 30, randomblob(8),
+                    '', '2026-01-01', '', 0);
+
+                INSERT INTO JournalEntries (
+                    Id, CompanyId, FiscalYearId, EntryNumber, EntryDate,
+                    Description, EntryType, SourceType, SourceId, Status,
+                    PostedOn, RowVersion, CreatedById, CreatedOn, CreatedByPc,
+                    IsDeleted)
+                VALUES (
+                    50, 1, {fiscalYearId}, 'JV-1', '2026-12-31', 'ledger',
+                    1, NULL, NULL, 1, '2026-12-31', randomblob(8), '',
+                    '2026-12-31', '', 0);
+
+                INSERT INTO JournalEntryLines (
+                    Id, CompanyId, JournalEntryId, AccountId, Debit, Credit,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES
+                    (501, 1, 50, 10, 100, 0, '', '2026-12-31', '', 0),
+                    (502, 1, 50, 20, 0, 100, '', '2026-12-31', '', 0);
+                """);
+
+        public Task ChangeClosingAssetBalanceAsync(decimal amount) =>
+            Context.Database.ExecuteSqlInterpolatedAsync($"UPDATE JournalEntryLines SET Debit = {amount} WHERE Id = 501");
+
+        public Task<List<ClosingTransferRow>> LoadClosingTransfersAsync(
+            int sourceFiscalYearId) =>
+            Context.JournalEntries
+                .AsNoTracking()
+                .Where(entry =>
+                    entry.CompanyId == 1 &&
+                    entry.EntryType == JournalEntryType.Opening &&
+                    entry.SourceType == JournalEntrySourceType.FiscalYearClosing &&
+                    entry.SourceId == sourceFiscalYearId)
+                .Select(entry => new ClosingTransferRow(
+                    entry.FiscalYearId,
+                    entry.Lines.Sum(line => line.Debit),
+                    entry.Lines.Sum(line => line.Credit)))
+                .ToListAsync();
 
         public async ValueTask DisposeAsync()
         {
@@ -328,11 +522,107 @@ public sealed class FiscalYearServiceTests
                     WHERE Id = NEW.Id;
                 END;
 
+                CREATE TABLE Accounts (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    Code TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    ParentAccountId INTEGER NULL,
+                    AccountType INTEGER NOT NULL,
+                    NormalBalance INTEGER NOT NULL,
+                    IsPosting INTEGER NOT NULL,
+                    IsActive INTEGER NOT NULL,
+                    RowVersion BLOB NOT NULL,
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE AccountMappings (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL,
+                    MappingType INTEGER NOT NULL,
+                    SourceId INTEGER NULL,
+                    AccountId INTEGER NOT NULL,
+                    RowVersion BLOB NOT NULL,
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE JournalEntries (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL,
+                    EntryNumber TEXT NOT NULL,
+                    EntryDate TEXT NOT NULL,
+                    Description TEXT NOT NULL,
+                    EntryType INTEGER NOT NULL,
+                    SourceType INTEGER NULL,
+                    SourceId INTEGER NULL,
+                    SourceNumber TEXT NULL,
+                    Status INTEGER NOT NULL,
+                    PostedOn TEXT NOT NULL,
+                    ReversedOn TEXT NULL,
+                    ReversalOfEntryId INTEGER NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE JournalEntryLines (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    JournalEntryId INTEGER NOT NULL,
+                    AccountId INTEGER NOT NULL,
+                    Description TEXT NULL,
+                    Debit NUMERIC NOT NULL,
+                    Credit NUMERIC NOT NULL,
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
                 INSERT INTO Companies (Id, Name)
                 VALUES (1, 'Company 1'), (2, 'Company 2');
                 """);
 
         private sealed record TestCurrentCompanyContext(int CompanyId)
             : ICurrentCompanyContext;
+
+        public sealed record ClosingTransferRow(
+            int FiscalYearId,
+            decimal Debit,
+            decimal Credit);
     }
 }
