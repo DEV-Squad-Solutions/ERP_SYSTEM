@@ -54,6 +54,7 @@ public static class SwaggerExtensions
             options.OperationFilter<AccountingSetupSwaggerDocumentation>();
             options.OperationFilter<AccountMappingsSwaggerDocumentation>();
             options.OperationFilter<AccountingReadinessSwaggerDocumentation>();
+            options.OperationFilter<DashboardSwaggerDocumentation>();
             options.OperationFilter<ItemsSwaggerDocumentation>();
             options.OperationFilter<ItemsCategoriesSwaggerDocumentation>();
             options.OperationFilter<ItemUnitsSwaggerDocumentation>();
