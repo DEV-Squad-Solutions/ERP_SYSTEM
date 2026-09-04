@@ -3,6 +3,7 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Application.Features.Items;
+using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -249,6 +250,10 @@ public sealed class InvoiceInventoryService(
                 expense.Notes
             })
             .ToListAsync(cancellationToken);
+        var pricingExpensesTotal = InventoryCostRules.RoundValue(
+            pricingExpenses.Sum(expense => expense.Amount));
+        var totalCostWithPricingExpenses = InventoryCostRules.RoundUnitCost(
+            costSnapshot.AverageCost + pricingExpensesTotal);
 
         return Result<InvoiceItemBalanceResponse>.Success(
             new InvoiceItemBalanceResponse(
@@ -269,7 +274,9 @@ public sealed class InvoiceInventoryService(
                         Name: expense.Name,
                         Amount: expense.Amount,
                         Notes: expense.Notes))
-                    .ToArray()
+                    .ToArray(),
+                PricingExpensesTotal = pricingExpensesTotal,
+                TotalCostWithPricingExpenses = totalCostWithPricingExpenses
             });
     }
 }

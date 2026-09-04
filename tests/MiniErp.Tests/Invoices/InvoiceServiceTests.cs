@@ -4337,6 +4337,8 @@ public sealed class InvoiceServiceTests
         Assert.Equal(9m, result.Value.CurrentQuantity);
         Assert.Equal(7m, result.Value.AverageCost);
         Assert.Equal(63m, result.Value.InventoryValue);
+        Assert.Equal(0m, result.Value.PricingExpensesTotal);
+        Assert.Equal(7m, result.Value.TotalCostWithPricingExpenses);
     }
 
     [Fact]
@@ -4409,6 +4411,8 @@ public sealed class InvoiceServiceTests
             });
         Assert.Equal(0m, result.Value.AverageCost);
         Assert.Equal(0m, result.Value.InventoryValue);
+        Assert.Equal(4.75m, result.Value.PricingExpensesTotal);
+        Assert.Equal(4.75m, result.Value.TotalCostWithPricingExpenses);
     }
 
     [Fact]

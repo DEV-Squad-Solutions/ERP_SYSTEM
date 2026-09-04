@@ -151,6 +151,17 @@ public sealed record InvoiceItemBalanceResponse(
     /// inventory valuation or accounting entries.
     /// </summary>
     public IReadOnlyList<ItemPricingExpenseResponse> PricingExpenses { get; init; } = [];
+
+    /// <summary>
+    /// Sum of all advisory pricing expenses for one item unit.
+    /// </summary>
+    public decimal PricingExpensesTotal { get; init; }
+
+    /// <summary>
+    /// Advisory cost for one item unit: AverageCost + PricingExpensesTotal.
+    /// It does not change inventory valuation or accounting entries.
+    /// </summary>
+    public decimal TotalCostWithPricingExpenses { get; init; }
 }
 
 public sealed record InvoicePagedResponse(
