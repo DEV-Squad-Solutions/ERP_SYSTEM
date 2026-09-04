@@ -25,3 +25,12 @@ public sealed record EmployeeMovementFilterRequest(
 
 public sealed record BulkEmployeeMovementRequest(
     List<EmployeeMovementRequest> Movements);
+
+public sealed record EmployeeMovementReportRequest(
+    int? EmployeeId = null,
+    DateOnly? FromDate = null,
+    DateOnly? ToDate = null,
+    EmployeeMovementType? Type = null,
+    CurrencyCode? Currency = null,
+    string? Search = null);
+

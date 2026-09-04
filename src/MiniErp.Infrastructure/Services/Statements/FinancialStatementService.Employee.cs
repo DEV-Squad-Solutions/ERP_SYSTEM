@@ -3,6 +3,7 @@ using static MiniErp.Application.Features.Statements.StatementErrors;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Statements;
+using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Enums;
 
 namespace MiniErp.Infrastructure.Services.Statements;
@@ -281,6 +282,10 @@ public sealed partial class FinancialStatementService
             rows.Where(r => r.MovementType == EmployeeMovementType.Advance)
                 .Sum(r => r.Debit);
 
+        var totalWithdrawals =
+            rows.Where(r => r.MovementType == EmployeeMovementType.Withdrawal)
+                .Sum(r => r.Debit);
+
         var totalDeductions =
             rows.Where(r => r.MovementType == EmployeeMovementType.Deduction)
                 .Sum(r => r.Debit);
@@ -289,7 +294,7 @@ public sealed partial class FinancialStatementService
             rows.Where(r => r.MovementType == EmployeeMovementType.Bonus)
                 .Sum(r => r.Credit);
 
-        var currentBalance = totalCredits - totalDebits;
+        var currentBalance = EmployeeAccountRules.CalculateBalance(totalCredits, totalDebits);
 
         // Payroll stats — single DbSet; GroupBy is safe here.
         var payrollStats = await dbContext.PayrollEntries
@@ -302,6 +307,43 @@ public sealed partial class FinancialStatementService
                 TotalSalaryMoved  = g.Where(p => p.IsSalaryMoveToEmployeeAccount).Sum(p => p.NetSalary)
             })
             .FirstOrDefaultAsync(cancellationToken);
+
+        var recentMovements = await dbContext.EmployeeMovements
+            .AsNoTracking()
+            .Where(m => m.CompanyId == companyId && m.EmployeeId == employeeId)
+            .OrderByDescending(m => m.MovementDate)
+            .ThenByDescending(m => m.Id)
+            .Take(10)
+            .Select(m => new EmployeeAccountRecentMovementResponse(
+                m.Id,
+                m.MovementDate,
+                m.Type,
+                EmployeeAccountRules.GetMovementTypeName(m.Type),
+                m.Debit > 0 ? m.Debit : m.Credit,
+                m.Debit,
+                m.Credit,
+                m.Currency,
+                m.ExchangeRate,
+                m.CashVoucherId,
+                m.CashVoucher != null ? m.CashVoucher.VoucherNumber : null,
+                m.Notes))
+            .ToListAsync(cancellationToken);
+
+        var payrollTransactions = await dbContext.PayrollEntries
+            .AsNoTracking()
+            .Where(p => p.CompanyId == companyId && p.EmployeeId == employeeId)
+            .OrderByDescending(p => p.EndDate)
+            .ThenByDescending(p => p.Id)
+            .Take(10)
+            .Select(p => new EmployeeAccountPayrollTransactionResponse(
+                p.Id,
+                p.StartDate,
+                p.EndDate,
+                p.NetSalary,
+                p.IsSalaryMoveToEmployeeAccount,
+                p.SalaryMovedOn,
+                null))
+            .ToListAsync(cancellationToken);
 
         var profile = new EmployeeProfileResponse(
             Id:                             employee.Id,
@@ -321,19 +363,22 @@ public sealed partial class FinancialStatementService
             CreatedOn:                      employee.CreatedOn);
 
         var response = new EmployeeAccountSummaryResponse(
-            Employee:           profile,
-            Currency:           CurrencyCode.EGP,
-            OpeningBalance:     openingBalance,
-            CurrentBalance:     currentBalance,
-            BalanceDescription: EmployeeBalanceDescription(currentBalance),
-            TotalCredits:       totalCredits,
-            TotalDebits:        totalDebits,
-            TotalAdvances:      totalAdvances,
-            TotalDeductions:    totalDeductions,
-            TotalBonuses:       totalBonuses,
-            TotalSalaryPosted:  payrollStats?.TotalSalaryPosted ?? 0m,
-            TotalSalaryMoved:   payrollStats?.TotalSalaryMoved  ?? 0m,
-            LastMovementDate:   lastDate);
+            Employee:                  profile,
+            Currency:                  CurrencyCode.EGP,
+            OpeningBalance:            openingBalance,
+            CurrentBalance:            currentBalance,
+            BalanceDescription:        EmployeeAccountRules.GetBalanceDescription(currentBalance),
+            TotalCredits:              totalCredits,
+            TotalDebits:               totalDebits,
+            TotalAdvances:             totalAdvances,
+            TotalDeductions:           totalDeductions,
+            TotalBonuses:              totalBonuses,
+            TotalSalaryPosted:         payrollStats?.TotalSalaryPosted ?? 0m,
+            TotalSalaryMoved:          payrollStats?.TotalSalaryMoved  ?? 0m,
+            LastMovementDate:          lastDate,
+            TotalWithdrawals:          totalWithdrawals,
+            RecentMovements:           recentMovements,
+            PayrollSalaryTransactions: payrollTransactions);
 
         return Result<EmployeeAccountSummaryResponse>.Success(response);
     }
@@ -539,22 +584,10 @@ public sealed partial class FinancialStatementService
     }
 
     private static string EmployeeBalanceDescription(decimal netBalance) =>
-        netBalance > 0
-            ? "دائن (مستحق للموظف)"
-            : netBalance < 0
-                ? "مدين (مستحق على الموظف)"
-                : "متزن (صفر)";
+        EmployeeAccountRules.GetBalanceDescription(netBalance);
 
     private static string EmployeeMovementTypeName(EmployeeMovementType type) =>
-        type switch
-        {
-            EmployeeMovementType.Credit     => "حركة دائنة",
-            EmployeeMovementType.Debit      => "حركة مدينة",
-            EmployeeMovementType.Advance    => "سلفة نقدية",
-            EmployeeMovementType.Deduction  => "خصم مالي",
-            EmployeeMovementType.Bonus      => "مكافأة مالية",
-            _                               => "حركة حساب موظف"
-        };
+        EmployeeAccountRules.GetMovementTypeName(type);
 }
 
 // ─── Raw DB projection (no computed strings — fully EF-translatable) ─────────

@@ -48,9 +48,9 @@ public sealed class EmployeeMovementRequestValidator
 
         RuleFor(request => request.CashboxId)
             .NotNull()
+            .WithMessage("لا يمكن إنشاء حركة موظف بدون خزينة.")
             .GreaterThan(0)
-            .When(request => EmployeeAccountRules.RequiresCashVoucher(request.Type))
-            .WithMessage("يجب تحديد الخزينة لصرف السلفة أو المسحوبات النقدية.");
+            .WithMessage("معرف الخزينة غير صالح.");
 
         RuleFor(request => request.Notes)
             .MaximumLength(EmployeeMovementRequest.NotesMaximumLength)
@@ -76,6 +76,28 @@ public sealed class EmployeeMovementFilterRequestValidator
     : AbstractValidator<EmployeeMovementFilterRequest>
 {
     public EmployeeMovementFilterRequestValidator()
+    {
+        RuleFor(request => request.FromDate)
+            .LessThanOrEqualTo(request => request.ToDate!.Value)
+            .When(request => request.FromDate.HasValue && request.ToDate.HasValue)
+            .WithMessage("تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية.");
+
+        RuleFor(request => request.Currency)
+            .IsInEnum()
+            .When(request => request.Currency.HasValue)
+            .WithMessage("العملة المحددة غير صالحة.");
+
+        RuleFor(request => request.Type)
+            .IsInEnum()
+            .When(request => request.Type.HasValue)
+            .WithMessage("نوع الحركة المحدد غير صالح.");
+    }
+}
+
+public sealed class EmployeeMovementReportRequestValidator
+    : AbstractValidator<EmployeeMovementReportRequest>
+{
+    public EmployeeMovementReportRequestValidator()
     {
         RuleFor(request => request.FromDate)
             .LessThanOrEqualTo(request => request.ToDate!.Value)

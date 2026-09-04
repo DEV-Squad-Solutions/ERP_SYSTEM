@@ -21,4 +21,8 @@ public interface IEmployeeMovementService
     Task<Result<List<EmployeeMovementResponse>>> AddBulkAsync(
         BulkEmployeeMovementRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<Result<EmployeeMovementReportResponse>> GetReportAsync(
+        EmployeeMovementReportRequest request,
+        CancellationToken cancellationToken = default);
 }

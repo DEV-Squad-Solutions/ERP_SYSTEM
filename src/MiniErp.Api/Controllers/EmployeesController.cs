@@ -48,19 +48,6 @@ public sealed class EmployeesController(
         return this.ToActionResult(result);
     }
 
-    [HttpGet("{id:int}/account")]
-    [ProducesResponseType<MiniErp.Application.Features.Statements.EmployeeAccountSummaryResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetAccount(
-        int id,
-        [FromServices] MiniErp.Application.Features.Statements.IFinancialStatementService statementService,
-        CancellationToken cancellationToken)
-    {
-        var result = await statementService.GetEmployeeAccountSummaryAsync(
-            id,
-            cancellationToken);
-        return this.ToActionResult(result);
-    }
 
     [Authorize(Roles = "Admin")]
     [HttpPost]

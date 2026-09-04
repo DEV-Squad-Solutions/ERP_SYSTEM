@@ -306,6 +306,29 @@ public sealed record EmployeeProfileResponse(
     bool IsActive,
     DateTime CreatedOn);
 
+public sealed record EmployeeAccountRecentMovementResponse(
+    int Id,
+    DateOnly Date,
+    EmployeeMovementType Type,
+    string TypeName,
+    decimal Amount,
+    decimal Debit,
+    decimal Credit,
+    CurrencyCode Currency,
+    decimal ExchangeRate,
+    int? CashVoucherId,
+    string? CashVoucherNumber,
+    string? Notes);
+
+public sealed record EmployeeAccountPayrollTransactionResponse(
+    int Id,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    decimal NetSalary,
+    bool IsSalaryMoveToEmployeeAccount,
+    DateOnly? SalaryMovedOn,
+    string? Notes);
+
 public sealed record EmployeeAccountSummaryResponse(
     EmployeeProfileResponse Employee,
     CurrencyCode Currency,
@@ -319,4 +342,7 @@ public sealed record EmployeeAccountSummaryResponse(
     decimal TotalBonuses,
     decimal TotalSalaryPosted,
     decimal TotalSalaryMoved,
-    DateOnly? LastMovementDate);
+    DateOnly? LastMovementDate,
+    decimal TotalWithdrawals = 0m,
+    IReadOnlyList<EmployeeAccountRecentMovementResponse>? RecentMovements = null,
+    IReadOnlyList<EmployeeAccountPayrollTransactionResponse>? PayrollSalaryTransactions = null);

@@ -173,38 +173,54 @@ public sealed class EmployeeMovementService(
             return Result<EmployeeMovementResponse>.Failure(exchangeRateResult.Error);
         }
 
-        CashVoucher? cashVoucher = null;
-        if (EmployeeAccountRules.RequiresCashVoucher(request.Type))
+        if (!request.CashboxId.HasValue || request.CashboxId.Value <= 0)
         {
-            if (!request.CashboxId.HasValue)
-            {
-                return Result<EmployeeMovementResponse>.Failure(CashboxRequiredForAdvance());
-            }
+            return Result<EmployeeMovementResponse>.Failure(CashboxRequired());
+        }
 
-            var cashbox = await dbContext.Cashboxes
-                .AsNoTracking()
-                .FirstOrDefaultAsync(
-                    c => c.Id == request.CashboxId.Value && c.CompanyId == companyId,
-                    cancellationToken);
+        var cashbox = await dbContext.Cashboxes
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                c => c.Id == request.CashboxId.Value && c.CompanyId == companyId,
+                cancellationToken);
 
-            if (cashbox is null)
-            {
-                return Result<EmployeeMovementResponse>.Failure(
-                    CashboxNotFound(request.CashboxId.Value));
-            }
+        if (cashbox is null)
+        {
+            return Result<EmployeeMovementResponse>.Failure(
+                CashboxNotFound(request.CashboxId.Value));
+        }
 
-            if (!cashbox.IsActive)
-            {
-                return Result<EmployeeMovementResponse>.Failure(
-                    CashboxInactive(request.CashboxId.Value));
-            }
+        if (!cashbox.IsActive)
+        {
+            return Result<EmployeeMovementResponse>.Failure(
+                CashboxInactive(request.CashboxId.Value));
+        }
 
-            if (cashbox.Currency != CurrencyCode.EGP)
-            {
-                return Result<EmployeeMovementResponse>.Failure(
-                    CashboxMustBeEgp());
-            }
+        if (cashbox.Currency != CurrencyCode.EGP)
+        {
+            return Result<EmployeeMovementResponse>.Failure(
+                CashboxMustBeEgp());
+        }
 
+        var movement = new EmployeeMovement
+        {
+            CompanyId = companyId,
+            EmployeeId = employee.Id,
+            MovementDate = request.MovementDate,
+            Currency = request.Currency,
+            Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim()
+        };
+
+        movement.ApplyAmounts(request.Type, request.Amount);
+        movement.ApplyExchangeRate(exchangeRateResult.Value.Rate);
+
+        var isCredit = EmployeeAccountRules.IsCreditMovement(request.Type);
+        var direction = isCredit ? CashDirection.Receipt : CashDirection.Payment;
+        var egpAmount = isCredit ? movement.BaseCredit : movement.BaseDebit;
+        var prefix = isCredit ? "RCV" : "PAY";
+
+        if (direction == CashDirection.Payment)
+        {
             var cashboxBalance = await dbContext.Cashboxes
                 .AsNoTracking()
                 .Where(c => c.CompanyId == companyId && c.Id == cashbox.Id)
@@ -215,59 +231,47 @@ public sealed class EmployeeMovementService(
                         .Sum(v => (decimal?)(v.Direction == CashDirection.Receipt ? v.Amount : -v.Amount)) ?? 0m))
                 .SingleAsync(cancellationToken);
 
-            if (cashboxBalance - request.Amount < 0m)
+            if (cashboxBalance - egpAmount < 0m)
             {
                 return Result<EmployeeMovementResponse>.Failure(
                     InsufficientCashboxBalance(cashbox.Id));
             }
-
-            var voucherNumber = await EntityIdentifierGenerator
-                .GenerateUniqueAsync(
-                    dbContext,
-                    prefix: "PAY",
-                    companyId: companyId,
-                    existingIdentifiers: dbContext.CashVouchers
-                        .IgnoreQueryFilters()
-                        .Where(v => v.CompanyId == companyId)
-                        .Select(v => v.VoucherNumber),
-                    cancellationToken);
-
-            cashVoucher = new CashVoucher
-            {
-                CompanyId = companyId,
-                VoucherNumber = voucherNumber,
-                VoucherDate = request.MovementDate,
-                Direction = CashDirection.Payment,
-                CashboxId = cashbox.Id,
-                PartyType = CashPartyType.Employee,
-                EmployeeId = employee.Id,
-                Amount = request.Amount,
-                Currency = CurrencyCode.EGP,
-                Description = request.Notes ?? $"Employee {request.Type}",
-                IsPosted = true
-            };
-            cashVoucher.ApplyExchangeRate(
-                exchangeRateId: null,
-                exchangeRate: 1m);
-            cashVoucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
-
-            dbContext.CashVouchers.Add(cashVoucher);
-            await dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        var movement = new EmployeeMovement
+        var voucherNumber = await EntityIdentifierGenerator
+            .GenerateUniqueAsync(
+                dbContext,
+                prefix: prefix,
+                companyId: companyId,
+                existingIdentifiers: dbContext.CashVouchers
+                    .IgnoreQueryFilters()
+                    .Where(v => v.CompanyId == companyId)
+                    .Select(v => v.VoucherNumber),
+                cancellationToken);
+
+        var cashVoucher = new CashVoucher
         {
             CompanyId = companyId,
+            VoucherNumber = voucherNumber,
+            VoucherDate = request.MovementDate,
+            Direction = direction,
+            CashboxId = cashbox.Id,
+            PartyType = CashPartyType.Employee,
             EmployeeId = employee.Id,
-            MovementDate = request.MovementDate,
-            Currency = request.Currency,
-            Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
-            CashVoucherId = cashVoucher?.Id
+            Amount = egpAmount,
+            Currency = CurrencyCode.EGP,
+            Description = request.Notes ?? $"Employee {request.Type}",
+            IsPosted = true
         };
+        cashVoucher.ApplyExchangeRate(
+            exchangeRateId: null,
+            exchangeRate: 1m);
+        cashVoucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
 
-        movement.ApplyAmounts(request.Type, request.Amount);
-        movement.ApplyExchangeRate(exchangeRateResult.Value.Rate);
+        dbContext.CashVouchers.Add(cashVoucher);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
+        movement.CashVoucherId = cashVoucher.Id;
         dbContext.EmployeeMovements.Add(movement);
         await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -305,6 +309,14 @@ public sealed class EmployeeMovementService(
                 Error.Validation("EmployeeMovements.EmptyBulk", "يجب إرسال حركة موظف واحدة على الأقل."));
         }
 
+        foreach (var item in request.Movements)
+        {
+            if (!item.CashboxId.HasValue || item.CashboxId.Value <= 0)
+            {
+                return Result<List<EmployeeMovementResponse>>.Failure(CashboxRequired());
+            }
+        }
+
         var employeeIds = request.Movements.Select(m => m.EmployeeId).Distinct().ToList();
         var employees = await dbContext.Employees
             .AsNoTracking()
@@ -326,62 +338,53 @@ public sealed class EmployeeMovementService(
         }
 
         var cashboxIds = request.Movements
-            .Where(m => m.CashboxId.HasValue && EmployeeAccountRules.RequiresCashVoucher(m.Type))
             .Select(m => m.CashboxId!.Value)
             .Distinct()
             .ToList();
 
-        Dictionary<int, Cashbox> cashboxes = [];
-        Dictionary<int, decimal> cashboxBalances = [];
+        var cashboxes = await dbContext.Cashboxes
+            .AsNoTracking()
+            .Where(c => c.CompanyId == companyId && cashboxIds.Contains(c.Id))
+            .ToDictionaryAsync(c => c.Id, cancellationToken);
 
-        if (cashboxIds.Count > 0)
+        if (cashboxes.Count != cashboxIds.Count)
         {
-            cashboxes = await dbContext.Cashboxes
-                .AsNoTracking()
-                .Where(c => c.CompanyId == companyId && cashboxIds.Contains(c.Id))
-                .ToDictionaryAsync(c => c.Id, cancellationToken);
-
-            if (cashboxes.Count != cashboxIds.Count)
-            {
-                var missing = cashboxIds.Where(id => !cashboxes.ContainsKey(id)).ToList();
-                return Result<List<EmployeeMovementResponse>>.Failure(
-                    Error.NotFound("Cashboxes.NotFound", $"بعض الخزائن المحددة غير موجودة: {string.Join(", ", missing)}"));
-            }
-
-            var nonActive = cashboxes.Values.FirstOrDefault(c => !c.IsActive);
-            if (nonActive is not null)
-            {
-                return Result<List<EmployeeMovementResponse>>.Failure(
-                    CashboxInactive(nonActive.Id));
-            }
-
-            var nonEgp = cashboxes.Values.FirstOrDefault(c => c.Currency != CurrencyCode.EGP);
-            if (nonEgp is not null)
-            {
-                return Result<List<EmployeeMovementResponse>>.Failure(
-                    CashboxMustBeEgp());
-            }
-
-            foreach (var cashboxId in cashboxIds)
-            {
-                var balance = await dbContext.Cashboxes
-                    .AsNoTracking()
-                    .Where(c => c.CompanyId == companyId && c.Id == cashboxId)
-                    .Select(c =>
-                        c.OpeningBalance +
-                        (c.Vouchers
-                            .Where(v => v.IsPosted)
-                            .Sum(v => (decimal?)(v.Direction == CashDirection.Receipt ? v.Amount : -v.Amount)) ?? 0m))
-                    .SingleAsync(cancellationToken);
-
-                cashboxBalances[cashboxId] = balance;
-            }
+            var missing = cashboxIds.Where(id => !cashboxes.ContainsKey(id)).ToList();
+            return Result<List<EmployeeMovementResponse>>.Failure(
+                Error.NotFound("Cashboxes.NotFound", $"بعض الخزائن المحددة غير موجودة: {string.Join(", ", missing)}"));
         }
+
+        var nonActive = cashboxes.Values.FirstOrDefault(c => !c.IsActive);
+        if (nonActive is not null)
+        {
+            return Result<List<EmployeeMovementResponse>>.Failure(
+                CashboxInactive(nonActive.Id));
+        }
+
+        var nonEgp = cashboxes.Values.FirstOrDefault(c => c.Currency != CurrencyCode.EGP);
+        if (nonEgp is not null)
+        {
+            return Result<List<EmployeeMovementResponse>>.Failure(
+                CashboxMustBeEgp());
+        }
+
+        var cashboxBalances = await dbContext.Cashboxes
+            .AsNoTracking()
+            .Where(c => c.CompanyId == companyId && cashboxIds.Contains(c.Id))
+            .Select(c => new
+            {
+                c.Id,
+                Balance = c.OpeningBalance +
+                    (c.Vouchers
+                        .Where(v => v.IsPosted)
+                        .Sum(v => (decimal?)(v.Direction == CashDirection.Receipt ? v.Amount : -v.Amount)) ?? 0m)
+            })
+            .ToDictionaryAsync(c => c.Id, c => c.Balance, cancellationToken);
 
         await using var transaction = await dbContext.Database
             .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
-        var results = new List<EmployeeMovementResponse>();
+        var voucherList = new List<(EmployeeMovement Movement, CashVoucher Voucher, Employee Employee, EmployeeMovementRequest Request)>();
 
         foreach (var item in request.Movements)
         {
@@ -398,95 +401,247 @@ public sealed class EmployeeMovementService(
                 return Result<List<EmployeeMovementResponse>>.Failure(exchangeRateResult.Error);
             }
 
-            CashVoucher? cashVoucher = null;
-            if (EmployeeAccountRules.RequiresCashVoucher(item.Type))
-            {
-                if (!item.CashboxId.HasValue || !cashboxes.TryGetValue(item.CashboxId.Value, out var cashbox))
-                {
-                    return Result<List<EmployeeMovementResponse>>.Failure(CashboxRequiredForAdvance());
-                }
-
-                var currentBalance = cashboxBalances[cashbox.Id];
-                if (currentBalance - item.Amount < 0m)
-                {
-                    return Result<List<EmployeeMovementResponse>>.Failure(
-                        InsufficientCashboxBalance(cashbox.Id));
-                }
-
-                cashboxBalances[cashbox.Id] = currentBalance - item.Amount;
-
-                var voucherNumber = await EntityIdentifierGenerator
-                    .GenerateUniqueAsync(
-                        dbContext,
-                        prefix: "PAY",
-                        companyId: companyId,
-                        existingIdentifiers: dbContext.CashVouchers
-                            .IgnoreQueryFilters()
-                            .Where(v => v.CompanyId == companyId)
-                            .Select(v => v.VoucherNumber),
-                        cancellationToken);
-
-                cashVoucher = new CashVoucher
-                {
-                    CompanyId = companyId,
-                    VoucherNumber = voucherNumber,
-                    VoucherDate = item.MovementDate,
-                    Direction = CashDirection.Payment,
-                    CashboxId = cashbox.Id,
-                    PartyType = CashPartyType.Employee,
-                    EmployeeId = employee.Id,
-                    Amount = item.Amount,
-                    Currency = CurrencyCode.EGP,
-                    Description = item.Notes ?? $"Employee {item.Type}",
-                    IsPosted = true
-                };
-                cashVoucher.ApplyExchangeRate(
-                    exchangeRateId: null,
-                    exchangeRate: 1m);
-                cashVoucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
-
-                dbContext.CashVouchers.Add(cashVoucher);
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
-
             var movement = new EmployeeMovement
             {
                 CompanyId = companyId,
                 EmployeeId = employee.Id,
                 MovementDate = item.MovementDate,
                 Currency = item.Currency,
-                Notes = string.IsNullOrWhiteSpace(item.Notes) ? null : item.Notes.Trim(),
-                CashVoucherId = cashVoucher?.Id
+                Notes = string.IsNullOrWhiteSpace(item.Notes) ? null : item.Notes.Trim()
             };
-
             movement.ApplyAmounts(item.Type, item.Amount);
             movement.ApplyExchangeRate(exchangeRateResult.Value.Rate);
 
-            dbContext.EmployeeMovements.Add(movement);
-            await dbContext.SaveChangesAsync(cancellationToken);
+            var cashbox = cashboxes[item.CashboxId!.Value];
+            var isCredit = EmployeeAccountRules.IsCreditMovement(item.Type);
+            var direction = isCredit ? CashDirection.Receipt : CashDirection.Payment;
+            var egpAmount = isCredit ? movement.BaseCredit : movement.BaseDebit;
+            var prefix = isCredit ? "RCV" : "PAY";
 
-            results.Add(new EmployeeMovementResponse(
-                Id: movement.Id,
-                CompanyId: movement.CompanyId,
-                EmployeeId: movement.EmployeeId,
-                EmployeeCode: employee.Code,
-                EmployeeName: employee.Name,
-                Type: movement.Type,
-                MovementDate: movement.MovementDate,
-                Currency: movement.Currency,
-                Amount: item.Amount,
-                Debit: movement.Debit,
-                Credit: movement.Credit,
-                ExchangeRate: movement.ExchangeRate,
-                BaseDebit: movement.BaseDebit,
-                BaseCredit: movement.BaseCredit,
-                CashVoucherId: movement.CashVoucherId,
-                CashVoucherNumber: cashVoucher?.VoucherNumber,
-                Notes: movement.Notes,
-                CreatedOn: movement.CreatedOn));
+            if (direction == CashDirection.Payment)
+            {
+                var currentBalance = cashboxBalances[cashbox.Id];
+                if (currentBalance - egpAmount < 0m)
+                {
+                    return Result<List<EmployeeMovementResponse>>.Failure(
+                        InsufficientCashboxBalance(cashbox.Id));
+                }
+
+                cashboxBalances[cashbox.Id] = currentBalance - egpAmount;
+            }
+            else
+            {
+                cashboxBalances[cashbox.Id] += egpAmount;
+            }
+
+            var voucherNumber = await EntityIdentifierGenerator
+                .GenerateUniqueAsync(
+                    dbContext,
+                    prefix: prefix,
+                    companyId: companyId,
+                    existingIdentifiers: dbContext.CashVouchers
+                        .IgnoreQueryFilters()
+                        .Where(v => v.CompanyId == companyId)
+                        .Select(v => v.VoucherNumber),
+                    cancellationToken);
+
+            var cashVoucher = new CashVoucher
+            {
+                CompanyId = companyId,
+                VoucherNumber = voucherNumber,
+                VoucherDate = item.MovementDate,
+                Direction = direction,
+                CashboxId = cashbox.Id,
+                PartyType = CashPartyType.Employee,
+                EmployeeId = employee.Id,
+                Amount = egpAmount,
+                Currency = CurrencyCode.EGP,
+                Description = item.Notes ?? $"Employee {item.Type}",
+                IsPosted = true
+            };
+            cashVoucher.ApplyExchangeRate(
+                exchangeRateId: null,
+                exchangeRate: 1m);
+            cashVoucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
+
+            dbContext.CashVouchers.Add(cashVoucher);
+            voucherList.Add((movement, cashVoucher, employee, item));
         }
 
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        foreach (var tuple in voucherList)
+        {
+            tuple.Movement.CashVoucherId = tuple.Voucher.Id;
+            dbContext.EmployeeMovements.Add(tuple.Movement);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+
+        var results = voucherList.Select(tuple => new EmployeeMovementResponse(
+            Id: tuple.Movement.Id,
+            CompanyId: tuple.Movement.CompanyId,
+            EmployeeId: tuple.Movement.EmployeeId,
+            EmployeeCode: tuple.Employee.Code,
+            EmployeeName: tuple.Employee.Name,
+            Type: tuple.Movement.Type,
+            MovementDate: tuple.Movement.MovementDate,
+            Currency: tuple.Movement.Currency,
+            Amount: tuple.Request.Amount,
+            Debit: tuple.Movement.Debit,
+            Credit: tuple.Movement.Credit,
+            ExchangeRate: tuple.Movement.ExchangeRate,
+            BaseDebit: tuple.Movement.BaseDebit,
+            BaseCredit: tuple.Movement.BaseCredit,
+            CashVoucherId: tuple.Movement.CashVoucherId,
+            CashVoucherNumber: tuple.Voucher?.VoucherNumber,
+            Notes: tuple.Movement.Notes,
+            CreatedOn: tuple.Movement.CreatedOn)).ToList();
+
         return Result<List<EmployeeMovementResponse>>.Success(results);
+    }
+
+    public async Task<Result<EmployeeMovementReportResponse>> GetReportAsync(
+        EmployeeMovementReportRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var query = dbContext.EmployeeMovements
+            .AsNoTracking()
+            .Where(m => m.CompanyId == companyId);
+
+        if (request.EmployeeId.HasValue)
+        {
+            query = query.Where(m => m.EmployeeId == request.EmployeeId.Value);
+        }
+
+        if (request.FromDate.HasValue)
+        {
+            query = query.Where(m => m.MovementDate >= request.FromDate.Value);
+        }
+
+        if (request.ToDate.HasValue)
+        {
+            query = query.Where(m => m.MovementDate <= request.ToDate.Value);
+        }
+
+        if (request.Type.HasValue)
+        {
+            query = query.Where(m => m.Type == request.Type.Value);
+        }
+
+        if (request.Currency.HasValue)
+        {
+            query = query.Where(m => m.Currency == request.Currency.Value);
+        }
+
+        var search = request.Search?.Trim();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query = query.Where(m =>
+                m.Employee.Name.Contains(search) ||
+                m.Employee.Code.Contains(search) ||
+                (m.Notes != null && m.Notes.Contains(search)) ||
+                (m.CashVoucher != null && m.CashVoucher.VoucherNumber.Contains(search)));
+        }
+
+        var movements = await query
+            .OrderBy(m => m.MovementDate)
+            .ThenBy(m => m.Id)
+            .Select(m => new
+            {
+                m.Id,
+                m.EmployeeId,
+                EmployeeCode = m.Employee.Code,
+                EmployeeName = m.Employee.Name,
+                m.MovementDate,
+                m.Type,
+                m.Currency,
+                m.Debit,
+                m.Credit,
+                m.ExchangeRate,
+                m.BaseDebit,
+                m.BaseCredit,
+                m.Notes,
+                m.CashVoucherId,
+                CashVoucherNumber = m.CashVoucher != null ? m.CashVoucher.VoucherNumber : null,
+                CashVoucherReference = m.CashVoucher != null ? m.CashVoucher.ReferenceNumber : null
+            })
+            .ToListAsync(cancellationToken);
+
+        decimal runningBalance = 0m;
+        var items = new List<EmployeeMovementReportItemResponse>(movements.Count);
+
+        decimal totalDebits = 0m;
+        decimal totalCredits = 0m;
+        decimal totalAdvances = 0m;
+        decimal totalWithdrawals = 0m;
+        decimal totalBonuses = 0m;
+        decimal totalDeductions = 0m;
+
+        foreach (var m in movements)
+        {
+            var isCredit = EmployeeAccountRules.IsCreditMovement(m.Type);
+            var originalAmount = isCredit ? m.Credit : m.Debit;
+            var egpAmount = isCredit ? m.BaseCredit : m.BaseDebit;
+
+            totalDebits += m.Debit;
+            totalCredits += m.Credit;
+
+            if (m.Type == EmployeeMovementType.Advance)
+            {
+                totalAdvances += m.Debit;
+            }
+            else if (m.Type == EmployeeMovementType.Withdrawal)
+            {
+                totalWithdrawals += m.Debit;
+            }
+            else if (m.Type == EmployeeMovementType.Deduction)
+            {
+                totalDeductions += m.Debit;
+            }
+            else if (m.Type == EmployeeMovementType.Bonus)
+            {
+                totalBonuses += m.Credit;
+            }
+
+            runningBalance += EmployeeAccountRules.SignedAmount(m.Debit, m.Credit);
+
+            items.Add(new EmployeeMovementReportItemResponse(
+                Id: m.Id,
+                EmployeeId: m.EmployeeId,
+                EmployeeCode: m.EmployeeCode,
+                EmployeeName: m.EmployeeName,
+                Date: m.MovementDate,
+                MovementType: m.Type,
+                MovementTypeName: EmployeeAccountRules.GetMovementTypeName(m.Type),
+                OriginalAmount: originalAmount,
+                Currency: m.Currency,
+                ExchangeRate: m.ExchangeRate,
+                EgpAmount: egpAmount,
+                Debit: m.Debit,
+                Credit: m.Credit,
+                RunningBalance: runningBalance,
+                Reason: m.Notes,
+                Notes: m.Notes,
+                CashVoucherId: m.CashVoucherId,
+                CashVoucherNumber: m.CashVoucherNumber,
+                CashVoucherReference: m.CashVoucherReference));
+        }
+
+        var summary = new EmployeeMovementReportSummaryResponse(
+            TotalDebits: totalDebits,
+            TotalCredits: totalCredits,
+            NetBalance: EmployeeAccountRules.CalculateBalance(totalCredits, totalDebits),
+            TotalAdvances: totalAdvances,
+            TotalWithdrawals: totalWithdrawals,
+            TotalBonuses: totalBonuses,
+            TotalDeductions: totalDeductions,
+            TotalMovements: items.Count);
+
+        return Result<EmployeeMovementReportResponse>.Success(
+            new EmployeeMovementReportResponse(
+                Summary: summary,
+                Items: items));
     }
 }

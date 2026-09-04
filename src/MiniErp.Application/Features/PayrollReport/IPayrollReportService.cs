@@ -8,5 +8,7 @@ public interface IPayrollReportService
     Task<Result<PayrollReportResponse>> BuildReportAsync(
         DateOnly startDate,
         DateOnly endDate,
-        CancellationToken cancellationToken);
+        int? employeeId = null,
+        bool? isMoved = null,
+        CancellationToken cancellationToken = default);
 }

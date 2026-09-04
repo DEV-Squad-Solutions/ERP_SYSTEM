@@ -24,10 +24,12 @@ public static class EmployeeMovementErrors
             "EmployeeMovements.EmployeeInactive",
             $"الموظف برقم '{employeeId}' غير نشط.");
 
-    public static Error CashboxRequiredForAdvance() =>
+    public static Error CashboxRequired() =>
         Error.Validation(
-            "EmployeeMovements.CashboxRequiredForAdvance",
-            "يجب تحديد الخزينة لصرف السلفة أو المسحوبات النقدية.");
+            "EmployeeMovements.CashboxRequired",
+            "لا يمكن إنشاء حركة موظف بدون خزينة.");
+
+    public static Error CashboxRequiredForAdvance() => CashboxRequired();
 
     public static Error CashboxNotFound(int cashboxId) =>
         Error.NotFound(

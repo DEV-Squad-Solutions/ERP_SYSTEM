@@ -137,7 +137,6 @@ public sealed class EmployeeAttendancesController(
 
     [Authorize(Roles = "Admin")]
     [HttpDelete("bulk")]
-    [HttpPost("bulk/delete")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
