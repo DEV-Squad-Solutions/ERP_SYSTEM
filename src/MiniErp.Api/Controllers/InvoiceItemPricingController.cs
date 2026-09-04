@@ -32,7 +32,7 @@ public sealed class InvoiceItemPricingController(
     /// The amounts are pricing hints only. They do not update inventory cost,
     /// inventory valuation, invoices, or accounting entries.
     /// </remarks>
-    [HttpPut("items/{itemId:int}/expenses")]
+    [HttpPut("{itemId:int}/expenses")]
     [ProducesResponseType<ItemPricingExpensesResponse>(
         StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

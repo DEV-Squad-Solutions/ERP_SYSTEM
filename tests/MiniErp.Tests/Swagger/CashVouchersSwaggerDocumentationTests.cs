@@ -25,10 +25,10 @@ public sealed class CashVouchersSwaggerDocumentationTests
         Assert.Contains("selected company", operation.Description);
         Assert.Contains("expenses", operation.Description);
         Assert.Contains("revenues", operation.Description);
-        Assert.Contains("id, name, and classification", operation.Description);
-        Assert.Contains("Payment movements classified Expense", operation.Description);
-        Assert.Contains("Receipt movements classified Revenue", operation.Description);
-        Assert.Contains("partner effect", operation.Description);
+        Assert.Contains("id, name, classification, code, and accountType", operation.Description);
+        Assert.Contains("Expense accounts", operation.Description);
+        Assert.Contains("Payment vouchers", operation.Description);
+        Assert.Contains("Receipt vouchers", operation.Description);
         Assert.Contains("ordered by name then id", operation.Description);
         Assert.Contains("license is expired", operation.Description);
         Assert.Contains("inactive", operation.Description);
@@ -37,7 +37,7 @@ public sealed class CashVouchersSwaggerDocumentationTests
     }
 
     [Fact]
-    public void PartySelectSchema_UsesSeparatedCamelCaseMovementArrays()
+    public void PartySelectSchema_UsesSeparatedCamelCaseAccountArrays()
     {
         var generator = new SchemaGenerator(
             new SchemaGeneratorOptions(),
@@ -64,14 +64,14 @@ public sealed class CashVouchersSwaggerDocumentationTests
             responseProperties.Keys);
         Assert.DoesNotContain("cashMovements", responseProperties.Keys);
 
-        var movementSchema = repository.Schemas[
-            nameof(CashVoucherCashMovementSelectResponse)];
-        var movementProperties = Assert.IsAssignableFrom<
-            IDictionary<string, IOpenApiSchema>>(movementSchema.Properties);
+        var accountSchema = repository.Schemas[
+            nameof(CashVoucherAccountSelectResponse)];
+        var accountProperties = Assert.IsAssignableFrom<
+            IDictionary<string, IOpenApiSchema>>(accountSchema.Properties);
         Assert.Equal(
-            ["id", "name", "classification"],
-            movementProperties.Keys);
-        Assert.DoesNotContain("direction", movementProperties.Keys);
+            ["id", "name", "classification", "code", "accountType"],
+            accountProperties.Keys);
+        Assert.DoesNotContain("direction", accountProperties.Keys);
     }
 
     [Fact]

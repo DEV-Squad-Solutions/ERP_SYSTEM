@@ -36,8 +36,8 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Returns the active business partners, drivers, employees, expenses, and revenues available to cash vouchers for the selected company.",
                     "No request parameters.",
-                    "Party collections contain id and name. expenses and revenues contain active posting accounts with id, code, name, and accountType. Every collection is ordered by name then id. Active drivers remain available even when their license is expired.",
-                    "Expense accounts are used with Payment vouchers and revenue accounts with Receipt vouchers. Movement descriptors are loaded separately from CashMovementTypes/select.")),
+                    "Party collections contain id and name. expenses and revenues contain active posting accounts with id, name, classification, code, and accountType. Every collection is ordered by name then id. Active drivers remain available even when their license is expired.",
+                    "Expense accounts are used with Payment vouchers and revenue accounts with Receipt vouchers. Movement descriptors are loaded separately from CashMovementTypes/select; inactive records are excluded.")),
             nameof(CashVouchersController.Create) => (
                 "Create a cash voucher",
                 SwaggerOperationDescription.Create(
@@ -50,15 +50,15 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Admin only. Applies up to 100 ordered Add, Update, and Delete cash-voucher items as one atomic transaction.",
                     "Each item uses action as its discriminator. Add accepts action and voucher; Update accepts action, id, original base64 rowVersion, and voucher; Delete accepts action, id, and original base64 rowVersion only. cashMovementTypeId is optional for Add and Update.",
-                    "The server generates voucher numbers and derives partyType from employeeId, businessPartnerId, driverId, or externalPartyName. Select at most one posting target from those fields or accountId; cashMovementTypeId is an optional descriptor and must match the voucher direction. An accountId must be an active posting Expense account for Payment or Revenue account for Receipt. An item cannot target an invoice-generated or cashbox-transfer-generated voucher. If any item fails, every item is rolled back.",
-                    "The response preserves request order and returns one result per request item, including the created or updated voucher; deleted items return voucher as null. Runtime failures identify their Items[index] location.")),
+                    "The server generates voucher numbers and derives partyType from employeeId, businessPartnerId, driverId, or externalPartyName. Send exactly one posting target from those fields or accountId; cashMovementTypeId is an optional descriptor and must match the voucher direction. An accountId must be an active posting Expense account for Payment or Revenue account for Receipt. An item cannot target an invoice-generated or cashbox-transfer-generated voucher. If any item fails, every item is rolled back.",
+                    "Every Add or Update produces a completed, posted voucher. The response preserves request order and returns one result per request item, including the created or updated voucher; deleted items return voucher as null. Runtime failures identify their Items[index] location.")),
             nameof(CashVouchersController.Update) => (
                 "Update a cash voucher",
                 SwaggerOperationDescription.Create(
                     "Admin only. Replaces a manual draft or completed voucher and all derived effects, including its base-currency snapshot, atomically.",
                     "All voucher fields plus the original base64 rowVersion. Voucher number is server-generated, immutable, and is not sent. Send exactly one posting target: employeeId, businessPartnerId, driverId, externalPartyName, or accountId. cashMovementTypeId is optional and can be sent with the target as an additional descriptor. driverTripId is allowed only with driverId.",
-                    "An active cashbox is required. An accountId must be an active posting Expense account for Payment or Revenue account for Receipt. A supplied cashMovementTypeId must be active and match the voucher direction. For a foreign-currency cashbox, send exchangeRate or omit it to use the registered rate for the voucher date.",
-                    "A stale token returns CashVouchers.Concurrency. An invoice-generated voucher returns CashVouchers.InvoiceGeneratedReadOnly and must be changed through its invoice.")),
+                    "The posting target allows cashMovementTypeId to be null. When supplied, it must be active, match the voucher direction, and a partner-only type cannot be used with a non-partner target. Use Receipt with Revenue account and Payment with Expense account. For a foreign-currency cashbox, send exchangeRate or omit it to use the registered rate for the voucher date.",
+                    "Saving produces a completed, posted voucher. A stale token returns CashVouchers.Concurrency. An invoice-generated voucher returns CashVouchers.InvoiceGeneratedReadOnly and must be changed through its invoice.")),
             nameof(CashVouchersController.Delete) => (
                 "Delete a cash voucher",
                 SwaggerOperationDescription.Create(
