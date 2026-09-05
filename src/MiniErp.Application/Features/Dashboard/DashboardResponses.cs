@@ -24,8 +24,7 @@ public sealed record DashboardInventorySummary(
     int PendingCostMovementCount);
 
 public sealed record DashboardEntityCounts(
-    int CustomerCount,
-    int SupplierCount,
+    int BusinessPartnerCount,
     int EmployeeCount,
     int DriverCount,
     int InvoiceCount);

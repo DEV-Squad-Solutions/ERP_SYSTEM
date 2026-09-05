@@ -75,8 +75,7 @@ public sealed class DashboardServiceTests
         Assert.Equal(45m, result.Value.Purchases.Net);
         Assert.Equal(40m, result.Value.Purchases.Outstanding);
         Assert.Equal(4, result.Value.Counts.InvoiceCount);
-        Assert.Equal(1, result.Value.Counts.CustomerCount);
-        Assert.Equal(1, result.Value.Counts.SupplierCount);
+        Assert.Equal(2, result.Value.Counts.BusinessPartnerCount);
         Assert.Equal(2, result.Value.InvoiceStatus.PartiallyPaidCount);
         Assert.Equal(2, result.Value.InvoiceStatus.OverdueCount);
         Assert.Equal(120m, result.Value.InvoiceStatus.OverdueAmount);
@@ -118,6 +117,17 @@ public sealed class DashboardServiceTests
                 CreatedByPc = "test",
                 CreatedOn = auditDate
             };
+            var inactivePartner = new BusinessPartner
+            {
+                CompanyId = 1,
+                Code = "BP-2",
+                Name = "Inactive Dashboard Partner",
+                Currency = CurrencyCode.EGP,
+                IsActive = false,
+                CreatedById = "test",
+                CreatedByPc = "test",
+                CreatedOn = auditDate
+            };
             var store = new Store
             {
                 CompanyId = 1,
@@ -128,7 +138,7 @@ public sealed class DashboardServiceTests
                 CreatedByPc = "test",
                 CreatedOn = auditDate
             };
-            Context.AddRange(partner, store);
+            Context.AddRange(partner, inactivePartner, store);
             await Context.SaveChangesAsync();
 
             await Context.Database.ExecuteSqlRawAsync(

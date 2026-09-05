@@ -278,28 +278,11 @@ public sealed class DashboardService(
         int invoiceCount,
         CancellationToken cancellationToken)
     {
-        var customerCount = await dbContext.BusinessPartners
+        var businessPartnerCount = await dbContext.BusinessPartners
             .AsNoTracking()
-            .Where(partner =>
-                partner.CompanyId == companyId &&
-                partner.IsActive &&
-                dbContext.Invoices.Any(invoice =>
-                    invoice.CompanyId == companyId &&
-                    invoice.BusinessPartnerId == partner.Id &&
-                    (invoice.InvoiceType == InvoiceType.Sales ||
-                     invoice.InvoiceType == InvoiceType.SalesReturn)))
-            .CountAsync(cancellationToken);
-        var supplierCount = await dbContext.BusinessPartners
-            .AsNoTracking()
-            .Where(partner =>
-                partner.CompanyId == companyId &&
-                partner.IsActive &&
-                dbContext.Invoices.Any(invoice =>
-                    invoice.CompanyId == companyId &&
-                    invoice.BusinessPartnerId == partner.Id &&
-                    (invoice.InvoiceType == InvoiceType.Purchase ||
-                     invoice.InvoiceType == InvoiceType.PurchaseReturn)))
-            .CountAsync(cancellationToken);
+            .CountAsync(
+                partner => partner.CompanyId == companyId,
+                cancellationToken);
         var employeeCount = await dbContext.Employees
             .AsNoTracking()
             .CountAsync(employee =>
@@ -314,8 +297,7 @@ public sealed class DashboardService(
                 cancellationToken);
 
         return new DashboardEntityCounts(
-            CustomerCount: customerCount,
-            SupplierCount: supplierCount,
+            BusinessPartnerCount: businessPartnerCount,
             EmployeeCount: employeeCount,
             DriverCount: driverCount,
             InvoiceCount: invoiceCount);
