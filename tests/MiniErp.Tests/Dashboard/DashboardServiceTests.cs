@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -11,6 +12,7 @@ using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Services.Dashboard;
+using MiniErp.Infrastructure.Services.ProfitabilityReports;
 
 namespace MiniErp.Tests.Dashboard;
 
@@ -83,6 +85,46 @@ public sealed class DashboardServiceTests
         Assert.Equal(45m, result.Value.MonthlyActivity.Single().Purchases);
         Assert.Contains(result.Value.Alerts, alert =>
             alert.Code == "OverdueInvoices" && alert.Count == 2);
+    }
+
+    [Fact]
+    public async Task Reports_EmitDurationAndWorkloadMetrics()
+    {
+        var observed = new List<string>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == "MiniErp.Reporting")
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<double>(
+            (instrument, _, _, _) => observed.Add(instrument.Name));
+        listener.SetMeasurementEventCallback<long>(
+            (instrument, _, _, _) => observed.Add(instrument.Name));
+        listener.Start();
+
+        await using var database = await TestDatabase.CreateAsync();
+        var dashboard = await database.Service.GetAsync(
+            new DashboardFilterRequest());
+        var profitability = await new ProfitabilityReportService(
+                database.Context,
+                new TestCurrentCompanyContext(1))
+            .GetInvoicesAsync(
+                new PaginationRequest
+                {
+                    PageNumber = 1,
+                    PageSize = 10
+                },
+                new ProfitabilityReportFilterRequest(),
+                CancellationToken.None);
+
+        Assert.True(dashboard.IsSuccess);
+        Assert.True(profitability.IsSuccess);
+        Assert.Contains("mini_erp.dashboard.duration", observed);
+        Assert.Contains("mini_erp.profitability.duration", observed);
+        Assert.Contains("mini_erp.profitability.loaded_lines", observed);
     }
 
     private sealed class TestDatabase : IAsyncDisposable

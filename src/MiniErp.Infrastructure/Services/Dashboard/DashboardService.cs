@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
@@ -7,6 +9,7 @@ using MiniErp.Application.Features.Dashboard;
 using MiniErp.Application.Features.ProfitabilityReports;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.Monitoring;
 using static MiniErp.Application.Features.Dashboard.DashboardErrors;
 
 namespace MiniErp.Infrastructure.Services.Dashboard;
@@ -16,7 +19,8 @@ public sealed class DashboardService(
     ICurrentCompanyContext currentCompanyContext,
     IProfitabilityReportService profitabilityReportService,
     IAccountingReadinessService accountingReadinessService,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    ILogger<DashboardService>? logger = null)
     : IDashboardService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -24,6 +28,26 @@ public sealed class DashboardService(
     public async Task<Result<DashboardResponse>> GetAsync(
         DashboardFilterRequest filters,
         CancellationToken cancellationToken = default)
+    {
+        var startedAt = Stopwatch.GetTimestamp();
+        var result = await BuildDashboardAsync(filters, cancellationToken);
+        var elapsed = Stopwatch.GetElapsedTime(startedAt);
+        ReportingMetrics.DashboardDuration.Record(
+            elapsed.TotalMilliseconds,
+            new KeyValuePair<string, object?>(
+                "outcome",
+                result.IsSuccess ? "success" : "failure"));
+        logger?.LogInformation(
+            "Dashboard query completed for company {CompanyId} in {ElapsedMilliseconds} ms with outcome {Outcome}.",
+            companyId,
+            elapsed.TotalMilliseconds,
+            result.IsSuccess ? "Success" : "Failure");
+        return result;
+    }
+
+    private async Task<Result<DashboardResponse>> BuildDashboardAsync(
+        DashboardFilterRequest filters,
+        CancellationToken cancellationToken)
     {
         var today = DateOnly.FromDateTime(
             timeProvider.GetUtcNow().UtcDateTime);
@@ -50,34 +74,58 @@ public sealed class DashboardService(
             .Select(settings => (CurrencyCode?)settings.BaseCurrency)
             .FirstOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
 
-        var invoices = await dbContext.Invoices
+        var invoiceActivity = await dbContext.Invoices
             .AsNoTracking()
             .Where(invoice =>
                 invoice.CompanyId == companyId &&
                 invoice.InvoiceDate >= fromDate &&
                 invoice.InvoiceDate <= toDate)
-            .Select(invoice => new InvoiceDashboardRow
+            .GroupBy(invoice => new
             {
-                InvoiceType = invoice.InvoiceType,
-                InvoiceDate = invoice.InvoiceDate,
-                DueDate = invoice.DueDate,
-                Total = invoice.Total,
-                PaidAmount = invoice.PaidAmount,
-                BaseTotal = invoice.BaseTotal,
-                BasePaidAmountAtInvoiceRate =
-                    invoice.BasePaidAmountAtInvoiceRate
+                invoice.InvoiceType,
+                Year = invoice.InvoiceDate.Year,
+                Month = invoice.InvoiceDate.Month
+            })
+            .Select(group => new InvoiceActivityAggregate
+            {
+                InvoiceType = group.Key.InvoiceType,
+                Year = group.Key.Year,
+                Month = group.Key.Month,
+                InvoiceCount = group.Count(),
+                BaseTotal = group.Sum(invoice => invoice.BaseTotal),
+                Outstanding = group.Sum(invoice =>
+                    invoice.BaseTotal - invoice.BasePaidAmountAtInvoiceRate > 0m
+                        ? invoice.BaseTotal -
+                            invoice.BasePaidAmountAtInvoiceRate
+                        : 0m),
+                PaidCount = group.Count(invoice =>
+                    invoice.Total - invoice.PaidAmount <= 0m),
+                UnpaidCount = group.Count(invoice =>
+                    invoice.PaidAmount <= 0m && invoice.Total > 0m),
+                OverdueCount = group.Count(invoice =>
+                    invoice.DueDate.HasValue &&
+                    invoice.DueDate.Value < today &&
+                    invoice.Total - invoice.PaidAmount > 0m),
+                OverdueAmount = group.Sum(invoice =>
+                    invoice.DueDate.HasValue &&
+                    invoice.DueDate.Value < today &&
+                    invoice.Total - invoice.PaidAmount > 0m &&
+                    invoice.BaseTotal -
+                        invoice.BasePaidAmountAtInvoiceRate > 0m
+                        ? invoice.BaseTotal -
+                            invoice.BasePaidAmountAtInvoiceRate
+                        : 0m)
             })
             .ToListAsync(cancellationToken);
 
         var sales = BuildMoneySummary(
-            invoices.Where(invoice => invoice.InvoiceType == InvoiceType.Sales),
-            invoices.Where(invoice =>
-                invoice.InvoiceType == InvoiceType.SalesReturn));
+            invoiceActivity,
+            InvoiceType.Sales,
+            InvoiceType.SalesReturn);
         var purchases = BuildMoneySummary(
-            invoices.Where(invoice =>
-                invoice.InvoiceType == InvoiceType.Purchase),
-            invoices.Where(invoice =>
-                invoice.InvoiceType == InvoiceType.PurchaseReturn));
+            invoiceActivity,
+            InvoiceType.Purchase,
+            InvoiceType.PurchaseReturn);
 
         var profitabilityResult = await profitabilityReportService
             .GetInvoicesAsync(
@@ -99,9 +147,9 @@ public sealed class DashboardService(
 
         var inventory = await BuildInventorySummaryAsync(cancellationToken);
         var counts = await BuildEntityCountsAsync(
-            invoices.Count,
+            invoiceActivity.Sum(row => row.InvoiceCount),
             cancellationToken);
-        var invoiceStatus = BuildInvoiceStatus(invoices, today);
+        var invoiceStatus = BuildInvoiceStatus(invoiceActivity);
         var cashBalances = await BuildCashBalancesAsync(cancellationToken);
 
         var readinessResult = await accountingReadinessService.GetAsync(
@@ -129,7 +177,7 @@ public sealed class DashboardService(
             PendingInvoiceCount: profitability.PendingInvoiceCount,
             PendingCostQuantity: profitability.PendingCostQuantity);
         var monthlyActivity = BuildMonthlyActivity(
-            invoices,
+            invoiceActivity,
             fromDate,
             toDate);
         var alerts = await BuildAlertsAsync(
@@ -213,16 +261,20 @@ public sealed class DashboardService(
     }
 
     private static DashboardMoneySummary BuildMoneySummary(
-        IEnumerable<InvoiceDashboardRow> source,
-        IEnumerable<InvoiceDashboardRow> returns)
+        IEnumerable<InvoiceActivityAggregate> rows,
+        InvoiceType sourceType,
+        InvoiceType returnType)
     {
-        var sourceRows = source.ToArray();
-        var returnRows = returns.ToArray();
-        var total = sourceRows.Sum(invoice => invoice.BaseTotal);
-        var returnTotal = returnRows.Sum(invoice => invoice.BaseTotal);
-        var outstanding = sourceRows.Sum(invoice => Math.Max(
-            invoice.BaseTotal - invoice.BasePaidAmountAtInvoiceRate,
-            0m));
+        var materializedRows = rows.ToArray();
+        var total = materializedRows
+            .Where(row => row.InvoiceType == sourceType)
+            .Sum(row => row.BaseTotal);
+        var returnTotal = materializedRows
+            .Where(row => row.InvoiceType == returnType)
+            .Sum(row => row.BaseTotal);
+        var outstanding = materializedRows
+            .Where(row => row.InvoiceType == sourceType)
+            .Sum(row => row.Outstanding);
 
         return new DashboardMoneySummary(
             Total: total,
@@ -240,22 +292,21 @@ public sealed class DashboardService(
                 item.CompanyId == companyId &&
                 item.IsActive,
                 cancellationToken);
-        var balances = await dbContext.ItemStoreBalances
+        var currentInventoryValue = await dbContext.ItemStoreBalances
             .AsNoTracking()
             .Where(balance => balance.CompanyId == companyId)
-            .Select(balance => new
-            {
-                balance.ItemId,
-                balance.Quantity,
-                balance.InventoryValue,
-                balance.Item.IsActive
-            })
-            .ToListAsync(cancellationToken);
-        var itemsWithStockCount = balances
-            .Where(balance => balance.IsActive && balance.Quantity > 0m)
+            .SumAsync(
+                balance => (decimal?)balance.InventoryValue,
+                cancellationToken) ?? 0m;
+        var itemsWithStockCount = await dbContext.ItemStoreBalances
+            .AsNoTracking()
+            .Where(balance =>
+                balance.CompanyId == companyId &&
+                balance.Item.IsActive &&
+                balance.Quantity > 0m)
             .Select(balance => balance.ItemId)
             .Distinct()
-            .Count();
+            .CountAsync(cancellationToken);
         var pendingCostMovementCount = await dbContext.ItemMovements
             .AsNoTracking()
             .CountAsync(movement =>
@@ -264,8 +315,7 @@ public sealed class DashboardService(
                 cancellationToken);
 
         return new DashboardInventorySummary(
-            CurrentInventoryValue: balances.Sum(balance =>
-                balance.InventoryValue),
+            CurrentInventoryValue: currentInventoryValue,
             ActiveItemCount: activeItemCount,
             ItemsWithStockCount: itemsWithStockCount,
             ZeroStockItemCount: Math.Max(
@@ -304,78 +354,60 @@ public sealed class DashboardService(
     }
 
     private static DashboardInvoiceStatusSummary BuildInvoiceStatus(
-        IEnumerable<InvoiceDashboardRow> invoices,
-        DateOnly today)
+        IEnumerable<InvoiceActivityAggregate> invoiceActivity)
     {
-        var rows = invoices
-            .Where(invoice =>
-                invoice.InvoiceType == InvoiceType.Sales ||
-                invoice.InvoiceType == InvoiceType.Purchase)
+        var rows = invoiceActivity
+            .Where(row =>
+                row.InvoiceType == InvoiceType.Sales ||
+                row.InvoiceType == InvoiceType.Purchase)
             .ToArray();
-        var paidCount = rows.Count(invoice =>
-            invoice.Total - invoice.PaidAmount <= 0m);
-        var unpaidCount = rows.Count(invoice =>
-            invoice.PaidAmount <= 0m &&
-            invoice.Total > 0m);
-        var partiallyPaidCount = rows.Length - paidCount - unpaidCount;
-        var overdue = rows.Where(invoice =>
-            invoice.DueDate.HasValue &&
-            invoice.DueDate.Value < today &&
-            invoice.Total - invoice.PaidAmount > 0m)
-            .ToArray();
+        var totalCount = rows.Sum(row => row.InvoiceCount);
+        var paidCount = rows.Sum(row => row.PaidCount);
+        var unpaidCount = rows.Sum(row => row.UnpaidCount);
 
         return new DashboardInvoiceStatusSummary(
             PaidCount: paidCount,
-            PartiallyPaidCount: partiallyPaidCount,
+            PartiallyPaidCount: totalCount - paidCount - unpaidCount,
             UnpaidCount: unpaidCount,
-            OverdueCount: overdue.Length,
-            OverdueAmount: overdue.Sum(invoice => Math.Max(
-                invoice.BaseTotal - invoice.BasePaidAmountAtInvoiceRate,
-                0m)));
+            OverdueCount: rows.Sum(row => row.OverdueCount),
+            OverdueAmount: rows.Sum(row => row.OverdueAmount));
     }
 
     private async Task<IReadOnlyList<DashboardCashBalance>>
         BuildCashBalancesAsync(CancellationToken cancellationToken)
     {
-        var cashboxes = await dbContext.Cashboxes
-            .AsNoTracking()
-            .Where(cashbox => cashbox.CompanyId == companyId)
-            .Select(cashbox => new
-            {
-                cashbox.Id,
-                cashbox.Currency,
-                cashbox.OpeningBalance
-            })
-            .ToListAsync(cancellationToken);
-        var vouchers = await dbContext.CashVouchers
+        var voucherTotals = dbContext.CashVouchers
             .AsNoTracking()
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
                 voucher.CashboxId.HasValue &&
                 voucher.IsPosted)
-            .Select(voucher => new
+            .GroupBy(voucher => voucher.CashboxId!.Value)
+            .Select(group => new
             {
-                CashboxId = voucher.CashboxId!.Value,
-                voucher.Direction,
-                voucher.Amount
-            })
-            .ToListAsync(cancellationToken);
-        var voucherTotals = vouchers
-            .GroupBy(voucher => voucher.CashboxId)
-            .ToDictionary(
-                group => group.Key,
-                group => group.Sum(voucher =>
+                CashboxId = group.Key,
+                Total = group.Sum(voucher =>
                     voucher.Direction == CashDirection.Receipt
                         ? voucher.Amount
-                        : -voucher.Amount));
+                        : -voucher.Amount)
+            });
 
-        return cashboxes
-            .Select(cashbox => new
-            {
-                cashbox.Currency,
-                Balance = cashbox.OpeningBalance +
-                    voucherTotals.GetValueOrDefault(cashbox.Id)
-            })
+        var balances = await (
+                from cashbox in dbContext.Cashboxes.AsNoTracking()
+                where cashbox.CompanyId == companyId
+                join voucherTotal in voucherTotals
+                    on cashbox.Id equals voucherTotal.CashboxId
+                    into matchingTotals
+                from voucherTotal in matchingTotals.DefaultIfEmpty()
+                select new
+                {
+                    cashbox.Currency,
+                    Balance = cashbox.OpeningBalance +
+                        (voucherTotal == null ? 0m : voucherTotal.Total)
+                })
+            .ToListAsync(cancellationToken);
+
+        return balances
             .GroupBy(cashbox => cashbox.Currency)
             .OrderBy(group => group.Key)
             .Select(group => new DashboardCashBalance(
@@ -387,30 +419,29 @@ public sealed class DashboardService(
 
     private static IReadOnlyList<DashboardMonthlyActivity>
         BuildMonthlyActivity(
-            IEnumerable<InvoiceDashboardRow> invoices,
+            IEnumerable<InvoiceActivityAggregate> invoiceActivity,
             DateOnly fromDate,
             DateOnly toDate)
     {
-        var rows = invoices.ToArray();
+        var rows = invoiceActivity.ToArray();
         var result = new List<DashboardMonthlyActivity>();
         var month = new DateOnly(fromDate.Year, fromDate.Month, 1);
         var lastMonth = new DateOnly(toDate.Year, toDate.Month, 1);
         while (month <= lastMonth)
         {
-            var monthlyRows = rows.Where(invoice =>
-                invoice.InvoiceDate.Year == month.Year &&
-                invoice.InvoiceDate.Month == month.Month);
-            var sales = monthlyRows.Sum(invoice =>
-                invoice.InvoiceType == InvoiceType.Sales
-                    ? invoice.BaseTotal
-                    : invoice.InvoiceType == InvoiceType.SalesReturn
-                        ? -invoice.BaseTotal
+            var monthlyRows = rows.Where(row =>
+                row.Year == month.Year && row.Month == month.Month);
+            var sales = monthlyRows.Sum(row =>
+                row.InvoiceType == InvoiceType.Sales
+                    ? row.BaseTotal
+                    : row.InvoiceType == InvoiceType.SalesReturn
+                        ? -row.BaseTotal
                         : 0m);
-            var purchases = monthlyRows.Sum(invoice =>
-                invoice.InvoiceType == InvoiceType.Purchase
-                    ? invoice.BaseTotal
-                    : invoice.InvoiceType == InvoiceType.PurchaseReturn
-                        ? -invoice.BaseTotal
+            var purchases = monthlyRows.Sum(row =>
+                row.InvoiceType == InvoiceType.Purchase
+                    ? row.BaseTotal
+                    : row.InvoiceType == InvoiceType.PurchaseReturn
+                        ? -row.BaseTotal
                         : 0m);
             result.Add(new DashboardMonthlyActivity(
                 Year: month.Year,
@@ -481,20 +512,26 @@ public sealed class DashboardService(
         DateOnly StartDate,
         DateOnly EndDate);
 
-    private sealed class InvoiceDashboardRow
+    private sealed class InvoiceActivityAggregate
     {
         public InvoiceType InvoiceType { get; init; }
 
-        public DateOnly InvoiceDate { get; init; }
+        public int Year { get; init; }
 
-        public DateOnly? DueDate { get; init; }
+        public int Month { get; init; }
 
-        public decimal Total { get; init; }
-
-        public decimal PaidAmount { get; init; }
+        public int InvoiceCount { get; init; }
 
         public decimal BaseTotal { get; init; }
 
-        public decimal BasePaidAmountAtInvoiceRate { get; init; }
+        public decimal Outstanding { get; init; }
+
+        public int PaidCount { get; init; }
+
+        public int UnpaidCount { get; init; }
+
+        public int OverdueCount { get; init; }
+
+        public decimal OverdueAmount { get; init; }
     }
 }

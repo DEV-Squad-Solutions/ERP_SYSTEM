@@ -7,6 +7,16 @@ namespace MiniErp.Tests.Authorization;
 public sealed class CompanyAndExchangeRateAuthorizationTests
 {
     [Fact]
+    public void AuthenticatedCompanyEndpoints_RequireKnownApplicationRole()
+    {
+        var authorize = typeof(ApiControllerBase)
+            .GetCustomAttributes<AuthorizeAttribute>()
+            .Single();
+
+        Assert.Equal("Admin,User", authorize.Roles);
+    }
+
+    [Fact]
     public void CompaniesController_RemainsAdminOnly()
     {
         var authorize = typeof(CompaniesController)

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Errors;
 using MiniErp.Api.Exceptions;
 using MiniErp.Api.ModelBinding;
+using MiniErp.Api.Monitoring;
 using MiniErp.Api.Realtime;
 using MiniErp.Api.Swagger;
 using MiniErp.Api.Startup;
@@ -142,6 +143,7 @@ app.UseSwaggerDocumentation();
 
 app.UseHttpsRedirection();
 app.UseCors(AllowAnyFrontendPolicy);
+app.UseMiddleware<RequestMonitoringMiddleware>();
 app.UseMiddleware<DatabaseReadinessMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();

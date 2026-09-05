@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
@@ -6,13 +8,15 @@ using MiniErp.Application.Features.ProfitabilityReports;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.Monitoring;
 using static MiniErp.Application.Features.ProfitabilityReports.ProfitabilityReportErrors;
 
 namespace MiniErp.Infrastructure.Services.ProfitabilityReports;
 
 public sealed class ProfitabilityReportService(
     ApplicationDbContext dbContext,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    ILogger<ProfitabilityReportService>? logger = null)
     : IProfitabilityReportService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -156,6 +160,7 @@ public sealed class ProfitabilityReportService(
         bool alignReturnsToSourceInvoice,
         CancellationToken cancellationToken)
     {
+        var startedAt = Stopwatch.GetTimestamp();
         var query = dbContext.InvoiceLines
             .AsNoTracking()
             .Where(line =>
@@ -297,86 +302,69 @@ public sealed class ProfitabilityReportService(
                     line.Item.Name.Contains(search));
         }
 
-        var projections = await query
-            .Select(line => new ProfitabilityLineProjection
-            {
-                InvoiceLineId = line.Id,
-                InvoiceId = line.InvoiceId,
-                SourceInvoiceId = line.SourceInvoiceLine != null
+        var movements = dbContext.ItemMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                (movement.MovementType == ItemMovementType.Sales ||
+                 movement.MovementType == ItemMovementType.SalesReturn));
+        var projections = await (
+                from line in query
+                join movement in movements
+                    on new
+                    {
+                        ReferenceId = line.InvoiceId,
+                        ItemId = line.ItemId!.Value,
+                        MovementType = line.Invoice.InvoiceType ==
+                            InvoiceType.Sales
+                                ? ItemMovementType.Sales
+                                : ItemMovementType.SalesReturn
+                    }
+                    equals new
+                    {
+                        movement.ReferenceId,
+                        movement.ItemId,
+                        movement.MovementType
+                    }
+                    into matchingMovements
+                from movement in matchingMovements.DefaultIfEmpty()
+                select new ProfitabilityLineProjection
+                {
+                    InvoiceLineId = line.Id,
+                    InvoiceId = line.InvoiceId,
+                    SourceInvoiceId = line.SourceInvoiceLine != null
                     ? line.SourceInvoiceLine.InvoiceId
                     : null,
-                InvoiceNumber = line.Invoice.InvoiceNumber,
-                InvoiceDate = line.Invoice.InvoiceDate,
-                InvoiceType = line.Invoice.InvoiceType,
-                BusinessPartnerId = line.Invoice.BusinessPartnerId,
-                BusinessPartnerName = line.Invoice.BusinessPartner.Name,
-                StoreId = line.Invoice.StoreId,
-                StoreName = line.Invoice.Store.Name,
-                InvoiceBaseSubtotal = line.Invoice.BaseSubtotal,
-                InvoiceBaseDiscountAmount =
-                    line.Invoice.BaseDiscountAmount,
-                ItemId = line.ItemId!.Value,
-                ItemCode = line.Item!.Code,
-                ItemName = line.Item.Name,
-                ItemUnitName = line.ItemUnit!.Name,
-                Quantity = line.Quantity,
-                BaseUnitPrice = line.BaseUnitPrice,
-                BaseTotal = line.BaseTotal,
-                CostStatus = dbContext.ItemMovements
-                    .Where(movement =>
-                        movement.CompanyId == companyId &&
-                        movement.ReferenceId == line.InvoiceId &&
-                        movement.ItemId == line.ItemId &&
-                        (line.Invoice.InvoiceType == InvoiceType.Sales &&
-                         movement.MovementType == ItemMovementType.Sales ||
-                         line.Invoice.InvoiceType ==
-                         InvoiceType.SalesReturn &&
-                         movement.MovementType ==
-                         ItemMovementType.SalesReturn))
-                    .Select(movement =>
-                        (InventoryCostStatus?)movement.CostStatus)
-                    .SingleOrDefault(),
-                PendingCostQuantity = dbContext.ItemMovements
-                    .Where(movement =>
-                        movement.CompanyId == companyId &&
-                        movement.ReferenceId == line.InvoiceId &&
-                        movement.ItemId == line.ItemId &&
-                        (line.Invoice.InvoiceType == InvoiceType.Sales &&
-                         movement.MovementType == ItemMovementType.Sales ||
-                         line.Invoice.InvoiceType ==
-                         InvoiceType.SalesReturn &&
-                         movement.MovementType ==
-                         ItemMovementType.SalesReturn))
-                    .Select(movement =>
-                        (decimal?)movement.PendingCostQuantity)
-                    .SingleOrDefault(),
-                UnitCost = dbContext.ItemMovements
-                    .Where(movement =>
-                        movement.CompanyId == companyId &&
-                        movement.ReferenceId == line.InvoiceId &&
-                        movement.ItemId == line.ItemId &&
-                        (line.Invoice.InvoiceType == InvoiceType.Sales &&
-                         movement.MovementType == ItemMovementType.Sales ||
-                         line.Invoice.InvoiceType ==
-                         InvoiceType.SalesReturn &&
-                         movement.MovementType ==
-                         ItemMovementType.SalesReturn))
-                    .Select(movement => movement.UnitCost)
-                    .SingleOrDefault(),
-                TotalCost = dbContext.ItemMovements
-                    .Where(movement =>
-                        movement.CompanyId == companyId &&
-                        movement.ReferenceId == line.InvoiceId &&
-                        movement.ItemId == line.ItemId &&
-                        (line.Invoice.InvoiceType == InvoiceType.Sales &&
-                         movement.MovementType == ItemMovementType.Sales ||
-                         line.Invoice.InvoiceType ==
-                         InvoiceType.SalesReturn &&
-                         movement.MovementType ==
-                         ItemMovementType.SalesReturn))
-                    .Select(movement => (decimal?)movement.TotalCost)
-                    .SingleOrDefault()
-            })
+                    InvoiceNumber = line.Invoice.InvoiceNumber,
+                    InvoiceDate = line.Invoice.InvoiceDate,
+                    InvoiceType = line.Invoice.InvoiceType,
+                    BusinessPartnerId = line.Invoice.BusinessPartnerId,
+                    BusinessPartnerName = line.Invoice.BusinessPartner.Name,
+                    StoreId = line.Invoice.StoreId,
+                    StoreName = line.Invoice.Store.Name,
+                    InvoiceBaseSubtotal = line.Invoice.BaseSubtotal,
+                    InvoiceBaseDiscountAmount =
+                        line.Invoice.BaseDiscountAmount,
+                    ItemId = line.ItemId!.Value,
+                    ItemCode = line.Item!.Code,
+                    ItemName = line.Item.Name,
+                    ItemUnitName = line.ItemUnit!.Name,
+                    Quantity = line.Quantity,
+                    BaseUnitPrice = line.BaseUnitPrice,
+                    BaseTotal = line.BaseTotal,
+                    CostStatus = movement == null
+                        ? null
+                        : movement.CostStatus,
+                    PendingCostQuantity = movement == null
+                        ? null
+                        : movement.PendingCostQuantity,
+                    UnitCost = movement == null
+                        ? null
+                        : movement.UnitCost,
+                    TotalCost = movement == null
+                        ? null
+                        : movement.TotalCost
+                })
             .ToListAsync(cancellationToken);
 
         var lines = projections
@@ -388,6 +376,15 @@ public sealed class ProfitabilityReportService(
             .Select(settings => (CurrencyCode?)settings.BaseCurrency)
             .SingleOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
         var summary = BuildSummary(lines);
+        var elapsed = Stopwatch.GetElapsedTime(startedAt);
+        ReportingMetrics.ProfitabilityDuration.Record(
+            elapsed.TotalMilliseconds);
+        ReportingMetrics.ProfitabilityLoadedLines.Record(lines.LongLength);
+        logger?.LogInformation(
+            "Profitability report loaded {LineCount} lines for company {CompanyId} in {ElapsedMilliseconds} ms.",
+            lines.Length,
+            companyId,
+            elapsed.TotalMilliseconds);
 
         return new ProfitabilityReportData(
             BaseCurrency: baseCurrency,

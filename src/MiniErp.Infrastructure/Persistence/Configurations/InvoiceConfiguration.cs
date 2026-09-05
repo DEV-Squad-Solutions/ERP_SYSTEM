@@ -188,6 +188,14 @@ public sealed class InvoiceConfiguration : AuditableEntityConfiguration<Invoice>
             invoice.InvoiceDate
         });
 
+        builder.HasIndex(invoice => new
+        {
+            invoice.CompanyId,
+            invoice.InvoiceDate,
+            invoice.InvoiceType
+        })
+            .HasDatabaseName("IX_Invoices_Company_Date_Type");
+
         builder.HasOne(invoice => invoice.Company)
             .WithMany()
             .HasForeignKey(invoice => invoice.CompanyId)

@@ -10,7 +10,7 @@ using MiniErp.Application.Common.Realtime;
 namespace MiniErp.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Roles = ApplicationRoles.Admin + "," + ApplicationRoles.User)]
 [ApiVersion(1.0)]
 [Route("api/v{version:apiVersion}/[controller]")]
 public abstract class ApiControllerBase : ControllerBase
