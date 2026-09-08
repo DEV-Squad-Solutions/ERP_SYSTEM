@@ -733,7 +733,8 @@ public sealed class CashVoucherServiceTests
                 ReferenceNumber: null,
                 Description: "Employee cash payment",
                 Notes: null,
-                RowVersion: draft.Value.RowVersion));
+                RowVersion: draft.Value.RowVersion,
+                EmployeeMovementType: EmployeeMovementType.Advance));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(CashPartyType.Employee, result.Value.PartyType);
@@ -745,6 +746,276 @@ public sealed class CashVoucherServiceTests
             await database.Context.BusinessPartnerMovements
                 .Where(item => item.CashVoucherId == result.Value.Id)
                 .ToListAsync());
+    }
+
+    [Fact]
+    public async Task DirectEmployeePaymentCreatesOneLinkedMovement()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var draft = await service.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 7, 27),
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                Amount: 75m,
+                Description: "Employee advance"));
+
+        var posted = await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: draft.Value.VoucherDate,
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                CashMovementTypeId: null,
+                EmployeeId: 1,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: 75m,
+                ReferenceNumber: null,
+                Description: "Employee advance",
+                Notes: "Advance from cash",
+                RowVersion: draft.Value.RowVersion,
+                EmployeeMovementType: EmployeeMovementType.Advance));
+
+        var movements = await database.Context.EmployeeMovements
+            .AsNoTracking()
+            .Where(item => item.CashVoucherId == draft.Value.Id)
+            .ToListAsync();
+
+        Assert.True(posted.IsSuccess);
+        var movement = Assert.Single(movements);
+        Assert.Equal(1, movement.EmployeeId);
+        Assert.Equal(EmployeeMovementType.Advance, movement.Type);
+        Assert.Equal(75m, movement.Debit);
+        Assert.Equal(0m, movement.Credit);
+        Assert.Equal(75m, movement.BaseDebit);
+        Assert.Equal("Advance from cash", movement.Notes);
+    }
+
+    [Fact]
+    public async Task DirectEmployeeUpdateUpdatesLinkedMovementWithoutDuplication()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var draft = await service.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 7, 27),
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                Amount: 75m,
+                Description: "Employee cash payment"));
+
+        var posted = await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: draft.Value.VoucherDate,
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                CashMovementTypeId: null,
+                EmployeeId: 1,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: 75m,
+                ReferenceNumber: null,
+                Description: "Employee cash payment",
+                Notes: null,
+                RowVersion: draft.Value.RowVersion,
+                EmployeeMovementType: EmployeeMovementType.Advance));
+
+        var movementId = await database.Context.EmployeeMovements
+            .Where(item => item.CashVoucherId == posted.Value.Id)
+            .Select(item => item.Id)
+            .SingleAsync();
+
+        await using var updateContext = database.CreateAdditionalContext();
+        var updateService = database.CreateVoucherService(1, updateContext);
+        var current = await updateService.GetByIdAsync(posted.Value.Id);
+        var updated = await updateService.UpdateAsync(
+            posted.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: current.Value.VoucherDate,
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                CashMovementTypeId: null,
+                EmployeeId: 1,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: 100m,
+                ReferenceNumber: null,
+                Description: "Employee deduction",
+                Notes: "Updated employee movement",
+                RowVersion: current.Value.RowVersion,
+                EmployeeMovementType: EmployeeMovementType.Deduction));
+
+        var movements = await updateContext.EmployeeMovements
+            .AsNoTracking()
+            .Where(item => item.CashVoucherId == posted.Value.Id)
+            .ToListAsync();
+
+        Assert.True(updated.IsSuccess, string.Join("; ", updated.Errors.Select(error => error.Code + ":" + error.Description)));
+        var movement = Assert.Single(movements);
+        Assert.Equal(movementId, movement.Id);
+        Assert.Equal(EmployeeMovementType.Deduction, movement.Type);
+        Assert.Equal(100m, movement.Debit);
+        Assert.Equal("Updated employee movement", movement.Notes);
+    }
+
+    [Fact]
+    public async Task ChangingEmployeeVoucherToAnotherTargetRemovesMovement()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var draft = await service.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 7, 27),
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                Amount: 75m,
+                Description: "Employee cash payment"));
+        var posted = await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: draft.Value.VoucherDate,
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                CashMovementTypeId: null,
+                EmployeeId: 1,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: 75m,
+                ReferenceNumber: null,
+                Description: "Employee cash payment",
+                Notes: null,
+                RowVersion: draft.Value.RowVersion,
+                EmployeeMovementType: EmployeeMovementType.Advance));
+
+        await using var changeContext = database.CreateAdditionalContext();
+        var changeService = database.CreateVoucherService(1, changeContext);
+        var current = await changeService.GetByIdAsync(posted.Value.Id);
+        var changed = await changeService.UpdateAsync(
+            posted.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: current.Value.VoucherDate,
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                CashMovementTypeId: 10,
+                EmployeeId: null,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: 75m,
+                ReferenceNumber: null,
+                Description: "Operating expense",
+                Notes: null,
+                RowVersion: current.Value.RowVersion));
+
+        Assert.True(changed.IsSuccess, string.Join("; ", changed.Errors.Select(error => error.Code + ":" + error.Description)));
+        Assert.Empty(await changeContext.EmployeeMovements
+            .Where(item => item.CashVoucherId == posted.Value.Id)
+            .ToListAsync());
+        Assert.True(await changeContext.EmployeeMovements
+            .IgnoreQueryFilters()
+            .AnyAsync(item => item.CashVoucherId == posted.Value.Id && item.IsDeleted));
+    }
+
+    [Fact]
+    public async Task DeletingEmployeeVoucherRemovesLinkedMovement()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var draft = await service.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 7, 27),
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                Amount: 50m,
+                Description: "Employee cash payment"));
+        var posted = await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: draft.Value.VoucherDate,
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                CashMovementTypeId: null,
+                EmployeeId: 1,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: 50m,
+                ReferenceNumber: null,
+                Description: "Employee cash payment",
+                Notes: null,
+                RowVersion: draft.Value.RowVersion,
+                EmployeeMovementType: EmployeeMovementType.Withdrawal));
+
+        await using var deleteContext = database.CreateAdditionalContext();
+        var deleteService = database.CreateVoucherService(1, deleteContext);
+        var current = await deleteService.GetByIdAsync(posted.Value.Id);
+        var deleted = await deleteService.DeleteAsync(current.Value.Id);
+
+        Assert.True(deleted.IsSuccess, string.Join("; ", deleted.Errors.Select(error => error.Code + ":" + error.Description)));
+        Assert.Empty(await deleteContext.EmployeeMovements
+            .Where(item => item.CashVoucherId == posted.Value.Id)
+            .ToListAsync());
+        Assert.True(await deleteContext.EmployeeMovements
+            .IgnoreQueryFilters()
+            .AnyAsync(item => item.CashVoucherId == posted.Value.Id && item.IsDeleted));
+    }
+
+    [Theory]
+    [InlineData(EmployeeMovementType.Credit)]
+    [InlineData(EmployeeMovementType.Bonus)]
+    public async Task DirectEmployeeReceiptCreatesCreditMovement(
+        EmployeeMovementType movementType)
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var draft = await service.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 7, 27),
+                Direction: CashDirection.Receipt,
+                CashboxId: 1,
+                Amount: 40m,
+                Description: "Employee receipt"));
+
+        var posted = await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: draft.Value.VoucherDate,
+                Direction: CashDirection.Receipt,
+                CashboxId: 1,
+                CashMovementTypeId: null,
+                EmployeeId: 1,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: 40m,
+                ReferenceNumber: null,
+                Description: "Employee receipt",
+                Notes: null,
+                RowVersion: draft.Value.RowVersion,
+                EmployeeMovementType: movementType));
+
+        var movement = await database.Context.EmployeeMovements
+            .AsNoTracking()
+            .SingleAsync(item => item.CashVoucherId == posted.Value.Id);
+
+        Assert.True(posted.IsSuccess);
+        Assert.Equal(movementType, movement.Type);
+        Assert.Equal(0m, movement.Debit);
+        Assert.Equal(40m, movement.Credit);
     }
 
     [Theory]
@@ -780,7 +1051,8 @@ public sealed class CashVoucherServiceTests
                 ReferenceNumber: null,
                 Description: "Employee validation",
                 Notes: null,
-                RowVersion: draft.Value.RowVersion));
+                RowVersion: draft.Value.RowVersion,
+                EmployeeMovementType: EmployeeMovementType.Advance));
 
         Assert.Equal("CashVouchers.EmployeeNotFound", result.Error.Code);
     }
@@ -1530,7 +1802,12 @@ public sealed class CashVoucherServiceTests
             Description: original.Description,
             Notes: original.Notes,
             RowVersion: original.RowVersion,
-            AccountId: original.AccountId);
+            AccountId: original.AccountId,
+            EmployeeMovementType: original.EmployeeId.HasValue
+                ? original.Direction == CashDirection.Receipt
+                    ? EmployeeMovementType.Credit
+                    : EmployeeMovementType.Advance
+                : null);
 
     private static async Task<Result<CashVoucherResponse>> AddVoucherAsync(
         ICashVoucherService service,
@@ -1566,7 +1843,12 @@ public sealed class CashVoucherServiceTests
                 Notes: request.Notes,
                 RowVersion: draft.Value.RowVersion,
                 ExchangeRate: request.ExchangeRate,
-                AccountId: request.AccountId));
+                AccountId: request.AccountId,
+                EmployeeMovementType: request.EmployeeId.HasValue
+                    ? request.Direction == CashDirection.Receipt
+                        ? EmployeeMovementType.Credit
+                        : EmployeeMovementType.Advance
+                    : null));
     }
 
     private sealed record VoucherTestRequest(

@@ -603,6 +603,44 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             CREATE INDEX IX_CashVouchers_Company_Account_Date
             ON CashVouchers (CompanyId, AccountId, VoucherDate, Id);
 
+            CREATE TABLE EmployeeMovements (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                EmployeeId INTEGER NOT NULL,
+                CashVoucherId INTEGER NULL,
+                Type INTEGER NOT NULL,
+                MovementDate TEXT NOT NULL,
+                Currency INTEGER NOT NULL,
+                Debit NUMERIC NOT NULL,
+                Credit NUMERIC NOT NULL,
+                ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                BaseDebit NUMERIC NOT NULL DEFAULT 0,
+                BaseCredit NUMERIC NOT NULL DEFAULT 0,
+                Notes TEXT NULL,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL,
+                CONSTRAINT CK_EmployeeMovements_Amounts_NonNegative CHECK (
+                    Debit >= 0 AND Credit >= 0),
+                CONSTRAINT CK_EmployeeMovements_ExactlyOneAmount CHECK (
+                    (Debit > 0 AND Credit = 0) OR
+                    (Debit = 0 AND Credit > 0))
+            );
+
+            CREATE UNIQUE INDEX UX_EmployeeMovements_Voucher
+            ON EmployeeMovements (CompanyId, CashVoucherId)
+            WHERE CashVoucherId IS NOT NULL AND IsDeleted = 0;
+
+            CREATE INDEX IX_EmployeeMovements_Company_Employee_Date
+            ON EmployeeMovements (CompanyId, EmployeeId, Currency, MovementDate, Id);
+
             CREATE TABLE EmployeeTransactions (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,

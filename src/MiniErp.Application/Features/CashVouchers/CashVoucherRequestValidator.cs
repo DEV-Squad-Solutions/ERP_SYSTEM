@@ -1,4 +1,5 @@
 using FluentValidation;
+using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 
@@ -56,6 +57,32 @@ public sealed class CashVoucherUpdateRequestValidator
         RuleFor(request => request.EmployeeId)
             .GreaterThan(0)
             .When(request => request.EmployeeId.HasValue);
+
+        RuleFor(request => request.EmployeeMovementType)
+            .NotNull()
+            .WithMessage("اختر نوع حركة الموظف لسند الموظف.")
+            .When(request => request.EmployeeId.HasValue);
+
+        RuleFor(request => request.EmployeeMovementType)
+            .Null()
+            .WithMessage("نوع حركة الموظف يُستخدم مع سند الموظف فقط.")
+            .When(request => !request.EmployeeId.HasValue);
+
+        RuleFor(request => request.EmployeeMovementType)
+            .IsInEnum()
+            .When(request => request.EmployeeMovementType.HasValue);
+
+        RuleFor(request => request)
+            .Must(request =>
+                IsEmployeeMovementDirectionCompatible(
+                    request.Direction,
+                    request.EmployeeMovementType))
+            .WithMessage(
+                "نوع حركة الموظف لا يطابق اتجاه السند: Credit وBonus لسند القبض، وباقي الأنواع لسند الصرف.")
+            .WithName(nameof(CashVoucherUpdateRequest.EmployeeMovementType))
+            .When(request =>
+                request.EmployeeId.HasValue &&
+                request.EmployeeMovementType.HasValue);
 
         RuleFor(request => request.BusinessPartnerId)
             .GreaterThan(0)
@@ -125,6 +152,13 @@ public sealed class CashVoucherUpdateRequestValidator
 
         return selectedTargetCount == 1;
     }
+
+    private static bool IsEmployeeMovementDirectionCompatible(
+        CashDirection direction,
+        EmployeeMovementType? movementType) =>
+        movementType is null ||
+        EmployeeAccountRules.IsCreditMovement(movementType.Value) ==
+            (direction == CashDirection.Receipt);
 }
 
 public sealed class CashVoucherBulkVoucherRequestValidator
@@ -147,6 +181,28 @@ public sealed class CashVoucherBulkVoucherRequestValidator
         RuleFor(request => request.EmployeeId)
             .GreaterThan(0)
             .When(request => request.EmployeeId.HasValue);
+        RuleFor(request => request.EmployeeMovementType)
+            .NotNull()
+            .WithMessage("اختر نوع حركة الموظف لسند الموظف.")
+            .When(request => request.EmployeeId.HasValue);
+        RuleFor(request => request.EmployeeMovementType)
+            .Null()
+            .WithMessage("نوع حركة الموظف يُستخدم مع سند الموظف فقط.")
+            .When(request => !request.EmployeeId.HasValue);
+        RuleFor(request => request.EmployeeMovementType)
+            .IsInEnum()
+            .When(request => request.EmployeeMovementType.HasValue);
+        RuleFor(request => request)
+            .Must(request =>
+                IsEmployeeMovementDirectionCompatible(
+                    request.Direction,
+                    request.EmployeeMovementType))
+            .WithMessage(
+                "نوع حركة الموظف لا يطابق اتجاه السند: Credit وBonus لسند القبض، وباقي الأنواع لسند الصرف.")
+            .WithName(nameof(CashVoucherBulkVoucherRequest.EmployeeMovementType))
+            .When(request =>
+                request.EmployeeId.HasValue &&
+                request.EmployeeMovementType.HasValue);
         RuleFor(request => request.BusinessPartnerId)
             .GreaterThan(0)
             .When(request => request.BusinessPartnerId.HasValue);
@@ -197,6 +253,13 @@ public sealed class CashVoucherBulkVoucherRequestValidator
 
         return selectedTargetCount == 1;
     }
+
+    private static bool IsEmployeeMovementDirectionCompatible(
+        CashDirection direction,
+        EmployeeMovementType? movementType) =>
+        movementType is null ||
+        EmployeeAccountRules.IsCreditMovement(movementType.Value) ==
+            (direction == CashDirection.Receipt);
 }
 
 public sealed class CashVoucherBulkRequestValidator

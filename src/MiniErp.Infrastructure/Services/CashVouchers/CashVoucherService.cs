@@ -10,6 +10,7 @@ using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Accounting;
+using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Entities.Logistics;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -497,6 +498,11 @@ public sealed class CashVoucherService(
                 voucher,
                 preparation.Value.BusinessPartner is not null,
                 cancellationToken);
+            await SynchronizeEmployeeMovementAsync(
+                voucher,
+                preparation.Value.PartyType == CashPartyType.Employee,
+                request.EmployeeMovementType,
+                cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
 
             if (cashVoucherPostingService is not null)
@@ -591,6 +597,11 @@ public sealed class CashVoucherService(
                     movement.CashVoucherId == id)
                 .ToListAsync(cancellationToken);
             dbContext.BusinessPartnerMovements.RemoveRange(partnerMovements);
+            await SynchronizeEmployeeMovementAsync(
+                voucher,
+                shouldExist: false,
+                movementType: null,
+                cancellationToken);
             dbContext.CashVouchers.Remove(voucher);
             await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -667,6 +678,11 @@ public sealed class CashVoucherService(
         await SynchronizePartnerMovementAsync(
             voucher,
             preparation.Value.BusinessPartner is not null,
+            cancellationToken);
+        await SynchronizeEmployeeMovementAsync(
+            voucher,
+            preparation.Value.PartyType == CashPartyType.Employee,
+            request.EmployeeMovementType,
             cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -778,6 +794,11 @@ public sealed class CashVoucherService(
                 voucher,
                 preparation.Value.BusinessPartner is not null,
                 cancellationToken);
+            await SynchronizeEmployeeMovementAsync(
+                voucher,
+                preparation.Value.PartyType == CashPartyType.Employee,
+                request.EmployeeMovementType,
+                cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
 
             if (cashVoucherPostingService is not null)
@@ -877,6 +898,11 @@ public sealed class CashVoucherService(
                     movement.CashVoucherId == voucher.Id)
                 .ToListAsync(cancellationToken);
             dbContext.BusinessPartnerMovements.RemoveRange(partnerMovements);
+            await SynchronizeEmployeeMovementAsync(
+                voucher,
+                shouldExist: false,
+                movementType: null,
+                cancellationToken);
             dbContext.CashVouchers.Remove(voucher);
             await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -941,7 +967,8 @@ public sealed class CashVoucherService(
             Notes: request.Notes,
             RowVersion: rowVersion,
             ExchangeRate: request.ExchangeRate,
-            AccountId: request.AccountId);
+            AccountId: request.AccountId,
+            EmployeeMovementType: request.EmployeeMovementType);
 
     private async Task<Result<VoucherPreparation>> PrepareAsync(
         CashVoucherUpdateRequest request,
@@ -976,6 +1003,34 @@ public sealed class CashVoucherService(
         }
 
         var partyType = DerivePartyType(request);
+
+        if (partyType == CashPartyType.Employee)
+        {
+            if (!request.EmployeeMovementType.HasValue)
+            {
+                return Result<VoucherPreparation>.Failure(
+                    EmployeeMovementTypeRequired());
+            }
+
+            if (!Enum.IsDefined(request.EmployeeMovementType.Value))
+            {
+                return Result<VoucherPreparation>.Failure(
+                    EmployeeMovementTypeInvalid());
+            }
+
+            var isReceipt = request.Direction == CashDirection.Receipt;
+            if (EmployeeAccountRules.IsCreditMovement(
+                    request.EmployeeMovementType.Value) != isReceipt)
+            {
+                return Result<VoucherPreparation>.Failure(
+                    EmployeeMovementTypeDirectionMismatch());
+            }
+        }
+        else if (request.EmployeeMovementType.HasValue)
+        {
+            return Result<VoucherPreparation>.Failure(
+                EmployeeMovementTypeNotAllowed());
+        }
 
         var cashbox = await dbContext.Cashboxes
             .FirstOrDefaultAsync(
@@ -1312,6 +1367,58 @@ public sealed class CashVoucherService(
         existing.ApplyExchangeRate(voucher.ExchangeRate);
         existing.Description = voucher.Description ??
             $"Cash voucher {voucher.VoucherNumber}";
+    }
+
+    private async Task SynchronizeEmployeeMovementAsync(
+        CashVoucher voucher,
+        bool shouldExist,
+        EmployeeMovementType? movementType,
+        CancellationToken cancellationToken)
+    {
+        var existing = await dbContext.EmployeeMovements
+            .FirstOrDefaultAsync(
+                movement =>
+                    movement.CompanyId == companyId &&
+                    movement.CashVoucherId == voucher.Id,
+                cancellationToken);
+
+        if (!shouldExist || voucher.EmployeeId is null)
+        {
+            if (existing is not null)
+            {
+                dbContext.EmployeeMovements.Remove(existing);
+            }
+
+            return;
+        }
+
+        // The API validator requires the type for employee vouchers. Keep a
+        // safe fallback for internal callers and existing vouchers so the
+        // synchronization remains idempotent when they do not send it.
+        var effectiveType = movementType ??
+            existing?.Type ??
+            (voucher.Direction == CashDirection.Receipt
+                ? EmployeeMovementType.Credit
+                : EmployeeMovementType.Advance);
+
+        if (existing is null)
+        {
+            existing = new EmployeeMovement
+            {
+                CompanyId = companyId,
+                CashVoucherId = voucher.Id
+            };
+            dbContext.EmployeeMovements.Add(existing);
+        }
+
+        existing.EmployeeId = voucher.EmployeeId.Value;
+        existing.MovementDate = voucher.VoucherDate;
+        existing.Currency = voucher.Currency;
+        existing.Notes = string.IsNullOrWhiteSpace(voucher.Notes)
+            ? null
+            : voucher.Notes.Trim();
+        existing.ApplyAmounts(effectiveType, voucher.Amount);
+        existing.ApplyExchangeRate(voucher.ExchangeRate);
     }
 
     private IQueryable<CashVoucherResponse> ProjectResponseQuery(int id) =>

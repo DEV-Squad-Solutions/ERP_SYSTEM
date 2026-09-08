@@ -34,5 +34,6 @@ public sealed record CashVoucherUpdateRequest(
     string? Notes,
     byte[]? RowVersion,
     decimal? ExchangeRate = null,
-    int? AccountId = null)
+    int? AccountId = null,
+    EmployeeMovementType? EmployeeMovementType = null)
 ;

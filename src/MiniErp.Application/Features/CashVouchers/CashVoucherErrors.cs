@@ -118,6 +118,30 @@ public static class CashVoucherErrors
             $"لم يتم العثور على الموظف رقم {id}.",
             nameof(CashVoucherUpdateRequest.EmployeeId));
 
+    public static Error EmployeeMovementTypeRequired() =>
+        Error.Validation(
+            "CashVouchers.EmployeeMovementTypeRequired",
+            "اختر نوع حركة الموظف لسند الموظف.",
+            nameof(CashVoucherUpdateRequest.EmployeeMovementType));
+
+    public static Error EmployeeMovementTypeNotAllowed() =>
+        Error.Validation(
+            "CashVouchers.EmployeeMovementTypeNotAllowed",
+            "نوع حركة الموظف يُستخدم مع سند الموظف فقط.",
+            nameof(CashVoucherUpdateRequest.EmployeeMovementType));
+
+    public static Error EmployeeMovementTypeInvalid() =>
+        Error.Validation(
+            "CashVouchers.EmployeeMovementTypeInvalid",
+            "نوع حركة الموظف المختار غير صالح.",
+            nameof(CashVoucherUpdateRequest.EmployeeMovementType));
+
+    public static Error EmployeeMovementTypeDirectionMismatch() =>
+        Error.Conflict(
+            "CashVouchers.EmployeeMovementTypeDirectionMismatch",
+            "نوع حركة الموظف لا يطابق اتجاه السند: Credit وBonus لسند القبض، وباقي الأنواع لسند الصرف.",
+            nameof(CashVoucherUpdateRequest.EmployeeMovementType));
+
     public static Error PartnerNotFound(int? id) =>
         Error.NotFound(
             "CashVouchers.PartnerNotFound",

@@ -580,5 +580,8 @@ public sealed class CashManagementValidatorTests
             ReferenceNumber: null,
             Description: null,
             Notes: null,
-            RowVersion: new byte[8]);
+            RowVersion: new byte[8],
+            EmployeeMovementType: employeeId.HasValue
+                ? EmployeeMovementType.Credit
+                : null);
 }

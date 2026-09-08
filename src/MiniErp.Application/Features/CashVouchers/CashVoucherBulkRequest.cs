@@ -52,7 +52,8 @@ public sealed record CashVoucherBulkVoucherRequest(
     string? Description,
     string? Notes,
     decimal? ExchangeRate,
-    int? AccountId = null);
+    int? AccountId = null,
+    EmployeeMovementType? EmployeeMovementType = null);
 
 public sealed record CashVoucherBulkResponse(
     IReadOnlyList<CashVoucherBulkItemResponse> Items,
