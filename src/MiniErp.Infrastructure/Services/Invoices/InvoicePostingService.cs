@@ -238,6 +238,27 @@ public sealed class InvoicePostingService(
             }
         }
 
+        var hasEffectiveLines = lines.Any(line =>
+            line.Debit > 0m || line.Credit > 0m);
+        if (!hasEffectiveLines)
+        {
+            var deleteResult = await automaticPostingService.DeleteAsync(
+                JournalEntrySourceType.Invoice,
+                invoice.Id,
+                cancellationToken);
+            if (deleteResult.IsFailure)
+            {
+                return Result<AutomaticJournalEntryResult>.Failure(
+                    deleteResult.Errors);
+            }
+
+            return Result<AutomaticJournalEntryResult>.Success(
+                new AutomaticJournalEntryResult(
+                    JournalEntryId: 0,
+                    EntryNumber: string.Empty,
+                    Created: false));
+        }
+
         return await automaticPostingService.CreateOrUpdateAsync(
             new AutomaticJournalEntryRequest(
                 FiscalYearId: fiscalYear.Id,

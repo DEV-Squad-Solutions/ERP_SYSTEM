@@ -369,6 +369,58 @@ public sealed class AutomaticPostingServiceTests
     }
 
     [Fact]
+    public async Task InvoicePosting_ZeroTotalDeletesExistingEntryAndSucceeds()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var companyContext = new TestCurrentCompanyContext(1);
+        var automaticPostingService = new AutomaticPostingService(
+            database.Context,
+            companyContext,
+            TimeProvider.System,
+            NullLogger<AutomaticPostingService>.Instance);
+        var postingService = new InvoicePostingService(
+            database.Context,
+            companyContext,
+            new AccountMappingResolver(database.Context, companyContext),
+            automaticPostingService);
+
+        var created = await postingService.SynchronizeAsync(60);
+
+        Assert.True(created.IsSuccess);
+        Assert.True(created.Value.JournalEntryId > 0);
+        Assert.Single(await database.Context.JournalEntries
+            .AsNoTracking()
+            .ToListAsync());
+
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE Invoices SET Total = 0, BaseTotal = 0 WHERE Id = 60");
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE ItemMovements SET TotalCost = 0 WHERE Id = 6001");
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "DELETE FROM InvoicePayments WHERE Id = 6002");
+        database.Context.ChangeTracker.Clear();
+
+        var zeroed = await postingService.SynchronizeAsync(60);
+
+        Assert.True(zeroed.IsSuccess);
+        Assert.Equal(0, zeroed.Value.JournalEntryId);
+        Assert.Empty(await database.Context.JournalEntries
+            .AsNoTracking()
+            .ToListAsync());
+        Assert.Empty(await database.Context.JournalEntryLines
+            .AsNoTracking()
+            .ToListAsync());
+
+        var repeated = await postingService.SynchronizeAsync(60);
+
+        Assert.True(repeated.IsSuccess);
+        Assert.Equal(0, repeated.Value.JournalEntryId);
+        Assert.Empty(await database.Context.JournalEntries
+            .AsNoTracking()
+            .ToListAsync());
+    }
+
+    [Fact]
     public async Task StockAdjustmentPosting_UpdatesSameEntryAndDeletesIt()
     {
         await using var database = await TestDatabase.CreateAsync();

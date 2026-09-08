@@ -637,7 +637,20 @@ public sealed class AccountingReadinessService(
             .Where(invoice =>
                 invoice.CompanyId == companyId &&
                 invoice.InvoiceDate >= startDate &&
-                invoice.InvoiceDate <= endDate)
+                invoice.InvoiceDate <= endDate &&
+                (invoice.Total != 0m ||
+                 invoice.BaseTotal != 0m ||
+                 dbContext.ItemMovements.Any(movement =>
+                     movement.CompanyId == companyId &&
+                     movement.ReferenceId == invoice.Id &&
+                     movement.TotalCost > 0m &&
+                     (movement.MovementType == ItemMovementType.Sales ||
+                      movement.MovementType == ItemMovementType.SalesReturn)) ||
+                 dbContext.InvoicePayments.Any(payment =>
+                     payment.CompanyId == companyId &&
+                     payment.InvoiceId == invoice.Id &&
+                     (payment.AppliedBaseAmount != 0m ||
+                      payment.CashboxBaseAmount != 0m))))
             .Select(invoice => new SourceDescriptor(
                 new SourceKey(JournalEntrySourceType.Invoice, invoice.Id),
                 invoice.InvoiceNumber,
@@ -848,7 +861,20 @@ public sealed class AccountingReadinessService(
             .Where(invoice =>
                 invoice.CompanyId == companyId &&
                 invoice.InvoiceDate >= startDate &&
-                invoice.InvoiceDate <= endDate)
+                invoice.InvoiceDate <= endDate &&
+                (invoice.Total != 0m ||
+                 invoice.BaseTotal != 0m ||
+                 dbContext.ItemMovements.Any(movement =>
+                     movement.CompanyId == companyId &&
+                     movement.ReferenceId == invoice.Id &&
+                     movement.TotalCost > 0m &&
+                     (movement.MovementType == ItemMovementType.Sales ||
+                      movement.MovementType == ItemMovementType.SalesReturn)) ||
+                 dbContext.InvoicePayments.Any(payment =>
+                     payment.CompanyId == companyId &&
+                     payment.InvoiceId == invoice.Id &&
+                     (payment.AppliedBaseAmount != 0m ||
+                      payment.CashboxBaseAmount != 0m))))
             .Select(invoice => new
             {
                 invoice.Id,
