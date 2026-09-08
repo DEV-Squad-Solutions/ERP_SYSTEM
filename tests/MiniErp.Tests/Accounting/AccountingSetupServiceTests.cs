@@ -6,6 +6,7 @@ using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Features.AccountStatementMappings;
 using MiniErp.Application.Features.Accounts;
 using MiniErp.Application.Features.FinancialStatementLines;
+using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
@@ -15,6 +16,7 @@ using MiniErp.Infrastructure.Services.AccountingSetup;
 using MiniErp.Infrastructure.Services.AccountStatementMappings;
 using MiniErp.Infrastructure.Services.Accounts;
 using MiniErp.Infrastructure.Services.FinancialStatementLines;
+using MiniErp.Infrastructure.Services.JournalEntries;
 using MiniErp.Infrastructure.Services.Pagination;
 
 namespace MiniErp.Tests.Accounting;
@@ -164,6 +166,117 @@ public sealed class AccountingSetupServiceTests
         Assert.Equal("2100", child2.Value.Code);
         Assert.Equal("2200", child3.Value.Code);
         Assert.Equal("2110", grandchild.Value.Code);
+    }
+
+    [Fact]
+    public async Task JournalSelect_IncludesMappedPostingChildren_AndExcludesInvalidAccounts()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var accountService = database.CreateAccountService(companyId: 1);
+        var otherCompanyAccountService = database.CreateAccountService(companyId: 2);
+
+        var root = await accountService.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "أصل رئيسي",
+            ParentAccountId: null,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+        var mappedChild = await accountService.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حساب مرتبط تشغيليًا",
+            ParentAccountId: root.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+        var inactiveChild = await accountService.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حساب غير فعال",
+            ParentAccountId: root.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+        await database.SetAccountInactiveAsync(inactiveChild.Value.Id);
+
+        var otherRoot = await otherCompanyAccountService.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "أصل شركة أخرى",
+            ParentAccountId: null,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+        await otherCompanyAccountService.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حساب شركة أخرى",
+            ParentAccountId: otherRoot.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+
+        await database.AddOperationalAccountMappingAsync(mappedChild.Value.Id);
+
+        var result = await accountService.GetJournalSelectAsync(fiscalYearId: 1);
+
+        Assert.True(result.IsSuccess);
+        var selected = Assert.Single(result.Value);
+        Assert.Equal(mappedChild.Value.Id, selected.Id);
+    }
+
+    [Fact]
+    public async Task JournalEntryAdd_AllowsMappedPostingChildAccount()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var accountService = database.CreateAccountService(companyId: 1);
+        var journalEntryService = database.CreateJournalEntryService(companyId: 1);
+        var root = await accountService.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "أصل رئيسي",
+            ParentAccountId: null,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: false));
+        var mappedChild = await accountService.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حساب مرتبط تشغيليًا",
+            ParentAccountId: root.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+        var counterpart = await accountService.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حساب مقابل",
+            ParentAccountId: root.Value.Id,
+            AccountType: AccountType.Asset,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+        await database.AddOperationalAccountMappingAsync(mappedChild.Value.Id);
+
+        var result = await journalEntryService.AddAsync(new JournalEntryRequest(
+            FiscalYearId: 1,
+            EntryDate: new DateOnly(2026, 9, 8),
+            Description: "قيد يدوي على حساب مرتبط",
+            EntryType: JournalEntryType.Manual,
+            Lines:
+            [
+                new JournalEntryLineRequest(
+                    AccountId: mappedChild.Value.Id,
+                    Description: "مدين مرتبط تشغيليًا",
+                    Debit: 100m,
+                    Credit: 0m),
+                new JournalEntryLineRequest(
+                    AccountId: counterpart.Value.Id,
+                    Description: "دائن",
+                    Debit: 0m,
+                    Credit: 100m)
+            ]));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(JournalEntryType.Manual, result.Value.EntryType);
+        Assert.Equal(100m, result.Value.TotalDebit);
+        Assert.Equal(100m, result.Value.TotalCredit);
+        Assert.Contains(
+            result.Value.Lines,
+            line => line.AccountId == mappedChild.Value.Id);
     }
 
     [Fact]
@@ -452,6 +565,12 @@ public sealed class AccountingSetupServiceTests
                 new PaginationService(),
                 new TestCurrentCompanyContext(companyId));
 
+        public JournalEntryService CreateJournalEntryService(int companyId) =>
+            new(
+                Context,
+                new TestCurrentCompanyContext(companyId),
+                TimeProvider.System);
+
         public FinancialStatementLineService CreateLineService(int companyId) =>
             new(
                 Context,
@@ -591,6 +710,22 @@ public sealed class AccountingSetupServiceTests
             Context.Database.ExecuteSqlInterpolatedAsync(
                 $"INSERT INTO CashVouchers (CompanyId, AccountId, IsDeleted) VALUES (1, {accountId}, 0)");
 
+        public Task SetAccountInactiveAsync(int accountId) =>
+            Context.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE Accounts SET IsActive = 0 WHERE Id = {accountId}");
+
+        public async Task AddOperationalAccountMappingAsync(int accountId)
+        {
+            Context.AccountMappings.Add(new AccountMapping
+            {
+                CompanyId = 1,
+                FiscalYearId = 1,
+                MappingType = AccountingMappingType.Sales,
+                AccountId = accountId
+            });
+            await Context.SaveChangesAsync();
+        }
+
         public Task SoftDeleteAccountAsync(int accountId) =>
             Context.Database.ExecuteSqlInterpolatedAsync(
                 $"UPDATE Accounts SET IsDeleted = 1 WHERE Id = {accountId}");
@@ -710,11 +845,60 @@ public sealed class AccountingSetupServiceTests
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 
+                CREATE TABLE JournalEntries (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL,
+                    EntryNumber TEXT NOT NULL,
+                    EntryDate TEXT NOT NULL,
+                    Description TEXT NOT NULL,
+                    EntryType INTEGER NOT NULL,
+                    SourceType INTEGER NULL,
+                    SourceId INTEGER NULL,
+                    SourceNumber TEXT NULL,
+                    Status INTEGER NOT NULL,
+                    PostedOn TEXT NOT NULL,
+                    ReversedOn TEXT NULL,
+                    ReversalOfEntryId INTEGER NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (CompanyId) REFERENCES Companies (Id),
+                    FOREIGN KEY (FiscalYearId) REFERENCES FiscalYears (Id)
+                );
+
+                CREATE UNIQUE INDEX UX_JournalEntries_Company_Number
+                ON JournalEntries (CompanyId, EntryNumber) WHERE IsDeleted = 0;
+
                 CREATE TABLE JournalEntryLines (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    JournalEntryId INTEGER NOT NULL,
                     AccountId INTEGER NOT NULL,
-                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                    Description TEXT NULL,
+                    Debit TEXT NOT NULL,
+                    Credit TEXT NOT NULL,
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (CompanyId) REFERENCES Companies (Id),
+                    FOREIGN KEY (JournalEntryId) REFERENCES JournalEntries (Id),
+                    FOREIGN KEY (AccountId) REFERENCES Accounts (Id)
                 );
 
                 CREATE TABLE FinancialStatementLines (

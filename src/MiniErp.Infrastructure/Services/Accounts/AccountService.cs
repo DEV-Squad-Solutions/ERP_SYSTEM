@@ -150,12 +150,7 @@ public sealed class AccountService(
                 account.CompanyId == companyId &&
                 account.IsActive &&
                 account.IsPosting &&
-                account.ParentAccountId.HasValue &&
-                !dbContext.AccountMappings.Any(
-                    mapping =>
-                        mapping.CompanyId == companyId &&
-                        mapping.FiscalYearId == fiscalYearId &&
-                        mapping.AccountId == account.Id))
+                account.ParentAccountId.HasValue)
             .OrderBy(account => account.Code)
             .ThenBy(account => account.Id)
             .Select(account => new AccountSelectResponse(

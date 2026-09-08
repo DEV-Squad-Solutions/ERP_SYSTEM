@@ -49,7 +49,7 @@ public sealed class AccountingMonitoringSwaggerDocumentationTests
     }
 
     [Fact]
-    public void JournalSelect_DocumentsOperationalAccountExclusion()
+    public void JournalSelect_DocumentsAllPostingChildrenIncludingOperationalAccounts()
     {
         var operation = new OpenApiOperation();
 
@@ -61,7 +61,8 @@ public sealed class AccountingMonitoringSwaggerDocumentationTests
 
         Assert.Equal("Accounts_GetJournalSelect", operation.OperationId);
         Assert.Contains("fiscalYearId", operation.Description);
-        Assert.Contains("المرتبطة بعناصر تشغيلية", operation.Description);
+        Assert.Contains("بما في ذلك الحسابات المرتبطة بعناصر تشغيلية", operation.Description);
+        Assert.Contains("تجنب تسجيل نفس الأثر مرتين", operation.Description);
     }
 
     [Theory]

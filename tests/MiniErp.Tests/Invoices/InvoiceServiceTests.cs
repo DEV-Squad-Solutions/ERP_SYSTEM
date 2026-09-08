@@ -1301,20 +1301,95 @@ public sealed class InvoiceServiceTests
         Assert.Equal("Invoices.ContainerStoreRequired", result.Error.Code);
     }
 
-    [Fact]
-    public async Task Add_ReportsForbiddenContainerLinesBeforeStockShortage()
+    [Theory]
+    [InlineData(InvoiceType.Sales)]
+    [InlineData(InvoiceType.Purchase)]
+    [InlineData(InvoiceType.SalesReturn)]
+    [InlineData(InvoiceType.PurchaseReturn)]
+    public async Task Add_AllInvoiceTypesAllowContainerLinesWithItemLines(
+        InvoiceType invoiceType)
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
 
         var result = await database.CreateService().AddAsync(
             CreateRequest(
-                InvoiceType.PurchaseReturn,
-                storeId: 2,
+                invoiceType,
                 lines: [new InvoiceLineRequest(1, 1, 1m, 10m, null)],
+                containerStoreId: 3,
                 containerLines: [new InvoiceContainerLineRequest(1, 1, 0)]));
 
+        Assert.True(
+            result.IsSuccess,
+            result.IsFailure ? result.Error.Description : null);
+        Assert.Single(result.Value.Lines);
+        Assert.Single(result.Value.ContainerLines);
+        Assert.Single(await database.Context.InvoiceContainerLines.ToListAsync());
+        var containerMovement = Assert.Single(
+            await database.Context.ContainerMovements.ToListAsync());
+        Assert.Equal(result.Value.Id, containerMovement.InvoiceId);
+        Assert.Equal(3, containerMovement.ContainerStoreId);
+        Assert.Equal(1, containerMovement.ContainerId);
+        Assert.Equal(1, containerMovement.OutgoingUnits);
+        Assert.Equal(0, containerMovement.IncomingUnits);
+        Assert.Single(await database.Context.ItemMovements.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(InvoiceType.Sales)]
+    [InlineData(InvoiceType.Purchase)]
+    [InlineData(InvoiceType.SalesReturn)]
+    [InlineData(InvoiceType.PurchaseReturn)]
+    public async Task Add_AllInvoiceTypesAllowContainerContent(
+        InvoiceType invoiceType)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var request = CreateRequest(
+            invoiceType,
+            storeId: 3,
+            containerStoreId: 3,
+            containerLines: [new InvoiceContainerLineRequest(1, 1, 0)]) with
+        {
+            ContentType = InvoiceContentType.Containers,
+            Lines = [],
+            WBWeight = 0m,
+            PaidAmount = 0m,
+            CashboxId = null
+        };
+
+        var result = await database.CreateService().AddAsync(request);
+
+        Assert.True(
+            result.IsSuccess,
+            result.IsFailure ? result.Error.Description : null);
+        Assert.Equal(InvoiceContentType.Containers, result.Value.ContentType);
+        Assert.Empty(result.Value.Lines);
+        Assert.Single(result.Value.ContainerLines);
+        Assert.Single(await database.Context.InvoiceContainerLines.ToListAsync());
+        var containerMovement = Assert.Single(
+            await database.Context.ContainerMovements.ToListAsync());
+        Assert.Equal(result.Value.Id, containerMovement.InvoiceId);
+        Assert.Equal(3, containerMovement.ContainerStoreId);
+        Assert.Equal(1, containerMovement.ContainerId);
+        Assert.Equal(1, containerMovement.OutgoingUnits);
+        Assert.Equal(0, containerMovement.IncomingUnits);
+        Assert.Empty(await database.Context.ItemMovements.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Add_RejectsContainerLineWithoutMovementUnits()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                containerStoreId: 3,
+                containerLines: [new InvoiceContainerLineRequest(1, 0, 0)]));
+
         Assert.True(result.IsFailure);
-        Assert.Equal("Invoices.ContainerLinesNotAllowed", result.Error.Code);
+        Assert.Equal("Invoices.InvalidContainerMovement", result.Error.Code);
+        Assert.Empty(await database.Context.Invoices.ToListAsync());
     }
 
     [Fact]

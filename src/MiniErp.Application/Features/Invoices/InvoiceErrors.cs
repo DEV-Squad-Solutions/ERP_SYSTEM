@@ -195,6 +195,12 @@ public static class InvoiceErrors
             "لا تكرر العبوة في الفاتورة.",
             nameof(InvoiceRequest.ContainerLines));
 
+    public static Error InvalidContainerMovement() =>
+        Error.Validation(
+            "Invoices.InvalidContainerMovement",
+            "يجب أن تكون وحدات العبوة غير سالبة وأن تحتوي الحركة على وحدات واردة أو صادرة.",
+            nameof(InvoiceRequest.ContainerLines));
+
     public static Error InvalidCalculatedAmounts(InvoiceCalculationErrorKind kind) =>
         Error.Validation(
             "Invoices.InvalidCalculatedAmounts",
@@ -299,12 +305,6 @@ public static class InvoiceErrors
             "Invoices.DriverInactive",
             "السائق الرئيسي غير نشط.",
             nameof(InvoiceRequest.DriverId));
-
-    public static Error ContainerLinesNotAllowed() =>
-        Error.Conflict(
-            "Invoices.ContainerLinesNotAllowed",
-            "سطور العبوات متاحة فقط لفواتير البيع ومرتجع البيع.",
-            nameof(InvoiceRequest.ContainerLines));
 
     public static Error ContainerNotAssigned(IEnumerable<int> ids) =>
         Error.NotFound(

@@ -134,6 +134,15 @@ public sealed partial class InvoiceService
                 DuplicateContainerIds());
         }
 
+        if (containerLines.Any(line =>
+                line.OutgoingUnits < 0 ||
+                line.IncomingUnits < 0 ||
+                (line.OutgoingUnits == 0 && line.IncomingUnits == 0)))
+        {
+            return Failure(
+                InvalidContainerMovement());
+        }
+
         foreach (var line in lines)
         {
             if (!TryGetEffectiveLineValues(
@@ -410,13 +419,6 @@ public sealed partial class InvoiceService
 
         if (containerLines.Count > 0)
         {
-            if (invoice.InvoiceType is not (InvoiceType.Sales or
-                InvoiceType.SalesReturn))
-            {
-                return Failure(
-                    ContainerLinesNotAllowed());
-            }
-
             if (containerStore is null)
             {
                 return Failure(
