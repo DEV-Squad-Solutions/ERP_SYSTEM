@@ -386,7 +386,7 @@ public sealed class DashboardService(
             .Select(group => new
             {
                 CashboxId = group.Key,
-                Total = group.Sum(voucher =>
+                Total = (decimal?)group.Sum(voucher =>
                     voucher.Direction == CashDirection.Receipt
                         ? voucher.Amount
                         : -voucher.Amount)
@@ -403,7 +403,7 @@ public sealed class DashboardService(
                 {
                     cashbox.Currency,
                     Balance = cashbox.OpeningBalance +
-                        (voucherTotal == null ? 0m : voucherTotal.Total)
+                        (voucherTotal.Total ?? 0m)
                 })
             .ToListAsync(cancellationToken);
 

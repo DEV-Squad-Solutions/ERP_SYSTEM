@@ -7,6 +7,7 @@ using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.FiscalYears;
 using MiniErp.Application.Features.AccountingReadiness;
 using MiniErp.Application.Common.Results;
+using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
@@ -186,6 +187,10 @@ public sealed class FiscalYearServiceTests
         Assert.Equal(next.Value.Id, transfers[0].FiscalYearId);
         Assert.Equal(120m, transfers[0].Debit);
         Assert.Equal(120m, transfers[0].Credit);
+        var partyLine = await database.LoadClosingPartyLineAsync(
+            first.Value.Id);
+        Assert.Equal(JournalPartyType.Customer, partyLine.PartyType);
+        Assert.Equal(99, partyLine.PartyId);
     }
 
     [Fact]
@@ -442,11 +447,14 @@ public sealed class FiscalYearServiceTests
                     '2026-12-31', '', 0);
 
                 INSERT INTO JournalEntryLines (
-                    Id, CompanyId, JournalEntryId, AccountId, Debit, Credit,
-                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                    Id, CompanyId, JournalEntryId, AccountId, PartyType,
+                    PartyId, Debit, Credit, CreatedById, CreatedOn,
+                    CreatedByPc, IsDeleted)
                 VALUES
-                    (501, 1, 50, 10, 100, 0, '', '2026-12-31', '', 0),
-                    (502, 1, 50, 20, 0, 100, '', '2026-12-31', '', 0);
+                    (501, 1, 50, 10, 1, 99, 100, 0, '',
+                     '2026-12-31', '', 0),
+                    (502, 1, 50, 20, NULL, NULL, 0, 100, '',
+                     '2026-12-31', '', 0);
                 """);
 
         public Task ChangeClosingAssetBalanceAsync(decimal amount) =>
@@ -466,6 +474,18 @@ public sealed class FiscalYearServiceTests
                     entry.Lines.Sum(line => line.Debit),
                     entry.Lines.Sum(line => line.Credit)))
                 .ToListAsync();
+
+        public Task<JournalEntryLine> LoadClosingPartyLineAsync(
+            int sourceFiscalYearId) =>
+            Context.JournalEntryLines
+                .AsNoTracking()
+                .SingleAsync(line =>
+                    line.JournalEntry.CompanyId == 1 &&
+                    line.JournalEntry.EntryType == JournalEntryType.Opening &&
+                    line.JournalEntry.SourceType ==
+                        JournalEntrySourceType.FiscalYearClosing &&
+                    line.JournalEntry.SourceId == sourceFiscalYearId &&
+                    line.AccountId == 10);
 
         public async ValueTask DisposeAsync()
         {
@@ -598,6 +618,8 @@ public sealed class FiscalYearServiceTests
                     CompanyId INTEGER NOT NULL,
                     JournalEntryId INTEGER NOT NULL,
                     AccountId INTEGER NOT NULL,
+                    PartyType INTEGER NULL,
+                    PartyId INTEGER NULL,
                     Description TEXT NULL,
                     Debit NUMERIC NOT NULL,
                     Credit NUMERIC NOT NULL,

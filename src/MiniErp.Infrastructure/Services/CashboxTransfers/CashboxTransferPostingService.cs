@@ -140,12 +140,16 @@ public sealed class CashboxTransferPostingService(
                 AccountId: destinationAccountResult.Value,
                 Description: transfer.Description,
                 Debit: destinationBaseAmount,
-                Credit: 0m),
+                Credit: 0m,
+                PartyType: JournalPartyType.Cashbox,
+                PartyId: transfer.DestinationCashboxId),
             new(
                 AccountId: sourceAccountResult.Value,
                 Description: transfer.Description,
                 Debit: 0m,
-                Credit: sourceBaseAmount)
+                Credit: sourceBaseAmount,
+                PartyType: JournalPartyType.Cashbox,
+                PartyId: transfer.SourceCashboxId)
         };
 
         var difference = ExchangeRateRules.RoundBaseAmount(

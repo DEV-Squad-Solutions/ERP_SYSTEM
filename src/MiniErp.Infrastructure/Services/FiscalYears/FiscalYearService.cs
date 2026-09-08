@@ -467,12 +467,21 @@ public sealed class FiscalYearService(
                 line.JournalEntry.ReversalOfEntryId == null &&
                 line.Account.AccountType != AccountType.Revenue &&
                 line.Account.AccountType != AccountType.Expense)
-            .GroupBy(line => new { line.AccountId, line.Account.Code, line.Account.Name })
+            .GroupBy(line => new
+            {
+                line.AccountId,
+                line.Account.Code,
+                line.Account.Name,
+                line.PartyType,
+                line.PartyId
+            })
             .Select(group => new
             {
                 group.Key.AccountId,
                 group.Key.Code,
                 group.Key.Name,
+                group.Key.PartyType,
+                group.Key.PartyId,
                 Balance = group.Sum(line => line.Debit - line.Credit)
             })
             .Where(row => row.Balance != 0m)
@@ -493,6 +502,8 @@ public sealed class FiscalYearService(
             {
                 CompanyId = companyId,
                 AccountId = balance.AccountId,
+                PartyType = balance.PartyType,
+                PartyId = balance.PartyId,
                 Description = $"ترحيل رصيد {balance.Code} - {balance.Name}",
                 Debit = balance.Balance > 0m ? balance.Balance : 0m,
                 Credit = balance.Balance < 0m ? -balance.Balance : 0m

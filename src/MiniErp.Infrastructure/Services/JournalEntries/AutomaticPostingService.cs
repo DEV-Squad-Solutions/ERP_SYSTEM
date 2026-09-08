@@ -416,7 +416,10 @@ public sealed class AutomaticPostingService(
             return Result.Failure(FiscalYearClosed());
         }
 
-        return await ValidateAccountsAsync(request.Lines, cancellationToken)
+        return await ValidateAccountsAsync(
+            request.Lines,
+            request.FiscalYearId,
+            cancellationToken)
             is { } accountError
             ? Result.Failure(accountError)
             : Result.Success();
@@ -500,6 +503,8 @@ public sealed class AutomaticPostingService(
             {
                 CompanyId = companyId,
                 AccountId = line.AccountId,
+                PartyType = line.PartyType,
+                PartyId = line.PartyId,
                 Description = NormalizeOptional(line.Description),
                 Debit = line.Debit,
                 Credit = line.Credit
@@ -508,9 +513,11 @@ public sealed class AutomaticPostingService(
 
     private async Task<Error?> ValidateAccountsAsync(
         IReadOnlyList<JournalEntryLineRequest> lines,
+        int fiscalYearId,
         CancellationToken cancellationToken)
     {
         var accountIds = lines
+            .Where(line => line.Debit > 0m || line.Credit > 0m)
             .Select(line => line.AccountId)
             .Distinct()
             .ToArray();
@@ -527,9 +534,46 @@ public sealed class AutomaticPostingService(
                 account.ParentAccountId
             })
             .ToDictionaryAsync(account => account.Id, cancellationToken);
+        var mappingRows = await dbContext.AccountMappings
+            .AsNoTracking()
+            .Where(mapping =>
+                mapping.CompanyId == companyId &&
+                mapping.FiscalYearId == fiscalYearId &&
+                accountIds.Contains(mapping.AccountId) &&
+                (mapping.MappingType == AccountingMappingType.CustomerControl ||
+                 mapping.MappingType == AccountingMappingType.SupplierControl ||
+                 mapping.MappingType == AccountingMappingType.EmployeeControl ||
+                 mapping.MappingType == AccountingMappingType.EmployeeReceivable ||
+                 mapping.MappingType == AccountingMappingType.DriverControl ||
+                 mapping.MappingType == AccountingMappingType.Cashbox))
+            .Select(mapping => new
+            {
+                mapping.AccountId,
+                mapping.MappingType,
+                mapping.SourceId
+            })
+            .ToListAsync(cancellationToken);
+        var partyTypesByAccount = mappingRows
+            .Select(mapping => new
+            {
+                mapping.AccountId,
+                PartyType = ToJournalPartyType(mapping.MappingType)
+            })
+            .Distinct()
+            .ToLookup(mapping => mapping.AccountId, mapping => mapping.PartyType);
+        var cashboxIdsByAccount = mappingRows
+            .Where(mapping =>
+                mapping.MappingType == AccountingMappingType.Cashbox &&
+                mapping.SourceId.HasValue)
+            .ToLookup(mapping => mapping.AccountId, mapping => mapping.SourceId!.Value);
 
         for (var index = 0; index < lines.Count; index++)
         {
+            if (lines[index].Debit <= 0m && lines[index].Credit <= 0m)
+            {
+                continue;
+            }
+
             var accountId = lines[index].AccountId;
             if (!accounts.TryGetValue(accountId, out var account))
             {
@@ -550,10 +594,115 @@ public sealed class AutomaticPostingService(
             {
                 return AccountMustBeChild(accountId, index);
             }
+
+            var line = lines[index];
+            var allowedPartyTypes = partyTypesByAccount[accountId].ToHashSet();
+            if (line.PartyType.HasValue != line.PartyId.HasValue)
+            {
+                return PartyShapeInvalid(index);
+            }
+
+            if (allowedPartyTypes.Count == 0)
+            {
+                if (line.PartyType.HasValue)
+                {
+                    return PartyNotAllowed(accountId, index);
+                }
+
+                continue;
+            }
+
+            if (!line.PartyType.HasValue || !line.PartyId.HasValue)
+            {
+                return PartyRequired(accountId, index);
+            }
+
+            if (!Enum.IsDefined(line.PartyType.Value) ||
+                !allowedPartyTypes.Contains(line.PartyType.Value))
+            {
+                return PartyTypeNotAllowed(accountId, index);
+            }
+
+            if (line.PartyType == JournalPartyType.Cashbox &&
+                !cashboxIdsByAccount[accountId].Contains(line.PartyId.Value))
+            {
+                return PartyNotAllowed(accountId, index);
+            }
+
+            var partyState = await GetPartyStateAsync(
+                line.PartyType.Value,
+                line.PartyId.Value,
+                cancellationToken);
+            if (!partyState.Found)
+            {
+                return PartyNotFound(line.PartyId.Value, index);
+            }
+
+            if (!partyState.IsActive)
+            {
+                return PartyInactive(line.PartyId.Value, index);
+            }
         }
 
         return null;
     }
+
+    private async Task<(bool Found, bool IsActive)> GetPartyStateAsync(
+        JournalPartyType partyType,
+        int partyId,
+        CancellationToken cancellationToken) => partyType switch
+        {
+            JournalPartyType.Customer or JournalPartyType.Supplier =>
+                await dbContext.BusinessPartners
+                    .AsNoTracking()
+                    .Where(party =>
+                        party.CompanyId == companyId &&
+                        party.Id == partyId)
+                    .Select(party => new ValueTuple<bool, bool>(
+                        true,
+                        party.IsActive))
+                    .SingleOrDefaultAsync(cancellationToken),
+            JournalPartyType.Employee => await dbContext.Employees
+                .AsNoTracking()
+                .Where(party =>
+                    party.CompanyId == companyId &&
+                    party.Id == partyId)
+                .Select(party => new ValueTuple<bool, bool>(
+                    true,
+                    party.IsActive))
+                .SingleOrDefaultAsync(cancellationToken),
+            JournalPartyType.Driver => await dbContext.Drivers
+                .AsNoTracking()
+                .Where(party =>
+                    party.CompanyId == companyId &&
+                    party.Id == partyId)
+                .Select(party => new ValueTuple<bool, bool>(
+                    true,
+                    party.IsActive))
+                .SingleOrDefaultAsync(cancellationToken),
+            JournalPartyType.Cashbox => await dbContext.Cashboxes
+                .AsNoTracking()
+                .Where(party =>
+                    party.CompanyId == companyId &&
+                    party.Id == partyId)
+                .Select(party => new ValueTuple<bool, bool>(
+                    true,
+                    party.IsActive))
+                .SingleOrDefaultAsync(cancellationToken),
+            _ => (false, false)
+        };
+
+    private static JournalPartyType ToJournalPartyType(
+        AccountingMappingType mappingType) => mappingType switch
+        {
+            AccountingMappingType.CustomerControl => JournalPartyType.Customer,
+            AccountingMappingType.SupplierControl => JournalPartyType.Supplier,
+            AccountingMappingType.EmployeeControl or
+            AccountingMappingType.EmployeeReceivable => JournalPartyType.Employee,
+            AccountingMappingType.DriverControl => JournalPartyType.Driver,
+            AccountingMappingType.Cashbox => JournalPartyType.Cashbox,
+            _ => throw new ArgumentOutOfRangeException(nameof(mappingType))
+        };
 
     private static AutomaticJournalEntryResult ToResult(
         JournalEntry entry,

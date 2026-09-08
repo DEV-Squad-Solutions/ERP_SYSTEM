@@ -93,18 +93,23 @@ public sealed class CashVoucherPostingService(
             ? voucher.BaseAmount
             : voucher.Amount * voucher.ExchangeRate;
         var isReceipt = voucher.Direction == CashDirection.Receipt;
+        var party = GetJournalParty(voucher);
         var lines = new List<JournalEntryLineRequest>
         {
             new(
                 AccountId: cashboxAccountResult.Value,
                 Description: voucher.Description,
                 Debit: isReceipt ? amount : 0m,
-                Credit: isReceipt ? 0m : amount),
+                Credit: isReceipt ? 0m : amount,
+                PartyType: JournalPartyType.Cashbox,
+                PartyId: voucher.CashboxId),
             new(
                 AccountId: counterpartResult.Value,
                 Description: voucher.Description,
                 Debit: isReceipt ? 0m : amount,
-                Credit: isReceipt ? amount : 0m)
+                Credit: isReceipt ? amount : 0m,
+                PartyType: party.PartyType,
+                PartyId: party.PartyId)
         };
 
         return await automaticPostingService.CreateOrUpdateAsync(
@@ -171,4 +176,19 @@ public sealed class CashVoucherPostingService(
         (string.IsNullOrWhiteSpace(voucher.Description)
             ? string.Empty
             : $" - {voucher.Description.Trim()}");
+
+    private static (JournalPartyType? PartyType, int? PartyId)
+        GetJournalParty(CashVoucher voucher) => voucher.PartyType switch
+        {
+            CashPartyType.Partner when
+                voucher.Direction == CashDirection.Receipt =>
+                (JournalPartyType.Customer, voucher.BusinessPartnerId),
+            CashPartyType.Partner =>
+                (JournalPartyType.Supplier, voucher.BusinessPartnerId),
+            CashPartyType.Employee =>
+                (JournalPartyType.Employee, voucher.EmployeeId),
+            CashPartyType.Driver =>
+                (JournalPartyType.Driver, voucher.DriverId),
+            _ => (null, null)
+        };
 }

@@ -22,6 +22,22 @@ public sealed record AccountSelectResponse(
     string Name,
     AccountType AccountType);
 
+public sealed record JournalAccountSelectResponse(
+    int Id,
+    string Code,
+    string Name,
+    AccountType AccountType,
+    IReadOnlyList<JournalPartyGroupResponse> PartyGroups);
+
+public sealed record JournalPartyGroupResponse(
+    JournalPartyType PartyType,
+    IReadOnlyList<JournalPartySelectResponse> Parties);
+
+public sealed record JournalPartySelectResponse(
+    int Id,
+    string Code,
+    string Name);
+
 public sealed record AccountTreeResponse(
     int Id,
     string Code,

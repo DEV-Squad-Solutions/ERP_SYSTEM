@@ -1499,8 +1499,14 @@ public static class DevelopmentDataSeeder
             return;
         }
 
+        var cachedRates = await LoadCompanyExchangeRatesAsync(
+            dbContext,
+            company.Id,
+            cancellationToken);
+
         var existingInvoices = await dbContext.Invoices
             .IgnoreQueryFilters()
+            .AsSplitQuery()
             .Where(invoice =>
                 invoice.CompanyId == company.Id &&
                 seedExportCodes.Contains(invoice.ExportInvoiceCode!))
@@ -1586,24 +1592,12 @@ public static class DevelopmentDataSeeder
                 invoice.PaidAmount = invoice.Total;
             }
 
-            if (invoice.Currency == CurrencyCode.EGP)
-            {
-                invoice.ApplyExchangeRate(null, 1m);
-            }
-            else
-            {
-                var invoiceRate = await dbContext.ExchangeRates
-                    .Where(candidate =>
-                        candidate.CompanyId == company.Id &&
-                        candidate.Currency == invoice.Currency &&
-                        candidate.RateDate <= invoice.InvoiceDate)
-                    .OrderByDescending(candidate => candidate.RateDate)
-                    .ThenByDescending(candidate => candidate.Id)
-                    .FirstAsync(cancellationToken);
-                invoice.ApplyExchangeRate(
-                    invoiceRate.Id,
-                    invoiceRate.Rate);
-            }
+            await ApplySeedInvoiceExchangeRateAsync(
+                dbContext,
+                company.Id,
+                invoice,
+                cachedRates,
+                cancellationToken);
 
             invoice.Touch(createdOn);
             dbContext.Invoices.Add(invoice);
@@ -1613,12 +1607,19 @@ public static class DevelopmentDataSeeder
 
         var seededInvoices = await dbContext.Invoices
             .IgnoreQueryFilters()
+            .AsSplitQuery()
             .Include(invoice => invoice.Lines)
             .Include(invoice => invoice.ContainerLines)
             .Where(invoice =>
                 invoice.CompanyId == company.Id &&
                 seedExportCodes.Contains(invoice.ExportInvoiceCode!))
             .ToListAsync(cancellationToken);
+
+        var sideEffectMaps = await LoadSeedInvoiceSideEffectMapsAsync(
+            dbContext,
+            company.Id,
+            seededInvoices.Select(invoice => invoice.Id).ToList(),
+            cancellationToken);
 
         foreach (var invoice in seededInvoices)
         {
@@ -1737,6 +1738,7 @@ public static class DevelopmentDataSeeder
                 dbContext,
                 company.Id,
                 invoice,
+                cachedRates,
                 cancellationToken);
 
             if (invoiceChanged)
@@ -1744,190 +1746,13 @@ public static class DevelopmentDataSeeder
                 invoice.Touch(createdOn);
             }
 
-            foreach (var containerLine in invoice.ContainerLines.Where(
-                         line => !line.IsDeleted))
-            {
-                var containerMovement = await dbContext.ContainerMovements
-                    .IgnoreQueryFilters()
-                    .FirstOrDefaultAsync(movement =>
-                        movement.CompanyId == company.Id &&
-                        movement.InvoiceId == invoice.Id &&
-                        movement.ContainerId == containerLine.ContainerId,
-                        cancellationToken);
-                if (containerMovement is null)
-                {
-                    dbContext.ContainerMovements.Add(
-                        new ContainerMovement
-                        {
-                            CompanyId = company.Id,
-                            BusinessPartnerId = invoice.BusinessPartnerId,
-                            ContainerStoreId = invoice.ContainerStoreId!.Value,
-                            ContainerId = containerLine.ContainerId,
-                            InvoiceId = invoice.Id,
-                            InvoiceNumber = invoice.InvoiceNumber,
-                            MovementDate = invoice.InvoiceDate,
-                            OutgoingUnits = containerLine.OutgoingUnits,
-                            IncomingUnits = containerLine.IncomingUnits,
-                            Description = $"Invoice {invoice.InvoiceNumber}",
-                            CreatedById = SeedActor,
-                            CreatedByPc = createdByPc,
-                            CreatedOn = createdOn
-                        });
-                }
-                else
-                {
-                    containerMovement.IsDeleted = false;
-                    containerMovement.DeletedById = null;
-                    containerMovement.DeletedOn = null;
-                    containerMovement.DeletedByPc = null;
-                    containerMovement.BusinessPartnerId =
-                        invoice.BusinessPartnerId;
-                    containerMovement.ContainerStoreId =
-                        invoice.ContainerStoreId!.Value;
-                    containerMovement.InvoiceNumber = invoice.InvoiceNumber;
-                    containerMovement.MovementDate = invoice.InvoiceDate;
-                    containerMovement.OutgoingUnits =
-                        containerLine.OutgoingUnits;
-                    containerMovement.IncomingUnits =
-                        containerLine.IncomingUnits;
-                    containerMovement.Description =
-                        $"Invoice {invoice.InvoiceNumber}";
-                }
-            }
-
-            var itemMovements = await dbContext.ItemMovements
-                .IgnoreQueryFilters()
-                .Where(movement =>
-                    movement.CompanyId == company.Id &&
-                    movement.ReferenceId == invoice.Id)
-                .OrderBy(movement => movement.IsDeleted)
-                .ThenBy(movement => movement.Id)
-                .ToListAsync(cancellationToken);
-            var itemMovementType =
-                InvoiceMovementRules.GetItemMovementType(
-                    invoice.InvoiceType);
-            var inbound = InvoiceMovementRules.IsInbound(
-                invoice.InvoiceType);
-
-            foreach (var line in invoice.Lines.Where(line =>
-                         !line.IsDeleted && line.ItemId.HasValue))
-            {
-                if (line.ItemId is not int lineItemId)
-                {
-                    continue;
-                }
-
-                var itemMovement = itemMovements.FirstOrDefault(movement =>
-                    movement.ItemId == lineItemId);
-                if (itemMovement is null)
-                {
-                    itemMovement = new ItemMovement
-                    {
-                        CompanyId = company.Id,
-                        ReferenceId = invoice.Id,
-                        ItemId = lineItemId,
-                        CreatedById = SeedActor,
-                        CreatedByPc = createdByPc,
-                        CreatedOn = createdOn
-                    };
-                    dbContext.ItemMovements.Add(itemMovement);
-                }
-
-                itemMovement.IsDeleted = false;
-                itemMovement.DeletedById = null;
-                itemMovement.DeletedOn = null;
-                itemMovement.DeletedByPc = null;
-                itemMovement.StoreId = invoice.StoreId;
-                itemMovement.ItemUnitId = line.ItemUnitId;
-                itemMovement.MovementType = itemMovementType;
-                itemMovement.ReferenceNumber = invoice.InvoiceNumber;
-                itemMovement.MovementDate = invoice.InvoiceDate;
-                itemMovement.QuantityIn = inbound ? line.Quantity : 0m;
-                itemMovement.QuantityOut = inbound ? 0m : line.Quantity;
-                itemMovement.Description =
-                    $"Invoice {invoice.InvoiceNumber}";
-            }
-
-            var partnerMovement = await dbContext.BusinessPartnerMovements
-                .IgnoreQueryFilters()
-                .Where(movement =>
-                    movement.CompanyId == company.Id &&
-                    movement.InvoiceId == invoice.Id)
-                .OrderBy(movement => movement.IsDeleted)
-                .ThenBy(movement => movement.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-            var salesMovementType =
-                InvoiceMovementRules.GetPartnerMovementType(
-                    invoice.InvoiceType);
-            var (salesDebit, salesCredit) =
-                InvoiceMovementRules.GetPartnerAmounts(
-                    invoice.InvoiceType,
-                    invoice.Total);
-            if (partnerMovement is null)
-            {
-                partnerMovement = new BusinessPartnerMovement
-                {
-                    CompanyId = company.Id,
-                    InvoiceId = invoice.Id,
-                    CreatedById = SeedActor,
-                    CreatedByPc = createdByPc,
-                    CreatedOn = createdOn
-                };
-                dbContext.BusinessPartnerMovements.Add(partnerMovement);
-            }
-
-            partnerMovement.IsDeleted = false;
-            partnerMovement.DeletedById = null;
-            partnerMovement.DeletedOn = null;
-            partnerMovement.DeletedByPc = null;
-            partnerMovement.BusinessPartnerId = invoice.BusinessPartnerId;
-            partnerMovement.MovementType = salesMovementType;
-            partnerMovement.MovementDate = invoice.InvoiceDate;
-            partnerMovement.Currency = invoice.Currency;
-            partnerMovement.Debit = salesDebit;
-            partnerMovement.Credit = salesCredit;
-            partnerMovement.Description =
-                $"فاتورة {invoice.InvoiceNumber}";
-            partnerMovement.ApplyExchangeRate(invoice.ExchangeRate);
-
-            var driverTrip = await dbContext.DriverTrips
-                .IgnoreQueryFilters()
-                .FirstOrDefaultAsync(
-                    trip =>
-                        trip.CompanyId == company.Id &&
-                        trip.InvoiceId == invoice.Id,
-                    cancellationToken);
-            if (driverTrip is null)
-            {
-                dbContext.DriverTrips.Add(
-                    new DriverTrip
-                    {
-                        CompanyId = company.Id,
-                        DriverId = invoice.DriverId!.Value,
-                        ActualDriverName = invoice.ActualDriverName,
-                        InvoiceId = invoice.Id,
-                        BusinessPartnerId = invoice.BusinessPartnerId,
-                        InvoiceNumber = invoice.InvoiceNumber,
-                        ExportInvoiceCode = invoice.ExportInvoiceCode,
-                        TripDate = invoice.InvoiceDate,
-                        CreatedById = SeedActor,
-                        CreatedByPc = createdByPc,
-                        CreatedOn = createdOn
-                    });
-            }
-            else
-            {
-                driverTrip.IsDeleted = false;
-                driverTrip.DeletedById = null;
-                driverTrip.DeletedOn = null;
-                driverTrip.DeletedByPc = null;
-                driverTrip.DriverId = invoice.DriverId!.Value;
-                driverTrip.ActualDriverName = invoice.ActualDriverName;
-                driverTrip.BusinessPartnerId = invoice.BusinessPartnerId;
-                driverTrip.InvoiceNumber = invoice.InvoiceNumber;
-                driverTrip.ExportInvoiceCode = invoice.ExportInvoiceCode;
-                driverTrip.TripDate = invoice.InvoiceDate;
-            }
+            ApplySeedInvoiceSideEffects(
+                dbContext,
+                company.Id,
+                invoice,
+                createdOn,
+                createdByPc,
+                sideEffectMaps);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -2030,8 +1855,14 @@ public static class DevelopmentDataSeeder
             return;
         }
 
+        var cachedRates = await LoadCompanyExchangeRatesAsync(
+            dbContext,
+            company.Id,
+            cancellationToken);
+
         var existingInvoices = await dbContext.Invoices
             .IgnoreQueryFilters()
+            .AsSplitQuery()
             .Where(invoice =>
                 invoice.CompanyId == company.Id &&
                 seedExportCodes.Contains(invoice.ExportInvoiceCode!))
@@ -2263,6 +2094,7 @@ public static class DevelopmentDataSeeder
                 dbContext,
                 company.Id,
                 invoice,
+                cachedRates,
                 cancellationToken);
             invoice.Touch(createdOn);
         }
@@ -2360,15 +2192,66 @@ public static class DevelopmentDataSeeder
         return definitions;
     }
 
+    private static async Task<List<ExchangeRate>> LoadCompanyExchangeRatesAsync(
+        ApplicationDbContext dbContext,
+        int companyId,
+        CancellationToken cancellationToken)
+    {
+        return await dbContext.ExchangeRates
+            .Where(candidate => candidate.CompanyId == companyId)
+            .OrderBy(candidate => candidate.RateDate)
+            .ThenBy(candidate => candidate.Id)
+            .ToListAsync(cancellationToken);
+    }
+
+    private static ExchangeRate? FindSeedExchangeRate(
+        IReadOnlyList<ExchangeRate> cachedRates,
+        int companyId,
+        CurrencyCode currency,
+        DateOnly invoiceDate)
+    {
+        ExchangeRate? best = null;
+        foreach (var rate in cachedRates)
+        {
+            if (rate.CompanyId != companyId ||
+                rate.Currency != currency ||
+                rate.RateDate > invoiceDate)
+            {
+                continue;
+            }
+
+            if (best is null ||
+                rate.RateDate > best.RateDate ||
+                (rate.RateDate == best.RateDate && rate.Id > best.Id))
+            {
+                best = rate;
+            }
+        }
+
+        return best;
+    }
+
     private static async Task ApplySeedInvoiceExchangeRateAsync(
         ApplicationDbContext dbContext,
         int companyId,
         Invoice invoice,
+        IReadOnlyList<ExchangeRate> cachedRates,
         CancellationToken cancellationToken)
     {
         if (invoice.Currency == CurrencyCode.EGP)
         {
             invoice.ApplyExchangeRate(null, 1m);
+            return;
+        }
+
+        var cachedRate = FindSeedExchangeRate(
+            cachedRates,
+            companyId,
+            invoice.Currency,
+            invoice.InvoiceDate);
+        if (cachedRate is not null)
+        {
+            invoice.ApplyExchangeRate(cachedRate.Id, cachedRate.Rate);
             return;
         }
 
@@ -2383,6 +2266,248 @@ public static class DevelopmentDataSeeder
         invoice.ApplyExchangeRate(invoiceRate.Id, invoiceRate.Rate);
     }
 
+    private sealed class SeedInvoiceSideEffectMaps
+    {
+        public Dictionary<(int InvoiceId, int ContainerId), ContainerMovement>
+            ContainerMovements { get; } = new();
+
+        public Dictionary<(int InvoiceId, ItemMovementType MovementType, int ItemId), ItemMovement>
+            ItemMovements { get; } = new();
+
+        public Dictionary<int, BusinessPartnerMovement>
+            PartnerMovements { get; } = new();
+
+        public Dictionary<int, DriverTrip> DriverTrips { get; } = new();
+    }
+
+    private static async Task<SeedInvoiceSideEffectMaps>
+        LoadSeedInvoiceSideEffectMapsAsync(
+            ApplicationDbContext dbContext,
+            int companyId,
+            IReadOnlyCollection<int> invoiceIds,
+            CancellationToken cancellationToken)
+    {
+        var maps = new SeedInvoiceSideEffectMaps();
+        if (invoiceIds.Count == 0)
+        {
+            return maps;
+        }
+
+        var containerMovements = await dbContext.ContainerMovements
+            .IgnoreQueryFilters()
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                invoiceIds.Contains(movement.InvoiceId))
+            .OrderBy(movement => movement.IsDeleted)
+            .ThenBy(movement => movement.Id)
+            .ToListAsync(cancellationToken);
+        foreach (var movement in containerMovements)
+        {
+            maps.ContainerMovements.TryAdd(
+                (movement.InvoiceId, movement.ContainerId),
+                movement);
+        }
+
+        var itemMovements = await dbContext.ItemMovements
+            .IgnoreQueryFilters()
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                invoiceIds.Contains(movement.ReferenceId))
+            .OrderBy(movement => movement.IsDeleted)
+            .ThenBy(movement => movement.Id)
+            .ToListAsync(cancellationToken);
+        foreach (var movement in itemMovements)
+        {
+            maps.ItemMovements.TryAdd(
+                (movement.ReferenceId, movement.MovementType, movement.ItemId),
+                movement);
+        }
+
+        var partnerMovements = await dbContext.BusinessPartnerMovements
+            .IgnoreQueryFilters()
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.InvoiceId.HasValue &&
+                invoiceIds.Contains(movement.InvoiceId.Value))
+            .OrderBy(movement => movement.IsDeleted)
+            .ThenBy(movement => movement.Id)
+            .ToListAsync(cancellationToken);
+        foreach (var movement in partnerMovements)
+        {
+            if (movement.InvoiceId.HasValue)
+            {
+                maps.PartnerMovements.TryAdd(
+                    movement.InvoiceId.Value,
+                    movement);
+            }
+        }
+
+        var driverTrips = await dbContext.DriverTrips
+            .IgnoreQueryFilters()
+            .Where(trip =>
+                trip.CompanyId == companyId &&
+                invoiceIds.Contains(trip.InvoiceId))
+            .OrderBy(trip => trip.IsDeleted)
+            .ThenBy(trip => trip.Id)
+            .ToListAsync(cancellationToken);
+        foreach (var trip in driverTrips)
+        {
+            maps.DriverTrips.TryAdd(trip.InvoiceId, trip);
+        }
+
+        return maps;
+    }
+
+    private static void ApplySeedInvoiceSideEffects(
+        ApplicationDbContext dbContext,
+        int companyId,
+        Invoice invoice,
+        DateTime createdOn,
+        string createdByPc,
+        SeedInvoiceSideEffectMaps maps)
+    {
+        foreach (var containerLine in invoice.ContainerLines.Where(
+                     line => !line.IsDeleted))
+        {
+            var key = (invoice.Id, containerLine.ContainerId);
+            if (!maps.ContainerMovements.TryGetValue(
+                    key,
+                    out var containerMovement))
+            {
+                containerMovement = new ContainerMovement
+                {
+                    CompanyId = companyId,
+                    ContainerId = containerLine.ContainerId,
+                    InvoiceId = invoice.Id,
+                    CreatedById = SeedActor,
+                    CreatedByPc = createdByPc,
+                    CreatedOn = createdOn
+                };
+                dbContext.ContainerMovements.Add(containerMovement);
+                maps.ContainerMovements.Add(key, containerMovement);
+            }
+
+            containerMovement.IsDeleted = false;
+            containerMovement.DeletedById = null;
+            containerMovement.DeletedOn = null;
+            containerMovement.DeletedByPc = null;
+            containerMovement.BusinessPartnerId = invoice.BusinessPartnerId;
+            containerMovement.ContainerStoreId =
+                invoice.ContainerStoreId!.Value;
+            containerMovement.InvoiceNumber = invoice.InvoiceNumber;
+            containerMovement.MovementDate = invoice.InvoiceDate;
+            containerMovement.OutgoingUnits = containerLine.OutgoingUnits;
+            containerMovement.IncomingUnits = containerLine.IncomingUnits;
+            containerMovement.Description =
+                $"Invoice {invoice.InvoiceNumber}";
+        }
+
+        var itemMovementType =
+            InvoiceMovementRules.GetItemMovementType(invoice.InvoiceType);
+        var inbound = InvoiceMovementRules.IsInbound(invoice.InvoiceType);
+        foreach (var line in invoice.Lines.Where(line =>
+                     !line.IsDeleted && line.ItemId.HasValue))
+        {
+            if (line.ItemId is not int lineItemId)
+            {
+                continue;
+            }
+
+            var key = (invoice.Id, itemMovementType, lineItemId);
+            if (!maps.ItemMovements.TryGetValue(
+                    key,
+                    out var itemMovement))
+            {
+                itemMovement = new ItemMovement
+                {
+                    CompanyId = companyId,
+                    ReferenceId = invoice.Id,
+                    ItemId = lineItemId,
+                    CreatedById = SeedActor,
+                    CreatedByPc = createdByPc,
+                    CreatedOn = createdOn
+                };
+                dbContext.ItemMovements.Add(itemMovement);
+                maps.ItemMovements.Add(key, itemMovement);
+            }
+
+            itemMovement.IsDeleted = false;
+            itemMovement.DeletedById = null;
+            itemMovement.DeletedOn = null;
+            itemMovement.DeletedByPc = null;
+            itemMovement.StoreId = invoice.StoreId;
+            itemMovement.ItemUnitId = line.ItemUnitId;
+            itemMovement.MovementType = itemMovementType;
+            itemMovement.ReferenceNumber = invoice.InvoiceNumber;
+            itemMovement.MovementDate = invoice.InvoiceDate;
+            itemMovement.QuantityIn = inbound ? line.Quantity : 0m;
+            itemMovement.QuantityOut = inbound ? 0m : line.Quantity;
+            itemMovement.Description =
+                $"Invoice {invoice.InvoiceNumber}";
+        }
+
+        if (!maps.PartnerMovements.TryGetValue(
+                invoice.Id,
+                out var partnerMovement))
+        {
+            partnerMovement = new BusinessPartnerMovement
+            {
+                CompanyId = companyId,
+                InvoiceId = invoice.Id,
+                CreatedById = SeedActor,
+                CreatedByPc = createdByPc,
+                CreatedOn = createdOn
+            };
+            dbContext.BusinessPartnerMovements.Add(partnerMovement);
+            maps.PartnerMovements.Add(invoice.Id, partnerMovement);
+        }
+
+        var salesMovementType =
+            InvoiceMovementRules.GetPartnerMovementType(invoice.InvoiceType);
+        var (salesDebit, salesCredit) =
+            InvoiceMovementRules.GetPartnerAmounts(
+                invoice.InvoiceType,
+                invoice.Total);
+        partnerMovement.IsDeleted = false;
+        partnerMovement.DeletedById = null;
+        partnerMovement.DeletedOn = null;
+        partnerMovement.DeletedByPc = null;
+        partnerMovement.BusinessPartnerId = invoice.BusinessPartnerId;
+        partnerMovement.MovementType = salesMovementType;
+        partnerMovement.MovementDate = invoice.InvoiceDate;
+        partnerMovement.Currency = invoice.Currency;
+        partnerMovement.Debit = salesDebit;
+        partnerMovement.Credit = salesCredit;
+        partnerMovement.Description =
+            $"فاتورة {invoice.InvoiceNumber}";
+        partnerMovement.ApplyExchangeRate(invoice.ExchangeRate);
+
+        if (!maps.DriverTrips.TryGetValue(invoice.Id, out var driverTrip))
+        {
+            driverTrip = new DriverTrip
+            {
+                CompanyId = companyId,
+                InvoiceId = invoice.Id,
+                CreatedById = SeedActor,
+                CreatedByPc = createdByPc,
+                CreatedOn = createdOn
+            };
+            dbContext.DriverTrips.Add(driverTrip);
+            maps.DriverTrips.Add(invoice.Id, driverTrip);
+        }
+
+        driverTrip.IsDeleted = false;
+        driverTrip.DeletedById = null;
+        driverTrip.DeletedOn = null;
+        driverTrip.DeletedByPc = null;
+        driverTrip.DriverId = invoice.DriverId!.Value;
+        driverTrip.ActualDriverName = invoice.ActualDriverName;
+        driverTrip.BusinessPartnerId = invoice.BusinessPartnerId;
+        driverTrip.InvoiceNumber = invoice.InvoiceNumber;
+        driverTrip.ExportInvoiceCode = invoice.ExportInvoiceCode;
+        driverTrip.TripDate = invoice.InvoiceDate;
+    }
+
     private static async Task EnsureNonSalesInvoiceSideEffectsAsync(
         ApplicationDbContext dbContext,
         int companyId,
@@ -2391,6 +2516,7 @@ public static class DevelopmentDataSeeder
     {
         var invoices = await dbContext.Invoices
             .IgnoreQueryFilters()
+            .AsSplitQuery()
             .Include(invoice => invoice.Lines)
             .Include(invoice => invoice.ContainerLines)
             .Where(invoice =>
@@ -2399,174 +2525,22 @@ public static class DevelopmentDataSeeder
                 seedExportCodes.Contains(invoice.ExportInvoiceCode!))
             .ToListAsync(cancellationToken);
 
+        var sideEffectMaps = await LoadSeedInvoiceSideEffectMapsAsync(
+            dbContext,
+            companyId,
+            invoices.Select(invoice => invoice.Id).ToArray(),
+            cancellationToken);
+        var createdByPc = Environment.MachineName;
+
         foreach (var invoice in invoices)
         {
-            foreach (var containerLine in invoice.ContainerLines.Where(
-                         line => !line.IsDeleted))
-            {
-                var containerMovement = await dbContext.ContainerMovements
-                    .IgnoreQueryFilters()
-                    .Where(movement =>
-                        movement.CompanyId == companyId &&
-                        movement.InvoiceId == invoice.Id &&
-                        movement.ContainerId == containerLine.ContainerId)
-                    .OrderBy(movement => movement.IsDeleted)
-                    .ThenBy(movement => movement.Id)
-                    .FirstOrDefaultAsync(cancellationToken);
-                if (containerMovement is null)
-                {
-                    containerMovement = new ContainerMovement
-                    {
-                        CompanyId = companyId,
-                        InvoiceId = invoice.Id,
-                        ContainerId = containerLine.ContainerId,
-                        CreatedById = SeedActor,
-                        CreatedByPc = Environment.MachineName,
-                        CreatedOn = invoice.CreatedOn
-                    };
-                    dbContext.ContainerMovements.Add(containerMovement);
-                }
-
-                containerMovement.IsDeleted = false;
-                containerMovement.DeletedById = null;
-                containerMovement.DeletedOn = null;
-                containerMovement.DeletedByPc = null;
-                containerMovement.BusinessPartnerId =
-                    invoice.BusinessPartnerId;
-                containerMovement.ContainerStoreId =
-                    invoice.ContainerStoreId!.Value;
-                containerMovement.InvoiceNumber = invoice.InvoiceNumber;
-                containerMovement.MovementDate = invoice.InvoiceDate;
-                containerMovement.OutgoingUnits =
-                    containerLine.OutgoingUnits;
-                containerMovement.IncomingUnits =
-                    containerLine.IncomingUnits;
-                containerMovement.Description =
-                    $"Invoice {invoice.InvoiceNumber}";
-            }
-
-            var movementType = InvoiceMovementRules.GetItemMovementType(
-                invoice.InvoiceType);
-            var inbound = InvoiceMovementRules.IsInbound(
-                invoice.InvoiceType);
-            foreach (var line in invoice.Lines.Where(line =>
-                         !line.IsDeleted && line.ItemId.HasValue))
-            {
-                if (line.ItemId is not int lineItemId)
-                {
-                    continue;
-                }
-
-                var itemMovement = await dbContext.ItemMovements
-                    .IgnoreQueryFilters()
-                    .Where(movement =>
-                        movement.CompanyId == companyId &&
-                        movement.ReferenceId == invoice.Id &&
-                        movement.ItemId == lineItemId)
-                    .OrderBy(movement => movement.IsDeleted)
-                    .ThenBy(movement => movement.Id)
-                    .FirstOrDefaultAsync(cancellationToken);
-                if (itemMovement is null)
-                {
-                    itemMovement = new ItemMovement
-                    {
-                        CompanyId = companyId,
-                        ReferenceId = invoice.Id,
-                        ItemId = lineItemId,
-                        CreatedById = SeedActor,
-                        CreatedByPc = Environment.MachineName,
-                        CreatedOn = invoice.CreatedOn
-                    };
-                    dbContext.ItemMovements.Add(itemMovement);
-                }
-
-                itemMovement.IsDeleted = false;
-                itemMovement.DeletedById = null;
-                itemMovement.DeletedOn = null;
-                itemMovement.DeletedByPc = null;
-                itemMovement.StoreId = invoice.StoreId;
-                itemMovement.ItemUnitId = line.ItemUnitId;
-                itemMovement.MovementType = movementType;
-                itemMovement.ReferenceNumber = invoice.InvoiceNumber;
-                itemMovement.MovementDate = invoice.InvoiceDate;
-                itemMovement.QuantityIn = inbound ? line.Quantity : 0m;
-                itemMovement.QuantityOut = inbound ? 0m : line.Quantity;
-                itemMovement.Description =
-                    $"Invoice {invoice.InvoiceNumber}";
-            }
-
-            var partnerMovement = await dbContext.BusinessPartnerMovements
-                .IgnoreQueryFilters()
-                .Where(movement =>
-                    movement.CompanyId == companyId &&
-                    movement.InvoiceId == invoice.Id)
-                .OrderBy(movement => movement.IsDeleted)
-                .ThenBy(movement => movement.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-            var partnerMovementType =
-                InvoiceMovementRules.GetPartnerMovementType(
-                    invoice.InvoiceType);
-            var (debit, credit) = InvoiceMovementRules.GetPartnerAmounts(
-                invoice.InvoiceType,
-                invoice.Total);
-            if (partnerMovement is null)
-            {
-                partnerMovement = new BusinessPartnerMovement
-                {
-                    CompanyId = companyId,
-                    InvoiceId = invoice.Id,
-                    CreatedById = SeedActor,
-                    CreatedByPc = Environment.MachineName,
-                    CreatedOn = invoice.CreatedOn
-                };
-                dbContext.BusinessPartnerMovements.Add(partnerMovement);
-            }
-
-            partnerMovement.IsDeleted = false;
-            partnerMovement.DeletedById = null;
-            partnerMovement.DeletedOn = null;
-            partnerMovement.DeletedByPc = null;
-            partnerMovement.BusinessPartnerId = invoice.BusinessPartnerId;
-            partnerMovement.MovementType = partnerMovementType;
-            partnerMovement.MovementDate = invoice.InvoiceDate;
-            partnerMovement.Currency = invoice.Currency;
-            partnerMovement.Debit = debit;
-            partnerMovement.Credit = credit;
-            partnerMovement.Description =
-                $"فاتورة {invoice.InvoiceNumber}";
-            partnerMovement.ApplyExchangeRate(invoice.ExchangeRate);
-
-            var driverTrip = await dbContext.DriverTrips
-                .IgnoreQueryFilters()
-                .Where(trip =>
-                    trip.CompanyId == companyId &&
-                    trip.InvoiceId == invoice.Id)
-                .OrderBy(trip => trip.IsDeleted)
-                .ThenBy(trip => trip.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-            if (driverTrip is null)
-            {
-                driverTrip = new DriverTrip
-                {
-                    CompanyId = companyId,
-                    InvoiceId = invoice.Id,
-                    CreatedById = SeedActor,
-                    CreatedByPc = Environment.MachineName,
-                    CreatedOn = invoice.CreatedOn
-                };
-                dbContext.DriverTrips.Add(driverTrip);
-            }
-
-            driverTrip.IsDeleted = false;
-            driverTrip.DeletedById = null;
-            driverTrip.DeletedOn = null;
-            driverTrip.DeletedByPc = null;
-            driverTrip.DriverId = invoice.DriverId!.Value;
-            driverTrip.ActualDriverName = invoice.ActualDriverName;
-            driverTrip.BusinessPartnerId = invoice.BusinessPartnerId;
-            driverTrip.InvoiceNumber = invoice.InvoiceNumber;
-            driverTrip.ExportInvoiceCode = invoice.ExportInvoiceCode;
-            driverTrip.TripDate = invoice.InvoiceDate;
+            ApplySeedInvoiceSideEffects(
+                dbContext,
+                companyId,
+                invoice,
+                invoice.CreatedOn,
+                createdByPc,
+                sideEffectMaps);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -3620,7 +3594,7 @@ public static class DevelopmentDataSeeder
             Add(AccountingMappingType.CustomerControl, null, "1200");
             Add(AccountingMappingType.SupplierControl, null, "2100");
             Add(AccountingMappingType.EmployeeControl, null, "2200");
-            Add(AccountingMappingType.DriverControl, null, "2200");
+            Add(AccountingMappingType.DriverControl, null, "2300");
             Add(AccountingMappingType.ExchangeGain, null, "4300");
             Add(AccountingMappingType.ExchangeLoss, null, "5400");
             Add(AccountingMappingType.InventoryAdjustmentGain, null, "4400");
@@ -3654,7 +3628,8 @@ public static class DevelopmentDataSeeder
             ("1400", "ذمم الموظفين المدينة", "1000", AccountType.Asset, NormalBalance.Debit, true),
             ("2000", "الالتزامات", null, AccountType.Liability, NormalBalance.Credit, false),
             ("2100", "الموردون", "2000", AccountType.Liability, NormalBalance.Credit, true),
-            ("2200", "مستحقات الموظفين والسائقين", "2000", AccountType.Liability, NormalBalance.Credit, true),
+            ("2200", "مستحقات الموظفين", "2000", AccountType.Liability, NormalBalance.Credit, true),
+            ("2300", "مستحقات السائقين", "2000", AccountType.Liability, NormalBalance.Credit, true),
             ("3000", "حقوق الملكية", null, AccountType.Equity, NormalBalance.Credit, false),
             ("3100", "رأس المال", "3000", AccountType.Equity, NormalBalance.Credit, true),
             ("3200", "مقابل الأرصدة الافتتاحية", "3000", AccountType.Equity, NormalBalance.Credit, true),
@@ -3743,7 +3718,8 @@ public static class DevelopmentDataSeeder
                 ("FP-140", "ذمم الموظفين المدينة", "FP-100", 140, true),
                 ("FP-200", "الالتزامات", null, 200, false),
                 ("FP-210", "الموردون", "FP-200", 210, true),
-                ("FP-220", "مستحقات الموظفين والسائقين", "FP-200", 220, true),
+                ("FP-220", "مستحقات الموظفين", "FP-200", 220, true),
+                ("FP-230", "مستحقات السائقين", "FP-200", 230, true),
                 ("FP-300", "حقوق الملكية", null, 300, false),
                 ("FP-310", "رأس المال", "FP-300", 310, true),
                 ("FP-320", "مقابل الأرصدة الافتتاحية", "FP-300", 320, true)
@@ -3755,6 +3731,7 @@ public static class DevelopmentDataSeeder
                 ("1400", "FP-140"),
                 ("2100", "FP-210"),
                 ("2200", "FP-220"),
+                ("2300", "FP-230"),
                 ("3100", "FP-310"),
                 ("3200", "FP-320")
             ],
@@ -3819,6 +3796,7 @@ public static class DevelopmentDataSeeder
                 ("2100", "CF-120"),
                 ("1400", "CF-140"),
                 ("2200", "CF-130"),
+                ("2300", "CF-130"),
                 ("4200", "CF-140"),
                 ("4300", "CF-140"),
                 ("4400", "CF-140"),

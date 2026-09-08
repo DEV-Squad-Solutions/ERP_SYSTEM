@@ -23,7 +23,9 @@ public sealed record JournalEntryLineRequest(
     int AccountId,
     string? Description,
     decimal Debit,
-    decimal Credit)
+    decimal Credit,
+    JournalPartyType? PartyType = null,
+    int? PartyId = null)
 {
     public const int DescriptionMaximumLength = 300;
 }

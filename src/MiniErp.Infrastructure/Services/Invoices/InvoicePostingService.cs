@@ -37,6 +37,7 @@ public sealed class InvoicePostingService(
                 entity.InvoiceNumber,
                 entity.InvoiceDate,
                 entity.InvoiceType,
+                entity.BusinessPartnerId,
                 entity.Total,
                 entity.ExchangeRate,
                 entity.BaseTotal,
@@ -107,7 +108,8 @@ public sealed class InvoicePostingService(
             invoiceAccountResult.Value,
             controlAccountResult.Value,
             invoiceAmount,
-            invoice.InvoiceNumber);
+            invoice.InvoiceNumber,
+            invoice.BusinessPartnerId);
 
         var cost = await dbContext.ItemMovements
             .AsNoTracking()
@@ -193,7 +195,10 @@ public sealed class InvoicePostingService(
                 controlAccountResult.Value,
                 payment.CashboxBaseAmount,
                 payment.AppliedBaseAmount,
-                invoice.InvoiceNumber);
+                invoice.InvoiceNumber,
+                invoice.BusinessPartnerId,
+                ToJournalPartyType(invoice.InvoiceType),
+                payment.CashboxId.Value);
 
             var paymentBalance = payment.Direction == CashDirection.Receipt
                 ? payment.CashboxBaseAmount - payment.AppliedBaseAmount
@@ -307,7 +312,8 @@ public sealed class InvoicePostingService(
         int invoiceAccountId,
         int controlAccountId,
         decimal amount,
-        string invoiceNumber)
+        string invoiceNumber,
+        int businessPartnerId)
     {
         var invoiceSideIsDebit = invoiceType is
             InvoiceType.Purchase or InvoiceType.SalesReturn;
@@ -320,7 +326,9 @@ public sealed class InvoicePostingService(
             AccountId: controlAccountId,
             Description: $"طرف الفاتورة {invoiceNumber}",
             Debit: invoiceSideIsDebit ? 0m : amount,
-            Credit: invoiceSideIsDebit ? amount : 0m));
+            Credit: invoiceSideIsDebit ? amount : 0m,
+            PartyType: ToJournalPartyType(invoiceType),
+            PartyId: businessPartnerId));
     }
 
     private static void AddPaymentLines(
@@ -330,20 +338,33 @@ public sealed class InvoicePostingService(
         int controlAccountId,
         decimal cashboxBaseAmount,
         decimal appliedBaseAmount,
-        string invoiceNumber)
+        string invoiceNumber,
+        int businessPartnerId,
+        JournalPartyType partyType,
+        int cashboxId)
     {
         var isReceipt = direction == CashDirection.Receipt;
         lines.Add(new JournalEntryLineRequest(
             AccountId: cashboxAccountId,
             Description: $"سداد الفاتورة {invoiceNumber}",
             Debit: isReceipt ? cashboxBaseAmount : 0m,
-            Credit: isReceipt ? 0m : cashboxBaseAmount));
+            Credit: isReceipt ? 0m : cashboxBaseAmount,
+            PartyType: JournalPartyType.Cashbox,
+            PartyId: cashboxId));
         lines.Add(new JournalEntryLineRequest(
             AccountId: controlAccountId,
             Description: $"تسوية سداد الفاتورة {invoiceNumber}",
             Debit: isReceipt ? 0m : appliedBaseAmount,
-            Credit: isReceipt ? appliedBaseAmount : 0m));
+            Credit: isReceipt ? appliedBaseAmount : 0m,
+            PartyType: partyType,
+            PartyId: businessPartnerId));
     }
+
+    private static JournalPartyType ToJournalPartyType(
+        InvoiceType invoiceType) => invoiceType is
+        InvoiceType.Sales or InvoiceType.SalesReturn
+            ? JournalPartyType.Customer
+            : JournalPartyType.Supplier;
 
     private static string GetInvoiceTypeName(InvoiceType invoiceType) =>
         invoiceType switch

@@ -121,13 +121,13 @@ public sealed class AccountService(
         return Result<IReadOnlyList<AccountSelectResponse>>.Success(response);
     }
 
-    public async Task<Result<IReadOnlyList<AccountSelectResponse>>> GetJournalSelectAsync(
+    public async Task<Result<IReadOnlyList<JournalAccountSelectResponse>>> GetJournalSelectAsync(
         int fiscalYearId,
         CancellationToken cancellationToken = default)
     {
         if (fiscalYearId <= 0)
         {
-            return Result<IReadOnlyList<AccountSelectResponse>>.Failure(
+            return Result<IReadOnlyList<JournalAccountSelectResponse>>.Failure(
                 InvalidId());
         }
 
@@ -140,11 +140,11 @@ public sealed class AccountService(
                 cancellationToken);
         if (!fiscalYearExists)
         {
-            return Result<IReadOnlyList<AccountSelectResponse>>.Failure(
+            return Result<IReadOnlyList<JournalAccountSelectResponse>>.Failure(
                 FiscalYearNotFound(fiscalYearId));
         }
 
-        var rows = await dbContext.Accounts
+        var accounts = await dbContext.Accounts
             .AsNoTracking()
             .Where(account =>
                 account.CompanyId == companyId &&
@@ -153,15 +153,203 @@ public sealed class AccountService(
                 account.ParentAccountId.HasValue)
             .OrderBy(account => account.Code)
             .ThenBy(account => account.Id)
-            .Select(account => new AccountSelectResponse(
+            .Select(account => new
+            {
+                account.Id,
+                account.Code,
+                account.Name,
+                account.AccountType
+            })
+            .ToListAsync(cancellationToken);
+
+        var accountIds = accounts.Select(account => account.Id).ToArray();
+        var mappings = await dbContext.AccountMappings
+            .AsNoTracking()
+            .Where(mapping =>
+                mapping.CompanyId == companyId &&
+                mapping.FiscalYearId == fiscalYearId &&
+                accountIds.Contains(mapping.AccountId) &&
+                (mapping.MappingType == AccountingMappingType.CustomerControl ||
+                 mapping.MappingType == AccountingMappingType.SupplierControl ||
+                 mapping.MappingType == AccountingMappingType.EmployeeControl ||
+                 mapping.MappingType == AccountingMappingType.EmployeeReceivable ||
+                 mapping.MappingType == AccountingMappingType.DriverControl ||
+                 mapping.MappingType == AccountingMappingType.Cashbox))
+            .Select(mapping => new
+            {
+                mapping.AccountId,
+                mapping.MappingType,
+                mapping.SourceId
+            })
+            .ToListAsync(cancellationToken);
+
+        var partyTypesByAccount = mappings
+            .Select(mapping => new
+            {
+                mapping.AccountId,
+                PartyType = ToJournalPartyType(mapping.MappingType),
+                mapping.SourceId
+            })
+            .Where(mapping => mapping.PartyType != JournalPartyType.Cashbox ||
+                              mapping.SourceId.HasValue)
+            .Distinct()
+            .ToLookup(mapping => mapping.AccountId, mapping => mapping.PartyType);
+        var requiredPartyTypes = partyTypesByAccount
+            .SelectMany(group => group)
+            .ToHashSet();
+
+        IReadOnlyList<JournalPartySelectResponse> businessPartners = [];
+        if (requiredPartyTypes.Contains(JournalPartyType.Customer) ||
+            requiredPartyTypes.Contains(JournalPartyType.Supplier))
+        {
+            var rows = await dbContext.BusinessPartners
+                .AsNoTracking()
+                .Where(partner =>
+                    partner.CompanyId == companyId &&
+                    partner.IsActive)
+                .OrderBy(partner => partner.Name)
+                .ThenBy(partner => partner.Id)
+                .Select(partner => new
+                {
+                    partner.Id,
+                    partner.Code,
+                    partner.Name
+                })
+                .ToListAsync(cancellationToken);
+            businessPartners = rows.Select(party =>
+                new JournalPartySelectResponse(
+                    Id: party.Id,
+                    Code: party.Code,
+                    Name: party.Name)).ToArray();
+        }
+
+        IReadOnlyList<JournalPartySelectResponse> employees = [];
+        if (requiredPartyTypes.Contains(JournalPartyType.Employee))
+        {
+            var rows = await dbContext.Employees
+                .AsNoTracking()
+                .Where(employee =>
+                    employee.CompanyId == companyId &&
+                    employee.IsActive)
+                .OrderBy(employee => employee.Name)
+                .ThenBy(employee => employee.Id)
+                .Select(employee => new
+                {
+                    employee.Id,
+                    employee.Code,
+                    employee.Name
+                })
+                .ToListAsync(cancellationToken);
+            employees = rows.Select(party =>
+                new JournalPartySelectResponse(
+                    Id: party.Id,
+                    Code: party.Code,
+                    Name: party.Name)).ToArray();
+        }
+
+        IReadOnlyList<JournalPartySelectResponse> drivers = [];
+        if (requiredPartyTypes.Contains(JournalPartyType.Driver))
+        {
+            var rows = await dbContext.Drivers
+                .AsNoTracking()
+                .Where(driver =>
+                    driver.CompanyId == companyId &&
+                    driver.IsActive)
+                .OrderBy(driver => driver.Name)
+                .ThenBy(driver => driver.Id)
+                .Select(driver => new
+                {
+                    driver.Id,
+                    driver.Code,
+                    driver.Name
+                })
+                .ToListAsync(cancellationToken);
+            drivers = rows.Select(party =>
+                new JournalPartySelectResponse(
+                    Id: party.Id,
+                    Code: party.Code,
+                    Name: party.Name)).ToArray();
+        }
+
+        var cashboxIds = mappings
+            .Where(mapping =>
+                mapping.MappingType == AccountingMappingType.Cashbox &&
+                mapping.SourceId.HasValue)
+            .Select(mapping => mapping.SourceId!.Value)
+            .Distinct()
+            .ToArray();
+        var cashboxes = cashboxIds.Length == 0
+            ? new Dictionary<int, JournalPartySelectResponse>()
+            : await dbContext.Cashboxes
+                .AsNoTracking()
+                .Where(cashbox =>
+                    cashbox.CompanyId == companyId &&
+                    cashbox.IsActive &&
+                    cashboxIds.Contains(cashbox.Id))
+                .OrderBy(cashbox => cashbox.Name)
+                .ThenBy(cashbox => cashbox.Id)
+                .Select(cashbox => new
+                {
+                    cashbox.Id,
+                    cashbox.Code,
+                    cashbox.Name
+                })
+                .ToDictionaryAsync(
+                    cashbox => cashbox.Id,
+                    cashbox => new JournalPartySelectResponse(
+                        Id: cashbox.Id,
+                        Code: cashbox.Code,
+                        Name: cashbox.Name),
+                    cancellationToken);
+
+        IReadOnlyList<JournalAccountSelectResponse> response = accounts
+            .Select(account => new JournalAccountSelectResponse(
                 Id: account.Id,
                 Code: account.Code,
                 Name: account.Name,
-                AccountType: account.AccountType))
-            .ToListAsync(cancellationToken);
+                AccountType: account.AccountType,
+                PartyGroups: partyTypesByAccount[account.Id]
+                    .Distinct()
+                    .OrderBy(partyType => partyType)
+                    .Select(partyType => new JournalPartyGroupResponse(
+                        PartyType: partyType,
+                        Parties: partyType switch
+                        {
+                            JournalPartyType.Customer or
+                            JournalPartyType.Supplier => businessPartners,
+                            JournalPartyType.Employee => employees,
+                            JournalPartyType.Driver => drivers,
+                            JournalPartyType.Cashbox => mappings
+                                .Where(mapping =>
+                                    mapping.AccountId == account.Id &&
+                                    mapping.MappingType == AccountingMappingType.Cashbox &&
+                                    mapping.SourceId.HasValue &&
+                                    cashboxes.ContainsKey(mapping.SourceId.Value))
+                                .Select(mapping => cashboxes[mapping.SourceId!.Value])
+                                .DistinctBy(cashbox => cashbox.Id)
+                                .OrderBy(cashbox => cashbox.Name)
+                                .ThenBy(cashbox => cashbox.Id)
+                                .ToArray(),
+                            _ => []
+                        }))
+                    .ToArray()))
+            .ToArray();
 
-        return Result<IReadOnlyList<AccountSelectResponse>>.Success(rows);
+        return Result<IReadOnlyList<JournalAccountSelectResponse>>.Success(
+            response);
     }
+
+    private static JournalPartyType ToJournalPartyType(
+        AccountingMappingType mappingType) => mappingType switch
+        {
+            AccountingMappingType.CustomerControl => JournalPartyType.Customer,
+            AccountingMappingType.SupplierControl => JournalPartyType.Supplier,
+            AccountingMappingType.EmployeeControl or
+            AccountingMappingType.EmployeeReceivable => JournalPartyType.Employee,
+            AccountingMappingType.DriverControl => JournalPartyType.Driver,
+            AccountingMappingType.Cashbox => JournalPartyType.Cashbox,
+            _ => throw new ArgumentOutOfRangeException(nameof(mappingType))
+        };
 
     public async Task<Result<AccountResponse>> GetByIdAsync(
         int id,

@@ -46,7 +46,7 @@ public sealed class AccountsController(IAccountService accountService)
     }
 
     [HttpGet("journal-select")]
-    [ProducesResponseType<IReadOnlyList<AccountSelectResponse>>(
+    [ProducesResponseType<IReadOnlyList<JournalAccountSelectResponse>>(
         StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetJournalSelect(

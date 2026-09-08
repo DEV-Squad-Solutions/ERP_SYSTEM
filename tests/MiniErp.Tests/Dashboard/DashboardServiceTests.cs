@@ -57,6 +57,38 @@ public sealed class DashboardServiceTests
     }
 
     [Fact]
+    public async Task Get_ReturnsZeroBalanceForCashboxWithoutVouchers()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.SeedCashboxWithoutVouchersAsync(openingBalance: 0m);
+
+        var result = await database.Service.GetAsync(
+            new DashboardFilterRequest());
+
+        Assert.True(result.IsSuccess);
+        var cashBalance = Assert.Single(result.Value.CashBalances);
+        Assert.Equal(CurrencyCode.EGP, cashBalance.Currency);
+        Assert.Equal(1, cashBalance.CashboxCount);
+        Assert.Equal(0m, cashBalance.CurrentBalance);
+    }
+
+    [Fact]
+    public async Task Get_IncludesOpeningBalanceForCashboxWithoutVouchers()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.SeedCashboxWithoutVouchersAsync(openingBalance: 250m);
+
+        var result = await database.Service.GetAsync(
+            new DashboardFilterRequest());
+
+        Assert.True(result.IsSuccess);
+        var cashBalance = Assert.Single(result.Value.CashBalances);
+        Assert.Equal(CurrencyCode.EGP, cashBalance.Currency);
+        Assert.Equal(1, cashBalance.CashboxCount);
+        Assert.Equal(250m, cashBalance.CurrentBalance);
+    }
+
+    [Fact]
     public async Task Get_CalculatesBaseCurrencyTotalsReturnsAndOutstanding()
     {
         await using var database = await TestDatabase.CreateAsync();
@@ -144,6 +176,25 @@ public sealed class DashboardServiceTests
         public ApplicationDbContext Context { get; }
 
         public DashboardService Service { get; }
+
+        public async Task SeedCashboxWithoutVouchersAsync(decimal openingBalance)
+        {
+            await Context.Database.ExecuteSqlAsync(
+                $"""
+                INSERT INTO Cashboxes (
+                    CompanyId, Code, Name, Currency, OpeningBalance,
+                    OpeningBalanceDate, OpeningExchangeRateId,
+                    OpeningExchangeRate, BaseOpeningBalance, IsActive,
+                    Notes, RowVersion, CreatedById, CreatedOn,
+                    CreatedByPc, IsDeleted)
+                VALUES (
+                    1, 'CB-EMPTY', 'Empty Dashboard Cashbox', 1,
+                    {openingBalance}, '2026-01-01', NULL, 1,
+                    {openingBalance}, 1, NULL, randomblob(8), 'test',
+                    '2026-09-01', 'test', 0);
+                """);
+            Context.ChangeTracker.Clear();
+        }
 
         public async Task SeedInvoicesAsync()
         {

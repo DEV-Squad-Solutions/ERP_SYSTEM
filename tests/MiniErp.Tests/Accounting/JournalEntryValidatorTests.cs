@@ -71,6 +71,37 @@ public sealed class JournalEntryValidatorTests
     }
 
     [Fact]
+    public void RequestValidator_RequiresPartyTypeAndIdTogether()
+    {
+        var request = CreateRequest(100m, 100m) with
+        {
+            Lines =
+            [
+                new JournalEntryLineRequest(
+                    AccountId: 1,
+                    Description: null,
+                    Debit: 100m,
+                    Credit: 0m,
+                    PartyType: JournalPartyType.Customer,
+                    PartyId: null),
+                new JournalEntryLineRequest(
+                    AccountId: 2,
+                    Description: null,
+                    Debit: 0m,
+                    Credit: 100m)
+            ]
+        };
+
+        var result = new JournalEntryRequestValidator().Validate(request);
+
+        Assert.Contains(
+            result.Errors,
+            error => error.PropertyName.Contains(
+                nameof(JournalEntryLineRequest.PartyId),
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void UpdateValidator_RequiresRowVersion()
     {
         var result = new JournalEntryUpdateRequestValidator().Validate(

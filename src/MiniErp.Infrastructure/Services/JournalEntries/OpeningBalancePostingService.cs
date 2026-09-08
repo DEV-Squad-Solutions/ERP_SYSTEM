@@ -97,7 +97,9 @@ public sealed class OpeningBalancePostingService(
                         cashboxAccountResult.Value,
                         "رصيد الخزينة الافتتاحي",
                         cashboxIsDebit ? amount : 0m,
-                        cashboxIsDebit ? 0m : amount),
+                        cashboxIsDebit ? 0m : amount,
+                        PartyType: JournalPartyType.Cashbox,
+                        PartyId: cashbox.Id),
                     new JournalEntryLineRequest(
                         equityResult.Value,
                         "مقابل رصيد الخزينة الافتتاحي",
@@ -122,6 +124,7 @@ public sealed class OpeningBalancePostingService(
             .Select(entity => new
             {
                 entity.Id,
+                entity.BusinessPartnerId,
                 entity.DocumentNumber,
                 entity.DocumentDate,
                 entity.BalanceType,
@@ -160,6 +163,8 @@ public sealed class OpeningBalancePostingService(
             isDebit,
             controlResult,
             "رصيد افتتاحي طرف",
+            isDebit ? JournalPartyType.Customer : JournalPartyType.Supplier,
+            balance.BusinessPartnerId,
             cancellationToken);
     }
 
@@ -175,6 +180,7 @@ public sealed class OpeningBalancePostingService(
             .Select(entity => new
             {
                 entity.Id,
+                entity.EmployeeId,
                 entity.PayrollEntryId,
                 entity.DocumentNumber,
                 entity.DocumentDate,
@@ -224,6 +230,8 @@ public sealed class OpeningBalancePostingService(
             isDebit,
             controlResult,
             "رصيد افتتاحي موظف",
+            JournalPartyType.Employee,
+            balance.EmployeeId,
             cancellationToken);
     }
 
@@ -246,6 +254,8 @@ public sealed class OpeningBalancePostingService(
         bool controlIsDebit,
         Result<int> controlResult,
         string description,
+        JournalPartyType partyType,
+        int partyId,
         CancellationToken cancellationToken)
     {
         if (amount <= 0m)
@@ -281,10 +291,12 @@ public sealed class OpeningBalancePostingService(
                 Lines:
                 [
                     new JournalEntryLineRequest(
-                        controlResult.Value,
-                        description,
-                        controlIsDebit ? amount : 0m,
-                        controlIsDebit ? 0m : amount),
+                        AccountId: controlResult.Value,
+                        Description: description,
+                        Debit: controlIsDebit ? amount : 0m,
+                        Credit: controlIsDebit ? 0m : amount,
+                        PartyType: partyType,
+                        PartyId: partyId),
                     new JournalEntryLineRequest(
                         equityResult.Value,
                         "مقابل الرصيد الافتتاحي",

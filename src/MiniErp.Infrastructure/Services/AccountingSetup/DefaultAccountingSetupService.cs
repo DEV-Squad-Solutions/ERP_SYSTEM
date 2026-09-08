@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Features.Companies;
 using MiniErp.Domain.Entities.Accounting;
+using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 
@@ -21,7 +22,8 @@ public sealed class DefaultAccountingSetupService(
         new("1400", "ذمم الموظفين المدينة", "1000", AccountType.Asset, NormalBalance.Debit, true),
         new("2000", "الالتزامات", null, AccountType.Liability, NormalBalance.Credit, false),
         new("2100", "الموردون", "2000", AccountType.Liability, NormalBalance.Credit, true),
-        new("2200", "مستحقات الموظفين والسائقين", "2000", AccountType.Liability, NormalBalance.Credit, true),
+        new("2200", "مستحقات الموظفين", "2000", AccountType.Liability, NormalBalance.Credit, true),
+        new("2300", "مستحقات السائقين", "2000", AccountType.Liability, NormalBalance.Credit, true),
         new("3000", "حقوق الملكية", null, AccountType.Equity, NormalBalance.Credit, false),
         new("3100", "رأس المال", "3000", AccountType.Equity, NormalBalance.Credit, true),
         new("3200", "مقابل الأرصدة الافتتاحية", "3000", AccountType.Equity, NormalBalance.Credit, true),
@@ -49,7 +51,7 @@ public sealed class DefaultAccountingSetupService(
         new(AccountingMappingType.CustomerControl, "1200"),
         new(AccountingMappingType.SupplierControl, "2100"),
         new(AccountingMappingType.EmployeeControl, "2200"),
-        new(AccountingMappingType.DriverControl, "2200"),
+        new(AccountingMappingType.DriverControl, "2300"),
         new(AccountingMappingType.ExchangeGain, "4300"),
         new(AccountingMappingType.ExchangeLoss, "5400"),
         new(AccountingMappingType.InventoryAdjustmentGain, "4400"),
@@ -57,6 +59,64 @@ public sealed class DefaultAccountingSetupService(
         new(AccountingMappingType.OpeningBalanceEquity, "3200"),
         new(AccountingMappingType.EmployeeReceivable, "1400"),
         new(AccountingMappingType.DriverTripExpense, "5200")
+    ];
+
+    private static readonly CashMovementTypeSeed[] CashMovementTypeSeeds =
+    [
+        new(
+            "Customer Collection",
+            CashDirection.Receipt,
+            CashMovementClassification.PartnerSettlement,
+            PartnerAccountEffect.Credit,
+            InvoiceType.Sales),
+        new(
+            "Supplier Refund",
+            CashDirection.Receipt,
+            CashMovementClassification.PartnerSettlement,
+            PartnerAccountEffect.Credit,
+            InvoiceType.PurchaseReturn),
+        new(
+            "Other Receipt",
+            CashDirection.Receipt,
+            CashMovementClassification.Other,
+            PartnerAccountEffect.None,
+            null),
+        new(
+            "Other Revenue",
+            CashDirection.Receipt,
+            CashMovementClassification.Revenue,
+            PartnerAccountEffect.None,
+            null),
+        new(
+            "Supplier Payment",
+            CashDirection.Payment,
+            CashMovementClassification.PartnerSettlement,
+            PartnerAccountEffect.Debit,
+            InvoiceType.Purchase),
+        new(
+            "Customer Refund",
+            CashDirection.Payment,
+            CashMovementClassification.PartnerSettlement,
+            PartnerAccountEffect.Debit,
+            InvoiceType.SalesReturn),
+        new(
+            "Driver Advance",
+            CashDirection.Payment,
+            CashMovementClassification.Other,
+            PartnerAccountEffect.None,
+            null),
+        new(
+            "Other Payment",
+            CashDirection.Payment,
+            CashMovementClassification.Other,
+            PartnerAccountEffect.None,
+            null),
+        new(
+            "Administrative Expense",
+            CashDirection.Payment,
+            CashMovementClassification.Expense,
+            PartnerAccountEffect.None,
+            null)
     ];
 
     private static readonly StatementSeed[] StatementSeeds =
@@ -71,7 +131,8 @@ public sealed class DefaultAccountingSetupService(
                 new("FP-140", "ذمم الموظفين المدينة", "FP-100", 140, true),
                 new("FP-200", "الالتزامات", null, 200, false),
                 new("FP-210", "الموردون", "FP-200", 210, true),
-                new("FP-220", "مستحقات الموظفين والسائقين", "FP-200", 220, true),
+                new("FP-220", "مستحقات الموظفين", "FP-200", 220, true),
+                new("FP-230", "مستحقات السائقين", "FP-200", 230, true),
                 new("FP-300", "حقوق الملكية", null, 300, false),
                 new("FP-310", "رأس المال", "FP-300", 310, true),
                 new("FP-320", "مقابل الأرصدة الافتتاحية", "FP-300", 320, true)
@@ -80,6 +141,7 @@ public sealed class DefaultAccountingSetupService(
                 new("1110", "FP-110"), new("1200", "FP-120"),
                 new("1300", "FP-130"), new("1400", "FP-140"),
                 new("2100", "FP-210"), new("2200", "FP-220"),
+                new("2300", "FP-230"),
                 new("3100", "FP-310"), new("3200", "FP-320")
             ]),
         new(
@@ -124,6 +186,7 @@ public sealed class DefaultAccountingSetupService(
                 new("1200", "CF-110"), new("4100", "CF-110"),
                 new("1300", "CF-120"), new("2100", "CF-120"),
                 new("2200", "CF-130"), new("5100", "CF-130"),
+                new("2300", "CF-130"),
                 new("5200", "CF-130"), new("5300", "CF-130"),
                 new("1400", "CF-140"), new("4200", "CF-140"),
                 new("4300", "CF-140"), new("4400", "CF-140"),
@@ -145,11 +208,195 @@ public sealed class DefaultAccountingSetupService(
             effectiveDate,
             cancellationToken);
 
+        await EnsureCashManagementDefaultsAsync(
+            companyId,
+            effectiveDate,
+            cancellationToken);
+
         await EnsureFiscalYearSetupAsync(
             companyId,
             fiscalYear.Id,
             accounts,
             cancellationToken);
+    }
+
+    private async Task EnsureCashManagementDefaultsAsync(
+        int companyId,
+        DateOnly effectiveDate,
+        CancellationToken cancellationToken)
+    {
+        var baseCurrency = await dbContext.CompanySettings
+            .IgnoreQueryFilters()
+            .Where(settings => settings.CompanyId == companyId)
+            .Select(settings => (CurrencyCode?)settings.BaseCurrency)
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? CurrencyCode.EGP;
+
+        var cashbox = await dbContext.Cashboxes
+            .IgnoreQueryFilters()
+            .Where(entity =>
+                entity.CompanyId == companyId &&
+                entity.Code == "CASH-MAIN")
+            .OrderBy(entity => entity.IsDeleted)
+            .ThenBy(entity => entity.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (cashbox is null)
+        {
+            cashbox = new Cashbox
+            {
+                CompanyId = companyId,
+                Code = "CASH-MAIN",
+                Name = "Main Cashbox",
+                Currency = baseCurrency,
+                OpeningBalance = 0m,
+                IsActive = true
+            };
+            cashbox.ApplyOpeningExchangeRate(
+                effectiveDate,
+                exchangeRateId: null,
+                exchangeRate: 1m);
+            dbContext.Cashboxes.Add(cashbox);
+        }
+        else
+        {
+            // Restore the existing row in place so its historical references
+            // remain valid; never remove and recreate a soft-deleted cashbox.
+            cashbox.IsDeleted = false;
+            cashbox.DeletedById = null;
+            cashbox.DeletedOn = null;
+            cashbox.DeletedByPc = null;
+            cashbox.IsActive = true;
+        }
+
+        var movementTypes = await dbContext.CashMovementTypes
+            .IgnoreQueryFilters()
+            .Where(entity => entity.CompanyId == companyId)
+            .OrderBy(entity => entity.IsDeleted)
+            .ThenBy(entity => entity.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var seed in CashMovementTypeSeeds)
+        {
+            var movementType = movementTypes
+                .Where(entity =>
+                    entity.Direction == seed.Direction &&
+                    entity.Name == seed.Name)
+                .OrderBy(entity => entity.IsDeleted)
+                .ThenBy(entity => entity.Id)
+                .FirstOrDefault();
+            if (movementType is null)
+            {
+                movementType = new CashMovementType
+                {
+                    CompanyId = companyId,
+                    Name = seed.Name,
+                    Direction = seed.Direction,
+                    Classification = seed.Classification,
+                    PartnerEffect = seed.PartnerEffect,
+                    IsActive = true
+                };
+                SetDefaultForInvoiceTypeIfAvailable(
+                    movementType,
+                    seed.DefaultInvoiceType,
+                    movementTypes);
+                dbContext.CashMovementTypes.Add(movementType);
+                movementTypes.Add(movementType);
+                continue;
+            }
+
+            var wasDeleted = movementType.IsDeleted;
+            movementType.IsDeleted = false;
+            movementType.DeletedById = null;
+            movementType.DeletedOn = null;
+            movementType.DeletedByPc = null;
+            movementType.IsActive = true;
+            movementType.Classification = seed.Classification;
+            movementType.PartnerEffect = seed.PartnerEffect;
+
+            // A deleted row can still carry an old default flag. Clear it when
+            // another active row already owns that default to avoid filtered
+            // unique-index conflicts during restoration. Clear all flags on a
+            // restored seed so an old, unrelated invoice default cannot block
+            // the intended default for another invoice type.
+            if (wasDeleted)
+            {
+                movementType.IsDefaultForSales = false;
+                movementType.IsDefaultForPurchase = false;
+                movementType.IsDefaultForSalesReturn = false;
+                movementType.IsDefaultForPurchaseReturn = false;
+            }
+
+            SetDefaultForInvoiceTypeIfAvailable(
+                movementType,
+                seed.DefaultInvoiceType,
+                movementTypes,
+                wasDeleted);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void SetDefaultForInvoiceTypeIfAvailable(
+        CashMovementType movementType,
+        InvoiceType? invoiceType,
+        IReadOnlyCollection<CashMovementType> movementTypes,
+        bool wasDeleted = false)
+    {
+        if (invoiceType is not InvoiceType type)
+        {
+            return;
+        }
+
+        var hasAnotherActiveDefault = movementTypes.Any(entity =>
+            !ReferenceEquals(entity, movementType) &&
+            !entity.IsDeleted &&
+            IsDefaultForInvoiceType(entity, type));
+        if (hasAnotherActiveDefault)
+        {
+            SetDefaultForInvoiceType(movementType, type, value: false);
+            return;
+        }
+
+        // Preserve an existing active default. A restored soft-deleted seed
+        // becomes the default only when no active row currently owns it.
+        if (!wasDeleted || !IsDefaultForInvoiceType(movementType, type))
+        {
+            SetDefaultForInvoiceType(movementType, type, value: true);
+        }
+    }
+
+    private static bool IsDefaultForInvoiceType(
+        CashMovementType movementType,
+        InvoiceType invoiceType) =>
+        invoiceType switch
+        {
+            InvoiceType.Sales => movementType.IsDefaultForSales,
+            InvoiceType.Purchase => movementType.IsDefaultForPurchase,
+            InvoiceType.SalesReturn => movementType.IsDefaultForSalesReturn,
+            InvoiceType.PurchaseReturn => movementType.IsDefaultForPurchaseReturn,
+            _ => false
+        };
+
+    private static void SetDefaultForInvoiceType(
+        CashMovementType movementType,
+        InvoiceType invoiceType,
+        bool value)
+    {
+        switch (invoiceType)
+        {
+            case InvoiceType.Sales:
+                movementType.IsDefaultForSales = value;
+                break;
+            case InvoiceType.Purchase:
+                movementType.IsDefaultForPurchase = value;
+                break;
+            case InvoiceType.SalesReturn:
+                movementType.IsDefaultForSalesReturn = value;
+                break;
+            case InvoiceType.PurchaseReturn:
+                movementType.IsDefaultForPurchaseReturn = value;
+                break;
+        }
     }
 
     public async Task EnsureFiscalYearAsync(
@@ -649,6 +896,13 @@ public sealed class DefaultAccountingSetupService(
     private sealed record MappingSeed(
         AccountingMappingType MappingType,
         string AccountCode);
+
+    private sealed record CashMovementTypeSeed(
+        string Name,
+        CashDirection Direction,
+        CashMovementClassification Classification,
+        PartnerAccountEffect PartnerEffect,
+        InvoiceType? DefaultInvoiceType);
 
     private sealed record StatementSeed(
         FinancialStatementType StatementType,

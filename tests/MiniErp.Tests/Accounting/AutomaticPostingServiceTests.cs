@@ -82,15 +82,27 @@ public sealed class AutomaticPostingServiceTests
             Lines =
             [
                 new JournalEntryLineRequest(2, "سطر صفري", 0m, 0m),
-                new JournalEntryLineRequest(2, "مدين", 125m, 0m),
-                new JournalEntryLineRequest(3, "دائن", 0m, 125m),
+                new JournalEntryLineRequest(
+                    AccountId: 2,
+                    Description: "مدين",
+                    Debit: 125m,
+                    Credit: 0m,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 7),
+                new JournalEntryLineRequest(
+                    AccountId: 3,
+                    Description: "دائن",
+                    Debit: 0m,
+                    Credit: 125m,
+                    PartyType: JournalPartyType.Customer,
+                    PartyId: 11),
                 new JournalEntryLineRequest(3, "سطر صفري", 0m, 0m)
             ]
         };
 
         var result = await service.CreateOrUpdateAsync(request);
 
-        Assert.True(result.IsSuccess);
+        Assert.True(result.IsSuccess, string.Join("; ", result.Errors.Select(error => error.Code)));
         var lines = await database.Context.JournalEntryLines
             .AsNoTracking()
             .Where(line => line.JournalEntryId == result.Value.JournalEntryId)
@@ -249,9 +261,15 @@ public sealed class AutomaticPostingServiceTests
         Assert.Equal(150m, entry.Lines.Sum(line => line.Debit));
         Assert.Equal(150m, entry.Lines.Sum(line => line.Credit));
         Assert.Contains(entry.Lines, line =>
-            line.AccountId == 2 && line.Debit == 150m);
+            line.AccountId == 2 &&
+            line.Debit == 150m &&
+            line.PartyType == JournalPartyType.Cashbox &&
+            line.PartyId == 7);
         Assert.Contains(entry.Lines, line =>
-            line.AccountId == 3 && line.Credit == 150m);
+            line.AccountId == 3 &&
+            line.Credit == 150m &&
+            line.PartyType == JournalPartyType.Customer &&
+            line.PartyId == 11);
 
         var deleted = await postingService.DeleteAsync(voucher.Id);
         Assert.True(deleted.IsSuccess);
@@ -284,6 +302,16 @@ public sealed class AutomaticPostingServiceTests
         Assert.Equal(105m, entry.Lines.Sum(line => line.Debit));
         Assert.Equal(105m, entry.Lines.Sum(line => line.Credit));
         Assert.Contains(entry.Lines, line =>
+            line.AccountId == 4 &&
+            line.Debit == 105m &&
+            line.PartyType == JournalPartyType.Cashbox &&
+            line.PartyId == 8);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 2 &&
+            line.Credit == 100m &&
+            line.PartyType == JournalPartyType.Cashbox &&
+            line.PartyId == 7);
+        Assert.Contains(entry.Lines, line =>
             line.AccountId == 5 && line.Credit == 5m);
 
         await database.Context.Database.ExecuteSqlRawAsync(
@@ -301,7 +329,6 @@ public sealed class AutomaticPostingServiceTests
         Assert.Equal(100m, entry.Lines.Sum(line => line.Credit));
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 6 && line.Debit == 5m);
-
         var deleted = await postingService.DeleteAsync(50);
         Assert.True(deleted.IsSuccess);
         Assert.Empty(await database.Context.JournalEntries.ToListAsync());
@@ -335,9 +362,21 @@ public sealed class AutomaticPostingServiceTests
         Assert.Equal(265m, entry.Lines.Sum(line => line.Debit));
         Assert.Equal(265m, entry.Lines.Sum(line => line.Credit));
         Assert.Contains(entry.Lines, line =>
-            line.AccountId == 10 && line.Debit == 105m);
+            line.AccountId == 10 &&
+            line.Debit == 105m &&
+            line.PartyType == JournalPartyType.Cashbox &&
+            line.PartyId == 9);
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 5 && line.Credit == 5m);
+        var partnerLines = entry.Lines
+            .Where(line => line.AccountId == 3)
+            .ToArray();
+        Assert.Equal(2, partnerLines.Length);
+        Assert.All(partnerLines, line =>
+        {
+            Assert.Equal(JournalPartyType.Customer, line.PartyType);
+            Assert.Equal(11, line.PartyId);
+        });
 
         await database.Context.Database.ExecuteSqlRawAsync(
             "UPDATE Invoices SET Total = 120, BaseTotal = 120 WHERE Id = 60");
@@ -362,6 +401,11 @@ public sealed class AutomaticPostingServiceTests
         Assert.Equal(310m, entry.Lines.Sum(line => line.Credit));
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 6 && line.Debit == 5m);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 10 &&
+            line.Debit == 115m &&
+            line.PartyType == JournalPartyType.Cashbox &&
+            line.PartyId == 9);
 
         var deleted = await postingService.DeleteAsync(60);
         Assert.True(deleted.IsSuccess);
@@ -545,7 +589,10 @@ public sealed class AutomaticPostingServiceTests
             .SingleAsync();
         var entryId = entry.Id;
         Assert.Contains(entry.Lines, line =>
-            line.AccountId == 3 && line.Debit == 300m);
+            line.AccountId == 3 &&
+            line.Debit == 300m &&
+            line.PartyType == JournalPartyType.Customer &&
+            line.PartyId == 11);
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 11 && line.Credit == 300m);
 
@@ -567,7 +614,10 @@ public sealed class AutomaticPostingServiceTests
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 11 && line.Debit == 350m);
         Assert.Contains(entry.Lines, line =>
-            line.AccountId == 12 && line.Credit == 350m);
+            line.AccountId == 12 &&
+            line.Credit == 350m &&
+            line.PartyType == JournalPartyType.Supplier &&
+            line.PartyId == 11);
 
         var deleted = await postingService.DeleteAsync(
             JournalEntrySourceType.PartnerOpeningBalance,
@@ -594,7 +644,10 @@ public sealed class AutomaticPostingServiceTests
             .SingleAsync();
         var entryId = entry.Id;
         Assert.Contains(entry.Lines, line =>
-            line.AccountId == 14 && line.Debit == 80m);
+            line.AccountId == 14 &&
+            line.Debit == 80m &&
+            line.PartyType == JournalPartyType.Employee &&
+            line.PartyId == 21);
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 11 && line.Credit == 80m);
 
@@ -619,7 +672,10 @@ public sealed class AutomaticPostingServiceTests
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 11 && line.Debit == 90m);
         Assert.Contains(entry.Lines, line =>
-            line.AccountId == 13 && line.Credit == 90m);
+            line.AccountId == 13 &&
+            line.Credit == 90m &&
+            line.PartyType == JournalPartyType.Employee &&
+            line.PartyId == 21);
 
         var deleted = await postingService.DeleteAsync(
             JournalEntrySourceType.EmployeeOpeningBalance,
@@ -648,7 +704,10 @@ public sealed class AutomaticPostingServiceTests
         Assert.Equal(JournalEntrySourceType.CashboxOpeningBalance,
             entry.SourceType);
         Assert.Contains(entry.Lines, line =>
-            line.AccountId == 2 && line.Debit == 500m);
+            line.AccountId == 2 &&
+            line.Debit == 500m &&
+            line.PartyType == JournalPartyType.Cashbox &&
+            line.PartyId == 7);
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 11 && line.Credit == 500m);
 
@@ -666,7 +725,10 @@ public sealed class AutomaticPostingServiceTests
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 11 && line.Debit == 100m);
         Assert.Contains(entry.Lines, line =>
-            line.AccountId == 2 && line.Credit == 100m);
+            line.AccountId == 2 &&
+            line.Credit == 100m &&
+            line.PartyType == JournalPartyType.Cashbox &&
+            line.PartyId == 7);
 
         var deleted = await postingService.DeleteAsync(
             JournalEntrySourceType.CashboxOpeningBalance,
@@ -701,7 +763,10 @@ public sealed class AutomaticPostingServiceTests
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 9 && line.Debit == 70m);
         Assert.Contains(entry.Lines, line =>
-            line.AccountId == 13 && line.Credit == 70m);
+            line.AccountId == 15 &&
+            line.Credit == 70m &&
+            line.PartyType == JournalPartyType.Driver &&
+            line.PartyId == 31);
 
         await database.Context.Database.ExecuteSqlRawAsync(
             "UPDATE DriverTrips SET Cost = 85 WHERE Id = 95");
@@ -807,12 +872,16 @@ public sealed class AutomaticPostingServiceTests
                     AccountId: 2,
                     Description: "الخزينة",
                     Debit: amount,
-                    Credit: 0m),
+                    Credit: 0m,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 7),
                 new JournalEntryLineRequest(
                     AccountId: 3,
                     Description: "الطرف المقابل",
                     Debit: 0m,
-                    Credit: amount)
+                    Credit: amount,
+                    PartyType: JournalPartyType.Customer,
+                    PartyId: 11)
             ]);
 
     private sealed class TestDatabase(
@@ -941,6 +1010,7 @@ public sealed class AutomaticPostingServiceTests
                     Name TEXT NOT NULL,
                     OpeningBalanceDate TEXT NOT NULL,
                     BaseOpeningBalance TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 
@@ -960,6 +1030,7 @@ public sealed class AutomaticPostingServiceTests
                 CREATE TABLE Invoices (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    BusinessPartnerId INTEGER NOT NULL,
                     InvoiceNumber TEXT NOT NULL,
                     InvoiceDate TEXT NOT NULL,
                     InvoiceType INTEGER NOT NULL,
@@ -1001,6 +1072,7 @@ public sealed class AutomaticPostingServiceTests
                 CREATE TABLE PartnerOpeningBalances (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    BusinessPartnerId INTEGER NOT NULL,
                     DocumentNumber TEXT NOT NULL,
                     DocumentDate TEXT NOT NULL,
                     BalanceType INTEGER NOT NULL,
@@ -1011,6 +1083,7 @@ public sealed class AutomaticPostingServiceTests
                 CREATE TABLE EmployeeOpeningBalances (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    EmployeeId INTEGER NOT NULL,
                     PayrollEntryId INTEGER NULL,
                     DocumentNumber TEXT NOT NULL,
                     DocumentDate TEXT NOT NULL,
@@ -1022,6 +1095,7 @@ public sealed class AutomaticPostingServiceTests
                 CREATE TABLE DriverTrips (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    DriverId INTEGER NOT NULL,
                     InvoiceNumber TEXT NOT NULL,
                     TripDate TEXT NOT NULL,
                     Cost TEXT NULL,
@@ -1035,6 +1109,33 @@ public sealed class AutomaticPostingServiceTests
                     CashVoucherId INTEGER NOT NULL,
                     AppliedBaseAmount TEXT NOT NULL,
                     CashboxBaseAmount TEXT NOT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE BusinessPartners (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    Code TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE Employees (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    Code TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE Drivers (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    Code TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 
@@ -1063,6 +1164,8 @@ public sealed class AutomaticPostingServiceTests
                     CompanyId INTEGER NOT NULL,
                     JournalEntryId INTEGER NOT NULL,
                     AccountId INTEGER NOT NULL,
+                    PartyType INTEGER NULL,
+                    PartyId INTEGER NULL,
                     Description TEXT NULL,
                     Debit TEXT NOT NULL,
                     Credit TEXT NOT NULL,
@@ -1109,7 +1212,8 @@ public sealed class AutomaticPostingServiceTests
                     (11, 1, '3100', 'Opening equity', 1, 3, 2, 1, 1),
                     (12, 1, '2100', 'Suppliers', 1, 2, 2, 1, 1),
                     (13, 1, '2200', 'Employee payable', 1, 2, 2, 1, 1),
-                    (14, 1, '1210', 'Employee receivable', 1, 1, 1, 1, 1);
+                    (14, 1, '1210', 'Employee receivable', 1, 1, 1, 1, 1),
+                    (15, 1, '2300', 'Driver payable', 1, 2, 2, 1, 1);
 
                 INSERT INTO AccountMappings
                     (CompanyId, FiscalYearId, MappingType, SourceId, AccountId)
@@ -1123,7 +1227,7 @@ public sealed class AutomaticPostingServiceTests
                     (1, 1, 9, NULL, 3),
                     (1, 1, 10, NULL, 12),
                     (1, 1, 11, NULL, 13),
-                    (1, 1, 12, NULL, 13),
+                    (1, 1, 12, NULL, 15),
                     (1, 1, 13, NULL, 5),
                     (1, 1, 14, NULL, 6),
                     (1, 1, 15, NULL, 5),
@@ -1144,7 +1248,9 @@ public sealed class AutomaticPostingServiceTests
                     (Id, CompanyId, Code, Name, OpeningBalanceDate,
                      BaseOpeningBalance)
                 VALUES
-                    (7, 1, 'CBX-0007', 'Main cashbox', '2026-01-01', 500);
+                    (7, 1, 'CBX-0007', 'Main cashbox', '2026-01-01', 500),
+                    (8, 1, 'CBX-0008', 'Destination cashbox', '2026-01-01', 0),
+                    (9, 1, 'CBX-0009', 'Invoice cashbox', '2026-01-01', 0);
 
                 INSERT INTO CashVouchers
                     (Id, CompanyId, CashboxTransferId, Direction, CashboxId,
@@ -1155,10 +1261,11 @@ public sealed class AutomaticPostingServiceTests
                     (601, 1, NULL, 1, 9, 105, 1, 105, 1);
 
                 INSERT INTO Invoices
-                    (Id, CompanyId, InvoiceNumber, InvoiceDate, InvoiceType,
-                     Total, ExchangeRate, BaseTotal, Notes)
+                    (Id, CompanyId, BusinessPartnerId, InvoiceNumber,
+                     InvoiceDate, InvoiceType, Total, ExchangeRate,
+                     BaseTotal, Notes)
                 VALUES
-                    (60, 1, 'INV-0060', '2026-08-31', 1,
+                    (60, 1, 11, 'INV-0060', '2026-08-31', 1,
                      100, 1, 100, 'Sales invoice');
 
                 INSERT INTO ItemMovements
@@ -1180,22 +1287,37 @@ public sealed class AutomaticPostingServiceTests
                     (80, 1, 'OPEN-0080', '2026-01-01');
 
                 INSERT INTO PartnerOpeningBalances
-                    (Id, CompanyId, DocumentNumber, DocumentDate,
-                     BalanceType, BaseAmount)
-                VALUES
-                    (90, 1, 'POB-0090', '2026-01-01', 1, 300);
-
-                INSERT INTO EmployeeOpeningBalances
-                    (Id, CompanyId, PayrollEntryId, DocumentNumber,
+                    (Id, CompanyId, BusinessPartnerId, DocumentNumber,
                      DocumentDate, BalanceType, BaseAmount)
                 VALUES
-                    (91, 1, NULL, 'EOB-0091', '2026-01-01', 1, 80),
-                    (92, 1, 500, 'EOB-0092', '2026-08-31', 2, 500);
+                    (90, 1, 11, 'POB-0090', '2026-01-01', 1, 300);
+
+                INSERT INTO EmployeeOpeningBalances
+                    (Id, CompanyId, EmployeeId, PayrollEntryId,
+                     DocumentNumber, DocumentDate, BalanceType, BaseAmount)
+                VALUES
+                    (91, 1, 21, NULL, 'EOB-0091', '2026-01-01', 1, 80),
+                    (92, 1, 21, 500, 'EOB-0092', '2026-08-31', 2, 500);
 
                 INSERT INTO DriverTrips
-                    (Id, CompanyId, InvoiceNumber, TripDate, Cost)
+                    (Id, CompanyId, DriverId, InvoiceNumber, TripDate, Cost)
                 VALUES
-                    (95, 1, 'INV-0095', '2026-08-31', 70);
+                    (95, 1, 31, 'INV-0095', '2026-08-31', 70);
+
+                INSERT INTO BusinessPartners
+                    (Id, CompanyId, Code, Name, IsActive)
+                VALUES
+                    (11, 1, 'BP-0011', 'Test partner', 1);
+
+                INSERT INTO Employees
+                    (Id, CompanyId, Code, Name, IsActive)
+                VALUES
+                    (21, 1, 'EMP-0021', 'Test employee', 1);
+
+                INSERT INTO Drivers
+                    (Id, CompanyId, Code, Name, IsActive)
+                VALUES
+                    (31, 1, 'DRV-0031', 'Test driver', 1);
 
                 INSERT INTO InvoicePayments
                     (Id, CompanyId, InvoiceId, CashVoucherId,

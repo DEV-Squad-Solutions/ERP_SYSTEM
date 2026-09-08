@@ -134,6 +134,7 @@ public sealed class JournalEntryService(
 
         var accountValidation = await ValidateAccountsAsync(
             request.Lines,
+            request.FiscalYearId,
             cancellationToken);
         if (accountValidation.IsFailure)
         {
@@ -165,6 +166,8 @@ public sealed class JournalEntryService(
             {
                 CompanyId = companyId,
                 AccountId = line.AccountId,
+                PartyType = line.PartyType,
+                PartyId = line.PartyId,
                 Description = NormalizeOptional(line.Description),
                 Debit = line.Debit,
                 Credit = line.Credit
@@ -262,6 +265,7 @@ public sealed class JournalEntryService(
 
         var accountValidation = await ValidateAccountsAsync(
             request.Lines,
+            request.FiscalYearId,
             cancellationToken);
         if (accountValidation.IsFailure)
         {
@@ -281,6 +285,8 @@ public sealed class JournalEntryService(
         {
             CompanyId = companyId,
             AccountId = line.AccountId,
+            PartyType = line.PartyType,
+            PartyId = line.PartyId,
             Description = NormalizeOptional(line.Description),
             Debit = line.Debit,
             Credit = line.Credit
@@ -409,6 +415,7 @@ public sealed class JournalEntryService(
 
     private async Task<Result> ValidateAccountsAsync(
         IReadOnlyList<JournalEntryLineRequest> lines,
+        int fiscalYearId,
         CancellationToken cancellationToken)
     {
         var accountIds = lines
@@ -428,10 +435,96 @@ public sealed class JournalEntryService(
                 account.ParentAccountId
             })
             .ToDictionaryAsync(account => account.Id, cancellationToken);
+        var mappingRows = await dbContext.AccountMappings
+            .AsNoTracking()
+            .Where(mapping =>
+                mapping.CompanyId == companyId &&
+                mapping.FiscalYearId == fiscalYearId &&
+                accountIds.Contains(mapping.AccountId) &&
+                (mapping.MappingType == AccountingMappingType.CustomerControl ||
+                 mapping.MappingType == AccountingMappingType.SupplierControl ||
+                 mapping.MappingType == AccountingMappingType.EmployeeControl ||
+                 mapping.MappingType == AccountingMappingType.EmployeeReceivable ||
+                 mapping.MappingType == AccountingMappingType.DriverControl ||
+                 mapping.MappingType == AccountingMappingType.Cashbox))
+            .Select(mapping => new
+            {
+                mapping.AccountId,
+                mapping.MappingType,
+                mapping.SourceId
+            })
+            .ToListAsync(cancellationToken);
+        var partyTypesByAccount = mappingRows
+            .Select(mapping => new
+            {
+                mapping.AccountId,
+                PartyType = ToJournalPartyType(mapping.MappingType)
+            })
+            .Distinct()
+            .ToLookup(mapping => mapping.AccountId, mapping => mapping.PartyType);
+        var cashboxIdsByAccount = mappingRows
+            .Where(mapping =>
+                mapping.MappingType == AccountingMappingType.Cashbox &&
+                mapping.SourceId.HasValue)
+            .ToLookup(mapping => mapping.AccountId, mapping => mapping.SourceId!.Value);
+        var partnerIds = lines
+            .Where(line => line.PartyType is
+                JournalPartyType.Customer or JournalPartyType.Supplier)
+            .Select(line => line.PartyId)
+            .OfType<int>()
+            .Distinct()
+            .ToArray();
+        var partners = await dbContext.BusinessPartners
+            .AsNoTracking()
+            .Where(party =>
+                party.CompanyId == companyId &&
+                partnerIds.Contains(party.Id))
+            .Select(party => new { party.Id, party.IsActive })
+            .ToDictionaryAsync(party => party.Id, cancellationToken);
+        var employeeIds = lines
+            .Where(line => line.PartyType == JournalPartyType.Employee)
+            .Select(line => line.PartyId)
+            .OfType<int>()
+            .Distinct()
+            .ToArray();
+        var employees = await dbContext.Employees
+            .AsNoTracking()
+            .Where(party =>
+                party.CompanyId == companyId &&
+                employeeIds.Contains(party.Id))
+            .Select(party => new { party.Id, party.IsActive })
+            .ToDictionaryAsync(party => party.Id, cancellationToken);
+        var driverIds = lines
+            .Where(line => line.PartyType == JournalPartyType.Driver)
+            .Select(line => line.PartyId)
+            .OfType<int>()
+            .Distinct()
+            .ToArray();
+        var drivers = await dbContext.Drivers
+            .AsNoTracking()
+            .Where(party =>
+                party.CompanyId == companyId &&
+                driverIds.Contains(party.Id))
+            .Select(party => new { party.Id, party.IsActive })
+            .ToDictionaryAsync(party => party.Id, cancellationToken);
+        var cashboxIds = lines
+            .Where(line => line.PartyType == JournalPartyType.Cashbox)
+            .Select(line => line.PartyId)
+            .OfType<int>()
+            .Distinct()
+            .ToArray();
+        var cashboxes = await dbContext.Cashboxes
+            .AsNoTracking()
+            .Where(cashbox =>
+                cashbox.CompanyId == companyId &&
+                cashboxIds.Contains(cashbox.Id))
+            .Select(cashbox => new { cashbox.Id, cashbox.IsActive })
+            .ToDictionaryAsync(cashbox => cashbox.Id, cancellationToken);
         var errors = new List<Error>();
         for (var index = 0; index < lines.Count; index++)
         {
-            var accountId = lines[index].AccountId;
+            var line = lines[index];
+            var accountId = line.AccountId;
             if (!accounts.TryGetValue(accountId, out var account))
             {
                 errors.Add(AccountNotFound(accountId, index));
@@ -448,12 +541,90 @@ public sealed class JournalEntryService(
             {
                 errors.Add(AccountMustBeChild(accountId, index));
             }
+
+            var allowedPartyTypes = partyTypesByAccount[accountId].ToHashSet();
+            if (line.PartyType.HasValue != line.PartyId.HasValue)
+            {
+                errors.Add(PartyShapeInvalid(index));
+                continue;
+            }
+
+            if (allowedPartyTypes.Count == 0)
+            {
+                if (line.PartyType.HasValue)
+                {
+                    errors.Add(PartyNotAllowed(accountId, index));
+                }
+
+                continue;
+            }
+
+            if (!line.PartyType.HasValue || !line.PartyId.HasValue)
+            {
+                errors.Add(PartyRequired(accountId, index));
+                continue;
+            }
+
+            if (!Enum.IsDefined(line.PartyType.Value) ||
+                !allowedPartyTypes.Contains(line.PartyType.Value))
+            {
+                errors.Add(PartyTypeNotAllowed(accountId, index));
+                continue;
+            }
+
+            if (line.PartyType == JournalPartyType.Cashbox &&
+                !cashboxIdsByAccount[accountId].Contains(line.PartyId.Value))
+            {
+                errors.Add(PartyNotAllowed(accountId, index));
+                continue;
+            }
+
+            var partyState = line.PartyType.Value switch
+            {
+                JournalPartyType.Customer or JournalPartyType.Supplier =>
+                    partners.TryGetValue(line.PartyId.Value, out var party)
+                        ? (Found: true, party.IsActive)
+                        : (Found: false, IsActive: false),
+                JournalPartyType.Employee =>
+                    employees.TryGetValue(line.PartyId.Value, out var party)
+                        ? (Found: true, party.IsActive)
+                        : (Found: false, IsActive: false),
+                JournalPartyType.Driver =>
+                    drivers.TryGetValue(line.PartyId.Value, out var party)
+                        ? (Found: true, party.IsActive)
+                        : (Found: false, IsActive: false),
+                JournalPartyType.Cashbox =>
+                    cashboxes.TryGetValue(line.PartyId.Value, out var party)
+                        ? (Found: true, party.IsActive)
+                        : (Found: false, IsActive: false),
+                _ => (Found: false, IsActive: false)
+            };
+            if (!partyState.Found)
+            {
+                errors.Add(PartyNotFound(line.PartyId.Value, index));
+            }
+            else if (!partyState.IsActive)
+            {
+                errors.Add(PartyInactive(line.PartyId.Value, index));
+            }
         }
 
         return errors.Count == 0
             ? Result.Success()
             : Result.Failure(errors);
     }
+
+    private static JournalPartyType ToJournalPartyType(
+        AccountingMappingType mappingType) => mappingType switch
+        {
+            AccountingMappingType.CustomerControl => JournalPartyType.Customer,
+            AccountingMappingType.SupplierControl => JournalPartyType.Supplier,
+            AccountingMappingType.EmployeeControl or
+            AccountingMappingType.EmployeeReceivable => JournalPartyType.Employee,
+            AccountingMappingType.DriverControl => JournalPartyType.Driver,
+            AccountingMappingType.Cashbox => JournalPartyType.Cashbox,
+            _ => throw new ArgumentOutOfRangeException(nameof(mappingType))
+        };
 
     private static Result ValidateBalance(
         IReadOnlyList<JournalEntryLineRequest> lines)
@@ -484,6 +655,80 @@ public sealed class JournalEntryService(
                 entry.CompanyId == companyId &&
                 ids.Contains(entry.Id))
             .ToListAsync(cancellationToken);
+
+        var partnerIds = entries
+            .SelectMany(entry => entry.Lines)
+            .Where(line => line.PartyType is
+                JournalPartyType.Customer or JournalPartyType.Supplier)
+            .Select(line => line.PartyId)
+            .OfType<int>()
+            .Distinct()
+            .ToArray();
+        var partners = await dbContext.BusinessPartners
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(party =>
+                party.CompanyId == companyId &&
+                partnerIds.Contains(party.Id))
+            .Select(party => new { party.Id, party.Code, party.Name })
+            .ToDictionaryAsync(
+                party => party.Id,
+                party => new PartySnapshot(party.Code, party.Name),
+                cancellationToken);
+        var employeeIds = entries
+            .SelectMany(entry => entry.Lines)
+            .Where(line => line.PartyType == JournalPartyType.Employee)
+            .Select(line => line.PartyId)
+            .OfType<int>()
+            .Distinct()
+            .ToArray();
+        var employees = await dbContext.Employees
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(party =>
+                party.CompanyId == companyId &&
+                employeeIds.Contains(party.Id))
+            .Select(party => new { party.Id, party.Code, party.Name })
+            .ToDictionaryAsync(
+                party => party.Id,
+                party => new PartySnapshot(party.Code, party.Name),
+                cancellationToken);
+        var driverIds = entries
+            .SelectMany(entry => entry.Lines)
+            .Where(line => line.PartyType == JournalPartyType.Driver)
+            .Select(line => line.PartyId)
+            .OfType<int>()
+            .Distinct()
+            .ToArray();
+        var drivers = await dbContext.Drivers
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(party =>
+                party.CompanyId == companyId &&
+                driverIds.Contains(party.Id))
+            .Select(party => new { party.Id, party.Code, party.Name })
+            .ToDictionaryAsync(
+                party => party.Id,
+                party => new PartySnapshot(party.Code, party.Name),
+                cancellationToken);
+        var cashboxIds = entries
+            .SelectMany(entry => entry.Lines)
+            .Where(line => line.PartyType == JournalPartyType.Cashbox)
+            .Select(line => line.PartyId)
+            .OfType<int>()
+            .Distinct()
+            .ToArray();
+        var cashboxes = await dbContext.Cashboxes
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(cashbox =>
+                cashbox.CompanyId == companyId &&
+                cashboxIds.Contains(cashbox.Id))
+            .Select(cashbox => new { cashbox.Id, cashbox.Code, cashbox.Name })
+            .ToDictionaryAsync(
+                cashbox => cashbox.Id,
+                cashbox => new PartySnapshot(cashbox.Code, cashbox.Name),
+                cancellationToken);
 
         var relatedIds = entries
             .Where(entry => entry.ReversalOfEntryId.HasValue)
@@ -522,14 +767,28 @@ public sealed class JournalEntryService(
                 reversals.TryGetValue(entry.Id, out var reversedBy);
                 var lines = entry.Lines
                     .OrderBy(line => line.Id)
-                    .Select(line => new JournalEntryLineResponse(
-                        Id: line.Id,
-                        AccountId: line.AccountId,
-                        AccountCode: line.Account.Code,
-                        AccountName: line.Account.Name,
-                        Description: line.Description,
-                        Debit: line.Debit,
-                        Credit: line.Credit))
+                    .Select(line =>
+                    {
+                        var party = ResolveParty(
+                            line.PartyType,
+                            line.PartyId,
+                            partners,
+                            employees,
+                            drivers,
+                            cashboxes);
+                        return new JournalEntryLineResponse(
+                            Id: line.Id,
+                            AccountId: line.AccountId,
+                            AccountCode: line.Account.Code,
+                            AccountName: line.Account.Name,
+                            Description: line.Description,
+                            Debit: line.Debit,
+                            Credit: line.Credit,
+                            PartyType: line.PartyType,
+                            PartyId: line.PartyId,
+                            PartyCode: party?.Code,
+                            PartyName: party?.Name);
+                    })
                     .ToArray();
                 return new JournalEntryResponse(
                     Id: entry.Id,
@@ -567,4 +826,32 @@ public sealed class JournalEntryService(
 
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static PartySnapshot? ResolveParty(
+        JournalPartyType? partyType,
+        int? partyId,
+        IReadOnlyDictionary<int, PartySnapshot> partners,
+        IReadOnlyDictionary<int, PartySnapshot> employees,
+        IReadOnlyDictionary<int, PartySnapshot> drivers,
+        IReadOnlyDictionary<int, PartySnapshot> cashboxes)
+    {
+        if (!partyType.HasValue || !partyId.HasValue)
+        {
+            return null;
+        }
+
+        var source = partyType.Value switch
+        {
+            JournalPartyType.Customer or JournalPartyType.Supplier => partners,
+            JournalPartyType.Employee => employees,
+            JournalPartyType.Driver => drivers,
+            JournalPartyType.Cashbox => cashboxes,
+            _ => null
+        };
+        return source is not null && source.TryGetValue(partyId.Value, out var party)
+            ? party
+            : null;
+    }
+
+    private sealed record PartySnapshot(string Code, string Name);
 }

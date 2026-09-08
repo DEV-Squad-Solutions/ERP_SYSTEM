@@ -1,5 +1,6 @@
 using MiniErp.Domain.Common.Entities;
 using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Domain.Entities.Accounting;
 
@@ -18,6 +19,10 @@ public sealed class JournalEntryLine : AuditableEntity
     public int AccountId { get; set; }
 
     public Account Account { get; set; } = null!;
+
+    public JournalPartyType? PartyType { get; set; }
+
+    public int? PartyId { get; set; }
 
     public string? Description { get; set; }
 

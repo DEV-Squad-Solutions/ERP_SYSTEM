@@ -51,6 +51,41 @@ public static class JournalEntryErrors
             $"الحساب رقم {accountId} حساب رئيسي. القيود اليومية تُسجل على الحسابات الفرعية فقط.",
             $"Lines[{lineIndex}].AccountId");
 
+    public static Error PartyRequired(int accountId, int lineIndex) =>
+        Error.Validation(
+            "JournalEntries.PartyRequired",
+            $"يجب اختيار الطرف عند التسجيل على الحساب رقم {accountId}.",
+            $"Lines[{lineIndex}].PartyId");
+
+    public static Error PartyShapeInvalid(int lineIndex) => Error.Validation(
+        "JournalEntries.PartyShapeInvalid",
+        "يجب إرسال نوع الطرف ورقم الطرف معًا.",
+        $"Lines[{lineIndex}].PartyId");
+
+    public static Error PartyNotAllowed(int accountId, int lineIndex) =>
+        Error.Validation(
+            "JournalEntries.PartyNotAllowed",
+            $"الحساب رقم {accountId} لا يقبل ربط طرف.",
+            $"Lines[{lineIndex}].PartyId");
+
+    public static Error PartyTypeNotAllowed(int accountId, int lineIndex) =>
+        Error.Validation(
+            "JournalEntries.PartyTypeNotAllowed",
+            $"نوع الطرف لا يطابق تعريف الحساب رقم {accountId} في السنة المالية.",
+            $"Lines[{lineIndex}].PartyType");
+
+    public static Error PartyNotFound(int partyId, int lineIndex) =>
+        Error.Validation(
+            "JournalEntries.PartyNotFound",
+            $"الطرف رقم {partyId} غير موجود في الشركة الحالية.",
+            $"Lines[{lineIndex}].PartyId");
+
+    public static Error PartyInactive(int partyId, int lineIndex) =>
+        Error.Validation(
+            "JournalEntries.PartyInactive",
+            $"الطرف رقم {partyId} غير فعال.",
+            $"Lines[{lineIndex}].PartyId");
+
     public static Error Unbalanced() => Error.Validation(
         "JournalEntries.Unbalanced",
         "إجمالي المدين يجب أن يساوي إجمالي الدائن ويكون أكبر من صفر.",

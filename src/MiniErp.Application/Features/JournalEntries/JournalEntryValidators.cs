@@ -84,6 +84,16 @@ public sealed class JournalEntryLineRequestValidator
         RuleFor(line => line.Credit)
             .GreaterThanOrEqualTo(0m)
             .PrecisionScale(19, 4, ignoreTrailingZeros: true);
+        RuleFor(line => line.PartyType)
+            .IsInEnum()
+            .When(line => line.PartyType.HasValue);
+        RuleFor(line => line.PartyId)
+            .GreaterThan(0)
+            .When(line => line.PartyId.HasValue);
+        RuleFor(line => line)
+            .Must(line => line.PartyType.HasValue == line.PartyId.HasValue)
+            .WithName(nameof(JournalEntryLineRequest.PartyId))
+            .WithMessage("يجب إرسال نوع الطرف ورقم الطرف معًا.");
         RuleFor(line => line)
             .Must(line =>
                 (line.Debit > 0m && line.Credit == 0m) ||

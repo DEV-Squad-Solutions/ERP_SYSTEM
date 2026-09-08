@@ -33,6 +33,7 @@ public sealed class DriverTripPostingService(
                 entity.Id,
                 entity.InvoiceNumber,
                 entity.TripDate,
+                entity.DriverId,
                 entity.Cost
             })
             .SingleOrDefaultAsync(cancellationToken);
@@ -110,10 +111,12 @@ public sealed class DriverTripPostingService(
                         trip.Cost.Value,
                         0m),
                     new JournalEntryLineRequest(
-                        driverResult.Value,
-                        "مستحقات السائق عن الرحلة",
-                        0m,
-                        trip.Cost.Value)
+                        AccountId: driverResult.Value,
+                        Description: "مستحقات السائق عن الرحلة",
+                        Debit: 0m,
+                        Credit: trip.Cost.Value,
+                        PartyType: JournalPartyType.Driver,
+                        PartyId: trip.DriverId)
                 ]),
             cancellationToken);
         return postingResult.IsFailure

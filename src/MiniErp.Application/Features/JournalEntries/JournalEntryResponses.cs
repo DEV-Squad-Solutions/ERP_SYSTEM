@@ -9,7 +9,11 @@ public sealed record JournalEntryLineResponse(
     string AccountName,
     string? Description,
     decimal Debit,
-    decimal Credit);
+    decimal Credit,
+    JournalPartyType? PartyType = null,
+    int? PartyId = null,
+    string? PartyCode = null,
+    string? PartyName = null);
 
 public sealed record JournalEntryResponse(
     int Id,

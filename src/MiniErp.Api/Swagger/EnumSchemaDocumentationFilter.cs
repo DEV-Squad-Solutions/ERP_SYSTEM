@@ -70,6 +70,15 @@ public sealed class EnumSchemaDocumentationFilter : ISchemaFilter
                    "customer or supplier.";
         }
 
+        if (enumType == typeof(JournalPartyType))
+        {
+            return "Analytical party attached to a journal line. Customer and " +
+                   "Supplier both reference BusinessPartners, Employee references " +
+                   "Employees, Driver references Drivers, and Cashbox references " +
+                   "an active company cashbox. The selected type and id must match " +
+                   "the account mapping for the fiscal year.";
+        }
+
         return null;
     }
 }

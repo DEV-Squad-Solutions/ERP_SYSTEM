@@ -8,6 +8,7 @@ using MiniErp.Application.Features.Accounts;
 using MiniErp.Application.Features.FinancialStatementLines;
 using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.Accounting;
+using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
@@ -34,22 +35,64 @@ public sealed class AccountingSetupServiceTests
     {
         await using var database = await AccountingTestDatabase.CreateAsync();
         var service = database.CreateDefaultAccountingSetupService();
-        await database.AddCashSetupSourcesAsync();
+        await database.SetBaseCurrencyAsync(CurrencyCode.USD);
 
         await service.InitializeCompanyAsync(
             companyId: 1,
             effectiveDate: new DateOnly(2026, 9, 2));
+        var initialCashbox = await database.GetDefaultCashboxAsync();
+        var initialCustomerCollection = await database.GetCashMovementTypeAsync(
+            name: "Customer Collection",
+            direction: CashDirection.Receipt);
+
+        await database.SoftDeleteDefaultCashSetupAsync();
         await service.InitializeCompanyAsync(
             companyId: 1,
             effectiveDate: new DateOnly(2026, 9, 2));
 
         var counts = await database.GetDefaultSetupCountsAsync();
 
-        Assert.Equal(23, counts.Accounts);
-        Assert.Equal(19, counts.AccountMappings);
-        Assert.Equal(34, counts.StatementLines);
-        Assert.Equal(33, counts.StatementMappings);
+        Assert.Equal(24, counts.Accounts);
+        Assert.Equal(27, counts.AccountMappings);
+        Assert.Equal(35, counts.StatementLines);
+        Assert.Equal(35, counts.StatementMappings);
         Assert.Equal(1, counts.FiscalYears);
+        var cashbox = await database.GetDefaultCashboxAsync();
+        Assert.NotNull(cashbox);
+        Assert.Equal(initialCashbox!.Id, cashbox.Id);
+        Assert.Equal("CASH-MAIN", cashbox.Code);
+        Assert.Equal("Main Cashbox", cashbox.Name);
+        Assert.Equal(CurrencyCode.USD, cashbox.Currency);
+        Assert.Equal(0m, cashbox.OpeningBalance);
+        Assert.Equal(new DateOnly(2026, 9, 2), cashbox.OpeningBalanceDate);
+        Assert.Equal(1m, cashbox.OpeningExchangeRate);
+        Assert.Equal(0m, cashbox.BaseOpeningBalance);
+
+        var movementTypes = await database.GetCashMovementTypesAsync();
+        Assert.Equal(9, movementTypes.Count);
+        Assert.Equal(initialCustomerCollection!.Id, movementTypes.Single(type =>
+            type.Name == "Customer Collection" &&
+            type.Direction == CashDirection.Receipt).Id);
+        Assert.Equal(
+            [
+                "Customer Collection", "Supplier Refund", "Other Receipt",
+                "Other Revenue", "Supplier Payment", "Customer Refund",
+                "Driver Advance", "Other Payment", "Administrative Expense"
+            ],
+            movementTypes.Select(type => type.Name));
+        Assert.Equal(
+            "Customer Collection",
+            movementTypes.Single(type => type.IsDefaultForSales).Name);
+        Assert.Equal(
+            "Supplier Payment",
+            movementTypes.Single(type => type.IsDefaultForPurchase).Name);
+        Assert.Equal(
+            "Customer Refund",
+            movementTypes.Single(type => type.IsDefaultForSalesReturn).Name);
+        Assert.Equal(
+            "Supplier Refund",
+            movementTypes.Single(type => type.IsDefaultForPurchaseReturn).Name);
+        Assert.All(movementTypes, type => Assert.True(type.IsActive));
         Assert.True(await database.HasDefaultAccountClassificationAsync(
             accountCode: "1200",
             statementType: FinancialStatementType.FinancialPosition,
@@ -62,6 +105,18 @@ public sealed class AccountingSetupServiceTests
             accountCode: "4100",
             statementType: FinancialStatementType.CashFlow,
             lineCode: "CF-110"));
+        Assert.Equal(
+            "2200",
+            await database.GetMappingAccountCodeAsync(
+                AccountingMappingType.EmployeeControl));
+        Assert.Equal(
+            "2300",
+            await database.GetMappingAccountCodeAsync(
+                AccountingMappingType.DriverControl));
+        Assert.True(await database.HasDefaultAccountClassificationAsync(
+            accountCode: "2300",
+            statementType: FinancialStatementType.FinancialPosition,
+            lineCode: "FP-230"));
     }
 
     [Fact]
@@ -76,17 +131,17 @@ public sealed class AccountingSetupServiceTests
         await database.AddFutureFiscalYearAndCashSetupSourcesAsync();
 
         await service.EnsureFiscalYearAsync(companyId: 1, fiscalYearId: 3);
-        await service.EnsureCashboxAsync(companyId: 1, cashboxId: 1);
+        await service.EnsureCashboxAsync(companyId: 1, cashboxId: 2);
         await service.EnsureCashMovementTypeAsync(
             companyId: 1,
-            cashMovementTypeId: 1);
+            cashMovementTypeId: 10);
         await service.EnsureFiscalYearAsync(companyId: 1, fiscalYearId: 3);
 
         var counts = await database.GetFiscalYearSetupCountsAsync(3);
 
-        Assert.Equal(19, counts.AccountMappings);
-        Assert.Equal(34, counts.StatementLines);
-        Assert.Equal(33, counts.StatementMappings);
+        Assert.Equal(29, counts.AccountMappings);
+        Assert.Equal(35, counts.StatementLines);
+        Assert.Equal(35, counts.StatementMappings);
     }
 
     [Fact]
@@ -169,87 +224,50 @@ public sealed class AccountingSetupServiceTests
     }
 
     [Fact]
-    public async Task JournalSelect_IncludesMappedPostingChildren_AndExcludesInvalidAccounts()
+    public async Task JournalSelect_GroupsEveryActivePartyUnderItsControlAccount()
     {
         await using var database = await AccountingTestDatabase.CreateAsync();
         var accountService = database.CreateAccountService(companyId: 1);
-        var otherCompanyAccountService = database.CreateAccountService(companyId: 2);
-
-        var root = await accountService.AddAsync(new AccountRequest(
-            Code: null,
-            Name: "أصل رئيسي",
-            ParentAccountId: null,
-            AccountType: AccountType.Asset,
-            NormalBalance: NormalBalance.Debit,
-            IsPosting: false));
-        var mappedChild = await accountService.AddAsync(new AccountRequest(
-            Code: null,
-            Name: "حساب مرتبط تشغيليًا",
-            ParentAccountId: root.Value.Id,
-            AccountType: AccountType.Asset,
-            NormalBalance: NormalBalance.Debit,
-            IsPosting: true));
-        var inactiveChild = await accountService.AddAsync(new AccountRequest(
-            Code: null,
-            Name: "حساب غير فعال",
-            ParentAccountId: root.Value.Id,
-            AccountType: AccountType.Asset,
-            NormalBalance: NormalBalance.Debit,
-            IsPosting: true));
-        await database.SetAccountInactiveAsync(inactiveChild.Value.Id);
-
-        var otherRoot = await otherCompanyAccountService.AddAsync(new AccountRequest(
-            Code: null,
-            Name: "أصل شركة أخرى",
-            ParentAccountId: null,
-            AccountType: AccountType.Asset,
-            NormalBalance: NormalBalance.Debit,
-            IsPosting: false));
-        await otherCompanyAccountService.AddAsync(new AccountRequest(
-            Code: null,
-            Name: "حساب شركة أخرى",
-            ParentAccountId: otherRoot.Value.Id,
-            AccountType: AccountType.Asset,
-            NormalBalance: NormalBalance.Debit,
-            IsPosting: true));
-
-        await database.AddOperationalAccountMappingAsync(mappedChild.Value.Id);
+        await database.AddJournalPartyFixturesAsync();
+        await database.AddSecondCashboxAsync();
 
         var result = await accountService.GetJournalSelectAsync(fiscalYearId: 1);
 
         Assert.True(result.IsSuccess);
-        var selected = Assert.Single(result.Value);
-        Assert.Equal(mappedChild.Value.Id, selected.Id);
+        Assert.Equal([2, 11, 7, 4, 5, 6], result.Value.Select(account => account.Id));
+        var customer = Assert.Single(result.Value.Single(account => account.Id == 2).PartyGroups);
+        var supplier = Assert.Single(result.Value.Single(account => account.Id == 4).PartyGroups);
+        var employee = Assert.Single(result.Value.Single(account => account.Id == 5).PartyGroups);
+        var driver = Assert.Single(result.Value.Single(account => account.Id == 6).PartyGroups);
+        var cashbox = Assert.Single(result.Value.Single(account => account.Id == 11).PartyGroups);
+        Assert.Equal(JournalPartyType.Customer, customer.PartyType);
+        Assert.Equal(JournalPartyType.Supplier, supplier.PartyType);
+        Assert.Equal(JournalPartyType.Employee, employee.PartyType);
+        Assert.Equal(JournalPartyType.Driver, driver.PartyType);
+        Assert.Equal(JournalPartyType.Cashbox, cashbox.PartyType);
+        Assert.Equal(1, Assert.Single(customer.Parties).Id);
+        Assert.Equal(1, Assert.Single(supplier.Parties).Id);
+        Assert.Equal(1, Assert.Single(employee.Parties).Id);
+        Assert.Equal(1, Assert.Single(driver.Parties).Id);
+        Assert.Equal(1, Assert.Single(cashbox.Parties).Id);
+        Assert.DoesNotContain(cashbox.Parties, party => party.Id == 2);
+        Assert.Empty(result.Value.Single(account => account.Id == 7).PartyGroups);
     }
 
-    [Fact]
-    public async Task JournalEntryAdd_AllowsMappedPostingChildAccount()
+    [Theory]
+    [InlineData(2, JournalPartyType.Customer, "BP-1")]
+    [InlineData(4, JournalPartyType.Supplier, "BP-1")]
+    [InlineData(5, JournalPartyType.Employee, "EMP-1")]
+    [InlineData(6, JournalPartyType.Driver, "DRV-1")]
+    [InlineData(11, JournalPartyType.Cashbox, "CB-1")]
+    public async Task JournalEntryAdd_AllowsMappedPostingChildAccount(
+        int accountId,
+        JournalPartyType partyType,
+        string partyCode)
     {
         await using var database = await AccountingTestDatabase.CreateAsync();
-        var accountService = database.CreateAccountService(companyId: 1);
         var journalEntryService = database.CreateJournalEntryService(companyId: 1);
-        var root = await accountService.AddAsync(new AccountRequest(
-            Code: null,
-            Name: "أصل رئيسي",
-            ParentAccountId: null,
-            AccountType: AccountType.Asset,
-            NormalBalance: NormalBalance.Debit,
-            IsPosting: false));
-        var mappedChild = await accountService.AddAsync(new AccountRequest(
-            Code: null,
-            Name: "حساب مرتبط تشغيليًا",
-            ParentAccountId: root.Value.Id,
-            AccountType: AccountType.Asset,
-            NormalBalance: NormalBalance.Debit,
-            IsPosting: true));
-        var counterpart = await accountService.AddAsync(new AccountRequest(
-            Code: null,
-            Name: "حساب مقابل",
-            ParentAccountId: root.Value.Id,
-            AccountType: AccountType.Asset,
-            NormalBalance: NormalBalance.Debit,
-            IsPosting: true));
-        await database.AddOperationalAccountMappingAsync(mappedChild.Value.Id);
+        await database.AddJournalPartyFixturesAsync();
 
         var result = await journalEntryService.AddAsync(new JournalEntryRequest(
             FiscalYearId: 1,
@@ -259,12 +277,14 @@ public sealed class AccountingSetupServiceTests
             Lines:
             [
                 new JournalEntryLineRequest(
-                    AccountId: mappedChild.Value.Id,
+                    AccountId: accountId,
                     Description: "مدين مرتبط تشغيليًا",
                     Debit: 100m,
-                    Credit: 0m),
+                    Credit: 0m,
+                    PartyType: partyType,
+                    PartyId: 1),
                 new JournalEntryLineRequest(
-                    AccountId: counterpart.Value.Id,
+                    AccountId: 7,
                     Description: "دائن",
                     Debit: 0m,
                     Credit: 100m)
@@ -276,7 +296,135 @@ public sealed class AccountingSetupServiceTests
         Assert.Equal(100m, result.Value.TotalCredit);
         Assert.Contains(
             result.Value.Lines,
-            line => line.AccountId == mappedChild.Value.Id);
+            line => line.AccountId == accountId &&
+                line.PartyType == partyType &&
+                line.PartyId == 1 &&
+                line.PartyCode == partyCode &&
+                !string.IsNullOrWhiteSpace(line.PartyName));
+    }
+
+    [Fact]
+    public async Task JournalEntryAdd_RequiresMatchingActivePartyForControlAccount()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var service = database.CreateJournalEntryService(companyId: 1);
+        await database.AddJournalPartyFixturesAsync();
+
+        async Task<string> AddAndGetErrorAsync(
+            JournalPartyType? partyType,
+            int? partyId)
+        {
+            var result = await service.AddAsync(new JournalEntryRequest(
+                FiscalYearId: 1,
+                EntryDate: new DateOnly(2026, 9, 8),
+                Description: "اختبار طرف إلزامي",
+                EntryType: JournalEntryType.Manual,
+                Lines:
+                [
+                    new JournalEntryLineRequest(
+                        AccountId: 2,
+                        Description: null,
+                        Debit: 10m,
+                        Credit: 0m,
+                        PartyType: partyType,
+                        PartyId: partyId),
+                    new JournalEntryLineRequest(
+                        AccountId: 7,
+                        Description: null,
+                        Debit: 0m,
+                        Credit: 10m)
+                ]));
+            return Assert.Single(result.Errors).Code;
+        }
+
+        Assert.Equal(
+            "JournalEntries.PartyRequired",
+            await AddAndGetErrorAsync(null, null));
+        Assert.Equal(
+            "JournalEntries.PartyTypeNotAllowed",
+            await AddAndGetErrorAsync(JournalPartyType.Supplier, 1));
+        Assert.Equal(
+            "JournalEntries.PartyInactive",
+            await AddAndGetErrorAsync(JournalPartyType.Customer, 2));
+        Assert.Equal(
+            "JournalEntries.PartyNotFound",
+            await AddAndGetErrorAsync(JournalPartyType.Customer, 3));
+
+        var ordinaryAccount = await service.AddAsync(new JournalEntryRequest(
+            FiscalYearId: 1,
+            EntryDate: new DateOnly(2026, 9, 8),
+            Description: "طرف على حساب عادي",
+            EntryType: JournalEntryType.Manual,
+            Lines:
+            [
+                new JournalEntryLineRequest(
+                    AccountId: 7,
+                    Description: null,
+                    Debit: 10m,
+                    Credit: 0m,
+                    PartyType: JournalPartyType.Customer,
+                    PartyId: 1),
+                new JournalEntryLineRequest(
+                    AccountId: 7,
+                    Description: null,
+                    Debit: 0m,
+                    Credit: 10m)
+            ]));
+        Assert.Equal(
+            "JournalEntries.PartyNotAllowed",
+            Assert.Single(ordinaryAccount.Errors).Code);
+    }
+
+    [Fact]
+    public async Task JournalEntryAdd_RequiresCashboxMappedToTheSelectedAccount()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var service = database.CreateJournalEntryService(companyId: 1);
+        await database.AddJournalPartyFixturesAsync();
+        await database.AddCashboxValidationFixturesAsync();
+
+        async Task<string?> AddAsync(int? cashboxId)
+        {
+            var result = await service.AddAsync(new JournalEntryRequest(
+                FiscalYearId: 1,
+                EntryDate: new DateOnly(2026, 9, 8),
+                Description: "اختبار خزينة مرتبطة",
+                EntryType: JournalEntryType.Manual,
+                Lines:
+                [
+                    new JournalEntryLineRequest(
+                        AccountId: 11,
+                        Description: null,
+                        Debit: 10m,
+                        Credit: 0m,
+                        PartyType: cashboxId.HasValue
+                            ? JournalPartyType.Cashbox
+                            : null,
+                        PartyId: cashboxId),
+                    new JournalEntryLineRequest(
+                        AccountId: 7,
+                        Description: null,
+                        Debit: 0m,
+                        Credit: 10m,
+                        PartyType: JournalPartyType.Cashbox,
+                        PartyId: 2)
+                ]));
+            return result.IsSuccess ? null : Assert.Single(result.Errors).Code;
+        }
+
+        Assert.Equal(
+            "JournalEntries.PartyNotAllowed",
+            await AddAsync(2));
+        Assert.Equal(
+            "JournalEntries.PartyInactive",
+            await AddAsync(3));
+        Assert.Equal(
+            "JournalEntries.PartyNotFound",
+            await AddAsync(4));
+        Assert.Equal(
+            "JournalEntries.PartyRequired",
+            await AddAsync(null));
+        Assert.Null(await AddAsync(1));
     }
 
     [Fact]
@@ -586,13 +734,61 @@ public sealed class AccountingSetupServiceTests
         public Task AddCashSetupSourcesAsync() =>
             Context.Database.ExecuteSqlRawAsync(
                 """
-                INSERT INTO Cashboxes (Id, CompanyId, IsDeleted)
-                VALUES (1, 1, 0);
+                INSERT INTO Cashboxes (
+                    Id, CompanyId, Code, Name, Currency, OpeningBalance,
+                    OpeningBalanceDate, IsActive, IsDeleted)
+                VALUES (
+                    1, 1, 'CASH-MAIN', 'Main Cashbox', 1, 0,
+                    '2026-09-02', 1, 0);
 
                 INSERT INTO CashMovementTypes (
-                    Id, CompanyId, Direction, Classification, IsDeleted)
-                VALUES (1, 1, 2, 2, 0);
+                    Id, CompanyId, Name, Direction, Classification,
+                    PartnerEffect, IsActive, IsDeleted)
+                VALUES (
+                    1, 1, 'Customer Collection', 1, 1, 2, 1, 0);
                 """);
+
+        public Task<Cashbox?> GetDefaultCashboxAsync() =>
+            Context.Cashboxes
+                .AsNoTracking()
+                .SingleOrDefaultAsync(cashbox =>
+                    cashbox.CompanyId == 1 &&
+                    cashbox.Code == "CASH-MAIN");
+
+        public Task SetBaseCurrencyAsync(CurrencyCode currency) =>
+            Context.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE CompanySettings SET BaseCurrency = {(int)currency} WHERE CompanyId = 1");
+
+        public Task<CashMovementType?> GetCashMovementTypeAsync(
+            string name,
+            CashDirection direction) =>
+            Context.CashMovementTypes
+                .AsNoTracking()
+                .SingleOrDefaultAsync(movementType =>
+                    movementType.CompanyId == 1 &&
+                    movementType.Name == name &&
+                    movementType.Direction == direction);
+
+        public Task<List<CashMovementType>> GetCashMovementTypesAsync() =>
+            Context.CashMovementTypes
+                .AsNoTracking()
+                .Where(movementType => movementType.CompanyId == 1)
+                .OrderBy(movementType => movementType.Id)
+                .ToListAsync();
+
+        public async Task SoftDeleteDefaultCashSetupAsync()
+        {
+            await Context.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE Cashboxes
+                SET IsDeleted = 1
+                WHERE CompanyId = 1 AND Code = 'CASH-MAIN';
+                UPDATE CashMovementTypes
+                SET IsDeleted = 1
+                WHERE CompanyId = 1 AND Name = 'Customer Collection';
+                """);
+            Context.ChangeTracker.Clear();
+        }
 
         public Task AddFutureFiscalYearAndCashSetupSourcesAsync() =>
             Context.Database.ExecuteSqlRawAsync(
@@ -604,12 +800,18 @@ public sealed class AccountingSetupServiceTests
                     3, 1, '2027', '2027-01-01', '2027-12-31', 1, 0,
                     'test', CURRENT_TIMESTAMP, 'test', 0);
 
-                INSERT INTO Cashboxes (Id, CompanyId, IsDeleted)
-                VALUES (1, 1, 0);
+                INSERT INTO Cashboxes (
+                    Id, CompanyId, Code, Name, Currency, OpeningBalance,
+                    OpeningBalanceDate, IsActive, IsDeleted)
+                VALUES (
+                    2, 1, 'CB-2', 'خزينة سنة لاحقة', 1, 0,
+                    '2027-01-01', 1, 0);
 
                 INSERT INTO CashMovementTypes (
-                    Id, CompanyId, Direction, Classification, IsDeleted)
-                VALUES (1, 1, 2, 2, 0);
+                    Id, CompanyId, Name, Direction, Classification,
+                    PartnerEffect, IsActive, IsDeleted)
+                VALUES (
+                    10, 1, 'حركة سنة لاحقة', 2, 2, 0, 1, 0);
                 """);
 
         public async Task<int> AddCustomStatementMappingAsync()
@@ -669,6 +871,17 @@ public sealed class AccountingSetupServiceTests
                 mapping.Account.Code == accountCode &&
                 mapping.FinancialStatementLine.Code == lineCode);
 
+        public Task<string> GetMappingAccountCodeAsync(
+            AccountingMappingType mappingType) =>
+            Context.AccountMappings
+                .Where(mapping =>
+                    mapping.CompanyId == 1 &&
+                    mapping.FiscalYearId == 1 &&
+                    mapping.MappingType == mappingType &&
+                    mapping.SourceId == null)
+                .Select(mapping => mapping.Account.Code)
+                .SingleAsync();
+
         public async Task<(int Accounts, int AccountMappings,
             int StatementLines, int StatementMappings, int FiscalYears)>
             GetDefaultSetupCountsAsync() =>
@@ -710,21 +923,93 @@ public sealed class AccountingSetupServiceTests
             Context.Database.ExecuteSqlInterpolatedAsync(
                 $"INSERT INTO CashVouchers (CompanyId, AccountId, IsDeleted) VALUES (1, {accountId}, 0)");
 
-        public Task SetAccountInactiveAsync(int accountId) =>
-            Context.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE Accounts SET IsActive = 0 WHERE Id = {accountId}");
+        public Task AddSecondCashboxAsync() =>
+            Context.Database.ExecuteSqlRawAsync(
+                "INSERT INTO Cashboxes (Id, CompanyId, Code, Name, IsActive, IsDeleted) " +
+                "VALUES (2, 1, 'CB-2', 'خزينة ثانية', 1, 0)");
 
-        public async Task AddOperationalAccountMappingAsync(int accountId)
-        {
-            Context.AccountMappings.Add(new AccountMapping
-            {
-                CompanyId = 1,
-                FiscalYearId = 1,
-                MappingType = AccountingMappingType.Sales,
-                AccountId = accountId
-            });
-            await Context.SaveChangesAsync();
-        }
+        public Task AddCashboxValidationFixturesAsync() =>
+            Context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO Cashboxes (Id, CompanyId, Code, Name, IsActive, IsDeleted)
+                VALUES
+                    (2, 1, 'CB-2', 'خزينة مربوطة بحساب آخر', 1, 0),
+                    (3, 1, 'CB-3', 'خزينة غير فعالة', 0, 0),
+                    (4, 2, 'CB-4', 'خزينة شركة أخرى', 1, 0);
+                INSERT INTO AccountMappings (
+                    CompanyId, FiscalYearId, MappingType, SourceId, AccountId,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES
+                    (1, 1, 1, 2, 7, 'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (1, 1, 1, 3, 11, 'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (1, 1, 1, 4, 11, 'test', CURRENT_TIMESTAMP, 'test', 0);
+                """);
+
+        public Task AddJournalPartyFixturesAsync() =>
+            Context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO Accounts (
+                    Id, CompanyId, Code, Name, ParentAccountId, AccountType,
+                    NormalBalance, IsPosting, IsActive,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES
+                    (1, 1, '1000', 'الأصول', NULL, 1, 1, 0, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (2, 1, '1200', 'العملاء', 1, 1, 1, 1, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (3, 1, '2000', 'الالتزامات', NULL, 2, 2, 0, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (4, 1, '2100', 'الموردون', 3, 2, 2, 1, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (5, 1, '2200', 'مستحقات الموظفين', 3, 2, 2, 1, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (6, 1, '2300', 'مستحقات السائقين', 3, 2, 2, 1, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (7, 1, '1500', 'حساب عادي', 1, 1, 1, 1, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (11, 1, '1400', 'حساب خزائن', 1, 1, 1, 1, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (8, 1, '1600', 'حساب غير فعال', 1, 1, 1, 1, 0,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (9, 2, '1000', 'أصل شركة أخرى', NULL, 1, 1, 0, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (10, 2, '1100', 'حساب شركة أخرى', 9, 1, 1, 1, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0);
+
+                INSERT INTO AccountMappings (
+                    CompanyId, FiscalYearId, MappingType, SourceId, AccountId,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES
+                    (1, 1, 9, NULL, 2, 'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (1, 1, 10, NULL, 4, 'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (1, 1, 11, NULL, 5, 'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (1, 1, 12, NULL, 6, 'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (1, 1, 1, 1, 11, 'test', CURRENT_TIMESTAMP, 'test', 0);
+
+                INSERT INTO BusinessPartners (
+                    Id, CompanyId, Code, Name, IsActive, IsDeleted)
+                VALUES
+                    (1, 1, 'BP-1', 'طرف مشترك', 1, 0),
+                    (2, 1, 'BP-2', 'طرف غير فعال', 0, 0),
+                    (3, 2, 'BP-3', 'طرف شركة أخرى', 1, 0);
+
+                INSERT INTO Employees (
+                    Id, CompanyId, Code, Name, IsActive, IsDeleted)
+                VALUES
+                    (1, 1, 'EMP-1', 'موظف فعال', 1, 0),
+                    (2, 1, 'EMP-2', 'موظف غير فعال', 0, 0),
+                    (3, 2, 'EMP-3', 'موظف شركة أخرى', 1, 0);
+
+                INSERT INTO Drivers (
+                    Id, CompanyId, Code, Name, IsActive, IsDeleted)
+                VALUES
+                    (1, 1, 'DRV-1', 'سائق فعال', 1, 0),
+                    (2, 1, 'DRV-2', 'سائق غير فعال', 0, 0),
+                    (3, 2, 'DRV-3', 'سائق شركة أخرى', 1, 0);
+
+                INSERT INTO Cashboxes (Id, CompanyId, Code, Name, IsActive, IsDeleted)
+                VALUES (1, 1, 'CB-1', 'خزينة رئيسية', 1, 0);
+                """);
 
         public Task SoftDeleteAccountAsync(int accountId) =>
             Context.Database.ExecuteSqlInterpolatedAsync(
@@ -743,7 +1028,15 @@ public sealed class AccountingSetupServiceTests
 
                 CREATE TABLE Companies (
                     Id INTEGER PRIMARY KEY,
-                    Name TEXT NULL
+                    Name TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE CompanySettings (
+                    CompanyId INTEGER PRIMARY KEY,
+                    BaseCurrency INTEGER NOT NULL DEFAULT 1,
+                    StockBalanceCheckMode INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (CompanyId) REFERENCES Companies (Id)
                 );
 
                 CREATE TABLE FiscalYears (
@@ -796,6 +1089,33 @@ public sealed class AccountingSetupServiceTests
                 CREATE UNIQUE INDEX UX_Accounts_Company_Code
                 ON Accounts (CompanyId, Code) WHERE IsDeleted = 0;
 
+                CREATE TABLE BusinessPartners (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    Code TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE Employees (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    Code TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE Drivers (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    Code TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
                 CREATE TABLE AccountMappings (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
@@ -827,16 +1147,79 @@ public sealed class AccountingSetupServiceTests
                 CREATE TABLE Cashboxes (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
-                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                    Code TEXT NOT NULL DEFAULT '',
+                    Name TEXT NOT NULL DEFAULT '',
+                    Currency INTEGER NOT NULL DEFAULT 1,
+                    OpeningBalance TEXT NOT NULL DEFAULT 0,
+                    OpeningBalanceDate TEXT NOT NULL DEFAULT '0001-01-01',
+                    OpeningExchangeRateId INTEGER NULL,
+                    OpeningExchangeRate TEXT NOT NULL DEFAULT 1,
+                    BaseOpeningBalance TEXT NOT NULL DEFAULT 0,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    Notes TEXT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL DEFAULT '',
+                    CreatedOn TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CreatedByPc TEXT NOT NULL DEFAULT '',
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (CompanyId) REFERENCES Companies (Id)
                 );
+
+                CREATE UNIQUE INDEX UX_Cashboxes_Company_Code
+                ON Cashboxes (CompanyId, Code) WHERE IsDeleted = 0;
 
                 CREATE TABLE CashMovementTypes (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,
+                    Name TEXT NOT NULL DEFAULT '',
                     Direction INTEGER NOT NULL,
                     Classification INTEGER NOT NULL,
-                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                    PartnerEffect INTEGER NOT NULL DEFAULT 0,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    IsDefaultForSales INTEGER NOT NULL DEFAULT 0,
+                    IsDefaultForPurchase INTEGER NOT NULL DEFAULT 0,
+                    IsDefaultForSalesReturn INTEGER NOT NULL DEFAULT 0,
+                    IsDefaultForPurchaseReturn INTEGER NOT NULL DEFAULT 0,
+                    Notes TEXT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL DEFAULT '',
+                    CreatedOn TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CreatedByPc TEXT NOT NULL DEFAULT '',
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (CompanyId) REFERENCES Companies (Id)
                 );
+
+                CREATE UNIQUE INDEX UX_CashMovementTypes_Company_Direction_Name
+                ON CashMovementTypes (CompanyId, Direction, Name)
+                WHERE IsDeleted = 0;
+
+                CREATE UNIQUE INDEX UX_CashMovementTypes_Default_Sales
+                ON CashMovementTypes (CompanyId, IsDefaultForSales)
+                WHERE IsDeleted = 0 AND IsDefaultForSales = 1;
+
+                CREATE UNIQUE INDEX UX_CashMovementTypes_Default_Purchase
+                ON CashMovementTypes (CompanyId, IsDefaultForPurchase)
+                WHERE IsDeleted = 0 AND IsDefaultForPurchase = 1;
+
+                CREATE UNIQUE INDEX UX_CashMovementTypes_Default_SalesReturn
+                ON CashMovementTypes (CompanyId, IsDefaultForSalesReturn)
+                WHERE IsDeleted = 0 AND IsDefaultForSalesReturn = 1;
+
+                CREATE UNIQUE INDEX UX_CashMovementTypes_Default_PurchaseReturn
+                ON CashMovementTypes (CompanyId, IsDefaultForPurchaseReturn)
+                WHERE IsDeleted = 0 AND IsDefaultForPurchaseReturn = 1;
 
                 CREATE TABLE CashVouchers (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -883,6 +1266,8 @@ public sealed class AccountingSetupServiceTests
                     CompanyId INTEGER NOT NULL,
                     JournalEntryId INTEGER NOT NULL,
                     AccountId INTEGER NOT NULL,
+                    PartyType INTEGER NULL,
+                    PartyId INTEGER NULL,
                     Description TEXT NULL,
                     Debit TEXT NOT NULL,
                     Credit TEXT NOT NULL,
@@ -974,6 +1359,9 @@ public sealed class AccountingSetupServiceTests
 
                 INSERT INTO Companies (Id, Name)
                 VALUES (1, 'Company 1'), (2, 'Company 2');
+
+                INSERT INTO CompanySettings (CompanyId, BaseCurrency)
+                VALUES (1, 1), (2, 1);
 
                 INSERT INTO FiscalYears (
                     Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent,
