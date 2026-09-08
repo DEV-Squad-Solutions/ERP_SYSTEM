@@ -88,10 +88,19 @@ public sealed class CashVoucherMappingRegister : IRegister
                     : (Domain.Enums.AccountType?)voucher.Account.AccountType)
             .Map(
                 response => response.Classification,
-                voucher => voucher.CashMovementType == null
-                    ? null
-                    : (Domain.Enums.CashMovementClassification?)
-                        voucher.CashMovementType.Classification)
+                voucher => voucher.Classification ??
+                    (voucher.CashMovementType == null
+                        ? voucher.Account == null
+                            ? null
+                            : voucher.Account.AccountType ==
+                                Domain.Enums.AccountType.Expense
+                                ? Domain.Enums.CashMovementClassification.Expense
+                                : voucher.Account.AccountType ==
+                                    Domain.Enums.AccountType.Revenue
+                                    ? Domain.Enums.CashMovementClassification.Revenue
+                                    : null
+                        : (Domain.Enums.CashMovementClassification?)
+                            voucher.CashMovementType.Classification))
             .Map(
                 response => response.IsDraft,
                 voucher => !voucher.IsPosted)

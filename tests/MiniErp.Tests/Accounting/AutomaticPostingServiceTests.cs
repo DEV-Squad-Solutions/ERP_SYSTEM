@@ -1024,6 +1024,7 @@ public sealed class AutomaticPostingServiceTests
                     ExchangeRate TEXT NOT NULL,
                     BaseAmount TEXT NOT NULL,
                     IsPosted INTEGER NOT NULL,
+                    Classification INTEGER NULL,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 

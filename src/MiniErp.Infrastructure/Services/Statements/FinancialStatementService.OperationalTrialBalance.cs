@@ -623,7 +623,8 @@ public sealed partial class FinancialStatementService
                 voucher.CashMovementTypeId.HasValue &&
                 !voucher.AccountId.HasValue &&
                 voucher.CashMovementType != null &&
-                voucher.CashMovementType.Classification == classification &&
+                (voucher.Classification == classification ||
+                 voucher.CashMovementType.Classification == classification) &&
                 voucher.VoucherDate <= filters.ToDate)
             .GroupBy(voucher => new
             {

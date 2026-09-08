@@ -111,9 +111,18 @@ public sealed partial class FinancialStatementService(
                 filters.CashMovementTypeId.Value)
             .Where(voucher =>
                 !filters.Classification.HasValue ||
+                voucher.Classification == filters.Classification.Value ||
                 (voucher.CashMovementType != null &&
                  voucher.CashMovementType.Classification ==
-                 filters.Classification.Value))
+                 filters.Classification.Value) ||
+                (filters.Classification.Value ==
+                     CashMovementClassification.Expense &&
+                 voucher.Account != null &&
+                 voucher.Account.AccountType == AccountType.Expense) ||
+                (filters.Classification.Value ==
+                     CashMovementClassification.Revenue &&
+                 voucher.Account != null &&
+                 voucher.Account.AccountType == AccountType.Revenue))
             .Where(voucher =>
                 !filters.PartyType.HasValue ||
                 voucher.PartyType == filters.PartyType.Value)

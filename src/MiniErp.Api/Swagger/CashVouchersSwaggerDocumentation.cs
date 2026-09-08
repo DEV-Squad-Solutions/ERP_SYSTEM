@@ -22,7 +22,7 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Returns active manual and invoice-generated Receipt and Payment vouchers for the selected company. InvoiceId and InvoiceNumber identify generated payment vouchers.",
                     "Optional search, voucherNumber, direction, cashboxId, cashMovementTypeId, classification, partyType, businessPartnerId, driverId, driverTripId, employeeId, isDraft, fromDate, toDate, pageNumber, and pageSize filters.",
-                    "Search covers voucher, cashbox, movement type, partner, driver, employee, trip invoice, external party, reference, and description display values.",
+                    "Search covers voucher, cashbox, movement type, partner, driver, employee, trip invoice, external party, reference, and description display values. classification is persisted on the voucher; old rows are read with a movement-type/account fallback.",
                     "Deleted and other-company vouchers are excluded.")),
             nameof(CashVouchersController.GetById) => (
                 "Get a cash voucher",
@@ -57,7 +57,7 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Admin only. Replaces a manual draft or completed voucher and all derived effects, including its base-currency snapshot, atomically.",
                     "All voucher fields plus the original base64 rowVersion. Voucher number is server-generated, immutable, and is not sent. Send exactly one posting target: employeeId, businessPartnerId, driverId, externalPartyName, or accountId. cashMovementTypeId is optional and can be sent with the target as an additional descriptor. driverTripId is allowed only with driverId.",
-                    "The posting target allows cashMovementTypeId to be null. When supplied, it must be active, match the voucher direction, and a partner-only type cannot be used with a non-partner target. For an employee target, employeeMovementType is required and must match the direction (Credit/Bonus for Receipt, Debit/Advance/Deduction/Withdrawal for Payment); the linked HR movement is upserted by CashVoucherId. Use Receipt with Revenue account and Payment with Expense account. For a foreign-currency cashbox, send exchangeRate or omit it to use the registered rate for the voucher date.",
+                    "The posting target allows cashMovementTypeId to be null. The server persists classification from the selected movement type, or Expense/Revenue from a direct account target, so expense screens can filter every source consistently. When supplied, the movement type must be active, match the voucher direction, and a partner-only type cannot be used with a non-partner target. For an employee target, employeeMovementType is required and must match the direction (Credit/Bonus for Receipt, Debit/Advance/Deduction/Withdrawal for Payment); the linked HR movement is upserted by CashVoucherId. Use Receipt with Revenue account and Payment with Expense account. For a foreign-currency cashbox, send exchangeRate or omit it to use the registered rate for the voucher date.",
                     "Saving produces a completed, posted voucher. A stale token returns CashVouchers.Concurrency. An invoice-generated voucher returns CashVouchers.InvoiceGeneratedReadOnly and must be changed through its invoice.")),
             nameof(CashVouchersController.Delete) => (
                 "Delete a cash voucher",

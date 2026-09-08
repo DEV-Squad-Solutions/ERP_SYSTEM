@@ -93,6 +93,24 @@ public sealed class StatementsController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("expenses")]
+    [ProducesResponseType<OperationalTrialBalanceResponse>(
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetExpenseStatement(
+        [FromQuery] OperationalTrialBalanceFilterRequest filters,
+        CancellationToken cancellationToken)
+    {
+        var expenseFilters = filters with
+        {
+            Category = OperationalTrialBalanceCategory.Expense
+        };
+        var result = await statementService
+            .GetOperationalTrialBalanceAsync(
+                expenseFilters,
+                cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("trial-balance")]
     [ProducesResponseType<TrialBalanceResponse>(
         StatusCodes.Status200OK)]

@@ -112,6 +112,9 @@ public sealed class CashVoucherConfiguration
             .HasConversion<int>()
             .IsRequired();
 
+        builder.Property(voucher => voucher.Classification)
+            .HasConversion<int>();
+
         builder.Property(voucher => voucher.AccountId);
 
         builder.Property(voucher => voucher.ExternalPartyName)

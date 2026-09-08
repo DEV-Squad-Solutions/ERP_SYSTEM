@@ -6612,6 +6612,7 @@ public sealed class InvoiceServiceTests
                     CashboxId INTEGER NOT NULL,
                     CashMovementTypeId INTEGER NOT NULL,
                     AccountId INTEGER NULL,
+                    Classification INTEGER NULL,
                     PartyType INTEGER NOT NULL,
                     EmployeeId INTEGER NULL,
                     BusinessPartnerId INTEGER NULL,

@@ -537,6 +537,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Direction INTEGER NOT NULL,
                 CashboxId INTEGER NULL,
                 CashMovementTypeId INTEGER NULL,
+                Classification INTEGER NULL,
                 AccountId INTEGER NULL,
                 PartyType INTEGER NOT NULL,
                 EmployeeId INTEGER NULL,

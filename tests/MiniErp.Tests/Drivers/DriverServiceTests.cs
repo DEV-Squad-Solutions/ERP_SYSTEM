@@ -504,6 +504,7 @@ public sealed class DriverServiceTests
                     EmployeeId INTEGER NULL,
                     DriverId INTEGER NULL,
                     AccountId INTEGER NULL,
+                    Classification INTEGER NULL,
                     CashboxTransferId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );

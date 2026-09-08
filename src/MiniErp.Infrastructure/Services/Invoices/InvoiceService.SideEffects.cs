@@ -215,6 +215,15 @@ public sealed partial class InvoiceService
             return;
         }
 
+        var classification = await dbContext.CashMovementTypes
+            .AsNoTracking()
+            .Where(movementType =>
+                movementType.CompanyId == companyId &&
+                movementType.Id == preparation.CashMovementTypeId)
+            .Select(movementType =>
+                (CashMovementClassification?)movementType.Classification)
+            .SingleOrDefaultAsync(cancellationToken);
+
         var direction = InvoiceMovementRules.GetPaymentDirection(
             invoice.InvoiceType);
         if (voucher is null)
@@ -241,6 +250,7 @@ public sealed partial class InvoiceService
                 Direction = direction,
                 CashboxId = preparation.CashboxId,
                 CashMovementTypeId = preparation.CashMovementTypeId,
+                Classification = classification,
                 PartyType = CashPartyType.Partner,
                 BusinessPartnerId = invoice.BusinessPartnerId,
                 Amount = preparation.CashboxAmount,
@@ -262,6 +272,7 @@ public sealed partial class InvoiceService
             voucher.CashboxId = preparation.CashboxId;
             voucher.CashMovementTypeId =
                 preparation.CashMovementTypeId;
+            voucher.Classification = classification;
             voucher.PartyType = CashPartyType.Partner;
             voucher.BusinessPartnerId = invoice.BusinessPartnerId;
             voucher.DriverId = null;

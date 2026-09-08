@@ -720,6 +720,7 @@ public sealed class CompanyServiceTests
                     CompanyId INTEGER NOT NULL,
                     EmployeeId INTEGER NULL,
                     AccountId INTEGER NULL,
+                    Classification INTEGER NULL,
                     CashboxTransferId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );

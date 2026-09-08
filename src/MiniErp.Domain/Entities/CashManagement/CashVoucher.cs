@@ -39,6 +39,10 @@ public sealed class CashVoucher : AuditableEntity
 
     public CashMovementType? CashMovementType { get; set; }
 
+    // Persist the operational classification so expense screens can filter
+    // vouchers consistently even when no movement type was selected.
+    public CashMovementClassification? Classification { get; set; }
+
     public int? AccountId { get; set; }
 
     public Account? Account { get; set; }

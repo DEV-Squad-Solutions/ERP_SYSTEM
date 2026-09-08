@@ -160,6 +160,46 @@ public sealed class OperationalTrialBalanceTests
     }
 
     [Fact]
+    public async Task DirectExpenseAccountVoucherAppearsInExpenseCategory()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO CashVouchers (
+                Id, CompanyId, VoucherNumber, VoucherDate, Direction,
+                CashboxId, CashMovementTypeId, AccountId, PartyType,
+                Amount, Currency, ExchangeRate, BaseAmount, IsPosted,
+                LastModifiedAt, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (901, 1, 'TB-901', '2026-06-15', 2, 1, NULL, 2, 1,
+                 77, 1, 1, 77, 1, '2026-06-15', 'test', '2026-06-15', 'test', 0),
+                (902, 1, 'TB-902', '2026-06-16', 2, 1, NULL, 2, 1,
+                 999, 1, 1, 999, 0, '2026-06-16', 'test', '2026-06-16', 'test', 0);
+            """);
+        database.Context.ChangeTracker.Clear();
+
+        var result = await database.CreateStatementService(1)
+            .GetOperationalTrialBalanceAsync(
+                new OperationalTrialBalanceFilterRequest(
+                    FromDate: FromDate,
+                    ToDate: ToDate,
+                    Category: OperationalTrialBalanceCategory.Expense,
+                    IncludeZeroBalances: true));
+
+        Assert.True(result.IsSuccess);
+        var accountItem = Assert.Single(
+            result.Value.Items,
+            item => item.AccountId == 2 &&
+                item.Category == OperationalTrialBalanceCategory.Expense);
+        Assert.Equal(77m, accountItem.PeriodDebit);
+        Assert.Equal(0m, accountItem.PeriodCredit);
+        Assert.DoesNotContain(
+            result.Value.Items,
+            item => item.PeriodDebit == 999m || item.PeriodCredit == 999m);
+    }
+
+    [Fact]
     public void FilterValidatorRejectsInvalidDatesAndEnums()
     {
         IValidator<OperationalTrialBalanceFilterRequest> validator =

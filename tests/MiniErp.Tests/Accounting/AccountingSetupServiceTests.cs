@@ -1225,6 +1225,7 @@ public sealed class AccountingSetupServiceTests
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
                     AccountId INTEGER NULL,
+                    Classification INTEGER NULL,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 

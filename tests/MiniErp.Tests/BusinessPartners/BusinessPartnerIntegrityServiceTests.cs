@@ -323,6 +323,7 @@ public sealed class BusinessPartnerIntegrityServiceTests
                     CompanyId INTEGER NOT NULL,
                     BusinessPartnerId INTEGER NULL,
                     AccountId INTEGER NULL,
+                    Classification INTEGER NULL,
                     IsDeleted INTEGER NOT NULL
                 );
                 """);

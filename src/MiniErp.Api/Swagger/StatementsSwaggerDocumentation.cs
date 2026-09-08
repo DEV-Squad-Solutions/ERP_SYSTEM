@@ -107,6 +107,15 @@ public sealed class StatementsSwaggerDocumentation : IOperationFilter
 
                 التقرير تشغيلي وليس ميزان مراجعة محاسبيًا مبنيًا على قيود مزدوجة، لذلك لا يفترض أو يعلن توازن جانبي المدين والدائن.
                 """),
+            nameof(StatementsController.GetExpenseStatement) => (
+                "شاشة المصروفات",
+                """
+                اسم مستعار لميزان المراجعة التشغيلي مخصص لشاشة المصروفات المنفصلة: يجبر `category=Expense` دائمًا ويحترم `fromDate` و`toDate` و`viewMode` و`includeZeroBalances`.
+
+                **المصدر:** نفس خدمة `operational-trial-balance`؛ أي حركة خزينة مصنفة كمصروف أو مرتبطة بحساب تحت نوع Expense تظهر هنا تلقائيًا. لا يقرأ `CashVouchers` مباشرة ولا يضاعف منطق التجميع.
+
+                **الاستخدام للفرونت:** `GET /api/v1/Statements/expenses?fromDate=2026-01-01&toDate=2026-12-31&viewMode=Detailed&includeZeroBalances=false`.
+                """),
             nameof(StatementsController.GetTrialBalance) => (
                 "ميزان المراجعة المحاسبي قبل أو بعد التسوية",
                 """

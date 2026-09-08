@@ -2841,6 +2841,7 @@ public static class DevelopmentDataSeeder
                 Direction = CashDirection.Receipt,
                 CashboxId = cashbox.Id,
                 CashMovementTypeId = collectionType.Id,
+                Classification = collectionType.Classification,
                 PartyType = CashPartyType.Partner,
                 BusinessPartnerId = partner.Id,
                 Amount = 1_000m,
@@ -3049,6 +3050,7 @@ public static class DevelopmentDataSeeder
             voucher.Direction = direction;
             voucher.CashboxId = cashbox.Id;
             voucher.CashMovementTypeId = movementType.Id;
+            voucher.Classification = movementType.Classification;
             voucher.PartyType = CashPartyType.Partner;
             voucher.BusinessPartnerId = invoice.BusinessPartnerId;
             voucher.EmployeeId = null;
@@ -3226,6 +3228,7 @@ public static class DevelopmentDataSeeder
             Direction = movementType.Direction,
             CashboxId = cashbox.Id,
             CashMovementTypeId = movementType.Id,
+            Classification = movementType.Classification,
             PartyType = CashPartyType.None,
             Amount = amount,
             Currency = cashbox.Currency,

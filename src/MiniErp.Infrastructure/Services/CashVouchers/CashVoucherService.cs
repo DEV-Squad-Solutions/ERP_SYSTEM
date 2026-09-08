@@ -88,9 +88,18 @@ public sealed class CashVoucherService(
                 filters.CashMovementTypeId.Value)
             .Where(voucher =>
                 !filters.Classification.HasValue ||
+                voucher.Classification == filters.Classification.Value ||
                 (voucher.CashMovementType != null &&
                  voucher.CashMovementType.Classification ==
-                 filters.Classification.Value))
+                 filters.Classification.Value) ||
+                (filters.Classification.Value ==
+                     CashMovementClassification.Expense &&
+                 voucher.Account != null &&
+                 voucher.Account.AccountType == AccountType.Expense) ||
+                (filters.Classification.Value ==
+                     CashMovementClassification.Revenue &&
+                 voucher.Account != null &&
+                 voucher.Account.AccountType == AccountType.Revenue))
             .Where(voucher =>
                 !filters.PartyType.HasValue ||
                 voucher.PartyType == filters.PartyType.Value)
@@ -484,6 +493,7 @@ public sealed class CashVoucherService(
 
         request.Adapt(voucher);
         voucher.PartyType = preparation.Value.PartyType;
+        voucher.Classification = preparation.Value.Classification;
         voucher.IsPosted = true;
         await ApplyPreparationAsync(
             voucher,
@@ -669,6 +679,7 @@ public sealed class CashVoucherService(
         };
         request.Adapt(voucher);
         voucher.PartyType = preparation.Value.PartyType;
+        voucher.Classification = preparation.Value.Classification;
         voucher.IsPosted = true;
         await ApplyPreparationAsync(voucher, preparation.Value, cancellationToken);
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
@@ -783,6 +794,7 @@ public sealed class CashVoucherService(
             item.RowVersion!;
         request.Adapt(voucher);
         voucher.PartyType = preparation.Value.PartyType;
+        voucher.Classification = preparation.Value.Classification;
         voucher.IsPosted = true;
         await ApplyPreparationAsync(voucher, preparation.Value, cancellationToken);
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
@@ -1227,7 +1239,15 @@ public sealed class CashVoucherService(
                 PartyType: partyType,
                 BusinessPartner: partner,
                 Driver: driver,
-                ExchangeRate: exchangeRateResult.Value));
+                ExchangeRate: exchangeRateResult.Value,
+                Classification: account?.AccountType switch
+                    {
+                        AccountType.Expense =>
+                            CashMovementClassification.Expense,
+                        AccountType.Revenue =>
+                            CashMovementClassification.Revenue,
+                        _ => movementType?.Classification
+                    }));
     }
 
     private async Task<Error?> ValidateFinalBalancesAsync(
@@ -1466,7 +1486,8 @@ public sealed class CashVoucherService(
         CashPartyType PartyType,
         BusinessPartner? BusinessPartner,
         Driver? Driver,
-        ResolvedExchangeRate? ExchangeRate);
+        ResolvedExchangeRate? ExchangeRate,
+        CashMovementClassification? Classification);
 
     private static CashPartyType DerivePartyType(
         CashVoucherUpdateRequest request) =>
