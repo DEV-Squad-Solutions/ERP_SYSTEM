@@ -176,6 +176,24 @@ public sealed class AutomaticPostingService(
         bool updateExisting,
         CancellationToken cancellationToken)
     {
+        var baseCurrency = await GetBaseCurrencyAsync(cancellationToken);
+        var normalizedLines = JournalEntryLineNormalizer.Normalize(
+            request.Lines,
+            baseCurrency);
+        if (normalizedLines.IsFailure)
+        {
+            LogFailure(
+                updateExisting ? "CreateOrUpdate" : "CreateOrGet",
+                request.SourceType,
+                request.SourceId,
+                request.FiscalYearId,
+                failureKind: "CurrencyValidation",
+                normalizedLines.Errors.Count);
+            return Result<AutomaticJournalEntryResult>.Failure(
+                normalizedLines.Errors);
+        }
+
+        request = request with { Lines = normalizedLines.Value };
         var validation = await ValidateRequestAsync(request, cancellationToken);
         if (validation.IsFailure)
         {
@@ -507,9 +525,22 @@ public sealed class AutomaticPostingService(
                 PartyId = line.PartyId,
                 Description = NormalizeOptional(line.Description),
                 Debit = line.Debit,
-                Credit = line.Credit
+                Credit = line.Credit,
+                Currency = line.Currency!.Value,
+                ExchangeRate = line.ExchangeRate!.Value,
+                TransactionDebit = line.TransactionDebit!.Value,
+                TransactionCredit = line.TransactionCredit!.Value
             })
             .ToList();
+
+    private async Task<CurrencyCode> GetBaseCurrencyAsync(
+        CancellationToken cancellationToken) =>
+        await dbContext.CompanySettings
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(settings => settings.CompanyId == companyId)
+            .Select(settings => (CurrencyCode?)settings.BaseCurrency)
+            .SingleOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
 
     private async Task<Error?> ValidateAccountsAsync(
         IReadOnlyList<JournalEntryLineRequest> lines,

@@ -59,11 +59,6 @@ public sealed class CashVoucherUpdateRequestValidator
             .When(request => request.EmployeeId.HasValue);
 
         RuleFor(request => request.EmployeeMovementType)
-            .NotNull()
-            .WithMessage("اختر نوع حركة الموظف لسند الموظف.")
-            .When(request => request.EmployeeId.HasValue);
-
-        RuleFor(request => request.EmployeeMovementType)
             .Null()
             .WithMessage("نوع حركة الموظف يُستخدم مع سند الموظف فقط.")
             .When(request => !request.EmployeeId.HasValue);
@@ -180,10 +175,6 @@ public sealed class CashVoucherBulkVoucherRequestValidator
             .When(request => request.AccountId.HasValue);
         RuleFor(request => request.EmployeeId)
             .GreaterThan(0)
-            .When(request => request.EmployeeId.HasValue);
-        RuleFor(request => request.EmployeeMovementType)
-            .NotNull()
-            .WithMessage("اختر نوع حركة الموظف لسند الموظف.")
             .When(request => request.EmployeeId.HasValue);
         RuleFor(request => request.EmployeeMovementType)
             .Null()

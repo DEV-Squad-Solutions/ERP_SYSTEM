@@ -91,6 +91,36 @@ public static class JournalEntryErrors
         "إجمالي المدين يجب أن يساوي إجمالي الدائن ويكون أكبر من صفر.",
         nameof(JournalEntryRequest.Lines));
 
+    public static Error CurrencyMetadataIncomplete(int lineIndex) => Error.Validation(
+        "JournalEntries.CurrencyMetadataIncomplete",
+        "يجب إرسال العملة وسعر الصرف والمدين والدائن بالعملة الأصلية معًا.",
+        $"Lines[{lineIndex}].Currency");
+
+    public static Error CurrencyInvalid(int lineIndex) => Error.Validation(
+        "JournalEntries.CurrencyInvalid",
+        "عملة السطر غير صحيحة.",
+        $"Lines[{lineIndex}].Currency");
+
+    public static Error ExchangeRateInvalid(int lineIndex) => Error.Validation(
+        "JournalEntries.ExchangeRateInvalid",
+        "سعر الصرف يجب أن يكون أكبر من صفر وبالدقة المسموحة.",
+        $"Lines[{lineIndex}].ExchangeRate");
+
+    public static Error BaseCurrencyRateMustBeOne(int lineIndex) => Error.Validation(
+        "JournalEntries.BaseCurrencyRateMustBeOne",
+        "سعر صرف عملة الشركة الأساسية يجب أن يساوي 1.",
+        $"Lines[{lineIndex}].ExchangeRate");
+
+    public static Error TransactionAmountShapeInvalid(int lineIndex) => Error.Validation(
+        "JournalEntries.TransactionAmountShapeInvalid",
+        "يجب إدخال مدين أو دائن بالعملة الأصلية فقط وبما يطابق اتجاه السطر.",
+        $"Lines[{lineIndex}].TransactionDebit");
+
+    public static Error TransactionConversionMismatch(int lineIndex) => Error.Validation(
+        "JournalEntries.TransactionConversionMismatch",
+        "المبلغ بالعملة الأصلية مع سعر الصرف لا يساوي مبلغ السطر بالعملة الأساسية.",
+        $"Lines[{lineIndex}].ExchangeRate");
+
     public static Error RowVersionRequired() => Error.Validation(
         "JournalEntries.RowVersionRequired",
         "يجب إرسال إصدار القيد الحالي قبل تعديله أو حذفه.",

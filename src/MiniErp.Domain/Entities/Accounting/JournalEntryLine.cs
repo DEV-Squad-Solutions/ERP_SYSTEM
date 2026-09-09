@@ -29,4 +29,16 @@ public sealed class JournalEntryLine : AuditableEntity
     public decimal Debit { get; set; }
 
     public decimal Credit { get; set; }
+
+    /// <summary>Currency of the amount entered on this line.</summary>
+    public CurrencyCode Currency { get; set; } = CurrencyCode.EGP;
+
+    /// <summary>Number of base-currency units represented by one currency unit.</summary>
+    public decimal ExchangeRate { get; set; } = 1m;
+
+    /// <summary>Debit amount in <see cref="Currency"/> (the original transaction amount).</summary>
+    public decimal TransactionDebit { get; set; }
+
+    /// <summary>Credit amount in <see cref="Currency"/> (the original transaction amount).</summary>
+    public decimal TransactionCredit { get; set; }
 }

@@ -34,7 +34,10 @@ public sealed class OpeningBalancePostingService(
                 entity.Id,
                 entity.Code,
                 entity.Name,
+                entity.Currency,
+                entity.OpeningBalance,
                 entity.OpeningBalanceDate,
+                entity.OpeningExchangeRate,
                 entity.BaseOpeningBalance
             })
             .SingleOrDefaultAsync(cancellationToken);
@@ -83,6 +86,13 @@ public sealed class OpeningBalancePostingService(
 
         var amount = Math.Abs(cashbox.BaseOpeningBalance);
         var cashboxIsDebit = cashbox.BaseOpeningBalance > 0m;
+        var cashboxTransactionAmount =
+            Domain.Entities.Companies.ExchangeRateRules.IsValidRate(
+                cashbox.OpeningExchangeRate)
+                ? Domain.Entities.Companies.ExchangeRateRules.ConvertFromBase(
+                    amount,
+                    cashbox.OpeningExchangeRate)
+                : Math.Abs(cashbox.OpeningBalance);
         var postingResult = await automaticPostingService.CreateOrUpdateAsync(
             new AutomaticJournalEntryRequest(
                 FiscalYearId: fiscalYearResult.Value,
@@ -99,7 +109,15 @@ public sealed class OpeningBalancePostingService(
                         cashboxIsDebit ? amount : 0m,
                         cashboxIsDebit ? 0m : amount,
                         PartyType: JournalPartyType.Cashbox,
-                        PartyId: cashbox.Id),
+                        PartyId: cashbox.Id,
+                        Currency: cashbox.Currency,
+                        ExchangeRate: cashbox.OpeningExchangeRate,
+                        TransactionDebit: cashboxIsDebit
+                            ? cashboxTransactionAmount
+                            : 0m,
+                        TransactionCredit: cashboxIsDebit
+                            ? 0m
+                            : cashboxTransactionAmount),
                     new JournalEntryLineRequest(
                         equityResult.Value,
                         "مقابل رصيد الخزينة الافتتاحي",
@@ -127,6 +145,9 @@ public sealed class OpeningBalancePostingService(
                 entity.BusinessPartnerId,
                 entity.DocumentNumber,
                 entity.DocumentDate,
+                entity.Currency,
+                entity.ExchangeRate,
+                entity.Amount,
                 entity.BalanceType,
                 entity.BaseAmount
             })
@@ -160,6 +181,9 @@ public sealed class OpeningBalancePostingService(
             JournalEntrySourceType.PartnerOpeningBalance,
             balance.Id,
             balance.BaseAmount,
+            balance.Currency,
+            balance.ExchangeRate,
+            balance.Amount,
             isDebit,
             controlResult,
             "رصيد افتتاحي طرف",
@@ -184,6 +208,9 @@ public sealed class OpeningBalancePostingService(
                 entity.PayrollEntryId,
                 entity.DocumentNumber,
                 entity.DocumentDate,
+                entity.Currency,
+                entity.ExchangeRate,
+                entity.Amount,
                 entity.BalanceType,
                 entity.BaseAmount
             })
@@ -227,6 +254,9 @@ public sealed class OpeningBalancePostingService(
             JournalEntrySourceType.EmployeeOpeningBalance,
             balance.Id,
             balance.BaseAmount,
+            balance.Currency,
+            balance.ExchangeRate,
+            balance.Amount,
             isDebit,
             controlResult,
             "رصيد افتتاحي موظف",
@@ -251,6 +281,9 @@ public sealed class OpeningBalancePostingService(
         JournalEntrySourceType sourceType,
         int sourceId,
         decimal amount,
+        CurrencyCode currency,
+        decimal exchangeRate,
+        decimal transactionAmount,
         bool controlIsDebit,
         Result<int> controlResult,
         string description,
@@ -296,7 +329,15 @@ public sealed class OpeningBalancePostingService(
                         Debit: controlIsDebit ? amount : 0m,
                         Credit: controlIsDebit ? 0m : amount,
                         PartyType: partyType,
-                        PartyId: partyId),
+                        PartyId: partyId,
+                        Currency: currency,
+                        ExchangeRate: exchangeRate,
+                        TransactionDebit: controlIsDebit
+                            ? (transactionAmount > 0m ? transactionAmount : amount)
+                            : 0m,
+                        TransactionCredit: controlIsDebit
+                            ? 0m
+                            : (transactionAmount > 0m ? transactionAmount : amount)),
                     new JournalEntryLineRequest(
                         equityResult.Value,
                         "مقابل الرصيد الافتتاحي",

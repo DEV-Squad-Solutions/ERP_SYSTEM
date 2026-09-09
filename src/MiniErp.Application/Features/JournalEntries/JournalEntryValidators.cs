@@ -1,4 +1,5 @@
 using FluentValidation;
+using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.JournalEntries;
@@ -94,6 +95,20 @@ public sealed class JournalEntryLineRequestValidator
             .Must(line => line.PartyType.HasValue == line.PartyId.HasValue)
             .WithName(nameof(JournalEntryLineRequest.PartyId))
             .WithMessage("يجب إرسال نوع الطرف ورقم الطرف معًا.");
+        RuleFor(line => line.Currency)
+            .IsInEnum()
+            .When(line => line.Currency.HasValue);
+        RuleFor(line => line.ExchangeRate)
+            .Must(rate => !rate.HasValue || ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("سعر الصرف يجب أن يكون أكبر من صفر وبالدقة المسموحة.");
+        RuleFor(line => line.TransactionDebit)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(19, 4, ignoreTrailingZeros: true)
+            .When(line => line.TransactionDebit.HasValue);
+        RuleFor(line => line.TransactionCredit)
+            .GreaterThanOrEqualTo(0m)
+            .PrecisionScale(19, 4, ignoreTrailingZeros: true)
+            .When(line => line.TransactionCredit.HasValue);
         RuleFor(line => line)
             .Must(line =>
                 (line.Debit > 0m && line.Credit == 0m) ||

@@ -58,6 +58,7 @@ public sealed class CashboxTransferPostingService(
                 voucher.Direction,
                 voucher.CashboxId,
                 voucher.Amount,
+                voucher.Currency,
                 voucher.ExchangeRate,
                 voucher.BaseAmount
             })
@@ -134,6 +135,14 @@ public sealed class CashboxTransferPostingService(
             receipt.BaseAmount,
             receipt.Amount,
             receipt.ExchangeRate);
+        var sourceTransactionAmount = GetTransactionAmount(
+            sourceBaseAmount,
+            payment.Amount,
+            payment.ExchangeRate);
+        var destinationTransactionAmount = GetTransactionAmount(
+            destinationBaseAmount,
+            receipt.Amount,
+            receipt.ExchangeRate);
         var lines = new List<JournalEntryLineRequest>
         {
             new(
@@ -142,14 +151,22 @@ public sealed class CashboxTransferPostingService(
                 Debit: destinationBaseAmount,
                 Credit: 0m,
                 PartyType: JournalPartyType.Cashbox,
-                PartyId: transfer.DestinationCashboxId),
+                PartyId: transfer.DestinationCashboxId,
+                Currency: receipt.Currency,
+                ExchangeRate: receipt.ExchangeRate,
+                TransactionDebit: destinationTransactionAmount,
+                TransactionCredit: 0m),
             new(
                 AccountId: sourceAccountResult.Value,
                 Description: transfer.Description,
                 Debit: 0m,
                 Credit: sourceBaseAmount,
                 PartyType: JournalPartyType.Cashbox,
-                PartyId: transfer.SourceCashboxId)
+                PartyId: transfer.SourceCashboxId,
+                Currency: payment.Currency,
+                ExchangeRate: payment.ExchangeRate,
+                TransactionDebit: 0m,
+                TransactionCredit: sourceTransactionAmount)
         };
 
         var difference = ExchangeRateRules.RoundBaseAmount(
@@ -221,4 +238,12 @@ public sealed class CashboxTransferPostingService(
         baseAmount > 0m
             ? baseAmount
             : ExchangeRateRules.ConvertToBase(amount, exchangeRate);
+
+    private static decimal GetTransactionAmount(
+        decimal baseAmount,
+        decimal amount,
+        decimal exchangeRate) =>
+        ExchangeRateRules.IsValidRate(exchangeRate)
+            ? ExchangeRateRules.ConvertFromBase(baseAmount, exchangeRate)
+            : amount;
 }

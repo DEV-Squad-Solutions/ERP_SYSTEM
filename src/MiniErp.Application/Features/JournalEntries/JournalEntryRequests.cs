@@ -25,7 +25,11 @@ public sealed record JournalEntryLineRequest(
     decimal Debit,
     decimal Credit,
     JournalPartyType? PartyType = null,
-    int? PartyId = null)
+    int? PartyId = null,
+    CurrencyCode? Currency = null,
+    decimal? ExchangeRate = null,
+    decimal? TransactionDebit = null,
+    decimal? TransactionCredit = null)
 {
     public const int DescriptionMaximumLength = 300;
 }

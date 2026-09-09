@@ -796,6 +796,50 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
+    public async Task DirectEmployeePaymentInfersMovementTypeWhenOmitted()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = database.CreateVoucherService(companyId: 1);
+        var draft = await service.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 7, 27),
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                Amount: 75m,
+                Description: "Employee advance"));
+
+        var posted = await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: draft.Value.VoucherDate,
+                Direction: CashDirection.Payment,
+                CashboxId: 1,
+                CashMovementTypeId: null,
+                EmployeeId: 1,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: 75m,
+                ReferenceNumber: null,
+                Description: "Employee advance",
+                Notes: null,
+                RowVersion: draft.Value.RowVersion,
+                EmployeeMovementType: null));
+
+        Assert.True(
+            posted.IsSuccess,
+            string.Join(
+                "; ",
+                posted.Errors.Select(error =>
+                    error.Code + ":" + error.Description)));
+        var movement = await database.Context.EmployeeMovements
+            .AsNoTracking()
+            .SingleAsync(item => item.CashVoucherId == draft.Value.Id);
+        Assert.Equal(EmployeeMovementType.Advance, movement.Type);
+    }
+
+    [Fact]
     public async Task DirectEmployeeUpdateUpdatesLinkedMovementWithoutDuplication()
     {
         await using var database = await CashManagementTestDatabase.CreateAsync();

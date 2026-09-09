@@ -23,6 +23,137 @@ namespace MiniErp.Tests.Accounting;
 public sealed class AutomaticPostingServiceTests
 {
     [Fact]
+    public async Task Posting_DefaultsTransactionCurrencyToCompanyBase()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var service = new AutomaticPostingService(
+            database.Context,
+            new TestCurrentCompanyContext(1),
+            TimeProvider.System,
+            NullLogger<AutomaticPostingService>.Instance);
+
+        var result = await service.CreateOrGetAsync(CreateRequest(100m));
+
+        Assert.True(result.IsSuccess, string.Join("; ", result.Errors.Select(error => error.Code)));
+        var lines = await database.Context.JournalEntryLines
+            .AsNoTracking()
+            .Where(line => line.JournalEntryId == result.Value.JournalEntryId)
+            .ToListAsync();
+        Assert.All(lines, line =>
+        {
+            Assert.Equal(CurrencyCode.EGP, line.Currency);
+            Assert.Equal(1m, line.ExchangeRate);
+        });
+        Assert.Equal(100m, lines[0].TransactionDebit);
+        Assert.Equal(100m, lines[1].TransactionCredit);
+    }
+
+    [Fact]
+    public async Task Posting_PersistsForeignTransactionCurrencyAndRate()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var service = new AutomaticPostingService(
+            database.Context,
+            new TestCurrentCompanyContext(1),
+            TimeProvider.System,
+            NullLogger<AutomaticPostingService>.Instance);
+        var request = CreateRequest(100m) with
+        {
+            SourceId = 404,
+            Lines =
+            [
+                new JournalEntryLineRequest(
+                    2, "مدين أجنبي", 100m, 0m,
+                    JournalPartyType.Cashbox, 7,
+                    CurrencyCode.USD, 50m, 2m, 0m),
+                new JournalEntryLineRequest(
+                    3, "دائن أجنبي", 0m, 100m,
+                    JournalPartyType.Customer, 11,
+                    CurrencyCode.USD, 50m, 0m, 2m)
+            ]
+        };
+
+        var result = await service.CreateOrGetAsync(request);
+
+        Assert.True(result.IsSuccess, string.Join("; ", result.Errors.Select(error => error.Code)));
+        var lines = await database.Context.JournalEntryLines
+            .AsNoTracking()
+            .Where(line => line.JournalEntryId == result.Value.JournalEntryId)
+            .ToListAsync();
+        Assert.All(lines, line =>
+        {
+            Assert.Equal(CurrencyCode.USD, line.Currency);
+            Assert.Equal(50m, line.ExchangeRate);
+        });
+        Assert.Equal(2m, lines[0].TransactionDebit);
+        Assert.Equal(2m, lines[1].TransactionCredit);
+    }
+
+    [Fact]
+    public async Task Posting_RejectsInconsistentTransactionConversion()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var service = new AutomaticPostingService(
+            database.Context,
+            new TestCurrentCompanyContext(1),
+            TimeProvider.System,
+            NullLogger<AutomaticPostingService>.Instance);
+        var request = CreateRequest(100m) with
+        {
+            SourceId = 405,
+            Lines =
+            [
+                new JournalEntryLineRequest(
+                    2, "مدين غير متسق", 100m, 0m,
+                    JournalPartyType.Cashbox, 7,
+                    CurrencyCode.USD, 50m, 3m, 0m),
+                new JournalEntryLineRequest(
+                    3, "دائن غير متسق", 0m, 100m,
+                    JournalPartyType.Customer, 11,
+                    CurrencyCode.USD, 50m, 0m, 2m)
+            ]
+        };
+
+        var result = await service.CreateOrGetAsync(request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Errors, error =>
+            error.Code == "JournalEntries.TransactionConversionMismatch");
+    }
+
+    [Fact]
+    public async Task Posting_RejectsNonOneRateForCompanyBaseCurrency()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var service = new AutomaticPostingService(
+            database.Context,
+            new TestCurrentCompanyContext(1),
+            TimeProvider.System,
+            NullLogger<AutomaticPostingService>.Instance);
+        var request = CreateRequest(100m) with
+        {
+            SourceId = 406,
+            Lines =
+            [
+                new JournalEntryLineRequest(
+                    2, "مدين", 100m, 0m,
+                    JournalPartyType.Cashbox, 7,
+                    CurrencyCode.EGP, 2m, 50m, 0m),
+                new JournalEntryLineRequest(
+                    3, "دائن", 0m, 100m,
+                    JournalPartyType.Customer, 11,
+                    CurrencyCode.EGP, 2m, 0m, 50m)
+            ]
+        };
+
+        var result = await service.CreateOrGetAsync(request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Errors, error =>
+            error.Code == "JournalEntries.BaseCurrencyRateMustBeOne");
+    }
+
+    [Fact]
     public async Task Posting_IsIdempotent_AndCorrectionUpdatesSameEntry()
     {
         await using var database = await TestDatabase.CreateAsync();
@@ -240,15 +371,16 @@ public sealed class AutomaticPostingServiceTests
             CashboxId = 7,
             PartyType = CashPartyType.Partner,
             BusinessPartnerId = 11,
-            Amount = 100m,
+            Amount = 2m,
+            Currency = CurrencyCode.USD,
             IsPosted = true,
             Description = "تحصيل من عميل"
         };
-        voucher.ApplyExchangeRate(exchangeRateId: null, exchangeRate: 1m);
+        voucher.ApplyExchangeRate(exchangeRateId: null, exchangeRate: 50m);
 
         var created = await postingService.SynchronizeAsync(voucher);
-        voucher.Amount = 150m;
-        voucher.ApplyExchangeRate(exchangeRateId: null, exchangeRate: 1m);
+        voucher.Amount = 3m;
+        voucher.ApplyExchangeRate(exchangeRateId: null, exchangeRate: 50m);
         var updated = await postingService.SynchronizeAsync(voucher);
 
         Assert.True(created.IsSuccess);
@@ -263,11 +395,17 @@ public sealed class AutomaticPostingServiceTests
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 2 &&
             line.Debit == 150m &&
+            line.Currency == CurrencyCode.USD &&
+            line.ExchangeRate == 50m &&
+            line.TransactionDebit == 3m &&
             line.PartyType == JournalPartyType.Cashbox &&
             line.PartyId == 7);
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 3 &&
             line.Credit == 150m &&
+            line.Currency == CurrencyCode.USD &&
+            line.ExchangeRate == 50m &&
+            line.TransactionCredit == 3m &&
             line.PartyType == JournalPartyType.Customer &&
             line.PartyId == 11);
 
@@ -304,18 +442,26 @@ public sealed class AutomaticPostingServiceTests
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 4 &&
             line.Debit == 105m &&
+            line.Currency == CurrencyCode.USD &&
+            line.ExchangeRate == 50m &&
+            line.TransactionDebit == 2.1m &&
             line.PartyType == JournalPartyType.Cashbox &&
             line.PartyId == 8);
         Assert.Contains(entry.Lines, line =>
             line.AccountId == 2 &&
             line.Credit == 100m &&
+            line.Currency == CurrencyCode.EGP &&
+            line.ExchangeRate == 1m &&
+            line.TransactionCredit == 100m &&
             line.PartyType == JournalPartyType.Cashbox &&
             line.PartyId == 7);
         Assert.Contains(entry.Lines, line =>
-            line.AccountId == 5 && line.Credit == 5m);
+            line.AccountId == 5 && line.Credit == 5m &&
+            line.Currency == CurrencyCode.EGP && line.ExchangeRate == 1m &&
+            line.TransactionCredit == 5m);
 
         await database.Context.Database.ExecuteSqlRawAsync(
-            "UPDATE CashVouchers SET BaseAmount = 95 WHERE Id = 502");
+            "UPDATE CashVouchers SET Amount = 1.9, BaseAmount = 95 WHERE Id = 502");
         var updated = await postingService.SynchronizeAsync(50);
 
         Assert.True(updated.IsSuccess);
@@ -328,7 +474,9 @@ public sealed class AutomaticPostingServiceTests
         Assert.Equal(100m, entry.Lines.Sum(line => line.Debit));
         Assert.Equal(100m, entry.Lines.Sum(line => line.Credit));
         Assert.Contains(entry.Lines, line =>
-            line.AccountId == 6 && line.Debit == 5m);
+            line.AccountId == 6 && line.Debit == 5m &&
+            line.Currency == CurrencyCode.EGP && line.ExchangeRate == 1m &&
+            line.TransactionDebit == 5m);
         var deleted = await postingService.DeleteAsync(50);
         Assert.True(deleted.IsSuccess);
         Assert.Empty(await database.Context.JournalEntries.ToListAsync());
@@ -1008,7 +1156,10 @@ public sealed class AutomaticPostingServiceTests
                     CompanyId INTEGER NOT NULL,
                     Code TEXT NOT NULL,
                     Name TEXT NOT NULL,
+                    Currency INTEGER NOT NULL DEFAULT 1,
+                    OpeningBalance TEXT NOT NULL DEFAULT 0,
                     OpeningBalanceDate TEXT NOT NULL,
+                    OpeningExchangeRate TEXT NOT NULL DEFAULT 1,
                     BaseOpeningBalance TEXT NOT NULL,
                     IsActive INTEGER NOT NULL DEFAULT 1,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
@@ -1021,6 +1172,7 @@ public sealed class AutomaticPostingServiceTests
                     Direction INTEGER NOT NULL,
                     CashboxId INTEGER NULL,
                     Amount TEXT NOT NULL,
+                    Currency INTEGER NOT NULL DEFAULT 1,
                     ExchangeRate TEXT NOT NULL,
                     BaseAmount TEXT NOT NULL,
                     IsPosted INTEGER NOT NULL,
@@ -1035,6 +1187,7 @@ public sealed class AutomaticPostingServiceTests
                     InvoiceNumber TEXT NOT NULL,
                     InvoiceDate TEXT NOT NULL,
                     InvoiceType INTEGER NOT NULL,
+                    Currency INTEGER NOT NULL DEFAULT 1,
                     Total TEXT NOT NULL,
                     ExchangeRate TEXT NOT NULL,
                     BaseTotal TEXT NOT NULL,
@@ -1076,7 +1229,10 @@ public sealed class AutomaticPostingServiceTests
                     BusinessPartnerId INTEGER NOT NULL,
                     DocumentNumber TEXT NOT NULL,
                     DocumentDate TEXT NOT NULL,
+                    Currency INTEGER NOT NULL DEFAULT 1,
+                    ExchangeRate TEXT NOT NULL DEFAULT 1,
                     BalanceType INTEGER NOT NULL,
+                    Amount TEXT NOT NULL DEFAULT 0,
                     BaseAmount TEXT NOT NULL,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
@@ -1088,7 +1244,10 @@ public sealed class AutomaticPostingServiceTests
                     PayrollEntryId INTEGER NULL,
                     DocumentNumber TEXT NOT NULL,
                     DocumentDate TEXT NOT NULL,
+                    Currency INTEGER NOT NULL DEFAULT 1,
+                    ExchangeRate TEXT NOT NULL DEFAULT 1,
                     BalanceType INTEGER NOT NULL,
+                    Amount TEXT NOT NULL DEFAULT 0,
                     BaseAmount TEXT NOT NULL,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
@@ -1108,10 +1267,24 @@ public sealed class AutomaticPostingServiceTests
                     CompanyId INTEGER NOT NULL,
                     InvoiceId INTEGER NOT NULL,
                     CashVoucherId INTEGER NOT NULL,
+                    InvoiceCurrency INTEGER NOT NULL DEFAULT 1,
+                    AppliedAmount TEXT NOT NULL DEFAULT 0,
+                    CashboxCurrency INTEGER NOT NULL DEFAULT 1,
+                    CashboxAmount TEXT NOT NULL DEFAULT 0,
+                    InvoiceToBaseRate TEXT NOT NULL DEFAULT 1,
+                    CashboxToBaseRate TEXT NOT NULL DEFAULT 1,
                     AppliedBaseAmount TEXT NOT NULL,
                     CashboxBaseAmount TEXT NOT NULL,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
+
+                CREATE TABLE CompanySettings (
+                    CompanyId INTEGER PRIMARY KEY,
+                    BaseCurrency INTEGER NOT NULL DEFAULT 1
+                );
+
+                INSERT INTO CompanySettings (CompanyId, BaseCurrency)
+                VALUES (1, 1);
 
                 CREATE TABLE BusinessPartners (
                     Id INTEGER PRIMARY KEY,
@@ -1170,6 +1343,10 @@ public sealed class AutomaticPostingServiceTests
                     Description TEXT NULL,
                     Debit TEXT NOT NULL,
                     Credit TEXT NOT NULL,
+                    Currency INTEGER NOT NULL DEFAULT 1,
+                    ExchangeRate TEXT NOT NULL DEFAULT 1,
+                    TransactionDebit TEXT NOT NULL DEFAULT 0,
+                    TransactionCredit TEXT NOT NULL DEFAULT 0,
                     CreatedById TEXT NOT NULL DEFAULT '',
                     CreatedOn TEXT NOT NULL DEFAULT '0001-01-01',
                     CreatedByPc TEXT NOT NULL DEFAULT '',
@@ -1255,11 +1432,11 @@ public sealed class AutomaticPostingServiceTests
 
                 INSERT INTO CashVouchers
                     (Id, CompanyId, CashboxTransferId, Direction, CashboxId,
-                     Amount, ExchangeRate, BaseAmount, IsPosted)
+                     Amount, Currency, ExchangeRate, BaseAmount, IsPosted)
                 VALUES
-                    (501, 1, 50, 2, 7, 100, 1, 100, 1),
-                    (502, 1, 50, 1, 8, 105, 1, 105, 1),
-                    (601, 1, NULL, 1, 9, 105, 1, 105, 1);
+                    (501, 1, 50, 2, 7, 100, 1, 1, 100, 1),
+                    (502, 1, 50, 1, 8, 2.1, 2, 50, 105, 1),
+                    (601, 1, NULL, 1, 9, 105, 1, 1, 105, 1);
 
                 INSERT INTO Invoices
                     (Id, CompanyId, BusinessPartnerId, InvoiceNumber,

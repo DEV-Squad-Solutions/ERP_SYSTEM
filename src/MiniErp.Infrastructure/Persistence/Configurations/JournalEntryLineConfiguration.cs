@@ -23,6 +23,16 @@ public sealed class JournalEntryLineConfiguration
                     "CK_JournalEntryLines_PartyShape",
                     "(([PartyType] IS NULL AND [PartyId] IS NULL) OR " +
                     "([PartyType] IN (1, 2, 3, 4, 5) AND [PartyId] IS NOT NULL))");
+                table.HasCheckConstraint(
+                    "CK_JournalEntryLines_Currency",
+                    "[Currency] BETWEEN 1 AND 7");
+                table.HasCheckConstraint(
+                    "CK_JournalEntryLines_ExchangeRate",
+                    "[ExchangeRate] > 0");
+                table.HasCheckConstraint(
+                    "CK_JournalEntryLines_TransactionAmounts",
+                    "(([TransactionDebit] > 0 AND [TransactionCredit] = 0 AND [Debit] > 0 AND [Credit] = 0) OR " +
+                    "([TransactionCredit] > 0 AND [TransactionDebit] = 0 AND [Credit] > 0 AND [Debit] = 0))");
             });
 
         builder.HasKey(line => line.Id);
@@ -37,6 +47,20 @@ public sealed class JournalEntryLineConfiguration
             .HasPrecision(19, 4)
             .IsRequired();
         builder.Property(line => line.Credit)
+            .HasPrecision(19, 4)
+            .IsRequired();
+        builder.Property(line => line.Currency)
+            .HasConversion<int>()
+            .IsRequired();
+        builder.Property(line => line.ExchangeRate)
+            .HasPrecision(
+                Domain.Entities.Companies.ExchangeRateRules.RatePrecision,
+                Domain.Entities.Companies.ExchangeRateRules.RateScale)
+            .IsRequired();
+        builder.Property(line => line.TransactionDebit)
+            .HasPrecision(19, 4)
+            .IsRequired();
+        builder.Property(line => line.TransactionCredit)
             .HasPrecision(19, 4)
             .IsRequired();
 

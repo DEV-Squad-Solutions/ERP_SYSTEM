@@ -112,7 +112,17 @@ public sealed class JournalEntryService(
                 AutomaticCannotBeCreatedManually());
         }
 
-        var balanceValidation = ValidateBalance(request.Lines);
+        var baseCurrency = await GetBaseCurrencyAsync(cancellationToken);
+        var normalizedResult = JournalEntryLineNormalizer.Normalize(
+            request.Lines,
+            baseCurrency);
+        if (normalizedResult.IsFailure)
+        {
+            return Result<JournalEntryResponse>.Failure(normalizedResult.Errors);
+        }
+
+        var lines = normalizedResult.Value;
+        var balanceValidation = ValidateBalance(lines);
         if (balanceValidation.IsFailure)
         {
             return Result<JournalEntryResponse>.Failure(
@@ -133,7 +143,7 @@ public sealed class JournalEntryService(
         }
 
         var accountValidation = await ValidateAccountsAsync(
-            request.Lines,
+            lines,
             request.FiscalYearId,
             cancellationToken);
         if (accountValidation.IsFailure)
@@ -162,7 +172,7 @@ public sealed class JournalEntryService(
             EntryType = request.EntryType,
             Status = JournalEntryStatus.Posted,
             PostedOn = now,
-            Lines = request.Lines.Select(line => new JournalEntryLine
+            Lines = lines.Select(line => new JournalEntryLine
             {
                 CompanyId = companyId,
                 AccountId = line.AccountId,
@@ -170,7 +180,11 @@ public sealed class JournalEntryService(
                 PartyId = line.PartyId,
                 Description = NormalizeOptional(line.Description),
                 Debit = line.Debit,
-                Credit = line.Credit
+                Credit = line.Credit,
+                Currency = line.Currency!.Value,
+                ExchangeRate = line.ExchangeRate!.Value,
+                TransactionDebit = line.TransactionDebit!.Value,
+                TransactionCredit = line.TransactionCredit!.Value
             }).ToList()
         };
 
@@ -199,7 +213,17 @@ public sealed class JournalEntryService(
             return Result<JournalEntryResponse>.Failure(RowVersionRequired());
         }
 
-        var balanceValidation = ValidateBalance(request.Lines);
+        var baseCurrency = await GetBaseCurrencyAsync(cancellationToken);
+        var normalizedResult = JournalEntryLineNormalizer.Normalize(
+            request.Lines,
+            baseCurrency);
+        if (normalizedResult.IsFailure)
+        {
+            return Result<JournalEntryResponse>.Failure(normalizedResult.Errors);
+        }
+
+        var lines = normalizedResult.Value;
+        var balanceValidation = ValidateBalance(lines);
         if (balanceValidation.IsFailure)
         {
             return Result<JournalEntryResponse>.Failure(
@@ -264,7 +288,7 @@ public sealed class JournalEntryService(
         }
 
         var accountValidation = await ValidateAccountsAsync(
-            request.Lines,
+            lines,
             request.FiscalYearId,
             cancellationToken);
         if (accountValidation.IsFailure)
@@ -281,7 +305,7 @@ public sealed class JournalEntryService(
         entry.Description = request.Description.Trim();
 
         dbContext.JournalEntryLines.RemoveRange(entry.Lines);
-        entry.Lines = request.Lines.Select(line => new JournalEntryLine
+        entry.Lines = lines.Select(line => new JournalEntryLine
         {
             CompanyId = companyId,
             AccountId = line.AccountId,
@@ -289,7 +313,11 @@ public sealed class JournalEntryService(
             PartyId = line.PartyId,
             Description = NormalizeOptional(line.Description),
             Debit = line.Debit,
-            Credit = line.Credit
+            Credit = line.Credit,
+            Currency = line.Currency!.Value,
+            ExchangeRate = line.ExchangeRate!.Value,
+            TransactionDebit = line.TransactionDebit!.Value,
+            TransactionCredit = line.TransactionCredit!.Value
         }).ToList();
 
         try
@@ -656,6 +684,8 @@ public sealed class JournalEntryService(
                 ids.Contains(entry.Id))
             .ToListAsync(cancellationToken);
 
+        var baseCurrency = await GetBaseCurrencyAsync(cancellationToken);
+
         var partnerIds = entries
             .SelectMany(entry => entry.Lines)
             .Where(line => line.PartyType is
@@ -784,6 +814,10 @@ public sealed class JournalEntryService(
                             Description: line.Description,
                             Debit: line.Debit,
                             Credit: line.Credit,
+                            Currency: line.Currency,
+                            ExchangeRate: line.ExchangeRate,
+                            TransactionDebit: line.TransactionDebit,
+                            TransactionCredit: line.TransactionCredit,
                             PartyType: line.PartyType,
                             PartyId: line.PartyId,
                             PartyCode: party?.Code,
@@ -803,6 +837,7 @@ public sealed class JournalEntryService(
                     SourceId: entry.SourceId,
                     SourceNumber: entry.SourceNumber,
                     Status: entry.Status,
+                    BaseCurrency: baseCurrency,
                     TotalDebit: lines.Sum(line => line.Debit),
                     TotalCredit: lines.Sum(line => line.Credit),
                     PostedOn: entry.PostedOn,
@@ -826,6 +861,15 @@ public sealed class JournalEntryService(
 
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task<CurrencyCode> GetBaseCurrencyAsync(
+        CancellationToken cancellationToken) =>
+        await dbContext.CompanySettings
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(settings => settings.CompanyId == companyId)
+            .Select(settings => (CurrencyCode?)settings.BaseCurrency)
+            .SingleOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
 
     private static PartySnapshot? ResolveParty(
         JournalPartyType? partyType,

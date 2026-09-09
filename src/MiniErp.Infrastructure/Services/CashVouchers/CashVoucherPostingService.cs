@@ -6,6 +6,7 @@ using MiniErp.Application.Features.CashVouchers;
 using MiniErp.Application.Features.FiscalYears;
 using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.CashManagement;
+using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 using static MiniErp.Application.Features.CashVouchers.CashVoucherErrors;
@@ -92,6 +93,9 @@ public sealed class CashVoucherPostingService(
         var amount = voucher.BaseAmount > 0m
             ? voucher.BaseAmount
             : voucher.Amount * voucher.ExchangeRate;
+        var transactionAmount = ExchangeRateRules.IsValidRate(voucher.ExchangeRate)
+            ? ExchangeRateRules.ConvertFromBase(amount, voucher.ExchangeRate)
+            : voucher.Amount;
         var isReceipt = voucher.Direction == CashDirection.Receipt;
         var party = GetJournalParty(voucher);
         var lines = new List<JournalEntryLineRequest>
@@ -102,14 +106,22 @@ public sealed class CashVoucherPostingService(
                 Debit: isReceipt ? amount : 0m,
                 Credit: isReceipt ? 0m : amount,
                 PartyType: JournalPartyType.Cashbox,
-                PartyId: voucher.CashboxId),
+                PartyId: voucher.CashboxId,
+                Currency: voucher.Currency,
+                ExchangeRate: voucher.ExchangeRate,
+                TransactionDebit: isReceipt ? transactionAmount : 0m,
+                TransactionCredit: isReceipt ? 0m : transactionAmount),
             new(
                 AccountId: counterpartResult.Value,
                 Description: voucher.Description,
                 Debit: isReceipt ? 0m : amount,
                 Credit: isReceipt ? amount : 0m,
                 PartyType: party.PartyType,
-                PartyId: party.PartyId)
+                PartyId: party.PartyId,
+                Currency: voucher.Currency,
+                ExchangeRate: voucher.ExchangeRate,
+                TransactionDebit: isReceipt ? 0m : transactionAmount,
+                TransactionCredit: isReceipt ? transactionAmount : 0m)
         };
 
         return await automaticPostingService.CreateOrUpdateAsync(

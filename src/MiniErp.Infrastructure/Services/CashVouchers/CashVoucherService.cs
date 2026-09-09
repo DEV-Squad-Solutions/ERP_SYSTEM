@@ -476,6 +476,11 @@ public sealed class CashVoucherService(
                 TransferGeneratedReadOnly());
         }
 
+        request = await NormalizeEmployeeMovementTypeAsync(
+            request,
+            voucher,
+            cancellationToken);
+
         var preparation = await PrepareAsync(
             request,
             voucher,
@@ -644,6 +649,10 @@ public sealed class CashVoucherService(
         CancellationToken cancellationToken)
     {
         var request = ToUpdateRequest(item.Voucher!, rowVersion: null);
+        request = await NormalizeEmployeeMovementTypeAsync(
+            request,
+            currentVoucher: null,
+            cancellationToken: cancellationToken);
         if (fiscalYearPeriodGuard is not null)
         {
             var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
@@ -775,6 +784,11 @@ public sealed class CashVoucherService(
             return Result<CashVoucherBulkItemResponse>.Failure(
                 TransferGeneratedReadOnly());
         }
+
+        request = await NormalizeEmployeeMovementTypeAsync(
+            request,
+            voucher,
+            cancellationToken);
 
         var preparation = await PrepareAsync(
             request,
@@ -981,6 +995,45 @@ public sealed class CashVoucherService(
             ExchangeRate: request.ExchangeRate,
             AccountId: request.AccountId,
             EmployeeMovementType: request.EmployeeMovementType);
+
+    private async Task<CashVoucherUpdateRequest> NormalizeEmployeeMovementTypeAsync(
+        CashVoucherUpdateRequest request,
+        CashVoucher? currentVoucher,
+        CancellationToken cancellationToken)
+    {
+        if (!request.EmployeeId.HasValue ||
+            request.EmployeeMovementType.HasValue)
+        {
+            return request;
+        }
+
+        EmployeeMovementType? existingType = null;
+        if (currentVoucher is not null)
+        {
+            existingType = await dbContext.EmployeeMovements
+                .AsNoTracking()
+                .Where(movement =>
+                    movement.CompanyId == companyId &&
+                    movement.CashVoucherId == currentVoucher.Id)
+                .Select(movement => (EmployeeMovementType?)movement.Type)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        var isReceipt = request.Direction == CashDirection.Receipt;
+        var effectiveType = existingType.HasValue &&
+            EmployeeAccountRules.IsCreditMovement(existingType.Value) ==
+            isReceipt
+                ? existingType.Value
+                : GetDefaultEmployeeMovementType(request.Direction);
+
+        return request with { EmployeeMovementType = effectiveType };
+    }
+
+    private static EmployeeMovementType GetDefaultEmployeeMovementType(
+        CashDirection direction) =>
+        direction == CashDirection.Receipt
+            ? EmployeeMovementType.Credit
+            : EmployeeMovementType.Advance;
 
     private async Task<Result<VoucherPreparation>> PrepareAsync(
         CashVoucherUpdateRequest request,
@@ -1412,14 +1465,11 @@ public sealed class CashVoucherService(
             return;
         }
 
-        // The API validator requires the type for employee vouchers. Keep a
-        // safe fallback for internal callers and existing vouchers so the
-        // synchronization remains idempotent when they do not send it.
+        // Keep a safe fallback for internal callers and existing vouchers so
+        // synchronization remains idempotent when they do not send a type.
         var effectiveType = movementType ??
             existing?.Type ??
-            (voucher.Direction == CashDirection.Receipt
-                ? EmployeeMovementType.Credit
-                : EmployeeMovementType.Advance);
+            GetDefaultEmployeeMovementType(voucher.Direction);
 
         if (existing is null)
         {

@@ -177,6 +177,32 @@ public sealed class CashManagementValidatorTests
         Assert.False(bulkResult.IsValid);
     }
 
+    [Fact]
+    public void EmployeeVoucherValidatorsAllowOmittedMovementType()
+    {
+        var updateResult = new CashVoucherUpdateRequestValidator().Validate(
+            CreateVoucher(
+                employeeId: 1,
+                partnerId: null,
+                driverId: null,
+                tripId: null,
+                externalPartyName: null) with
+            {
+                EmployeeMovementType = null
+            });
+        var bulkResult = new CashVoucherBulkVoucherRequestValidator().Validate(
+            CreateBulkVoucher() with
+            {
+                Direction = CashDirection.Payment,
+                CashMovementTypeId = null,
+                EmployeeId = 1,
+                EmployeeMovementType = null
+            });
+
+        Assert.True(updateResult.IsValid);
+        Assert.True(bulkResult.IsValid);
+    }
+
     [Theory]
     [InlineData(CashDirection.Receipt, false)]
     [InlineData(CashDirection.Payment, false)]

@@ -503,6 +503,11 @@ public sealed class FiscalYearServiceTests
                     Name TEXT NULL
                 );
 
+                CREATE TABLE CompanySettings (
+                    CompanyId INTEGER PRIMARY KEY,
+                    BaseCurrency INTEGER NOT NULL DEFAULT 1
+                );
+
                 CREATE TABLE FiscalYears (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
@@ -623,6 +628,10 @@ public sealed class FiscalYearServiceTests
                     Description TEXT NULL,
                     Debit NUMERIC NOT NULL,
                     Credit NUMERIC NOT NULL,
+                    Currency INTEGER NOT NULL DEFAULT 1,
+                    ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                    TransactionDebit NUMERIC NOT NULL DEFAULT 0,
+                    TransactionCredit NUMERIC NOT NULL DEFAULT 0,
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
                     CreatedByPc TEXT NOT NULL,
@@ -637,6 +646,9 @@ public sealed class FiscalYearServiceTests
 
                 INSERT INTO Companies (Id, Name)
                 VALUES (1, 'Company 1'), (2, 'Company 2');
+
+                INSERT INTO CompanySettings (CompanyId, BaseCurrency)
+                VALUES (1, 1), (2, 1);
                 """);
 
         private sealed record TestCurrentCompanyContext(int CompanyId)

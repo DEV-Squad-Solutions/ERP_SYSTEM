@@ -497,6 +497,13 @@ public sealed class FiscalYearService(
             return Result.Success();
         }
 
+        var baseCurrency = await dbContext.CompanySettings
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(settings => settings.CompanyId == companyId)
+            .Select(settings => (CurrencyCode?)settings.BaseCurrency)
+            .SingleOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
+
         var lines = balances
             .Select(balance => new JournalEntryLine
             {
@@ -506,7 +513,11 @@ public sealed class FiscalYearService(
                 PartyId = balance.PartyId,
                 Description = $"ترحيل رصيد {balance.Code} - {balance.Name}",
                 Debit = balance.Balance > 0m ? balance.Balance : 0m,
-                Credit = balance.Balance < 0m ? -balance.Balance : 0m
+                Credit = balance.Balance < 0m ? -balance.Balance : 0m,
+                Currency = baseCurrency,
+                ExchangeRate = 1m,
+                TransactionDebit = balance.Balance > 0m ? balance.Balance : 0m,
+                TransactionCredit = balance.Balance < 0m ? -balance.Balance : 0m
             })
             .ToList();
         var net = lines.Sum(line => line.Debit - line.Credit);
@@ -533,7 +544,11 @@ public sealed class FiscalYearService(
                 AccountId = equityAccountId.Value,
                 Description = "مقابل ترحيل أرصدة المركز المالي",
                 Debit = net < 0m ? -net : 0m,
-                Credit = net > 0m ? net : 0m
+                Credit = net > 0m ? net : 0m,
+                Currency = baseCurrency,
+                ExchangeRate = 1m,
+                TransactionDebit = net < 0m ? -net : 0m,
+                TransactionCredit = net > 0m ? net : 0m
             });
         }
 

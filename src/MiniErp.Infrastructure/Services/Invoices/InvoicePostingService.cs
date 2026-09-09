@@ -38,6 +38,7 @@ public sealed class InvoicePostingService(
                 entity.InvoiceDate,
                 entity.InvoiceType,
                 entity.BusinessPartnerId,
+                entity.Currency,
                 entity.Total,
                 entity.ExchangeRate,
                 entity.BaseTotal,
@@ -108,6 +109,11 @@ public sealed class InvoicePostingService(
             invoiceAccountResult.Value,
             controlAccountResult.Value,
             invoiceAmount,
+            invoice.Currency,
+            invoice.ExchangeRate,
+            ExchangeRateRules.IsValidRate(invoice.ExchangeRate)
+                ? ExchangeRateRules.ConvertFromBase(invoiceAmount, invoice.ExchangeRate)
+                : invoice.Total,
             invoice.InvoiceNumber,
             invoice.BusinessPartnerId);
 
@@ -165,6 +171,12 @@ public sealed class InvoicePostingService(
             {
                 payment.CashVoucher.CashboxId,
                 payment.CashVoucher.Direction,
+                payment.InvoiceCurrency,
+                payment.AppliedAmount,
+                payment.CashboxCurrency,
+                payment.CashboxAmount,
+                payment.InvoiceToBaseRate,
+                payment.CashboxToBaseRate,
                 payment.AppliedBaseAmount,
                 payment.CashboxBaseAmount
             })
@@ -195,6 +207,12 @@ public sealed class InvoicePostingService(
                 controlAccountResult.Value,
                 payment.CashboxBaseAmount,
                 payment.AppliedBaseAmount,
+                payment.CashboxCurrency,
+                payment.CashboxToBaseRate,
+                payment.CashboxAmount,
+                payment.InvoiceCurrency,
+                payment.InvoiceToBaseRate,
+                payment.AppliedAmount,
                 invoice.InvoiceNumber,
                 invoice.BusinessPartnerId,
                 ToJournalPartyType(invoice.InvoiceType),
@@ -312,6 +330,9 @@ public sealed class InvoicePostingService(
         int invoiceAccountId,
         int controlAccountId,
         decimal amount,
+        CurrencyCode currency,
+        decimal exchangeRate,
+        decimal transactionAmount,
         string invoiceNumber,
         int businessPartnerId)
     {
@@ -321,14 +342,22 @@ public sealed class InvoicePostingService(
             AccountId: invoiceAccountId,
             Description: $"إجمالي الفاتورة {invoiceNumber}",
             Debit: invoiceSideIsDebit ? amount : 0m,
-            Credit: invoiceSideIsDebit ? 0m : amount));
+            Credit: invoiceSideIsDebit ? 0m : amount,
+            Currency: currency,
+            ExchangeRate: exchangeRate,
+            TransactionDebit: invoiceSideIsDebit ? transactionAmount : 0m,
+            TransactionCredit: invoiceSideIsDebit ? 0m : transactionAmount));
         lines.Add(new JournalEntryLineRequest(
             AccountId: controlAccountId,
             Description: $"طرف الفاتورة {invoiceNumber}",
             Debit: invoiceSideIsDebit ? 0m : amount,
             Credit: invoiceSideIsDebit ? amount : 0m,
             PartyType: ToJournalPartyType(invoiceType),
-            PartyId: businessPartnerId));
+            PartyId: businessPartnerId,
+            Currency: currency,
+            ExchangeRate: exchangeRate,
+            TransactionDebit: invoiceSideIsDebit ? 0m : transactionAmount,
+            TransactionCredit: invoiceSideIsDebit ? transactionAmount : 0m));
     }
 
     private static void AddPaymentLines(
@@ -338,26 +367,50 @@ public sealed class InvoicePostingService(
         int controlAccountId,
         decimal cashboxBaseAmount,
         decimal appliedBaseAmount,
+        CurrencyCode cashboxCurrency,
+        decimal cashboxExchangeRate,
+        decimal cashboxAmount,
+        CurrencyCode invoiceCurrency,
+        decimal invoiceExchangeRate,
+        decimal appliedAmount,
         string invoiceNumber,
         int businessPartnerId,
         JournalPartyType partyType,
         int cashboxId)
     {
         var isReceipt = direction == CashDirection.Receipt;
+        var originalCashboxAmount = cashboxAmount > 0m
+            ? cashboxAmount
+            : ExchangeRateRules.ConvertFromBase(
+                cashboxBaseAmount,
+                cashboxExchangeRate);
+        var originalAppliedAmount = appliedAmount > 0m
+            ? appliedAmount
+            : ExchangeRateRules.ConvertFromBase(
+                appliedBaseAmount,
+                invoiceExchangeRate);
         lines.Add(new JournalEntryLineRequest(
             AccountId: cashboxAccountId,
             Description: $"سداد الفاتورة {invoiceNumber}",
             Debit: isReceipt ? cashboxBaseAmount : 0m,
             Credit: isReceipt ? 0m : cashboxBaseAmount,
             PartyType: JournalPartyType.Cashbox,
-            PartyId: cashboxId));
+            PartyId: cashboxId,
+            Currency: cashboxCurrency,
+            ExchangeRate: cashboxExchangeRate,
+            TransactionDebit: isReceipt ? originalCashboxAmount : 0m,
+            TransactionCredit: isReceipt ? 0m : originalCashboxAmount));
         lines.Add(new JournalEntryLineRequest(
             AccountId: controlAccountId,
             Description: $"تسوية سداد الفاتورة {invoiceNumber}",
             Debit: isReceipt ? 0m : appliedBaseAmount,
             Credit: isReceipt ? appliedBaseAmount : 0m,
             PartyType: partyType,
-            PartyId: businessPartnerId));
+            PartyId: businessPartnerId,
+            Currency: invoiceCurrency,
+            ExchangeRate: invoiceExchangeRate,
+            TransactionDebit: isReceipt ? 0m : originalAppliedAmount,
+            TransactionCredit: isReceipt ? originalAppliedAmount : 0m));
     }
 
     private static JournalPartyType ToJournalPartyType(
