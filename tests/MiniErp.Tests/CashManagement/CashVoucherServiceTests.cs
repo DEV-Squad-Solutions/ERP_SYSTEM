@@ -3,8 +3,10 @@ using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.CashVouchers;
+using MiniErp.Application.Features.Statements;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
+using MiniErp.Tests.TestDoubles;
 
 namespace MiniErp.Tests.CashManagement;
 
@@ -226,7 +228,7 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
-    public async Task InitialSaveCreatesDraftWithAutomaticNumberAndNoCashEffect()
+    public async Task InitialSaveCreatesDraftWithAutomaticNumberAndCashEffect()
     {
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
@@ -238,7 +240,8 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Receipt,
                 CashboxId: 1,
                 Amount: 250m,
-                Description: "Collected before posting details"));
+                Description: "Collected before posting details",
+                AccountId: 1));
         var cashbox = await database.CreateCashboxService(1)
             .GetByIdAsync(1);
         var drafts = await service.GetAllAsync(
@@ -257,11 +260,13 @@ public sealed class CashVoucherServiceTests
         Assert.Matches("^RCV-[0-9]{4,}$", result.Value.VoucherNumber);
         Assert.Equal(1, result.Value.CashboxId);
         Assert.Null(result.Value.CashMovementTypeId);
-        Assert.Null(result.Value.Classification);
+        Assert.Equal(
+            CashMovementClassification.Revenue,
+            result.Value.Classification);
         Assert.Equal(
             "Collected before posting details",
             result.Value.Description);
-        Assert.Equal(1000m, cashbox.Value.CurrentBalance);
+        Assert.Equal(1250m, cashbox.Value.CurrentBalance);
         Assert.Single(drafts.Value.Items);
         Assert.Empty(completed.Value.Items);
         Assert.Empty(await database.Context.BusinessPartnerMovements
@@ -280,7 +285,8 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Receipt,
                 CashboxId: 1,
                 Amount: 250m,
-                Description: "Collected before posting details"));
+                Description: "Collected before posting details",
+                AccountId: 1));
 
         await using var updateContext = database.CreateAdditionalContext();
         var updated = await database.CreateVoucherService(1, updateContext)
@@ -313,6 +319,34 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
+    public async Task InitialSaveRollsBackDraftWhenJournalSynchronizationFails()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var postingService = new NoOpCashVoucherPostingService
+        {
+            FailSynchronization = true
+        };
+        var service = database.CreateVoucherService(
+            companyId: 1,
+            postingService: postingService);
+
+        var result = await service.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 7, 21),
+                Direction: CashDirection.Receipt,
+                CashboxId: 1,
+                Amount: 250m,
+                Description: "Atomic draft posting",
+                AccountId: 1));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Tests.CashVoucherPostingFailed", result.Error.Code);
+        Assert.Single(postingService.SynchronizedVoucherIds);
+        Assert.Empty(await database.Context.CashVouchers.ToListAsync());
+    }
+
+    [Fact]
     public async Task EditingDraftWithExpenseOrRevenueAccountPostsAndKeepsDescriptorOptional()
     {
         await using var database =
@@ -323,7 +357,8 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Receipt,
                 CashboxId: 1,
                 Amount: 75m,
-                Description: "Account-targeted receipt"));
+                Description: "Account-targeted receipt",
+                AccountId: 1));
 
         await using var updateContext = database.CreateAdditionalContext();
         var updated = await database.CreateVoucherService(1, updateContext)
@@ -368,7 +403,8 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Receipt,
                 CashboxId: 1,
                 Amount: 40m,
-                Description: "Post without category"));
+                Description: "Post without category",
+                AccountId: 1));
 
         var updated = await service.UpdateAsync(
             draft.Value.Id,
@@ -398,7 +434,7 @@ public sealed class CashVoucherServiceTests
             "CashVouchers.PartySelectionMustBeExclusive",
             updated.Error.Code);
         Assert.False(stored.IsPosted);
-        Assert.Equal(1000m, cashbox.Value.CurrentBalance);
+        Assert.Equal(1040m, cashbox.Value.CurrentBalance);
     }
 
     [Fact]
@@ -453,7 +489,7 @@ public sealed class CashVoucherServiceTests
         Assert.Equal(
             "CashVouchers.InsufficientCashboxBalance",
             result.Error.Code);
-        Assert.Single(await database.Context.CashVouchers.ToListAsync());
+        Assert.Empty(await database.Context.CashVouchers.ToListAsync());
     }
 
     [Theory]
@@ -715,7 +751,8 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Payment,
                 CashboxId: 1,
                 Amount: 75m,
-                Description: "Employee cash payment"));
+                Description: "Employee cash payment",
+                AccountId: 2));
 
         var result = await service.UpdateAsync(
             draft.Value.Id,
@@ -749,6 +786,125 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
+    public async Task PostingIntegration_DraftImmediatelyFeedsLedgerAndUpdateReusesJournal()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var createService = database.CreatePostingVoucherService(1);
+
+        var draft = await createService.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 8, 15),
+                Direction: CashDirection.Receipt,
+                CashboxId: 1,
+                Amount: 125m,
+                Description: "Posting integration",
+                AccountId: 1));
+
+        Assert.True(draft.IsSuccess, draft.Error.Description);
+        Assert.True(draft.Value.IsDraft);
+        var draftEntry = await database.Context.JournalEntries
+            .AsNoTracking()
+            .SingleAsync(entry =>
+                entry.SourceType == JournalEntrySourceType.CashVoucher &&
+                entry.SourceId == draft.Value.Id);
+        Assert.Equal(JournalEntryStatus.Posted, draftEntry.Status);
+
+        var draftStatement = await database.CreateStatementService(1)
+            .GetCashboxStatementAsync(
+                new PaginationRequest { PageNumber = 1, PageSize = 50 },
+                new CashboxStatementFilterRequest(
+                    CashboxId: 1,
+                    FromDate: draft.Value.VoucherDate,
+                    ToDate: draft.Value.VoucherDate));
+        Assert.True(draftStatement.IsSuccess, draftStatement.Error.Description);
+        Assert.Contains(draftStatement.Value.Items, item =>
+            item.CashVoucherId == draft.Value.Id &&
+            item.ReceiptAmount == 125m &&
+            item.JournalEntryId == draftEntry.Id);
+
+        await using var updateContext = database.CreateAdditionalContext();
+        var posted = await database.CreatePostingVoucherService(
+            companyId: 1,
+            context: updateContext)
+            .UpdateAsync(
+                draft.Value.Id,
+                new CashVoucherUpdateRequest(
+                    VoucherDate: draft.Value.VoucherDate,
+                    Direction: draft.Value.Direction,
+                    CashboxId: 1,
+                    CashMovementTypeId: null,
+                    EmployeeId: null,
+                    BusinessPartnerId: null,
+                    DriverId: null,
+                    DriverTripId: null,
+                    ExternalPartyName: null,
+                    Amount: draft.Value.Amount,
+                    ReferenceNumber: null,
+                    Description: draft.Value.Description,
+                    Notes: null,
+                    RowVersion: draft.Value.RowVersion,
+                    AccountId: 1));
+
+        Assert.True(posted.IsSuccess, posted.Error.Description);
+        Assert.False(posted.Value.IsDraft);
+
+        var entry = await database.Context.JournalEntries
+            .AsNoTracking()
+            .SingleAsync(item =>
+                item.SourceType == JournalEntrySourceType.CashVoucher &&
+                item.SourceId == draft.Value.Id);
+        Assert.Equal(JournalEntryStatus.Posted, entry.Status);
+        Assert.Equal(draftEntry.Id, entry.Id);
+
+        var lines = await database.Context.JournalEntryLines
+            .AsNoTracking()
+            .Where(line => line.JournalEntryId == entry.Id)
+            .OrderBy(line => line.Id)
+            .ToListAsync();
+        Assert.Equal(2, lines.Count);
+        Assert.Contains(lines, line =>
+            line.AccountId == 100 &&
+            line.PartyType == JournalPartyType.Cashbox &&
+            line.PartyId == 1 &&
+            line.Debit == 125m &&
+            line.Credit == 0m);
+        Assert.Contains(lines, line =>
+            line.AccountId == 1 &&
+            line.PartyType is null &&
+            line.PartyId is null &&
+            line.Debit == 0m &&
+            line.Credit == 125m);
+
+        var statement = await database.CreateStatementService(1)
+            .GetCashboxStatementAsync(
+                new PaginationRequest { PageNumber = 1, PageSize = 50 },
+                new CashboxStatementFilterRequest(
+                    CashboxId: 1,
+                    FromDate: draft.Value.VoucherDate,
+                    ToDate: draft.Value.VoucherDate));
+        Assert.True(statement.IsSuccess, statement.Error.Description);
+        Assert.Contains(statement.Value.Items, item =>
+            item.CashVoucherId == draft.Value.Id &&
+            item.ReceiptAmount == 125m &&
+            item.JournalEntryId == entry.Id);
+
+        await using var deleteContext = database.CreateAdditionalContext();
+        var deleted = await database.CreatePostingVoucherService(
+                companyId: 1,
+                context: deleteContext)
+            .DeleteAsync(draft.Value.Id);
+
+        Assert.True(deleted.IsSuccess, deleted.Error.Description);
+        Assert.False(await deleteContext.CashVouchers
+            .AnyAsync(item => item.Id == draft.Value.Id));
+        Assert.False(await deleteContext.JournalEntries
+            .AnyAsync(item =>
+                item.SourceType == JournalEntrySourceType.CashVoucher &&
+                item.SourceId == draft.Value.Id));
+    }
+
+    [Fact]
     public async Task DirectEmployeePaymentCreatesOneLinkedMovement()
     {
         await using var database = await CashManagementTestDatabase.CreateAsync();
@@ -759,7 +915,9 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Payment,
                 CashboxId: 1,
                 Amount: 75m,
-                Description: "Employee advance"));
+                Description: "Employee advance",
+                EmployeeId: 1,
+                EmployeeMovementType: EmployeeMovementType.Advance));
 
         var posted = await service.UpdateAsync(
             draft.Value.Id,
@@ -806,7 +964,9 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Payment,
                 CashboxId: 1,
                 Amount: 75m,
-                Description: "Employee advance"));
+                Description: "Employee advance",
+                EmployeeId: 1,
+                EmployeeMovementType: EmployeeMovementType.Advance));
 
         var posted = await service.UpdateAsync(
             draft.Value.Id,
@@ -850,7 +1010,8 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Payment,
                 CashboxId: 1,
                 Amount: 75m,
-                Description: "Employee cash payment"));
+                Description: "Employee cash payment",
+                AccountId: 2));
 
         var posted = await service.UpdateAsync(
             draft.Value.Id,
@@ -922,7 +1083,8 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Payment,
                 CashboxId: 1,
                 Amount: 75m,
-                Description: "Employee cash payment"));
+                Description: "Employee cash payment",
+                AccountId: 2));
         var posted = await service.UpdateAsync(
             draft.Value.Id,
             new CashVoucherUpdateRequest(
@@ -983,7 +1145,9 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Payment,
                 CashboxId: 1,
                 Amount: 50m,
-                Description: "Employee cash payment"));
+                Description: "Employee cash payment",
+                EmployeeId: 1,
+                EmployeeMovementType: EmployeeMovementType.Advance));
         var posted = await service.UpdateAsync(
             draft.Value.Id,
             new CashVoucherUpdateRequest(
@@ -1031,7 +1195,9 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Receipt,
                 CashboxId: 1,
                 Amount: 40m,
-                Description: "Employee receipt"));
+                Description: "Employee receipt",
+                EmployeeId: 1,
+                EmployeeMovementType: movementType));
 
         var posted = await service.UpdateAsync(
             draft.Value.Id,
@@ -1077,7 +1243,8 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Payment,
                 CashboxId: 1,
                 Amount: 25m,
-                Description: "Employee validation"));
+                Description: "Employee validation",
+                AccountId: 2));
 
         var result = await service.UpdateAsync(
             draft.Value.Id,
@@ -1113,7 +1280,8 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Receipt,
                 CashboxId: 1,
                 Amount: 50m,
-                Description: "Historical external party"));
+                Description: "Historical external party",
+                AccountId: 1));
 
         var result = await service.UpdateAsync(
             draft.Value.Id,
@@ -1151,7 +1319,8 @@ public sealed class CashVoucherServiceTests
                 Direction: CashDirection.Payment,
                 CashboxId: 1,
                 Amount: 25m,
-                Description: "Invalid party selection"));
+                Description: "Invalid party selection",
+                AccountId: 2));
 
         var result = await service.UpdateAsync(
             draft.Value.Id,
@@ -1863,7 +2032,22 @@ public sealed class CashVoucherServiceTests
                 Direction: request.Direction,
                 CashboxId: request.CashboxId,
                 Amount: request.Amount,
-                Description: request.Description));
+                Description: request.Description,
+                CashMovementTypeId: request.CashMovementTypeId,
+                EmployeeId: request.EmployeeId,
+                BusinessPartnerId: request.BusinessPartnerId,
+                DriverId: request.DriverId,
+                DriverTripId: request.DriverTripId,
+                ExternalPartyName: request.ExternalPartyName,
+                ReferenceNumber: request.ReferenceNumber,
+                Notes: request.Notes,
+                ExchangeRate: request.ExchangeRate,
+                AccountId: request.AccountId,
+                EmployeeMovementType: request.EmployeeId.HasValue
+                    ? request.Direction == CashDirection.Receipt
+                        ? EmployeeMovementType.Credit
+                        : EmployeeMovementType.Advance
+                    : null));
         if (draft.IsFailure)
         {
             return draft;

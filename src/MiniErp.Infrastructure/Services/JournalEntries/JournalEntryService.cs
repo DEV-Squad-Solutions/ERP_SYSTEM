@@ -507,7 +507,12 @@ public sealed class JournalEntryService(
             .Where(party =>
                 party.CompanyId == companyId &&
                 partnerIds.Contains(party.Id))
-            .Select(party => new { party.Id, party.IsActive })
+            .Select(party => new
+            {
+                party.Id,
+                party.IsActive,
+                party.Currency
+            })
             .ToDictionaryAsync(party => party.Id, cancellationToken);
         var employeeIds = lines
             .Where(line => line.PartyType == JournalPartyType.Employee)
@@ -546,7 +551,12 @@ public sealed class JournalEntryService(
             .Where(cashbox =>
                 cashbox.CompanyId == companyId &&
                 cashboxIds.Contains(cashbox.Id))
-            .Select(cashbox => new { cashbox.Id, cashbox.IsActive })
+            .Select(cashbox => new
+            {
+                cashbox.Id,
+                cashbox.IsActive,
+                cashbox.Currency
+            })
             .ToDictionaryAsync(cashbox => cashbox.Id, cancellationToken);
         var errors = new List<Error>();
         for (var index = 0; index < lines.Count; index++)
@@ -611,21 +621,30 @@ public sealed class JournalEntryService(
             {
                 JournalPartyType.Customer or JournalPartyType.Supplier =>
                     partners.TryGetValue(line.PartyId.Value, out var party)
-                        ? (Found: true, party.IsActive)
-                        : (Found: false, IsActive: false),
+                        ? (Found: true, party.IsActive,
+                            Currency: (CurrencyCode?)party.Currency)
+                        : (Found: false, IsActive: false,
+                            Currency: (CurrencyCode?)null),
                 JournalPartyType.Employee =>
                     employees.TryGetValue(line.PartyId.Value, out var party)
-                        ? (Found: true, party.IsActive)
-                        : (Found: false, IsActive: false),
+                        ? (Found: true, party.IsActive,
+                            Currency: (CurrencyCode?)null)
+                        : (Found: false, IsActive: false,
+                            Currency: (CurrencyCode?)null),
                 JournalPartyType.Driver =>
                     drivers.TryGetValue(line.PartyId.Value, out var party)
-                        ? (Found: true, party.IsActive)
-                        : (Found: false, IsActive: false),
+                        ? (Found: true, party.IsActive,
+                            Currency: (CurrencyCode?)null)
+                        : (Found: false, IsActive: false,
+                            Currency: (CurrencyCode?)null),
                 JournalPartyType.Cashbox =>
                     cashboxes.TryGetValue(line.PartyId.Value, out var party)
-                        ? (Found: true, party.IsActive)
-                        : (Found: false, IsActive: false),
-                _ => (Found: false, IsActive: false)
+                        ? (Found: true, party.IsActive,
+                            Currency: (CurrencyCode?)party.Currency)
+                        : (Found: false, IsActive: false,
+                            Currency: (CurrencyCode?)null),
+                _ => (Found: false, IsActive: false,
+                    Currency: (CurrencyCode?)null)
             };
             if (!partyState.Found)
             {
@@ -634,6 +653,13 @@ public sealed class JournalEntryService(
             else if (!partyState.IsActive)
             {
                 errors.Add(PartyInactive(line.PartyId.Value, index));
+            }
+            else if (partyState.Currency.HasValue &&
+                     line.Currency != partyState.Currency.Value)
+            {
+                errors.Add(PartyCurrencyMismatch(
+                    partyState.Currency.Value,
+                    index));
             }
         }
 

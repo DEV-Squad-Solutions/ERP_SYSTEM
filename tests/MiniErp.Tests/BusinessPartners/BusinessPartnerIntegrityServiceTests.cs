@@ -273,6 +273,16 @@ public sealed class BusinessPartnerIntegrityServiceTests
                     IsDeleted INTEGER NOT NULL
                 );
 
+                CREATE TABLE Companies (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Name TEXT NOT NULL,
+                    Address TEXT NOT NULL,
+                    CommercialRegister TEXT NOT NULL,
+                    TaxNumber TEXT NOT NULL,
+                    ManagerName TEXT NOT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
                 CREATE TABLE Stores (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
@@ -340,6 +350,13 @@ public sealed class BusinessPartnerIntegrityServiceTests
                 VALUES (
                     1, 1, 'BP-1', 'Partner One', 1, 0,
                     1, 'test', '2026-01-01', 'test', 0);
+
+                INSERT INTO Companies (
+                    Id, Name, Address, CommercialRegister, TaxNumber,
+                    ManagerName, IsDeleted)
+                VALUES (
+                    1, 'Company One', 'Address', 'CR-1', 'TAX-1',
+                    'Manager', 0);
                 """);
         }
     }

@@ -36,50 +36,34 @@ public sealed partial class FinancialStatementService
                     : entity.Company.Settings.BaseCurrency
             })
             .FirstOrDefaultAsync(cancellationToken);
-
         if (employee is null)
         {
             return Result<EmployeeStatementResponse>.Failure(
                 EmployeeNotFound(filters.EmployeeId));
         }
 
-        var allRows = CreateEmployeeRows(filters.EmployeeId);
-
+        var allRows = CreateEmployeeRows(employee.Id);
         var openingBalance = filters.FromDate.HasValue
             ? await allRows
                 .Where(row => row.Date < filters.FromDate.Value)
-                .SumAsync(
-                    row => (decimal?)(row.Credit - row.Debit),
+                .SumAsync(row => (decimal?)(row.Credit - row.Debit),
                     cancellationToken) ?? 0m
             : 0m;
-
-        var baseOpeningBalance = filters.FromDate.HasValue
-            ? await allRows
-                .Where(row => row.Date < filters.FromDate.Value)
-                .SumAsync(
-                    row => (decimal?)(row.BaseCredit - row.BaseDebit),
-                    cancellationToken) ?? 0m
-            : 0m;
-
         var search = filters.Search?.Trim();
         var query = allRows
-            .Where(row =>
-                !filters.FromDate.HasValue ||
+            .Where(row => !filters.FromDate.HasValue ||
                 row.Date >= filters.FromDate.Value)
-            .Where(row =>
-                !filters.ToDate.HasValue ||
+            .Where(row => !filters.ToDate.HasValue ||
                 row.Date <= filters.ToDate.Value)
-            .Where(row =>
-                !filters.SourceType.HasValue ||
+            .Where(row => !filters.SourceType.HasValue ||
                 row.SourceType == filters.SourceType.Value)
-            .Where(row =>
-                !filters.MovementType.HasValue ||
+            .Where(row => !filters.MovementType.HasValue ||
                 row.MovementType == filters.MovementType.Value)
-            .Where(row =>
-                string.IsNullOrEmpty(search) ||
+            .Where(row => string.IsNullOrEmpty(search) ||
                 row.DocumentNumber.Contains(search) ||
                 (row.Description != null && row.Description.Contains(search)) ||
-                (row.ReferenceNumber != null && row.ReferenceNumber.Contains(search)));
+                (row.ReferenceNumber != null &&
+                 row.ReferenceNumber.Contains(search)));
 
         var totalCount = await query.CountAsync(cancellationToken);
         var totals = await query
@@ -87,41 +71,22 @@ public sealed partial class FinancialStatementService
             .Select(rows => new
             {
                 Debit = rows.Sum(row => row.Debit),
-                Credit = rows.Sum(row => row.Credit),
-                BaseDebit = rows.Sum(row => row.BaseDebit),
-                BaseCredit = rows.Sum(row => row.BaseCredit)
+                Credit = rows.Sum(row => row.Credit)
             })
             .SingleOrDefaultAsync(cancellationToken);
-
         var totalDebit = totals?.Debit ?? 0m;
         var totalCredit = totals?.Credit ?? 0m;
-        var totalBaseDebit = totals?.BaseDebit ?? 0m;
-        var totalBaseCredit = totals?.BaseCredit ?? 0m;
-
         var ordered = query
             .OrderBy(row => row.Date)
             .ThenBy(row => row.CreatedOn)
             .ThenBy(row => row.DocumentNumber)
-            .ThenBy(row => row.SourceId);
-
+            .ThenBy(row => row.JournalEntryLineId);
         var offset = GetOffset(pagination, totalCount);
-
         var precedingEffect = offset == 0
             ? 0m
-            : await ordered
-                .Take(offset)
-                .SumAsync(
-                    row => (decimal?)(row.Credit - row.Debit),
-                    cancellationToken) ?? 0m;
-
-        var precedingBaseEffect = offset == 0
-            ? 0m
-            : await ordered
-                .Take(offset)
-                .SumAsync(
-                    row => (decimal?)(row.BaseCredit - row.BaseDebit),
-                    cancellationToken) ?? 0m;
-
+            : await ordered.Take(offset).SumAsync(
+                row => (decimal?)(row.Credit - row.Debit), cancellationToken)
+                ?? 0m;
         var pageRows = offset >= totalCount
             ? []
             : await ordered
@@ -130,15 +95,11 @@ public sealed partial class FinancialStatementService
                 .ToListAsync(cancellationToken);
 
         var runningBalance = openingBalance + precedingEffect;
-        var runningBaseBalance = baseOpeningBalance + precedingBaseEffect;
-
         var items = pageRows.Select(row =>
         {
             runningBalance += row.Credit - row.Debit;
-            runningBaseBalance += row.BaseCredit - row.BaseDebit;
-
             return new EmployeeStatementItemResponse(
-                SourceId: row.SourceId,
+                SourceId: row.JournalEntryLineId,
                 SourceType: row.SourceType,
                 Date: row.Date,
                 DocumentNumber: row.DocumentNumber,
@@ -151,21 +112,21 @@ public sealed partial class FinancialStatementService
                 ReferenceNumber: row.ReferenceNumber)
             {
                 ExchangeRate = row.ExchangeRate,
-                BaseDebitAmount = row.BaseDebit,
-                BaseCreditAmount = row.BaseCredit,
-                BaseBalanceAmount = Math.Abs(runningBaseBalance)
+                BaseDebitAmount = row.Debit,
+                BaseCreditAmount = row.Credit,
+                BaseBalanceAmount = Math.Abs(runningBalance),
+                JournalEntryId = row.JournalEntryId,
+                JournalEntryLineId = row.JournalEntryLineId
             };
-        }).ToList();
+        }).ToArray();
 
         var closingBalance = openingBalance + totalCredit - totalDebit;
-        var baseClosingBalance = baseOpeningBalance + totalBaseCredit - totalBaseDebit;
-
         return Result<EmployeeStatementResponse>.Success(
             new EmployeeStatementResponse(
                 EmployeeId: employee.Id,
                 EmployeeCode: employee.Code,
                 EmployeeName: employee.Name,
-                Currency: CurrencyCode.EGP,
+                Currency: employee.BaseCurrency,
                 Items: items,
                 PageNumber: pagination.PageNumber,
                 PageSize: pagination.PageSize,
@@ -173,16 +134,18 @@ public sealed partial class FinancialStatementService
                 TotalPages: GetTotalPages(totalCount, pagination.PageSize),
                 Summary: new EmployeeStatementSummaryResponse(
                     OpeningBalanceAmount: Math.Abs(openingBalance),
-                    OpeningBalanceDescription: EmployeeBalanceDescription(openingBalance),
+                    OpeningBalanceDescription:
+                        EmployeeBalanceDescription(openingBalance),
                     TotalDebits: totalDebit,
                     TotalCredits: totalCredit,
                     ClosingBalanceAmount: Math.Abs(closingBalance),
-                    ClosingBalanceDescription: EmployeeBalanceDescription(closingBalance))
+                    ClosingBalanceDescription:
+                        EmployeeBalanceDescription(closingBalance))
                 {
-                    BaseOpeningBalanceAmount = Math.Abs(baseOpeningBalance),
-                    BaseTotalDebits = totalBaseDebit,
-                    BaseTotalCredits = totalBaseCredit,
-                    BaseClosingBalanceAmount = Math.Abs(baseClosingBalance)
+                    BaseOpeningBalanceAmount = Math.Abs(openingBalance),
+                    BaseTotalDebits = totalDebit,
+                    BaseTotalCredits = totalCredit,
+                    BaseClosingBalanceAmount = Math.Abs(closingBalance)
                 })
             {
                 BaseCurrency = employee.BaseCurrency
@@ -202,385 +165,406 @@ public sealed partial class FinancialStatementService
             {
                 entity.Id,
                 entity.Code,
-                entity.Name
+                entity.Name,
+                BaseCurrency = entity.Company.Settings == null
+                    ? CurrencyCode.EGP
+                    : entity.Company.Settings.BaseCurrency
             })
             .FirstOrDefaultAsync(cancellationToken);
-
         if (employee is null)
         {
             return Result<EmployeeAccountBalanceResponse>.Failure(
                 EmployeeNotFound(employeeId));
         }
 
-        // Materialise first — EF cannot GroupBy over a Concat of two different
-        // DbSets, so we aggregate in memory after fetching the lightweight rows.
-        var rows = await CreateEmployeeRowsQuery(employeeId)
-            .Select(r => new { r.Debit, r.Credit, r.Date })
-            .ToListAsync(cancellationToken);
-
-        var totalDebit  = rows.Sum(r => r.Debit);
-        var totalCredit = rows.Sum(r => r.Credit);
-        var netBalance  = totalCredit - totalDebit;
-        var lastDate    = rows.Count > 0 ? (DateOnly?)rows.Max(r => r.Date) : null;
+        var totals = await PostedLedgerLines()
+            .Where(line =>
+                line.PartyType == JournalPartyType.Employee &&
+                line.PartyId == employeeId)
+            .GroupBy(_ => 1)
+            .Select(lines => new
+            {
+                Debit = lines.Sum(line => line.Debit),
+                Credit = lines.Sum(line => line.Credit),
+                LastDate = lines.Max(line =>
+                    (DateOnly?)line.JournalEntry.EntryDate)
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        var totalDebit = totals?.Debit ?? 0m;
+        var totalCredit = totals?.Credit ?? 0m;
+        var balance = totalCredit - totalDebit;
 
         return Result<EmployeeAccountBalanceResponse>.Success(
             new EmployeeAccountBalanceResponse(
-                EmployeeId:          employee.Id,
-                EmployeeCode:        employee.Code,
-                EmployeeName:        employee.Name,
-                Currency:            CurrencyCode.EGP,
-                BalanceAmount:       Math.Abs(netBalance),
-                BalanceDescription:  EmployeeBalanceDescription(netBalance),
-                TotalCredits:        totalCredit,
-                TotalDebits:         totalDebit,
-                LastMovementDate:    lastDate));
+                EmployeeId: employee.Id,
+                EmployeeCode: employee.Code,
+                EmployeeName: employee.Name,
+                Currency: employee.BaseCurrency,
+                BalanceAmount: Math.Abs(balance),
+                BalanceDescription: EmployeeBalanceDescription(balance),
+                TotalCredits: totalCredit,
+                TotalDebits: totalDebit,
+                LastMovementDate: totals?.LastDate));
     }
 
-    public async Task<Result<EmployeeAccountSummaryResponse>> GetEmployeeAccountSummaryAsync(
-        int employeeId,
-        CancellationToken cancellationToken = default)
+    public async Task<Result<EmployeeAccountSummaryResponse>>
+        GetEmployeeAccountSummaryAsync(
+            int employeeId,
+            CancellationToken cancellationToken = default)
     {
         if (employeeId <= 0)
         {
-            return Result<EmployeeAccountSummaryResponse>.Failure(EmployeeNotFound(employeeId));
+            return Result<EmployeeAccountSummaryResponse>.Failure(
+                EmployeeNotFound(employeeId));
         }
 
         var employee = await dbContext.Employees
             .AsNoTracking()
-            .Where(e => e.CompanyId == companyId && e.Id == employeeId)
+            .Where(entity =>
+                entity.CompanyId == companyId &&
+                entity.Id == employeeId)
             .FirstOrDefaultAsync(cancellationToken);
-
         if (employee is null)
         {
-            return Result<EmployeeAccountSummaryResponse>.Failure(EmployeeNotFound(employeeId));
+            return Result<EmployeeAccountSummaryResponse>.Failure(
+                EmployeeNotFound(employeeId));
         }
+        var baseCurrency = await dbContext.CompanySettings
+            .AsNoTracking()
+            .Where(settings => settings.CompanyId == companyId)
+            .Select(settings => (CurrencyCode?)settings.BaseCurrency)
+            .FirstOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
 
-        // Materialise the lightweight raw rows — EF cannot GroupBy over a UNION
-        // of two DbSets, and we need per-MovementType sums that also require
-        // client-side filtering on nullable enum columns.
-        var rows = await CreateEmployeeRowsQuery(employeeId)
-            .Select(r => new
+        var ledgerRows = await PostedLedgerLines()
+            .Where(line =>
+                line.PartyType == JournalPartyType.Employee &&
+                line.PartyId == employeeId)
+            .Select(line => new
             {
-                r.SourceKind,
-                r.BalanceType,
-                r.MovementType,
-                r.Debit,
-                r.Credit,
-                r.Date
+                line.Debit,
+                line.Credit,
+                line.ExchangeRate,
+                line.JournalEntry.EntryDate,
+                line.JournalEntry.SourceType,
+                line.JournalEntry.SourceId
             })
             .ToListAsync(cancellationToken);
+        var totalDebits = ledgerRows.Sum(row => row.Debit);
+        var totalCredits = ledgerRows.Sum(row => row.Credit);
+        var currentBalance = EmployeeAccountRules.CalculateBalance(
+            totalCredits,
+            totalDebits);
+        var openingBalanceMetadata = await dbContext.EmployeeOpeningBalances
+            .AsNoTracking()
+            .Where(balance =>
+                balance.CompanyId == companyId &&
+                balance.EmployeeId == employeeId)
+            .Select(balance => new
+            {
+                balance.Id,
+                balance.PayrollEntryId
+            })
+            .ToListAsync(cancellationToken);
+        var payrollBalanceIds = openingBalanceMetadata
+            .Where(balance => balance.PayrollEntryId.HasValue)
+            .Select(balance => balance.Id)
+            .ToHashSet();
+        var openingBalanceIds = openingBalanceMetadata
+            .Where(balance => !balance.PayrollEntryId.HasValue)
+            .Select(balance => balance.Id)
+            .ToHashSet();
+        var openingBalance = ledgerRows
+            .Where(row =>
+                row.SourceType == JournalEntrySourceType.EmployeeOpeningBalance &&
+                row.SourceId.HasValue &&
+                openingBalanceIds.Contains(row.SourceId.Value))
+            .Sum(row => row.Credit - row.Debit);
+        var totalSalaryMoved = ledgerRows
+            .Where(row =>
+                row.SourceType == JournalEntrySourceType.EmployeeOpeningBalance &&
+                row.SourceId.HasValue &&
+                payrollBalanceIds.Contains(row.SourceId.Value))
+            .Sum(row => row.Credit - row.Debit);
+        var lastDate = ledgerRows.Count == 0
+            ? (DateOnly?)null
+            : ledgerRows.Max(row => row.EntryDate);
 
-        var totalDebits   = rows.Sum(r => r.Debit);
-        var totalCredits  = rows.Sum(r => r.Credit);
-        var lastDate      = rows.Count > 0 ? (DateOnly?)rows.Max(r => r.Date) : null;
+        // Operational employee movements provide category labels only. The
+        // amounts in each category are still summed from the exact matching
+        // posted cash-voucher journal lines.
+        var movementClasses = await dbContext.EmployeeMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.EmployeeId == employeeId &&
+                movement.CashVoucherId.HasValue)
+            .Select(movement => new
+            {
+                movement.CashVoucherId,
+                movement.Type,
+            })
+            .ToListAsync(cancellationToken);
+        var movementTypeByVoucher = movementClasses
+            .GroupBy(movement => movement.CashVoucherId.GetValueOrDefault())
+            .ToDictionary(group => group.Key, group => group.First().Type);
+        var categorizedLedgerRows = ledgerRows
+            .Where(row =>
+                row.SourceType == JournalEntrySourceType.CashVoucher &&
+                row.SourceId.HasValue &&
+                movementTypeByVoucher.ContainsKey(row.SourceId.Value))
+            .Select(row => new
+            {
+                Type = movementTypeByVoucher[row.SourceId.GetValueOrDefault()],
+                row.Debit,
+                row.Credit
+            })
+            .ToList();
+        var totalAdvances = categorizedLedgerRows
+            .Where(row => row.Type == EmployeeMovementType.Advance)
+            .Sum(row => row.Debit);
+        var totalWithdrawals = categorizedLedgerRows
+            .Where(row => row.Type == EmployeeMovementType.Withdrawal)
+            .Sum(row => row.Debit);
+        var totalDeductions = categorizedLedgerRows
+            .Where(row => row.Type == EmployeeMovementType.Deduction)
+            .Sum(row => row.Debit);
+        var totalBonuses = categorizedLedgerRows
+            .Where(row => row.Type == EmployeeMovementType.Bonus)
+            .Sum(row => row.Credit);
 
-        var openingBalance =
-            rows.Where(r => r.SourceKind == EmployeeStatementRawKind.OpeningBalance)
-                .Sum(r => r.Credit - r.Debit);
-
-        var totalAdvances =
-            rows.Where(r => r.MovementType == EmployeeMovementType.Advance)
-                .Sum(r => r.Debit);
-
-        var totalWithdrawals =
-            rows.Where(r => r.MovementType == EmployeeMovementType.Withdrawal)
-                .Sum(r => r.Debit);
-
-        var totalDeductions =
-            rows.Where(r => r.MovementType == EmployeeMovementType.Deduction)
-                .Sum(r => r.Debit);
-
-        var totalBonuses =
-            rows.Where(r => r.MovementType == EmployeeMovementType.Bonus)
-                .Sum(r => r.Credit);
-
-        var currentBalance = EmployeeAccountRules.CalculateBalance(totalCredits, totalDebits);
-
-        // Payroll stats — single DbSet; GroupBy is safe here.
         var payrollStats = await dbContext.PayrollEntries
             .AsNoTracking()
-            .Where(p => p.CompanyId == companyId && p.EmployeeId == employeeId)
+            .Where(payroll =>
+                payroll.CompanyId == companyId &&
+                payroll.EmployeeId == employeeId)
             .GroupBy(_ => 1)
-            .Select(g => new
+            .Select(group => new
             {
-                TotalSalaryPosted = g.Sum(p => p.NetSalary),
-                TotalSalaryMoved  = g.Where(p => p.IsSalaryMoveToEmployeeAccount).Sum(p => p.NetSalary)
+                TotalSalaryPosted = group.Sum(payroll => payroll.NetSalary)
             })
             .FirstOrDefaultAsync(cancellationToken);
-
-        var recentMovements = await dbContext.EmployeeMovements
+        var cashVoucherMovementMetadata = await dbContext.EmployeeMovements
             .AsNoTracking()
-            .Where(m => m.CompanyId == companyId && m.EmployeeId == employeeId)
-            .OrderByDescending(m => m.MovementDate)
-            .ThenByDescending(m => m.Id)
-            .Take(10)
-            .Select(m => new EmployeeAccountRecentMovementResponse(
-                m.Id,
-                m.MovementDate,
-                m.Type,
-                EmployeeAccountRules.GetMovementTypeName(m.Type),
-                m.Debit > 0 ? m.Debit : m.Credit,
-                m.Debit,
-                m.Credit,
-                m.Currency,
-                m.ExchangeRate,
-                m.CashVoucherId,
-                m.CashVoucher != null ? m.CashVoucher.VoucherNumber : null,
-                m.Notes))
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.EmployeeId == employeeId &&
+                movement.CashVoucherId.HasValue)
+            .Select(movement => new
+            {
+                movement.Id,
+                movement.CashVoucherId,
+                movement.Type,
+                movement.Notes
+            })
             .ToListAsync(cancellationToken);
+        var movementMetadataByVoucher = cashVoucherMovementMetadata
+            .GroupBy(movement => movement.CashVoucherId.GetValueOrDefault())
+            .ToDictionary(group => group.Key, group => group.First());
+        var voucherIds = movementMetadataByVoucher.Keys.ToArray();
+        var voucherNumbers = voucherIds.Length == 0
+            ? new Dictionary<int, string>()
+            : await dbContext.CashVouchers
+                .AsNoTracking()
+                .Where(voucher =>
+                    voucher.CompanyId == companyId &&
+                    voucherIds.Contains(voucher.Id))
+                .Select(voucher => new { voucher.Id, voucher.VoucherNumber })
+                .ToDictionaryAsync(
+                    voucher => voucher.Id,
+                    voucher => voucher.VoucherNumber,
+                    cancellationToken);
+        var recentMovements = ledgerRows
+            .Where(row =>
+                row.SourceType == JournalEntrySourceType.CashVoucher &&
+                row.SourceId.HasValue &&
+                movementMetadataByVoucher.ContainsKey(row.SourceId.Value))
+            .GroupBy(row => row.SourceId!.Value)
+            .Select(group =>
+            {
+                var movement = movementMetadataByVoucher[group.Key];
+                var debit = group.Sum(row => row.Debit);
+                var credit = group.Sum(row => row.Credit);
+                return new EmployeeAccountRecentMovementResponse(
+                    Id: movement.Id,
+                    Date: group.Min(row => row.EntryDate),
+                    Type: movement.Type,
+                    TypeName: EmployeeMovementTypeName(movement.Type),
+                    Amount: debit > 0m ? debit : credit,
+                    Debit: debit,
+                    Credit: credit,
+                    Currency: baseCurrency,
+                    ExchangeRate: group.Max(row => row.ExchangeRate),
+                    CashVoucherId: movement.CashVoucherId,
+                    CashVoucherNumber: voucherNumbers.GetValueOrDefault(group.Key),
+                    Notes: movement.Notes);
+            })
+            .OrderByDescending(movement => movement.Date)
+            .ThenByDescending(movement => movement.Id)
+            .Take(10)
+            .ToList();
 
         var payrollTransactions = await dbContext.PayrollEntries
             .AsNoTracking()
-            .Where(p => p.CompanyId == companyId && p.EmployeeId == employeeId)
-            .OrderByDescending(p => p.EndDate)
-            .ThenByDescending(p => p.Id)
+            .Where(payroll =>
+                payroll.CompanyId == companyId &&
+                payroll.EmployeeId == employeeId)
+            .OrderByDescending(payroll => payroll.EndDate)
+            .ThenByDescending(payroll => payroll.Id)
             .Take(10)
-            .Select(p => new EmployeeAccountPayrollTransactionResponse(
-                p.Id,
-                p.StartDate,
-                p.EndDate,
-                p.NetSalary,
-                p.IsSalaryMoveToEmployeeAccount,
-                p.SalaryMovedOn,
-                null))
+            .Select(payroll => new EmployeeAccountPayrollTransactionResponse(
+                Id: payroll.Id,
+                StartDate: payroll.StartDate,
+                EndDate: payroll.EndDate,
+                NetSalary: payroll.NetSalary,
+                IsSalaryMoveToEmployeeAccount:
+                    payroll.IsSalaryMoveToEmployeeAccount,
+                SalaryMovedOn: payroll.SalaryMovedOn,
+                Notes: null))
             .ToListAsync(cancellationToken);
 
         var profile = new EmployeeProfileResponse(
-            Id:                             employee.Id,
-            CompanyId:                      employee.CompanyId,
-            Code:                           employee.Code,
-            Name:                           employee.Name,
-            JobTitle:                       employee.JobTitle,
-            PhoneNumber:                    employee.PhoneNumber,
-            Email:                          employee.Email,
-            Address:                        employee.Address,
-            Type:                           employee.Type,
-            DailySalary:                    employee.DailySalary,
-            MonthlySalary:                  employee.MonthlySalary,
-            RequiredWorkingDaysPerMonth:    employee.RequiredWorkingDaysPerMonth,
-            LastDayOfReceivingSalary:       employee.LastDayOfReceivingSalary,
-            IsActive:                       employee.IsActive,
-            CreatedOn:                      employee.CreatedOn);
+            Id: employee.Id,
+            CompanyId: employee.CompanyId,
+            Code: employee.Code,
+            Name: employee.Name,
+            JobTitle: employee.JobTitle,
+            PhoneNumber: employee.PhoneNumber,
+            Email: employee.Email,
+            Address: employee.Address,
+            Type: employee.Type,
+            DailySalary: employee.DailySalary,
+            MonthlySalary: employee.MonthlySalary,
+            RequiredWorkingDaysPerMonth: employee.RequiredWorkingDaysPerMonth,
+            LastDayOfReceivingSalary: employee.LastDayOfReceivingSalary,
+            IsActive: employee.IsActive,
+            CreatedOn: employee.CreatedOn);
 
-        var response = new EmployeeAccountSummaryResponse(
-            Employee:                  profile,
-            Currency:                  CurrencyCode.EGP,
-            OpeningBalance:            openingBalance,
-            CurrentBalance:            currentBalance,
-            BalanceDescription:        EmployeeAccountRules.GetBalanceDescription(currentBalance),
-            TotalCredits:              totalCredits,
-            TotalDebits:               totalDebits,
-            TotalAdvances:             totalAdvances,
-            TotalDeductions:           totalDeductions,
-            TotalBonuses:              totalBonuses,
-            TotalSalaryPosted:         payrollStats?.TotalSalaryPosted ?? 0m,
-            TotalSalaryMoved:          payrollStats?.TotalSalaryMoved  ?? 0m,
-            LastMovementDate:          lastDate,
-            TotalWithdrawals:          totalWithdrawals,
-            RecentMovements:           recentMovements,
-            PayrollSalaryTransactions: payrollTransactions);
-
-        return Result<EmployeeAccountSummaryResponse>.Success(response);
+        return Result<EmployeeAccountSummaryResponse>.Success(
+            new EmployeeAccountSummaryResponse(
+                Employee: profile,
+                Currency: baseCurrency,
+                OpeningBalance: openingBalance,
+                CurrentBalance: currentBalance,
+                BalanceDescription:
+                    EmployeeAccountRules.GetBalanceDescription(currentBalance),
+                TotalCredits: totalCredits,
+                TotalDebits: totalDebits,
+                TotalAdvances: totalAdvances,
+                TotalDeductions: totalDeductions,
+                TotalBonuses: totalBonuses,
+                TotalSalaryPosted: payrollStats?.TotalSalaryPosted ?? 0m,
+                TotalSalaryMoved: totalSalaryMoved,
+                LastMovementDate: lastDate,
+                TotalWithdrawals: totalWithdrawals,
+                RecentMovements: recentMovements,
+                PayrollSalaryTransactions: payrollTransactions));
     }
-
-    // ─── helpers called AFTER materialisation ───────────────────────────────
-
-    private static string BuildDocumentNumber(EmployeeStatementRawDb raw)
-    {
-        if (raw.SourceKind == EmployeeStatementRawKind.OpeningBalance)
-        {
-            return raw.DocumentNumber;           // stored in DB
-        }
-        // Movement row
-        return raw.HasCashVoucher ? raw.DocumentNumber : $"MOV-{raw.SourceId}";
-    }
-
-    private static string? BuildReferenceNumber(EmployeeStatementRawDb raw)
-    {
-        if (raw.SourceKind == EmployeeStatementRawKind.OpeningBalance)
-        {
-            return raw.PayrollEntryId.HasValue ? $"PAY-{raw.PayrollEntryId.Value}" : null;
-        }
-        // Movement row
-        return raw.HasCashVoucher ? raw.CashVoucherReference : null;
-    }
-
-    private static EmployeeStatementSourceType BuildSourceType(EmployeeStatementRawDb raw)
-    {
-        if (raw.SourceKind == EmployeeStatementRawKind.OpeningBalance)
-        {
-            return raw.PayrollEntryId.HasValue
-                ? EmployeeStatementSourceType.SalaryTransfer
-                : EmployeeStatementSourceType.OpeningBalance;
-        }
-        return raw.HasCashVoucher
-            ? EmployeeStatementSourceType.CashVoucher
-            : EmployeeStatementSourceType.Movement;
-    }
-
-    private static string BuildMovementName(EmployeeStatementRawDb raw)
-    {
-        if (raw.SourceKind == EmployeeStatementRawKind.OpeningBalance)
-        {
-            if (raw.PayrollEntryId.HasValue)               return "تحويل راتب مسير";
-            return raw.BalanceType == EmployeeBalanceType.Credit
-                ? "رصيد دائن افتتاحي"
-                : "رصيد مدين افتتاحي";
-        }
-        // Movement
-        if (raw.HasCashVoucher)
-        {
-            return raw.CashDirection == CashDirection.Payment
-                ? "سند صرف نقدية"
-                : "سند قبض نقدية";
-        }
-        return EmployeeMovementTypeName(raw.MovementType!.Value);
-    }
-
-    private static EmployeeStatementRaw ToStatementRaw(EmployeeStatementRawDb raw) => new()
-    {
-        SourceId        = raw.SourceId,
-        SourceType      = BuildSourceType(raw),
-        MovementType    = raw.MovementType,
-        Date            = raw.Date,
-        CreatedOn       = raw.CreatedOn,
-        DocumentNumber  = BuildDocumentNumber(raw),
-        MovementName    = BuildMovementName(raw),
-        Description     = raw.Description,
-        Debit           = raw.Debit,
-        Credit          = raw.Credit,
-        ExchangeRate    = raw.ExchangeRate,
-        BaseDebit       = raw.BaseDebit,
-        BaseCredit      = raw.BaseCredit,
-        ReferenceNumber = BuildReferenceNumber(raw)
-    };
-
-    // ─── DB query (no string interpolation, fully translatable) ─────────────
-
-    private IQueryable<EmployeeStatementRawDb> CreateEmployeeRowsQuery(int employeeId)
-    {
-        var openingBalances = dbContext.EmployeeOpeningBalances
-            .AsNoTracking()
-            .Where(balance =>
-                balance.CompanyId == companyId &&
-                balance.EmployeeId == employeeId)
-            .Select(balance => new EmployeeStatementRawDb
-            {
-                SourceKind          = EmployeeStatementRawKind.OpeningBalance,
-                SourceId            = balance.Id,
-                PayrollEntryId      = balance.PayrollEntryId,
-                MovementType        = null,
-                HasCashVoucher      = false,
-                CashDirection       = null,
-                CashVoucherReference = null,
-                BalanceType         = balance.BalanceType,
-                Date                = balance.DocumentDate,
-                CreatedOn           = balance.CreatedOn,
-                DocumentNumber      = balance.DocumentNumber,
-                Description         = balance.Notes,
-                Debit               = balance.BalanceType == EmployeeBalanceType.Debit  ? balance.Amount     : 0m,
-                Credit              = balance.BalanceType == EmployeeBalanceType.Credit ? balance.Amount     : 0m,
-                ExchangeRate        = balance.ExchangeRate,
-                BaseDebit           = balance.BalanceType == EmployeeBalanceType.Debit  ? balance.BaseAmount : 0m,
-                BaseCredit          = balance.BalanceType == EmployeeBalanceType.Credit ? balance.BaseAmount : 0m
-            });
-
-        var movements = dbContext.EmployeeMovements
-            .AsNoTracking()
-            .Where(movement =>
-                movement.CompanyId == companyId &&
-                movement.EmployeeId == employeeId)
-            .Select(movement => new EmployeeStatementRawDb
-            {
-                SourceKind           = EmployeeStatementRawKind.Movement,
-                SourceId             = movement.Id,
-                PayrollEntryId       = null,
-                MovementType         = movement.Type,
-                HasCashVoucher       = movement.CashVoucherId.HasValue,
-                CashDirection        = movement.CashVoucherId.HasValue ? (CashDirection?)movement.CashVoucher!.Direction : null,
-                CashVoucherReference = movement.CashVoucherId.HasValue ? movement.CashVoucher!.ReferenceNumber : null,
-                BalanceType          = null,
-                Date                 = movement.MovementDate,
-                CreatedOn            = movement.CreatedOn,
-                DocumentNumber       = movement.CashVoucherId.HasValue ? movement.CashVoucher!.VoucherNumber : "",
-                Description          = movement.Notes,
-                Debit                = movement.Debit,
-                Credit               = movement.Credit,
-                ExchangeRate         = movement.ExchangeRate,
-                BaseDebit            = movement.BaseDebit,
-                BaseCredit           = movement.BaseCredit
-            });
-
-        return openingBalances.Concat(movements);
-    }
-
-    // ─── public helper used by statement (keeps paging in DB) ───────────────
 
     private IQueryable<EmployeeStatementRaw> CreateEmployeeRows(int employeeId)
     {
-        // Used only by GetEmployeeStatementAsync which pages in DB.
-        // String interpolation is avoided here via the same literals.
         var openingBalances = dbContext.EmployeeOpeningBalances
             .AsNoTracking()
-            .Where(balance =>
-                balance.CompanyId == companyId &&
-                balance.EmployeeId == employeeId)
-            .Select(balance => new EmployeeStatementRaw
-            {
-                SourceId       = balance.Id,
-                SourceType     = balance.PayrollEntryId.HasValue
-                                    ? EmployeeStatementSourceType.SalaryTransfer
-                                    : EmployeeStatementSourceType.OpeningBalance,
-                MovementType   = null,
-                Date           = balance.DocumentDate,
-                CreatedOn      = balance.CreatedOn,
-                DocumentNumber = balance.DocumentNumber,
-                MovementName   = balance.BalanceType == EmployeeBalanceType.Credit
-                                    ? "رصيد دائن افتتاحي"
-                                    : "رصيد مدين افتتاحي",
-                Description    = balance.Notes,
-                Debit          = balance.BalanceType == EmployeeBalanceType.Debit  ? balance.Amount     : 0m,
-                Credit         = balance.BalanceType == EmployeeBalanceType.Credit ? balance.Amount     : 0m,
-                ExchangeRate   = balance.ExchangeRate,
-                BaseDebit      = balance.BalanceType == EmployeeBalanceType.Debit  ? balance.BaseAmount : 0m,
-                BaseCredit     = balance.BalanceType == EmployeeBalanceType.Credit ? balance.BaseAmount : 0m,
-                ReferenceNumber = null
-            });
-
-        var movements = dbContext.EmployeeMovements
+            .Where(balance => balance.CompanyId == companyId);
+        var vouchers = dbContext.CashVouchers
             .AsNoTracking()
-            .Where(movement =>
-                movement.CompanyId == companyId &&
-                movement.EmployeeId == employeeId)
-            .Select(movement => new EmployeeStatementRaw
-            {
-                SourceId        = movement.Id,
-                SourceType      = movement.CashVoucherId.HasValue
-                                    ? EmployeeStatementSourceType.CashVoucher
-                                    : EmployeeStatementSourceType.Movement,
-                MovementType    = movement.Type,
-                Date            = movement.MovementDate,
-                CreatedOn       = movement.CreatedOn,
-                DocumentNumber  = movement.CashVoucherId.HasValue
-                                    ? movement.CashVoucher!.VoucherNumber
-                                    : "",
-                MovementName    = movement.CashVoucherId.HasValue
-                                    ? (movement.CashVoucher!.Direction == CashDirection.Payment
-                                        ? "سند صرف نقدية"
-                                        : "سند قبض نقدية")
-                                    : "",
-                Description     = movement.Notes,
-                Debit           = movement.Debit,
-                Credit          = movement.Credit,
-                ExchangeRate    = movement.ExchangeRate,
-                BaseDebit       = movement.BaseDebit,
-                BaseCredit      = movement.BaseCredit,
-                ReferenceNumber = movement.CashVoucherId.HasValue
-                                    ? movement.CashVoucher!.ReferenceNumber
-                                    : null
-            });
+            .Where(voucher => voucher.CompanyId == companyId);
 
-        return openingBalances.Concat(movements);
+        return
+            from line in PostedLedgerLines()
+            where line.PartyType == JournalPartyType.Employee &&
+                  line.PartyId == employeeId
+            join balance in openingBalances
+                on new
+                {
+                    line.JournalEntry.SourceId,
+                    line.JournalEntry.SourceType
+                }
+                equals new
+                {
+                    SourceId = (int?)balance.Id,
+                    SourceType = (JournalEntrySourceType?)
+                        JournalEntrySourceType.EmployeeOpeningBalance
+                }
+                into balanceRows
+            from balance in balanceRows.DefaultIfEmpty()
+            join voucher in vouchers
+                on new
+                {
+                    line.JournalEntry.SourceId,
+                    line.JournalEntry.SourceType
+                }
+                equals new
+                {
+                    SourceId = (int?)voucher.Id,
+                    SourceType = (JournalEntrySourceType?)
+                        JournalEntrySourceType.CashVoucher
+                }
+                into voucherRows
+            from voucher in voucherRows.DefaultIfEmpty()
+            select new EmployeeStatementRaw
+            {
+                JournalEntryLineId = line.Id,
+                JournalEntryId = line.JournalEntryId,
+                SourceType = balance != null
+                    ? balance.PayrollEntryId.HasValue
+                        ? EmployeeStatementSourceType.SalaryTransfer
+                        : EmployeeStatementSourceType.OpeningBalance
+                    : voucher != null
+                        ? EmployeeStatementSourceType.CashVoucher
+                        : EmployeeStatementSourceType.JournalEntry,
+                MovementType = voucher == null
+                    ? null
+                    : dbContext.EmployeeMovements
+                        .Where(movement =>
+                            movement.CompanyId == companyId &&
+                            movement.EmployeeId == employeeId &&
+                            movement.CashVoucherId == voucher.Id)
+                        .Select(movement =>
+                            (EmployeeMovementType?)movement.Type)
+                        .FirstOrDefault(),
+                Date = line.JournalEntry.EntryDate,
+                CreatedOn = line.JournalEntry.PostedOn,
+                DocumentNumber = balance != null
+                    ? balance.DocumentNumber
+                    : voucher != null
+                        ? voucher.VoucherNumber
+                        : line.JournalEntry.SourceNumber ??
+                          line.JournalEntry.EntryNumber,
+                MovementName = balance != null
+                    ? balance.PayrollEntryId.HasValue
+                        ? "تحويل راتب مسير"
+                        : balance.BalanceType == EmployeeBalanceType.Credit
+                            ? "رصيد دائن افتتاحي"
+                            : "رصيد مدين افتتاحي"
+                    : voucher != null
+                        ? voucher.Direction == CashDirection.Payment
+                            ? "سند صرف نقدية"
+                            : "سند قبض نقدية"
+                        : line.JournalEntry.EntryType ==
+                          JournalEntryType.Adjustment
+                            ? "قيد تسوية"
+                            : line.JournalEntry.EntryType ==
+                              JournalEntryType.Manual
+                                ? "قيد يدوي"
+                                : line.JournalEntry.EntryType ==
+                                  JournalEntryType.Opening
+                                    ? "قيد افتتاحي"
+                                    : "قيد محاسبي",
+                Description = line.Description ??
+                    (balance != null
+                        ? balance.Notes
+                        : line.JournalEntry.Description),
+                Debit = line.Debit,
+                Credit = line.Credit,
+                ExchangeRate = line.ExchangeRate,
+                ReferenceNumber = balance != null
+                    ? balance.PayrollEntryId.HasValue
+                        ? "PAY-" + balance.PayrollEntryId.Value
+                        : null
+                    : voucher == null
+                        ? null
+                        : voucher.ReferenceNumber
+            };
     }
 
     private static string EmployeeBalanceDescription(decimal netBalance) =>
@@ -590,45 +574,19 @@ public sealed partial class FinancialStatementService
         EmployeeAccountRules.GetMovementTypeName(type);
 }
 
-// ─── Raw DB projection (no computed strings — fully EF-translatable) ─────────
-
-public sealed class EmployeeStatementRawDb
+internal sealed class EmployeeStatementRaw
 {
-    public EmployeeStatementRawKind  SourceKind           { get; set; }
-    public int                       SourceId              { get; set; }
-    public int?                      PayrollEntryId        { get; set; }
-    public EmployeeMovementType?     MovementType          { get; set; }
-    public bool                      HasCashVoucher        { get; set; }
-    public CashDirection?            CashDirection         { get; set; }
-    public string?                   CashVoucherReference  { get; set; }
-    public EmployeeBalanceType?      BalanceType           { get; set; }
-    public DateOnly                  Date                  { get; set; }
-    public DateTime                  CreatedOn             { get; set; }
-    public string                    DocumentNumber        { get; set; } = string.Empty;
-    public string?                   Description           { get; set; }
-    public decimal                   Debit                 { get; set; }
-    public decimal                   Credit                { get; set; }
-    public decimal                   ExchangeRate          { get; set; }
-    public decimal                   BaseDebit             { get; set; }
-    public decimal                   BaseCredit            { get; set; }
-}
-
-public enum EmployeeStatementRawKind { OpeningBalance, Movement }
-
-public sealed class EmployeeStatementRaw
-{
-    public int SourceId { get; set; }
-    public EmployeeStatementSourceType SourceType { get; set; }
-    public EmployeeMovementType? MovementType { get; set; }
-    public DateOnly Date { get; set; }
-    public DateTime CreatedOn { get; set; }
-    public string DocumentNumber { get; set; } = string.Empty;
-    public string MovementName { get; set; } = string.Empty;
-    public string? Description { get; set; }
-    public decimal Debit { get; set; }
-    public decimal Credit { get; set; }
-    public decimal ExchangeRate { get; set; }
-    public decimal BaseDebit { get; set; }
-    public decimal BaseCredit { get; set; }
-    public string? ReferenceNumber { get; set; }
+    public int JournalEntryLineId { get; init; }
+    public int JournalEntryId { get; init; }
+    public EmployeeStatementSourceType SourceType { get; init; }
+    public EmployeeMovementType? MovementType { get; init; }
+    public DateOnly Date { get; init; }
+    public DateTime CreatedOn { get; init; }
+    public string DocumentNumber { get; init; } = string.Empty;
+    public string MovementName { get; init; } = string.Empty;
+    public string? Description { get; init; }
+    public decimal Debit { get; init; }
+    public decimal Credit { get; init; }
+    public decimal ExchangeRate { get; init; }
+    public string? ReferenceNumber { get; init; }
 }

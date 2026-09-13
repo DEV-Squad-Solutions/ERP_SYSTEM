@@ -2,15 +2,21 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
+using MiniErp.Application.Features.CashVouchers;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
 using MiniErp.Infrastructure.Services.Cashboxes;
 using MiniErp.Infrastructure.Services.CashboxTransfers;
 using MiniErp.Infrastructure.Services.CashMovementTypes;
 using MiniErp.Infrastructure.Services.CashVouchers;
+using MiniErp.Infrastructure.Services.AccountMappings;
 using MiniErp.Infrastructure.Services.DriverTrips;
+using MiniErp.Infrastructure.Services.JournalEntries;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.Statements;
+using MiniErp.Domain.Enums;
+using Microsoft.Extensions.Logging.Abstractions;
+using MiniErp.Tests.TestDoubles;
 
 namespace MiniErp.Tests.CashManagement;
 
@@ -88,13 +94,44 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
 
     public CashVoucherService CreateVoucherService(
         int companyId,
-        ApplicationDbContext? context = null) =>
+        ApplicationDbContext? context = null,
+        ICashVoucherPostingService? postingService = null) =>
         new(
             context ?? Context,
             new PaginationService(),
             new TestCurrentCompanyContext(companyId),
             new MiniErp.Tests.TestExchangeRateResolver(),
-            TimeProvider.System);
+            TimeProvider.System,
+            postingService ?? new NoOpCashVoucherPostingService());
+
+    public CashVoucherService CreatePostingVoucherService(
+        int companyId,
+        ApplicationDbContext? context = null)
+    {
+        var serviceContext = context ?? Context;
+        var companyContext = new TestCurrentCompanyContext(companyId);
+        var automaticPosting = new AutomaticPostingService(
+            serviceContext,
+            companyContext,
+            TimeProvider.System,
+            NullLogger<AutomaticPostingService>.Instance);
+        var mappingResolver = new AccountMappingResolver(
+            serviceContext,
+            companyContext);
+        var postingService = new CashVoucherPostingService(
+            serviceContext,
+            companyContext,
+            mappingResolver,
+            automaticPosting);
+
+        return new CashVoucherService(
+            serviceContext,
+            new PaginationService(),
+            companyContext,
+            new MiniErp.Tests.TestExchangeRateResolver(),
+            TimeProvider.System,
+            postingService);
+    }
 
     public DriverTripService CreateDriverTripService(
         int companyId,
@@ -110,6 +147,71 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
         new(
             context ?? Context,
             new TestCurrentCompanyContext(companyId));
+
+    public async Task SeedPostedJournalEntryAsync(
+        int journalEntryId,
+        string entryNumber,
+        DateOnly entryDate,
+        JournalEntryType entryType,
+        JournalEntrySourceType? sourceType,
+        int? sourceId,
+        string? sourceNumber,
+        IReadOnlyList<JournalEntryLineSeed> lines,
+        JournalEntryStatus status = JournalEntryStatus.Posted,
+        int? reversalOfEntryId = null,
+        bool isDeleted = false,
+        int companyId = 1)
+    {
+        var entryDateText = entryDate.ToString("yyyy-MM-dd");
+        var timestamp = entryDate.ToDateTime(TimeOnly.MinValue)
+            .ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ");
+        await Context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            INSERT INTO JournalEntries (
+                Id, CompanyId, FiscalYearId, EntryNumber, EntryDate,
+                Description, EntryType, SourceType, SourceId, SourceNumber,
+                Status, PostedOn, ReversalOfEntryId, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                {journalEntryId}, {companyId}, 1, {entryNumber}, {entryDateText},
+                {entryNumber}, {(int)entryType},
+                {(int?)sourceType}, {sourceId}, {sourceNumber},
+                {(int)status}, {timestamp}, {reversalOfEntryId}, 'test',
+                {timestamp}, 'test', {(isDeleted ? 1 : 0)});
+            """);
+
+        foreach (var line in lines)
+        {
+            await Context.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                INSERT INTO JournalEntryLines (
+                    CompanyId, JournalEntryId, AccountId, PartyType, PartyId,
+                    Description, Debit, Credit, Currency, ExchangeRate,
+                    TransactionDebit, TransactionCredit, CreatedById,
+                    CreatedOn, CreatedByPc, IsDeleted)
+                VALUES (
+                    {companyId}, {journalEntryId}, {line.AccountId},
+                    {(int?)line.PartyType}, {line.PartyId}, {line.Description},
+                    {line.Debit}, {line.Credit}, {(int)line.Currency},
+                    {line.ExchangeRate}, {line.TransactionDebit},
+                    {line.TransactionCredit}, 'test', {timestamp}, 'test',
+                    {(line.IsDeleted ? 1 : 0)});
+                """);
+        }
+    }
+
+    public sealed record JournalEntryLineSeed(
+        int AccountId,
+        JournalPartyType? PartyType,
+        int? PartyId,
+        decimal Debit,
+        decimal Credit,
+        CurrencyCode Currency,
+        decimal ExchangeRate,
+        decimal TransactionDebit,
+        decimal TransactionCredit,
+        string? Description = null,
+        bool IsDeleted = false);
 
     public async ValueTask DisposeAsync()
     {
@@ -148,6 +250,28 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
             );
 
+            CREATE TABLE FiscalYears (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                Name TEXT NOT NULL,
+                StartDate TEXT NOT NULL,
+                EndDate TEXT NOT NULL,
+                Status INTEGER NOT NULL,
+                IsCurrent INTEGER NOT NULL,
+                ClosedOn TEXT NULL,
+                RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                CreatedById TEXT NOT NULL DEFAULT 'test',
+                CreatedOn TEXT NOT NULL DEFAULT '2026-01-01',
+                CreatedByPc TEXT NOT NULL DEFAULT 'test',
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE TABLE Accounts (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 CompanyId INTEGER NOT NULL,
@@ -162,6 +286,80 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 CreatedById TEXT NOT NULL DEFAULT 'test',
                 CreatedOn TEXT NOT NULL DEFAULT '2026-01-01',
                 CreatedByPc TEXT NOT NULL DEFAULT 'test',
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE TABLE AccountMappings (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                FiscalYearId INTEGER NOT NULL,
+                MappingType INTEGER NOT NULL,
+                SourceId INTEGER NULL,
+                AccountId INTEGER NOT NULL,
+                RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                CreatedById TEXT NOT NULL DEFAULT 'test',
+                CreatedOn TEXT NOT NULL DEFAULT '2026-01-01',
+                CreatedByPc TEXT NOT NULL DEFAULT 'test',
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE JournalEntries (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                FiscalYearId INTEGER NOT NULL,
+                EntryNumber TEXT NOT NULL,
+                EntryDate TEXT NOT NULL,
+                Description TEXT NOT NULL,
+                EntryType INTEGER NOT NULL,
+                SourceType INTEGER NULL,
+                SourceId INTEGER NULL,
+                SourceNumber TEXT NULL,
+                Status INTEGER NOT NULL,
+                PostedOn TEXT NOT NULL,
+                ReversedOn TEXT NULL,
+                ReversalOfEntryId INTEGER NULL,
+                RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL
+            );
+
+            CREATE TABLE JournalEntryLines (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                JournalEntryId INTEGER NOT NULL,
+                AccountId INTEGER NOT NULL,
+                PartyType INTEGER NULL,
+                PartyId INTEGER NULL,
+                Description TEXT NULL,
+                Debit NUMERIC NOT NULL,
+                Credit NUMERIC NOT NULL,
+                Currency INTEGER NOT NULL,
+                ExchangeRate NUMERIC NOT NULL,
+                TransactionDebit NUMERIC NOT NULL,
+                TransactionCredit NUMERIC NOT NULL,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
                 UpdatedById TEXT NULL,
                 UpdatedOn TEXT NULL,
                 UpdatedByPc TEXT NULL,
@@ -778,9 +976,20 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Id, CompanyId, Code, Name, ParentAccountId, AccountType,
                 NormalBalance, IsPosting, IsActive, IsDeleted)
             VALUES
-                (1, 1, '4200', 'Other Revenue', NULL, 4, 2, 1, 1, 0),
+                (1, 1, '4200', 'Other Revenue', 50, 4, 2, 1, 1, 0),
                 (2, 1, '5200', 'Operating Expenses', NULL, 5, 1, 1, 1, 0),
-                (3, 2, '4200', 'Other Company Revenue', NULL, 4, 2, 1, 1, 0);
+                (3, 2, '4200', 'Other Company Revenue', NULL, 4, 2, 1, 1, 0),
+                (50, 1, '1000', 'Posting Test Root', NULL, 1, 1, 0, 1, 0),
+                (100, 1, '1100', 'Cashbox', 50, 1, 1, 1, 1, 0);
+
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, '2026', '2026-01-01', '2026-12-31', 1, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (2, 2, '2026', '2026-01-01', '2026-12-31', 1, 1,
+                 'test', '2026-01-01', 'test', 0);
 
             INSERT INTO BusinessPartners (
                 Id, CompanyId, Code, Name, Currency, CreditLimit, IsActive,
@@ -894,6 +1103,17 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 (6, 1, 'EUR', 'EUR Cashbox', 3, 100, 1,
                  'test', '2026-01-01', 'test', 0);
 
+            INSERT INTO AccountMappings (
+                CompanyId, FiscalYearId, MappingType, SourceId, AccountId,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 1, 1, 100, 'test', '2026-01-01', 'test', 0),
+                (1, 1, 1, 2, 100, 'test', '2026-01-01', 'test', 0),
+                (1, 1, 1, 3, 100, 'test', '2026-01-01', 'test', 0),
+                (1, 1, 1, 5, 100, 'test', '2026-01-01', 'test', 0),
+                (1, 1, 1, 6, 100, 'test', '2026-01-01', 'test', 0),
+                (2, 2, 1, 4, 100, 'test', '2026-01-01', 'test', 0);
+
             INSERT INTO CashMovementTypes (
                 Id, CompanyId, Name, Direction, Classification, PartnerEffect, IsActive,
                 IsDefaultForSales, IsDefaultForPurchase,
@@ -947,7 +1167,37 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 CreatedById, CreatedOn, CreatedByPc, IsDeleted)
             VALUES
                 (1, 1, 1, 1, NULL, 1, '2026-07-10', 1, 100, 0,
-                 'Invoice movement', 'test', '2026-07-10', 'test', 0);
+                'Invoice movement', 'test', '2026-07-10', 'test', 0);
+
+            INSERT INTO JournalEntries (
+                Id, CompanyId, FiscalYearId, EntryNumber, EntryDate,
+                Description, EntryType, SourceType, SourceId, SourceNumber,
+                Status, PostedOn, CreatedById, CreatedOn, CreatedByPc,
+                IsDeleted)
+            VALUES
+                (1001, 1, 1, 'JE-OPEN-CB-1', '2026-01-01', 'Cashbox opening', 3, 11, 1, 'MAIN', 1, '2026-01-01', 'test', '2026-01-01', 'test', 0),
+                (1002, 1, 1, 'JE-OPEN-CB-2', '2026-01-01', 'Cashbox opening', 3, 11, 2, 'SECOND', 1, '2026-01-01', 'test', '2026-01-01', 'test', 0),
+                (1003, 1, 1, 'JE-OPEN-CB-3', '2026-01-01', 'Cashbox opening', 3, 11, 3, 'INACTIVE', 1, '2026-01-01', 'test', '2026-01-01', 'test', 0),
+                (1004, 2, 1, 'JE-OPEN-CB-4', '2026-01-01', 'Cashbox opening', 3, 11, 4, 'MAIN', 1, '2026-01-01', 'test', '2026-01-01', 'test', 0),
+                (1005, 1, 1, 'JE-OPEN-CB-5', '2026-01-01', 'Cashbox opening', 3, 11, 5, 'USD', 1, '2026-01-01', 'test', '2026-01-01', 'test', 0),
+                (1006, 1, 1, 'JE-OPEN-CB-6', '2026-01-01', 'Cashbox opening', 3, 11, 6, 'EUR', 1, '2026-01-01', 'test', '2026-01-01', 'test', 0),
+                (1010, 1, 1, 'JE-OPEN-BP-1', '2026-07-01', 'Partner opening', 3, 9, 1, 'OPEN-1', 1, '2026-07-01', 'test', '2026-07-01', 'test', 0),
+                (1011, 1, 1, 'JE-INV-1', '2026-07-10', 'Invoice posting', 4, 1, 1, 'INV-1', 1, '2026-07-10', 'test', '2026-07-10', 'test', 0);
+
+            INSERT INTO JournalEntryLines (
+                Id, CompanyId, JournalEntryId, AccountId, PartyType, PartyId,
+                Description, Debit, Credit, Currency, ExchangeRate,
+                TransactionDebit, TransactionCredit, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES
+                (1001, 1, 1001, 1, 5, 1, 'Cashbox opening', 1000, 0, 1, 1, 1000, 0, 'test', '2026-01-01', 'test', 0),
+                (1002, 1, 1002, 1, 5, 2, 'Cashbox opening', 500, 0, 1, 1, 500, 0, 'test', '2026-01-01', 'test', 0),
+                (1003, 1, 1003, 1, 5, 3, 'Cashbox opening', 500, 0, 1, 1, 500, 0, 'test', '2026-01-01', 'test', 0),
+                (1004, 2, 1004, 1, 5, 4, 'Cashbox opening', 1000, 0, 1, 1, 1000, 0, 'test', '2026-01-01', 'test', 0),
+                (1005, 1, 1005, 1, 5, 5, 'Cashbox opening', 100, 0, 2, 1, 100, 0, 'test', '2026-01-01', 'test', 0),
+                (1006, 1, 1006, 1, 5, 6, 'Cashbox opening', 100, 0, 3, 1, 100, 0, 'test', '2026-01-01', 'test', 0),
+                (1010, 1, 1010, 1, 1, 1, 'Partner opening', 200, 0, 1, 1, 200, 0, 'test', '2026-07-01', 'test', 0),
+                (1011, 1, 1011, 1, 1, 1, 'Invoice posting', 100, 0, 1, 1, 100, 0, 'test', '2026-07-10', 'test', 0);
             """);
     }
 

@@ -21,6 +21,7 @@ using MiniErp.Infrastructure.Services.ExchangeRates;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.PayrollEntries;
 using MiniErp.Infrastructure.Services.Statements;
+using MiniErp.Tests.TestDoubles;
 using System;
 using System.Threading.Tasks;
 
@@ -33,6 +34,9 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
     private readonly AsyncServiceScope scope;
 
     public ApplicationDbContext Context { get; }
+
+    internal NoOpCashVoucherPostingService CashVoucherPostingService =>
+        scope.ServiceProvider.GetRequiredService<NoOpCashVoucherPostingService>();
 
     private PayrollEntryTestDatabase(
         SqliteConnection connection,
@@ -65,6 +69,9 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
         services.AddScoped<IPaginationService, PaginationService>();
         services.AddScoped<IExchangeRateResolver, ExchangeRateResolver>();
         services.AddScoped<ICashVoucherService, CashVoucherService>();
+        services.AddScoped<NoOpCashVoucherPostingService>();
+        services.AddScoped<ICashVoucherPostingService>(serviceProvider =>
+            serviceProvider.GetRequiredService<NoOpCashVoucherPostingService>());
         services.AddScoped<IEmployeeOpeningBalanceService, EmployeeOpeningBalanceService>();
         services.AddScoped<IEmployeeMovementService, EmployeeMovementService>();
         services.AddScoped<IPayrollEntryService, PayrollEntryService>();
@@ -80,6 +87,33 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
             PRAGMA foreign_keys = OFF;
             DROP TABLE IF EXISTS Companies;
             CREATE TABLE Companies (Id INTEGER PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL, Address TEXT NOT NULL, CommercialRegister TEXT NOT NULL, TaxNumber TEXT NOT NULL, ManagerName TEXT NOT NULL, RowVersion BLOB NOT NULL DEFAULT (randomblob(8)), CreatedById TEXT NOT NULL DEFAULT '', CreatedOn TEXT NOT NULL DEFAULT '2026-01-01', CreatedByPc TEXT NOT NULL DEFAULT '', UpdatedById TEXT NULL, UpdatedOn TEXT NULL, UpdatedByPc TEXT NULL, DeletedById TEXT NULL, DeletedOn TEXT NULL, DeletedByPc TEXT NULL, IsDeleted INTEGER NOT NULL DEFAULT 0);
+
+            DROP TABLE IF EXISTS ExchangeRates;
+            CREATE TABLE ExchangeRates (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                Currency INTEGER NOT NULL,
+                RateDate TEXT NOT NULL,
+                Rate NUMERIC NOT NULL,
+                Source INTEGER NOT NULL,
+                Provider TEXT NULL,
+                Notes TEXT NULL,
+                LastModifiedAt TEXT NOT NULL DEFAULT '2026-01-01',
+                RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                CreatedById TEXT NOT NULL DEFAULT '',
+                CreatedOn TEXT NOT NULL DEFAULT '2026-01-01',
+                CreatedByPc TEXT NOT NULL DEFAULT '',
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE UNIQUE INDEX IX_ExchangeRates_Company_Currency_Date
+                ON ExchangeRates (CompanyId, Currency, RateDate)
+                WHERE IsDeleted = 0;
 
             DROP TABLE IF EXISTS Cashboxes;
             CREATE TABLE Cashboxes (

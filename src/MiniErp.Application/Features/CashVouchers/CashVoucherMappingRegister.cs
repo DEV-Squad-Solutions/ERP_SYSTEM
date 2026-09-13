@@ -15,8 +15,17 @@ public sealed class CashVoucherMappingRegister : IRegister
             .Ignore(voucher => voucher.InvoicePayment)
             .Ignore(voucher => voucher.Account)
             .Map(
+                voucher => voucher.ExternalPartyName,
+                request => Normalize(request.ExternalPartyName))
+            .Map(
+                voucher => voucher.ReferenceNumber,
+                request => Normalize(request.ReferenceNumber))
+            .Map(
                 voucher => voucher.Description,
-                request => Normalize(request.Description));
+                request => Normalize(request.Description))
+            .Map(
+                voucher => voucher.Notes,
+                request => Normalize(request.Notes));
 
         config.ForType<CashVoucherUpdateRequest, CashVoucher>()
             .Ignore(voucher => voucher.RowVersion)
@@ -45,8 +54,7 @@ public sealed class CashVoucherMappingRegister : IRegister
                     : voucher.Company.Settings.BaseCurrency)
             .Map(
                 response => response.ExchangeRate,
-                voucher => voucher.IsPosted &&
-                    voucher.Currency ==
+                voucher => voucher.Currency ==
                         (voucher.Company.Settings == null
                             ? Domain.Enums.CurrencyCode.EGP
                             : voucher.Company.Settings.BaseCurrency)
@@ -54,8 +62,7 @@ public sealed class CashVoucherMappingRegister : IRegister
                         : voucher.ExchangeRate)
             .Map(
                 response => response.BaseAmount,
-                voucher => voucher.IsPosted &&
-                    voucher.Currency ==
+                voucher => voucher.Currency ==
                         (voucher.Company.Settings == null
                             ? Domain.Enums.CurrencyCode.EGP
                             : voucher.Company.Settings.BaseCurrency)

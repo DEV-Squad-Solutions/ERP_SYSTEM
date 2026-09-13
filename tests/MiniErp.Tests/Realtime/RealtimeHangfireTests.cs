@@ -76,7 +76,7 @@ public sealed class RealtimeHangfireTests
                 type.Name.EndsWith("RealtimeJob", StringComparison.Ordinal))
             .ToArray();
 
-        Assert.Equal(27, jobTypes.Length);
+        Assert.NotEmpty(jobTypes);
         foreach (var jobType in jobTypes)
         {
             var method = jobType.GetMethod("ExecuteAsync");

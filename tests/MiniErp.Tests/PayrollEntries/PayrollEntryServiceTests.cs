@@ -475,6 +475,7 @@ public sealed class PayrollEntryServiceTests
             Code = "CB-01",
             Name = "Main Box",
             Currency = CurrencyCode.EGP,
+            OpeningBalance = 1_000m,
             IsActive = true
         };
         database.Context.Cashboxes.Add(cashbox);

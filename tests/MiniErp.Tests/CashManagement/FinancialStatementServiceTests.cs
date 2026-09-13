@@ -25,34 +25,38 @@ public sealed class FinancialStatementServiceTests
             await CashManagementTestDatabase.CreateAsync();
         var vouchers = database.CreateVoucherService(companyId: 1);
 
-        await AddVoucherAsync(vouchers,
+        await AddVoucherAsync(database, vouchers,
             CreateGeneralVoucher(
                 "CV-BEFORE",
                 new DateOnly(2026, 7, 10),
                 CashDirection.Receipt,
                 9,
                 100m));
-        await AddVoucherAsync(vouchers,
+        await AddVoucherAsync(database, vouchers,
             CreateGeneralVoucher(
                 "CV-PERIOD-PAY",
                 new DateOnly(2026, 7, 22),
                 CashDirection.Payment,
                 10,
                 40m));
-        await AddVoucherAsync(vouchers,
+        await AddVoucherAsync(database, vouchers,
             CreateGeneralVoucher(
                 "CV-PERIOD-RECEIPT",
                 new DateOnly(2026, 7, 23),
                 CashDirection.Receipt,
                 9,
                 25m));
-        await vouchers.AddAsync(
+        var draft = await database.CreatePostingVoucherService(companyId: 1)
+            .AddAsync(
             new CashVoucherRequest(
                 new DateOnly(2026, 7, 24),
                 CashDirection.Receipt,
                 CashboxId: 1,
                 Amount: 500m,
-                Description: "Draft excluded from the statement"));
+                Description: "Draft included in the statement",
+                AccountId: 1));
+
+        Assert.True(draft.IsSuccess, draft.Error.Description);
 
         var result = await database.CreateStatementService(1)
             .GetCashboxStatementAsync(
@@ -67,17 +71,17 @@ public sealed class FinancialStatementServiceTests
         Assert.Equal("Main Cashbox", result.Value.CashboxName);
         Assert.Equal(CurrencyCode.EGP, result.Value.Currency);
         Assert.Equal(1100m, result.Value.Summary.OpeningBalance);
-        Assert.Equal(25m, result.Value.Summary.TotalReceipts);
+        Assert.Equal(525m, result.Value.Summary.TotalReceipts);
         Assert.Equal(40m, result.Value.Summary.TotalPayments);
-        Assert.Equal(1085m, result.Value.Summary.ClosingBalance);
-        Assert.Equal(2, result.Value.TotalCount);
+        Assert.Equal(1585m, result.Value.Summary.ClosingBalance);
+        Assert.Equal(3, result.Value.TotalCount);
         Assert.Equal(
-            [1060m, 1085m],
+            [1060m, 1085m, 1585m],
             result.Value.Items.Select(item => item.Balance).ToArray());
     }
 
     [Fact]
-    public async Task CashboxStatementIncludesPostedNullTypeAndExcludesDraft()
+    public async Task CashboxStatementIncludesPostedNullTypeAndDraftWithJournal()
     {
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
@@ -100,28 +104,38 @@ public sealed class FinancialStatementServiceTests
                         ReferenceNumber: null,
                         Description: "Posted without category",
                         Notes: null,
-                        ExchangeRate: null))
+                        ExchangeRate: null,
+                        AccountId: 1))
             ]));
-        await vouchers.AddAsync(
+        var draft = await database.CreatePostingVoucherService(companyId: 1)
+            .AddAsync(
             new CashVoucherRequest(
                 VoucherDate: new DateOnly(2026, 8, 4),
                 Direction: CashDirection.Receipt,
                 CashboxId: 1,
                 Amount: 50m,
-                Description: "Unposted draft"));
+                Description: "Draft with accounting effect",
+                AccountId: 1));
 
+        Assert.True(bulk.IsSuccess, bulk.Error.Description);
+        Assert.True(draft.IsSuccess, draft.Error.Description);
+        await SeedVoucherJournalAsync(database, bulk.Value.Items[0].Id);
         var result = await database.CreateStatementService(1)
             .GetCashboxStatementAsync(
                 Page(),
                 new CashboxStatementFilterRequest(CashboxId: 1));
-
-        Assert.True(bulk.IsSuccess);
         Assert.True(result.IsSuccess);
-        var item = Assert.Single(result.Value.Items);
-        Assert.Equal(bulk.Value.Items[0].Id, item.CashVoucherId);
-        Assert.Equal("سند قبض", item.MovementName);
-        Assert.Equal(30m, result.Value.Summary.TotalReceipts);
-        Assert.Equal(1030m, result.Value.Summary.ClosingBalance);
+        Assert.Equal(2, result.Value.Items.Count);
+        Assert.Contains(result.Value.Items, item =>
+            item.CashVoucherId == bulk.Value.Items[0].Id &&
+            item.MovementName == "سند قبض" &&
+            item.ReceiptAmount == 30m);
+        Assert.Contains(result.Value.Items, item =>
+            item.CashVoucherId == draft.Value.Id &&
+            item.ReceiptAmount == 50m &&
+            item.JournalEntryId.HasValue);
+        Assert.Equal(80m, result.Value.Summary.TotalReceipts);
+        Assert.Equal(1080m, result.Value.Summary.ClosingBalance);
     }
 
     [Fact]
@@ -130,14 +144,14 @@ public sealed class FinancialStatementServiceTests
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
         var vouchers = database.CreateVoucherService(companyId: 1);
-        await AddVoucherAsync(vouchers,
+        await AddVoucherAsync(database, vouchers,
             CreateGeneralVoucher(
                 "CV-OTHER",
                 new DateOnly(2026, 7, 22),
                 CashDirection.Receipt,
                 9,
                 25m));
-        var expense = await AddVoucherAsync(vouchers,
+        var expense = await AddVoucherAsync(database, vouchers,
             CreateGeneralVoucher(
                 "CV-EXPENSE",
                 new DateOnly(2026, 7, 23),
@@ -164,6 +178,7 @@ public sealed class FinancialStatementServiceTests
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
         var employeeVoucher = await AddVoucherAsync(
+            database,
             database.CreateVoucherService(companyId: 1),
             CreateEmployeeVoucher(employeeId: 1, amount: 30m));
 
@@ -172,7 +187,7 @@ public sealed class FinancialStatementServiceTests
                 Page(),
                 new CashboxStatementFilterRequest(
                     CashboxId: 1,
-                    Search: "EMP-1",
+                    Search: "Employee One",
                     PartyType: CashPartyType.Employee,
                     EmployeeId: 1));
 
@@ -196,6 +211,19 @@ public sealed class FinancialStatementServiceTests
                 BaseOpeningBalance = 4800
             WHERE Id = 5;
 
+            UPDATE JournalEntries
+            SET EntryDate = '2026-07-01'
+            WHERE SourceType = 11 AND SourceId = 5;
+
+            UPDATE JournalEntryLines
+            SET Debit = 4800,
+                Currency = 2,
+                ExchangeRate = 48,
+                TransactionDebit = 100
+            WHERE JournalEntryId = (
+                SELECT Id FROM JournalEntries
+                WHERE SourceType = 11 AND SourceId = 5);
+
             INSERT INTO CashVouchers (
                 CompanyId, VoucherNumber, VoucherDate, Direction,
                 CashboxId, CashMovementTypeId, PartyType, Amount,
@@ -207,6 +235,11 @@ public sealed class FinancialStatementServiceTests
                 2, 50, 500, 1, '2026-07-10',
                 'test', '2026-07-10', 'test', 0);
             """);
+        var usdVoucherId = await database.Context.CashVouchers
+            .Where(voucher => voucher.VoucherNumber == "USD-RECEIPT")
+            .Select(voucher => voucher.Id)
+            .SingleAsync();
+        await SeedVoucherJournalAsync(database, usdVoucherId);
 
         var result = await database.CreateStatementService(1)
             .GetCashboxStatementAsync(
@@ -240,6 +273,7 @@ public sealed class FinancialStatementServiceTests
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
         var voucher = await AddVoucherAsync(
+            database,
             database.CreateVoucherService(1),
             CreatePartnerVoucher(
                 "CV-PARTNER-STMT",
@@ -305,6 +339,51 @@ public sealed class FinancialStatementServiceTests
                 'USD invoice', 'test', '2026-07-10', 'test', 0);
             """);
 
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 3010,
+            entryNumber: "JE-OPEN-USD-PARTNER",
+            entryDate: new DateOnly(2026, 7, 1),
+            entryType: JournalEntryType.Opening,
+            sourceType: JournalEntrySourceType.PartnerOpeningBalance,
+            sourceId: 2,
+            sourceNumber: "OPEN-USD",
+            lines:
+            [
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 1,
+                    PartyType: JournalPartyType.Supplier,
+                    PartyId: 2,
+                    Debit: 5000m,
+                    Credit: 0m,
+                    Currency: CurrencyCode.USD,
+                    ExchangeRate: 50m,
+                    TransactionDebit: 100m,
+                    TransactionCredit: 0m,
+                    Description: "USD opening")
+            ]);
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 3011,
+            entryNumber: "JE-USD-INVOICE",
+            entryDate: new DateOnly(2026, 7, 10),
+            entryType: JournalEntryType.Automatic,
+            sourceType: JournalEntrySourceType.Invoice,
+            sourceId: 2,
+            sourceNumber: "INV-2",
+            lines:
+            [
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 1,
+                    PartyType: JournalPartyType.Supplier,
+                    PartyId: 2,
+                    Debit: 1020m,
+                    Credit: 0m,
+                    Currency: CurrencyCode.USD,
+                    ExchangeRate: 51m,
+                    TransactionDebit: 20m,
+                    TransactionCredit: 0m,
+                    Description: "USD invoice")
+            ]);
+
         var result = await database.CreateStatementService(1)
             .GetPartnerStatementAsync(
                 Page(),
@@ -343,14 +422,14 @@ public sealed class FinancialStatementServiceTests
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
         var vouchers = database.CreateVoucherService(1);
-        await AddVoucherAsync(vouchers,
+        await AddVoucherAsync(database, vouchers,
             CreateDriverVoucher(
                 "CV-DRIVER-GENERAL",
                 new DateOnly(2026, 7, 18),
                 CashDirection.Payment,
                 tripId: null,
                 amount: 100m));
-        await AddVoucherAsync(vouchers,
+        await AddVoucherAsync(database, vouchers,
             CreateDriverVoucher(
                 "CV-DRIVER-LINKED",
                 new DateOnly(2026, 7, 21),
@@ -373,6 +452,28 @@ public sealed class FinancialStatementServiceTests
                     "Trip cost",
                     trip.RowVersion)
             ]));
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 3020,
+            entryNumber: "JE-DRIVER-TRIP-1",
+            entryDate: new DateOnly(2026, 7, 20),
+            entryType: JournalEntryType.Automatic,
+            sourceType: JournalEntrySourceType.DriverTrip,
+            sourceId: 1,
+            sourceNumber: "INV-1",
+            lines:
+            [
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 2,
+                    PartyType: JournalPartyType.Driver,
+                    PartyId: 1,
+                    Debit: 0m,
+                    Credit: 60m,
+                    Currency: CurrencyCode.EGP,
+                    ExchangeRate: 1m,
+                    TransactionDebit: 0m,
+                    TransactionCredit: 60m,
+                    Description: "Trip cost")
+            ]);
 
         var statements = database.CreateStatementService(1);
         var overall = await statements.GetDriverStatementAsync(
@@ -434,7 +535,7 @@ public sealed class FinancialStatementServiceTests
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
         var vouchers = database.CreateVoucherService(1);
-        var created = await AddVoucherAsync(vouchers,
+        var created = await AddVoucherAsync(database, vouchers,
             CreateDriverVoucher(
                 "CV-DELETED",
                 new DateOnly(2026, 7, 25),
@@ -443,6 +544,8 @@ public sealed class FinancialStatementServiceTests
                 amount: 100m));
         database.Context.ChangeTracker.Clear();
         await vouchers.DeleteAsync(created.Value.Id);
+        await database.Context.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE JournalEntries SET IsDeleted = 1 WHERE SourceType = {(int)JournalEntrySourceType.CashVoucher} AND SourceId = {created.Value.Id}");
 
         var statements = database.CreateStatementService(1);
         var cashbox = await statements.GetCashboxStatementAsync(
@@ -868,6 +971,7 @@ public sealed class FinancialStatementServiceTests
             Notes: null);
 
     private static async Task<Result<CashVoucherResponse>> AddVoucherAsync(
+        CashManagementTestDatabase database,
         ICashVoucherService service,
         VoucherTestRequest request)
     {
@@ -877,13 +981,26 @@ public sealed class FinancialStatementServiceTests
                 Direction: request.Direction,
                 CashboxId: request.CashboxId,
                 Amount: request.Amount,
-                Description: request.Description));
+                Description: request.Description,
+                CashMovementTypeId: request.CashMovementTypeId,
+                EmployeeId: request.EmployeeId,
+                BusinessPartnerId: request.BusinessPartnerId,
+                DriverId: request.DriverId,
+                DriverTripId: request.DriverTripId,
+                ExternalPartyName: request.ExternalPartyName,
+                ReferenceNumber: request.ReferenceNumber,
+                Notes: request.Notes,
+                EmployeeMovementType: request.EmployeeId.HasValue
+                    ? request.Direction == CashDirection.Receipt
+                        ? EmployeeMovementType.Credit
+                        : EmployeeMovementType.Advance
+                    : null));
         if (draft.IsFailure)
         {
             return draft;
         }
 
-        return await service.UpdateAsync(
+        var updated = await service.UpdateAsync(
             draft.Value.Id,
             new CashVoucherUpdateRequest(
                 VoucherDate: request.VoucherDate,
@@ -900,6 +1017,73 @@ public sealed class FinancialStatementServiceTests
                 Description: request.Description,
                 Notes: request.Notes,
                 RowVersion: draft.Value.RowVersion));
+        if (updated.IsSuccess && !updated.Value.IsDraft)
+        {
+            await SeedVoucherJournalAsync(database, updated.Value.Id);
+        }
+        return updated;
+    }
+
+    private static async Task SeedVoucherJournalAsync(
+        CashManagementTestDatabase database,
+        int voucherId)
+    {
+        var voucher = await database.Context.CashVouchers
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == voucherId);
+        var isReceipt = voucher.Direction == CashDirection.Receipt;
+        var journalId = 20_000 + voucher.Id;
+        var lines = new List<CashManagementTestDatabase.JournalEntryLineSeed>();
+
+        if (voucher.CashboxId.HasValue)
+        {
+            lines.Add(new CashManagementTestDatabase.JournalEntryLineSeed(
+                AccountId: voucher.AccountId ?? 1,
+                PartyType: JournalPartyType.Cashbox,
+                PartyId: voucher.CashboxId,
+                Debit: isReceipt ? voucher.BaseAmount : 0m,
+                Credit: isReceipt ? 0m : voucher.BaseAmount,
+                Currency: voucher.Currency,
+                ExchangeRate: voucher.ExchangeRate,
+                TransactionDebit: isReceipt ? voucher.Amount : 0m,
+                TransactionCredit: isReceipt ? 0m : voucher.Amount,
+                Description: voucher.Description));
+        }
+
+        var (partyType, partyId) = voucher.PartyType switch
+        {
+            CashPartyType.Partner =>
+                (voucher.BusinessPartnerId == 2
+                    ? JournalPartyType.Supplier
+                    : JournalPartyType.Customer, voucher.BusinessPartnerId),
+            CashPartyType.Driver => (JournalPartyType.Driver, voucher.DriverId),
+            CashPartyType.Employee =>
+                (JournalPartyType.Employee, voucher.EmployeeId),
+            _ => ((JournalPartyType?)null, (int?)null)
+        };
+        var accountId = voucher.AccountId ??
+            (voucher.CashMovementTypeId == 9 ? 1 : 2);
+        lines.Add(new CashManagementTestDatabase.JournalEntryLineSeed(
+            AccountId: accountId,
+            PartyType: partyType,
+            PartyId: partyId,
+            Debit: isReceipt ? 0m : voucher.BaseAmount,
+            Credit: isReceipt ? voucher.BaseAmount : 0m,
+            Currency: voucher.Currency,
+            ExchangeRate: voucher.ExchangeRate,
+            TransactionDebit: isReceipt ? 0m : voucher.Amount,
+            TransactionCredit: isReceipt ? voucher.Amount : 0m,
+            Description: voucher.Description));
+
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: journalId,
+            entryNumber: $"JE-CV-{voucher.Id}",
+            entryDate: voucher.VoucherDate,
+            entryType: JournalEntryType.Automatic,
+            sourceType: JournalEntrySourceType.CashVoucher,
+            sourceId: voucher.Id,
+            sourceNumber: voucher.VoucherNumber,
+            lines: lines);
     }
 
     private sealed record VoucherTestRequest(

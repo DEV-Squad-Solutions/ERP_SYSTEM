@@ -74,16 +74,16 @@ public sealed class OperationalTrialBalanceTests
             Find(result.Value, OperationalTrialBalanceCategory.Expense),
             openingDebit: 30m,
             openingCredit: 0m,
-            periodDebit: 20m,
+            periodDebit: 26m,
             periodCredit: 2m,
-            closingDebit: 48m,
+            closingDebit: 54m,
             closingCredit: 0m);
 
         Assert.Equal(140m, result.Value.Totals.OpeningDebit);
         Assert.Equal(140m, result.Value.Totals.OpeningCredit);
-        Assert.Equal(181m, result.Value.Totals.PeriodDebit);
+        Assert.Equal(187m, result.Value.Totals.PeriodDebit);
         Assert.Equal(177m, result.Value.Totals.PeriodCredit);
-        Assert.Equal(164m, result.Value.Totals.ClosingDebit);
+        Assert.Equal(170m, result.Value.Totals.ClosingDebit);
         Assert.Equal(160m, result.Value.Totals.ClosingCredit);
     }
 
@@ -177,6 +177,49 @@ public sealed class OperationalTrialBalanceTests
                 (902, 1, 'TB-902', '2026-06-16', 2, 1, NULL, 2, 1,
                  999, 1, 1, 999, 0, '2026-06-16', 'test', '2026-06-16', 'test', 0);
             """);
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 4901,
+            entryNumber: "JE-TB-901",
+            entryDate: new DateOnly(2026, 6, 15),
+            entryType: JournalEntryType.Automatic,
+            sourceType: JournalEntrySourceType.CashVoucher,
+            sourceId: 901,
+            sourceNumber: "TB-901",
+            lines:
+            [
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 2,
+                    PartyType: null,
+                    PartyId: null,
+                    Debit: 77m,
+                    Credit: 0m,
+                    Currency: CurrencyCode.EGP,
+                    ExchangeRate: 1m,
+                    TransactionDebit: 77m,
+                    TransactionCredit: 0m)
+            ]);
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 4902,
+            entryNumber: "JE-TB-902",
+            entryDate: new DateOnly(2026, 6, 16),
+            entryType: JournalEntryType.Automatic,
+            sourceType: JournalEntrySourceType.CashVoucher,
+            sourceId: 902,
+            sourceNumber: "TB-902",
+            lines:
+            [
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 2,
+                    PartyType: null,
+                    PartyId: null,
+                    Debit: 999m,
+                    Credit: 0m,
+                    Currency: CurrencyCode.EGP,
+                    ExchangeRate: 1m,
+                    TransactionDebit: 999m,
+                    TransactionCredit: 0m)
+            ],
+            status: (JournalEntryStatus)0);
         database.Context.ChangeTracker.Clear();
 
         var result = await database.CreateStatementService(1)
@@ -277,6 +320,13 @@ public sealed class OperationalTrialBalanceTests
                 1, 0, 0, 0, 0,
                 'test', '2026-01-01', 'test', 0);
 
+            INSERT INTO Accounts (
+                Id, CompanyId, Code, Name, ParentAccountId, AccountType,
+                NormalBalance, IsPosting, IsActive, IsDeleted)
+            VALUES
+                (4, 1, '3000', 'Opening Equity', NULL, 3, 2, 1, 1, 0),
+                (11, 1, '5201', 'Unused Expense Account', NULL, 5, 1, 1, 1, 0);
+
             INSERT INTO CashVouchers (
                 Id, CompanyId, VoucherNumber, VoucherDate, Direction,
                 CashboxId, CashMovementTypeId, PartyType, EmployeeId,
@@ -340,6 +390,164 @@ public sealed class OperationalTrialBalanceTests
                 (101, 1, 1, 2, 100, '2026-05-15', 100, 1, 120, 1, 'test', '2026-05-15', 'test', 0),
                 (102, 1, 1, 1, 25, '2026-06-15', 75, 1, 121, 1, 'test', '2026-06-15', 'test', 0);
             """);
+
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "DELETE FROM JournalEntryLines; DELETE FROM JournalEntries;");
+        await SeedTrialBalanceLedgerAsync(database);
         database.Context.ChangeTracker.Clear();
+    }
+
+    private static async Task SeedTrialBalanceLedgerAsync(
+        CashManagementTestDatabase database)
+    {
+        async Task Entry(
+            int id,
+            DateOnly date,
+            JournalEntryType type,
+            JournalEntrySourceType? sourceType,
+            int? sourceId,
+            string number,
+            IReadOnlyList<CashManagementTestDatabase.JournalEntryLineSeed> lines,
+            JournalEntryStatus status = JournalEntryStatus.Posted,
+            int? reversalOfEntryId = null,
+            bool isDeleted = false,
+            int companyId = 1) =>
+            await database.SeedPostedJournalEntryAsync(
+                id,
+                $"JE-{number}",
+                date,
+                type,
+                sourceType,
+                sourceId,
+                number,
+                lines,
+                status,
+                reversalOfEntryId,
+                isDeleted,
+                companyId);
+
+        static CashManagementTestDatabase.JournalEntryLineSeed Line(
+            int accountId,
+            JournalPartyType? partyType,
+            int? partyId,
+            decimal debit,
+            decimal credit,
+            CurrencyCode currency = CurrencyCode.EGP,
+            decimal rate = 1m,
+            decimal? transactionDebit = null,
+            decimal? transactionCredit = null,
+            string? description = null,
+            bool isDeleted = false) =>
+            new(
+                AccountId: accountId,
+                PartyType: partyType,
+                PartyId: partyId,
+                Debit: debit,
+                Credit: credit,
+                Currency: currency,
+                ExchangeRate: rate,
+                TransactionDebit: transactionDebit ?? debit,
+                TransactionCredit: transactionCredit ?? credit,
+                Description: description,
+                IsDeleted: isDeleted);
+
+        const JournalPartyType cashbox = JournalPartyType.Cashbox;
+        const JournalPartyType customer = JournalPartyType.Customer;
+        const JournalPartyType driver = JournalPartyType.Driver;
+        const JournalPartyType employee = JournalPartyType.Employee;
+        var voucherSource = JournalEntrySourceType.CashVoucher;
+
+        await Entry(
+            4100, new DateOnly(2026, 1, 1), JournalEntryType.Opening,
+            JournalEntrySourceType.CashboxOpeningBalance, 1, "OPEN-CB",
+            [Line(4, cashbox, 1, 100m, 0m)]);
+
+        await Entry(4101, new DateOnly(2026, 5, 20), JournalEntryType.Automatic,
+            voucherSource, 101, "TB-101",
+            [Line(4, cashbox, 1, 50m, 0m, CurrencyCode.USD, 10m, 5m, 0m)]);
+        await Entry(4110, new DateOnly(2026, 5, 10), JournalEntryType.Automatic,
+            voucherSource, 110, "TB-110",
+            [Line(4, cashbox, 1, 0m, 30m, CurrencyCode.USD, 10m, 0m, 3m),
+             Line(4, driver, 1, 30m, 0m, CurrencyCode.USD, 10m, 3m, 0m)]);
+        await Entry(4111, new DateOnly(2026, 5, 11), JournalEntryType.Automatic,
+            voucherSource, 111, "TB-111",
+            [Line(4, cashbox, 1, 5m, 0m), Line(4, driver, 1, 0m, 5m)]);
+        await Entry(4120, new DateOnly(2026, 5, 15), JournalEntryType.Automatic,
+            voucherSource, 120, "TB-120",
+            [Line(4, cashbox, 1, 0m, 100m), Line(4, employee, 1, 0m, 100m)]);
+        await Entry(4130, new DateOnly(2026, 5, 1), JournalEntryType.Automatic,
+            voucherSource, 130, "TB-130",
+            [Line(4, cashbox, 1, 40m, 0m, CurrencyCode.USD, 10m, 4m, 0m),
+             Line(1, null, null, 0m, 40m, CurrencyCode.USD, 10m, 0m, 4m)]);
+        await Entry(4140, new DateOnly(2026, 5, 1), JournalEntryType.Automatic,
+            voucherSource, 140, "TB-140",
+            [Line(4, cashbox, 1, 0m, 30m), Line(2, null, null, 30m, 0m)]);
+
+        await Entry(4201, new DateOnly(2026, 6, 10), JournalEntryType.Automatic,
+            voucherSource, 102, "TB-102",
+            [Line(4, cashbox, 1, 0m, 20m, CurrencyCode.USD, 10m, 0m, 2m)]);
+        await Entry(4212, new DateOnly(2026, 6, 12), JournalEntryType.Automatic,
+            voucherSource, 112, "TB-112",
+            [Line(4, cashbox, 1, 0m, 15m), Line(4, driver, 1, 15m, 0m)]);
+        await Entry(4213, new DateOnly(2026, 6, 13), JournalEntryType.Automatic,
+            voucherSource, 113, "TB-113",
+            [Line(4, cashbox, 1, 4m, 0m), Line(4, driver, 1, 0m, 4m)]);
+        await Entry(4221, new DateOnly(2026, 6, 15), JournalEntryType.Automatic,
+            voucherSource, 121, "TB-121",
+            [Line(4, cashbox, 1, 0m, 25m), Line(4, employee, 1, 25m, 0m)]);
+        await Entry(4222, new DateOnly(2026, 6, 16), JournalEntryType.Automatic,
+            voucherSource, 122, "TB-122",
+            [Line(4, cashbox, 1, 0m, 10m), Line(4, employee, 1, 10m, 0m)]);
+        await Entry(4231, new DateOnly(2026, 6, 1), JournalEntryType.Automatic,
+            voucherSource, 131, "TB-131",
+            [Line(4, cashbox, 1, 60m, 0m, CurrencyCode.USD, 10m, 6m, 0m),
+             Line(1, null, null, 0m, 60m, CurrencyCode.USD, 10m, 0m, 6m)]);
+        await Entry(4232, new DateOnly(2026, 6, 2), JournalEntryType.Automatic,
+            voucherSource, 132, "TB-132",
+            [Line(4, cashbox, 1, 0m, 5m), Line(1, null, null, 5m, 0m)]);
+        await Entry(4241, new DateOnly(2026, 6, 1), JournalEntryType.Automatic,
+            voucherSource, 141, "TB-141",
+            [Line(4, cashbox, 1, 0m, 20m), Line(2, null, null, 20m, 0m)]);
+        await Entry(4242, new DateOnly(2026, 6, 2), JournalEntryType.Automatic,
+            voucherSource, 142, "TB-142",
+            [Line(4, cashbox, 1, 2m, 0m), Line(2, null, null, 0m, 2m)]);
+
+        await Entry(4150, new DateOnly(2026, 5, 1), JournalEntryType.Opening,
+            JournalEntrySourceType.PartnerOpeningBalance, 101, "TB-OPEN-1",
+            [Line(4, customer, 1, 70m, 0m, CurrencyCode.USD, 10m, 7m, 0m)]);
+        await Entry(4151, new DateOnly(2026, 5, 10), JournalEntryType.Automatic,
+            JournalEntrySourceType.Invoice, 1, "TB-PARTNER-101",
+            [Line(4, customer, 1, 0m, 20m)]);
+        await Entry(4152, new DateOnly(2026, 6, 10), JournalEntryType.Automatic,
+            JournalEntrySourceType.Invoice, 2, "TB-PARTNER-102",
+            [Line(4, customer, 1, 40m, 0m, CurrencyCode.USD, 10m, 4m, 0m)]);
+        await Entry(4153, new DateOnly(2026, 6, 11), JournalEntryType.Automatic,
+            JournalEntrySourceType.Invoice, 3, "TB-PARTNER-103",
+            [Line(4, customer, 1, 0m, 10m)]);
+
+        await Entry(4250, new DateOnly(2026, 6, 14), JournalEntryType.Automatic,
+            JournalEntrySourceType.DriverTrip, 101, "TB-INV-1",
+            [Line(4, driver, 1, 0m, 6m), Line(2, null, null, 6m, 0m)]);
+
+        await Entry(4199, new DateOnly(2026, 6, 20), JournalEntryType.Manual,
+            null, null, "TB-DELETED",
+            [Line(2, null, null, 999m, 0m)], isDeleted: true);
+        await Entry(4198, new DateOnly(2026, 6, 20), JournalEntryType.Manual,
+            null, null, "TB-DELETED-LINE",
+            [Line(2, null, null, 999m, 0m, isDeleted: true)]);
+        await Entry(4197, new DateOnly(2026, 6, 20), JournalEntryType.Manual,
+            null, null, "TB-REVERSED",
+            [Line(2, null, null, 999m, 0m)],
+            reversalOfEntryId: 4100);
+        await Entry(4103, new DateOnly(2026, 6, 11), JournalEntryType.Automatic,
+            voucherSource, 103, "TB-103",
+            [Line(4, cashbox, 1, 999m, 0m)],
+            status: (JournalEntryStatus)0);
+        await Entry(4104, new DateOnly(2026, 7, 1), JournalEntryType.Automatic,
+            voucherSource, 104, "TB-104",
+            [Line(4, cashbox, 1, 999m, 0m)]);
+        await Entry(4155, new DateOnly(2026, 6, 1), JournalEntryType.Automatic,
+            voucherSource, 150, "TB-150",
+            [Line(4, cashbox, 4, 999m, 0m)], companyId: 2);
     }
 }

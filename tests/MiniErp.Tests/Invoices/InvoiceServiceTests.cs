@@ -883,7 +883,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         await database.Context.Database.ExecuteSqlRawAsync(
-            $"INSERT INTO CompanySettings (CompanyId, StockBalanceCheckMode) VALUES (1, {(int)StockBalanceCheckMode.None});");
+            $"UPDATE CompanySettings SET StockBalanceCheckMode = {(int)StockBalanceCheckMode.None} WHERE CompanyId = 1;");
         var service = database.CreateService();
         var sale = (await service.AddAsync(
             CreateRequest(
@@ -1165,7 +1165,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         await database.Context.Database.ExecuteSqlRawAsync(
-            $"INSERT INTO CompanySettings (CompanyId, StockBalanceCheckMode) VALUES (1, {(int)StockBalanceCheckMode.None});");
+            $"UPDATE CompanySettings SET StockBalanceCheckMode = {(int)StockBalanceCheckMode.None} WHERE CompanyId = 1;");
         var invoiceService = database.CreateService();
         var sale = await invoiceService.AddAsync(
             CreateRequest(
@@ -1521,7 +1521,7 @@ public sealed class InvoiceServiceTests
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         await database.Context.Database.ExecuteSqlInterpolatedAsync(
-            $"INSERT INTO CompanySettings (CompanyId, StockBalanceCheckMode) VALUES (1, {(int)StockBalanceCheckMode.FinalCheck});");
+            $"UPDATE CompanySettings SET StockBalanceCheckMode = {(int)StockBalanceCheckMode.FinalCheck} WHERE CompanyId = 1;");
         database.Context.ItemMovements.AddRange(
             new ItemMovement
             {
@@ -6706,6 +6706,10 @@ public sealed class InvoiceServiceTests
                     Id, Name, Address, CommercialRegister, TaxNumber,
                     ManagerName, IsDeleted)
                 VALUES (1, 'Company', '', 'CR', 'TX', 'Manager', 0);
+
+                INSERT INTO CompanySettings (
+                    CompanyId, BaseCurrency, StockBalanceCheckMode)
+                VALUES (1, 1, 1);
 
                 INSERT INTO BusinessPartners (
                     Id, CompanyId, Code, Name, Currency, CreditLimit,

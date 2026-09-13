@@ -36,7 +36,10 @@ public sealed record JournalPartyGroupResponse(
 public sealed record JournalPartySelectResponse(
     int Id,
     string Code,
-    string Name);
+    string Name)
+{
+    public CurrencyCode? Currency { get; init; }
+}
 
 public sealed record AccountTreeResponse(
     int Id,

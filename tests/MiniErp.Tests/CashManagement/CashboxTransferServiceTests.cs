@@ -350,8 +350,40 @@ public sealed class CashboxTransferServiceTests
     {
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
-        await database.CreateCashboxTransferService(1)
+        var transfer = await database.CreateCashboxTransferService(1)
             .AddAsync(CreateRequest(amount: 75m));
+        Assert.True(transfer.IsSuccess);
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 1200,
+            entryNumber: "JE-TRANSFER-75",
+            entryDate: new DateOnly(2026, 8, 31),
+            entryType: JournalEntryType.Automatic,
+            sourceType: JournalEntrySourceType.CashboxTransfer,
+            sourceId: transfer.Value.Id,
+            sourceNumber: transfer.Value.TransferNumber,
+            lines:
+            [
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 1,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 1,
+                    Debit: 0m,
+                    Credit: 75m,
+                    Currency: CurrencyCode.EGP,
+                    ExchangeRate: 1m,
+                    TransactionDebit: 0m,
+                    TransactionCredit: 75m),
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 1,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 2,
+                    Debit: 75m,
+                    Credit: 0m,
+                    Currency: CurrencyCode.EGP,
+                    ExchangeRate: 1m,
+                    TransactionDebit: 75m,
+                    TransactionCredit: 0m)
+            ]);
 
         var statement = await database.CreateStatementService(1)
             .GetCashboxStatementAsync(

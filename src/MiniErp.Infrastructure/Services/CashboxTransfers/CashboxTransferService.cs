@@ -855,7 +855,9 @@ public sealed class CashboxTransferService(
                 Balance = cashbox.OpeningBalance +
                     (cashbox.Vouchers
                         .Where(voucher =>
-                            voucher.IsPosted &&
+                            (voucher.IsPosted ||
+                             (!voucher.InvoiceId.HasValue &&
+                              !voucher.CashboxTransferId.HasValue)) &&
                             !excludedVoucherIds.Contains(voucher.Id))
                         .Sum(voucher =>
                             (decimal?)(voucher.Direction ==

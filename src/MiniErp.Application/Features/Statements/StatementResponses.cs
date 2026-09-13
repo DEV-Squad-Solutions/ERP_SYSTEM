@@ -3,7 +3,7 @@ using MiniErp.Domain.Enums;
 namespace MiniErp.Application.Features.Statements;
 
 public sealed record CashboxStatementItemResponse(
-    int CashVoucherId,
+    int? CashVoucherId,
     DateOnly Date,
     string VoucherNumber,
     string MovementName,
@@ -14,6 +14,12 @@ public sealed record CashboxStatementItemResponse(
     decimal Balance,
     string? ReferenceNumber)
 {
+    public int? JournalEntryId { get; init; }
+
+    public int? JournalEntryLineId { get; init; }
+
+    public JournalEntrySourceType? SourceType { get; init; }
+
     public CurrencyCode Currency { get; init; }
 
     public CurrencyCode BaseCurrency { get; init; }
@@ -75,6 +81,12 @@ public sealed record PartnerStatementItemResponse(
     string BalanceDescription,
     string? ReferenceNumber)
 {
+    public int? JournalEntryId { get; init; }
+
+    public int? JournalEntryLineId { get; init; }
+
+    public PartnerStatementSourceType SourceType { get; init; }
+
     public decimal ExchangeRate { get; init; }
 
     public decimal BaseDebitAmount { get; init; }
@@ -127,6 +139,16 @@ public sealed record DriverStatementItemResponse(
     string? CashboxName,
     string? ReferenceNumber)
 {
+    public int? JournalEntryId { get; init; }
+
+    public int? JournalEntryLineId { get; init; }
+
+    public DriverStatementSourceType SourceType { get; init; }
+
+    public decimal DebitAmount { get; init; }
+
+    public decimal CreditAmount { get; init; }
+
     public int? BusinessPartnerId { get; init; }
 
     public string? BusinessPartnerName { get; init; }
@@ -141,7 +163,12 @@ public sealed record DriverStatementSummaryResponse(
     decimal TotalReceivedFromDriver,
     decimal TotalTripCost,
     decimal ClosingBalanceAmount,
-    string ClosingBalanceDescription);
+    string ClosingBalanceDescription)
+{
+    public decimal TotalDebits { get; init; }
+
+    public decimal TotalCredits { get; init; }
+}
 
 public sealed record DriverStatementResponse(
     int DriverId,
@@ -151,7 +178,10 @@ public sealed record DriverStatementResponse(
     int PageSize,
     int TotalCount,
     int TotalPages,
-    DriverStatementSummaryResponse Summary);
+    DriverStatementSummaryResponse Summary)
+{
+    public CurrencyCode BaseCurrency { get; init; }
+}
 
 public sealed record ContainerStorePartnerResponse(
     int Id,
@@ -237,6 +267,10 @@ public sealed record EmployeeStatementItemResponse(
     string BalanceDescription,
     string? ReferenceNumber)
 {
+    public int? JournalEntryId { get; init; }
+
+    public int? JournalEntryLineId { get; init; }
+
     public decimal ExchangeRate { get; init; }
 
     public decimal BaseDebitAmount { get; init; }

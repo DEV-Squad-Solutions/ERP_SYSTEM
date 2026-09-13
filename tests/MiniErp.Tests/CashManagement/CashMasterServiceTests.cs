@@ -418,7 +418,26 @@ public sealed class CashMasterServiceTests
                 Direction: request.Direction,
                 CashboxId: request.CashboxId,
                 Amount: request.Amount,
-                Description: request.Description));
+                Description: request.Description,
+                CashMovementTypeId: request.CashMovementTypeId,
+                EmployeeId: request.EmployeeId,
+                BusinessPartnerId: request.BusinessPartnerId,
+                DriverId: request.DriverId,
+                DriverTripId: request.DriverTripId,
+                ExternalPartyName: request.ExternalPartyName,
+                ReferenceNumber: request.ReferenceNumber,
+                Notes: request.Notes,
+                AccountId: request.BusinessPartnerId.HasValue ||
+                    request.EmployeeId.HasValue ||
+                    request.DriverId.HasValue ||
+                    !string.IsNullOrWhiteSpace(request.ExternalPartyName)
+                        ? null
+                        : request.Direction == CashDirection.Receipt ? 1 : 2,
+                EmployeeMovementType: request.EmployeeId.HasValue
+                    ? request.Direction == CashDirection.Receipt
+                        ? EmployeeMovementType.Credit
+                        : EmployeeMovementType.Advance
+                    : null));
         if (draft.IsFailure)
         {
             return draft;

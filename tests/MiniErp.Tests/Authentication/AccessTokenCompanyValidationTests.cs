@@ -246,16 +246,17 @@ public sealed class AccessTokenCompanyValidationTests
                     ProfileImage = string.Empty,
                     SecurityStamp = SecurityStamp
                 });
-            context.Companies.Add(
-                new Company
-                {
-                    Id = CompanyId,
-                    Name = "Company One",
-                    Address = "Address",
-                    CommercialRegister = "CR-1",
-                    TaxNumber = "TAX-1",
-                    ManagerName = "Manager"
-                });
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO Companies (
+                    Id, Name, Address, CommercialRegister, TaxNumber,
+                    ManagerName, RowVersion, CreatedById, CreatedOn,
+                    CreatedByPc, IsDeleted)
+                VALUES (
+                    1, 'Company One', 'Address', 'CR-1', 'TAX-1',
+                    'Manager', randomblob(8), 'test', '2026-01-01',
+                    'test', 0);
+                """);
             context.UserCompanies.Add(
                 new UserCompany
                 {

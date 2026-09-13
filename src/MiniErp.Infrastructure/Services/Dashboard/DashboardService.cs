@@ -10,6 +10,7 @@ using MiniErp.Application.Features.ProfitabilityReports;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Services.Monitoring;
+using MiniErp.Infrastructure.Services.Statements;
 using static MiniErp.Application.Features.Dashboard.DashboardErrors;
 
 namespace MiniErp.Infrastructure.Services.Dashboard;
@@ -376,34 +377,29 @@ public sealed class DashboardService(
     private async Task<IReadOnlyList<DashboardCashBalance>>
         BuildCashBalancesAsync(CancellationToken cancellationToken)
     {
-        var voucherTotals = dbContext.CashVouchers
-            .AsNoTracking()
-            .Where(voucher =>
-                voucher.CompanyId == companyId &&
-                voucher.CashboxId.HasValue &&
-                voucher.IsPosted)
-            .GroupBy(voucher => voucher.CashboxId!.Value)
+        var cashboxTotals = PostedJournalLedgerLines
+            .Create(dbContext, companyId)
+            .Where(line => line.PartyType == JournalPartyType.Cashbox &&
+                line.PartyId.HasValue)
+            .GroupBy(line => line.PartyId!.Value)
             .Select(group => new
             {
                 CashboxId = group.Key,
-                Total = (decimal?)group.Sum(voucher =>
-                    voucher.Direction == CashDirection.Receipt
-                        ? voucher.Amount
-                        : -voucher.Amount)
+                Total = (decimal?)group.Sum(line =>
+                    line.TransactionDebit - line.TransactionCredit)
             });
 
         var balances = await (
                 from cashbox in dbContext.Cashboxes.AsNoTracking()
                 where cashbox.CompanyId == companyId
-                join voucherTotal in voucherTotals
-                    on cashbox.Id equals voucherTotal.CashboxId
+                join cashboxTotal in cashboxTotals
+                    on cashbox.Id equals cashboxTotal.CashboxId
                     into matchingTotals
-                from voucherTotal in matchingTotals.DefaultIfEmpty()
+                from cashboxTotal in matchingTotals.DefaultIfEmpty()
                 select new
                 {
                     cashbox.Currency,
-                    Balance = cashbox.OpeningBalance +
-                        (voucherTotal.Total ?? 0m)
+                    Balance = cashboxTotal.Total ?? 0m
                 })
             .ToListAsync(cancellationToken);
 

@@ -673,12 +673,23 @@ public sealed class AutomaticPostingService(
             {
                 return PartyInactive(line.PartyId.Value, index);
             }
+
+            if (partyState.Currency.HasValue &&
+                line.Currency != partyState.Currency.Value)
+            {
+                return PartyCurrencyMismatch(
+                    partyState.Currency.Value,
+                    index);
+            }
         }
 
         return null;
     }
 
-    private async Task<(bool Found, bool IsActive)> GetPartyStateAsync(
+    private async Task<(
+        bool Found,
+        bool IsActive,
+        CurrencyCode? Currency)> GetPartyStateAsync(
         JournalPartyType partyType,
         int partyId,
         CancellationToken cancellationToken) => partyType switch
@@ -689,38 +700,42 @@ public sealed class AutomaticPostingService(
                     .Where(party =>
                         party.CompanyId == companyId &&
                         party.Id == partyId)
-                    .Select(party => new ValueTuple<bool, bool>(
+                    .Select(party => new ValueTuple<bool, bool, CurrencyCode?>(
                         true,
-                        party.IsActive))
+                        party.IsActive,
+                        party.Currency))
                     .SingleOrDefaultAsync(cancellationToken),
             JournalPartyType.Employee => await dbContext.Employees
                 .AsNoTracking()
                 .Where(party =>
                     party.CompanyId == companyId &&
                     party.Id == partyId)
-                .Select(party => new ValueTuple<bool, bool>(
+                .Select(party => new ValueTuple<bool, bool, CurrencyCode?>(
                     true,
-                    party.IsActive))
+                    party.IsActive,
+                    null))
                 .SingleOrDefaultAsync(cancellationToken),
             JournalPartyType.Driver => await dbContext.Drivers
                 .AsNoTracking()
                 .Where(party =>
                     party.CompanyId == companyId &&
                     party.Id == partyId)
-                .Select(party => new ValueTuple<bool, bool>(
+                .Select(party => new ValueTuple<bool, bool, CurrencyCode?>(
                     true,
-                    party.IsActive))
+                    party.IsActive,
+                    null))
                 .SingleOrDefaultAsync(cancellationToken),
             JournalPartyType.Cashbox => await dbContext.Cashboxes
                 .AsNoTracking()
                 .Where(party =>
                     party.CompanyId == companyId &&
                     party.Id == partyId)
-                .Select(party => new ValueTuple<bool, bool>(
+                .Select(party => new ValueTuple<bool, bool, CurrencyCode?>(
                     true,
-                    party.IsActive))
+                    party.IsActive,
+                    party.Currency))
                 .SingleOrDefaultAsync(cancellationToken),
-            _ => (false, false)
+            _ => (false, false, null)
         };
 
     private static JournalPartyType ToJournalPartyType(

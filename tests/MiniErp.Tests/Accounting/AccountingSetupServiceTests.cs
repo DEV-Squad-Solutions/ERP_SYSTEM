@@ -246,10 +246,12 @@ public sealed class AccountingSetupServiceTests
         Assert.Equal(JournalPartyType.Driver, driver.PartyType);
         Assert.Equal(JournalPartyType.Cashbox, cashbox.PartyType);
         Assert.Equal(1, Assert.Single(customer.Parties).Id);
+        Assert.Equal(CurrencyCode.EGP, Assert.Single(customer.Parties).Currency);
         Assert.Equal(1, Assert.Single(supplier.Parties).Id);
         Assert.Equal(1, Assert.Single(employee.Parties).Id);
         Assert.Equal(1, Assert.Single(driver.Parties).Id);
         Assert.Equal(1, Assert.Single(cashbox.Parties).Id);
+        Assert.Equal(CurrencyCode.EGP, Assert.Single(cashbox.Parties).Currency);
         Assert.DoesNotContain(cashbox.Parties, party => party.Id == 2);
         Assert.Empty(result.Value.Single(account => account.Id == 7).PartyGroups);
     }
@@ -373,6 +375,47 @@ public sealed class AccountingSetupServiceTests
         Assert.Equal(
             "JournalEntries.PartyNotAllowed",
             Assert.Single(ordinaryAccount.Errors).Code);
+    }
+
+    [Theory]
+    [InlineData(2, JournalPartyType.Customer)]
+    [InlineData(11, JournalPartyType.Cashbox)]
+    public async Task JournalEntryAdd_RejectsCurrencyDifferentFromSelectedParty(
+        int accountId,
+        JournalPartyType partyType)
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var service = database.CreateJournalEntryService(companyId: 1);
+        await database.AddJournalPartyFixturesAsync();
+
+        var result = await service.AddAsync(new JournalEntryRequest(
+            FiscalYearId: 1,
+            EntryDate: new DateOnly(2026, 9, 8),
+            Description: "اختبار تطابق عملة الطرف",
+            EntryType: JournalEntryType.Manual,
+            Lines:
+            [
+                new JournalEntryLineRequest(
+                    AccountId: accountId,
+                    Description: null,
+                    Debit: 100m,
+                    Credit: 0m,
+                    PartyType: partyType,
+                    PartyId: 1,
+                    Currency: CurrencyCode.USD,
+                    ExchangeRate: 50m,
+                    TransactionDebit: 2m,
+                    TransactionCredit: 0m),
+                new JournalEntryLineRequest(
+                    AccountId: 7,
+                    Description: null,
+                    Debit: 0m,
+                    Credit: 100m)
+            ]));
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("JournalEntries.PartyCurrencyMismatch", error.Code);
+        Assert.Equal("Lines[0].Currency", error.FieldName);
     }
 
     [Fact]
@@ -1094,6 +1137,7 @@ public sealed class AccountingSetupServiceTests
                     CompanyId INTEGER NOT NULL,
                     Code TEXT NOT NULL,
                     Name TEXT NOT NULL,
+                    Currency INTEGER NOT NULL DEFAULT 1,
                     IsActive INTEGER NOT NULL DEFAULT 1,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );

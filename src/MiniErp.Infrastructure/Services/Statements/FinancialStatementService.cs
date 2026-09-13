@@ -16,11 +16,10 @@ public sealed partial class FinancialStatementService(
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
 
-    public async Task<Result<CashboxStatementResponse>>
-        GetCashboxStatementAsync(
-            PaginationRequest pagination,
-            CashboxStatementFilterRequest filters,
-            CancellationToken cancellationToken = default)
+    public async Task<Result<CashboxStatementResponse>> GetCashboxStatementAsync(
+        PaginationRequest pagination,
+        CashboxStatementFilterRequest filters,
+        CancellationToken cancellationToken = default)
     {
         var paginationError = ValidatePagination(pagination);
         if (paginationError is not null)
@@ -38,10 +37,8 @@ public sealed partial class FinancialStatementService(
                 entity.Id,
                 entity.Name,
                 entity.Currency,
-                entity.OpeningBalance,
                 entity.OpeningBalanceDate,
                 entity.OpeningExchangeRate,
-                entity.BaseOpeningBalance,
                 BaseCurrency = entity.Company.Settings == null
                     ? CurrencyCode.EGP
                     : entity.Company.Settings.BaseCurrency
@@ -53,225 +50,128 @@ public sealed partial class FinancialStatementService(
                 CashboxNotFound(filters.CashboxId));
         }
 
-        var openingBalance = cashbox.OpeningBalance;
-        var baseOpeningBalance = cashbox.BaseOpeningBalance;
+        var allRows = CreateCashboxRows(cashbox.Id);
+        var openingJournal = await allRows
+            .Where(row => row.IsOpening)
+            .GroupBy(_ => 1)
+            .Select(rows => new
+            {
+                Amount = rows.Sum(row => row.ReceiptAmount - row.PaymentAmount),
+                BaseAmount = rows.Sum(row =>
+                    row.BaseReceiptAmount - row.BasePaymentAmount)
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        var openingBalance = openingJournal?.Amount ?? 0m;
+        var baseOpeningBalance = openingJournal?.BaseAmount ?? 0m;
+        var nonOpeningRows = allRows.Where(row => !row.IsOpening);
+
         if (filters.FromDate.HasValue)
         {
-            openingBalance += await dbContext.CashVouchers
-                .AsNoTracking()
-                .Where(voucher =>
-                    voucher.CompanyId == companyId &&
-                    voucher.CashboxId == cashbox.Id &&
-                    voucher.IsPosted &&
-                    voucher.VoucherDate < filters.FromDate.Value)
+            openingBalance += await nonOpeningRows
+                .Where(row => row.Date < filters.FromDate.Value)
                 .SumAsync(
-                    voucher =>
-                        (decimal?)(voucher.Direction ==
-                            CashDirection.Receipt
-                            ? voucher.Amount
-                            : -voucher.Amount),
+                    row => (decimal?)(row.ReceiptAmount - row.PaymentAmount),
                     cancellationToken) ?? 0m;
-
-            baseOpeningBalance += await dbContext.CashVouchers
-                .AsNoTracking()
-                .Where(voucher =>
-                    voucher.CompanyId == companyId &&
-                    voucher.CashboxId == cashbox.Id &&
-                    voucher.IsPosted &&
-                    voucher.VoucherDate < filters.FromDate.Value)
+            baseOpeningBalance += await nonOpeningRows
+                .Where(row => row.Date < filters.FromDate.Value)
                 .SumAsync(
-                    voucher =>
-                        (decimal?)(voucher.Direction ==
-                            CashDirection.Receipt
-                            ? voucher.BaseAmount
-                            : -voucher.BaseAmount),
+                    row => (decimal?)(row.BaseReceiptAmount -
+                        row.BasePaymentAmount),
                     cancellationToken) ?? 0m;
         }
 
         var search = filters.Search?.Trim();
         var voucherNumber = filters.VoucherNumber?.Trim();
-        var query = dbContext.CashVouchers
-            .AsNoTracking()
-            .Where(voucher =>
-                voucher.CompanyId == companyId &&
-                voucher.CashboxId == cashbox.Id &&
-                voucher.IsPosted)
-            .Where(voucher =>
+        var query = nonOpeningRows
+            .Where(row =>
                 !filters.FromDate.HasValue ||
-                voucher.VoucherDate >= filters.FromDate.Value)
-            .Where(voucher =>
+                row.Date >= filters.FromDate.Value)
+            .Where(row =>
                 !filters.ToDate.HasValue ||
-                voucher.VoucherDate <= filters.ToDate.Value)
-            .Where(voucher =>
+                row.Date <= filters.ToDate.Value)
+            .Where(row =>
                 !filters.Direction.HasValue ||
-                voucher.Direction == filters.Direction.Value)
-            .Where(voucher =>
+                (filters.Direction == CashDirection.Receipt
+                    ? row.ReceiptAmount > 0m
+                    : row.PaymentAmount > 0m))
+            .Where(row =>
                 !filters.CashMovementTypeId.HasValue ||
-                voucher.CashMovementTypeId ==
-                filters.CashMovementTypeId.Value)
-            .Where(voucher =>
+                row.CashMovementTypeId == filters.CashMovementTypeId.Value)
+            .Where(row =>
                 !filters.Classification.HasValue ||
-                voucher.Classification == filters.Classification.Value ||
-                (voucher.CashMovementType != null &&
-                 voucher.CashMovementType.Classification ==
-                 filters.Classification.Value) ||
-                (filters.Classification.Value ==
-                     CashMovementClassification.Expense &&
-                 voucher.Account != null &&
-                 voucher.Account.AccountType == AccountType.Expense) ||
-                (filters.Classification.Value ==
-                     CashMovementClassification.Revenue &&
-                 voucher.Account != null &&
-                 voucher.Account.AccountType == AccountType.Revenue))
-            .Where(voucher =>
+                row.Classification == filters.Classification.Value)
+            .Where(row =>
                 !filters.PartyType.HasValue ||
-                voucher.PartyType == filters.PartyType.Value)
-            .Where(voucher =>
+                row.CashPartyType == filters.PartyType.Value)
+            .Where(row =>
                 !filters.BusinessPartnerId.HasValue ||
-                voucher.BusinessPartnerId ==
-                filters.BusinessPartnerId.Value)
-            .Where(voucher =>
+                row.BusinessPartnerId == filters.BusinessPartnerId.Value)
+            .Where(row =>
                 !filters.DriverId.HasValue ||
-                voucher.DriverId == filters.DriverId.Value)
-            .Where(voucher =>
+                row.DriverId == filters.DriverId.Value)
+            .Where(row =>
                 !filters.DriverTripId.HasValue ||
-                voucher.DriverTripId == filters.DriverTripId.Value)
-            .Where(voucher =>
+                row.DriverTripId == filters.DriverTripId.Value)
+            .Where(row =>
                 !filters.EmployeeId.HasValue ||
-                voucher.EmployeeId == filters.EmployeeId.Value)
-            .Where(voucher =>
+                row.EmployeeId == filters.EmployeeId.Value)
+            .Where(row =>
                 string.IsNullOrEmpty(voucherNumber) ||
-                voucher.VoucherNumber.Contains(voucherNumber))
-            .Where(voucher =>
+                row.DocumentNumber.Contains(voucherNumber))
+            .Where(row =>
                 string.IsNullOrEmpty(search) ||
-                voucher.VoucherNumber.Contains(search) ||
-                (voucher.CashMovementType != null &&
-                 voucher.CashMovementType.Name.Contains(search)) ||
-                (voucher.BusinessPartner != null &&
-                 voucher.BusinessPartner.Name.Contains(search)) ||
-                (voucher.Driver != null &&
-                 voucher.Driver.Name.Contains(search)) ||
-                (voucher.Employee != null &&
-                 (voucher.Employee.Code.Contains(search) ||
-                  voucher.Employee.Name.Contains(search))) ||
-                (voucher.ExternalPartyName != null &&
-                 voucher.ExternalPartyName.Contains(search)) ||
-                (voucher.ReferenceNumber != null &&
-                 voucher.ReferenceNumber.Contains(search)) ||
-                (voucher.Description != null &&
-                 voucher.Description.Contains(search)));
+                row.DocumentNumber.Contains(search) ||
+                (row.MovementName != null &&
+                 row.MovementName.Contains(search)) ||
+                (row.PartyName != null && row.PartyName.Contains(search)) ||
+                (row.ExternalPartyName != null &&
+                 row.ExternalPartyName.Contains(search)) ||
+                (row.ReferenceNumber != null &&
+                 row.ReferenceNumber.Contains(search)) ||
+                (row.Description != null && row.Description.Contains(search)));
 
         var totalCount = await query.CountAsync(cancellationToken);
         var totals = await query
             .GroupBy(_ => 1)
-            .Select(vouchers => new
+            .Select(rows => new
             {
-                Receipts = vouchers.Sum(voucher =>
-                    voucher.Direction == CashDirection.Receipt
-                        ? voucher.Amount
-                        : 0m),
-                Payments = vouchers.Sum(voucher =>
-                    voucher.Direction == CashDirection.Payment
-                        ? voucher.Amount
-                        : 0m),
-                BaseReceipts = vouchers.Sum(voucher =>
-                    voucher.Direction == CashDirection.Receipt
-                        ? voucher.BaseAmount
-                        : 0m),
-                BasePayments = vouchers.Sum(voucher =>
-                    voucher.Direction == CashDirection.Payment
-                        ? voucher.BaseAmount
-                        : 0m)
+                Receipts = rows.Sum(row => row.ReceiptAmount),
+                Payments = rows.Sum(row => row.PaymentAmount),
+                BaseReceipts = rows.Sum(row => row.BaseReceiptAmount),
+                BasePayments = rows.Sum(row => row.BasePaymentAmount)
             })
             .SingleOrDefaultAsync(cancellationToken);
-
         var totalReceipts = totals?.Receipts ?? 0m;
         var totalPayments = totals?.Payments ?? 0m;
         var totalBaseReceipts = totals?.BaseReceipts ?? 0m;
         var totalBasePayments = totals?.BasePayments ?? 0m;
-        var ordered = query
-            .OrderBy(voucher => voucher.VoucherDate)
-            .ThenBy(voucher => voucher.CreatedOn)
-            .ThenBy(voucher => voucher.VoucherNumber)
-            .ThenBy(voucher => voucher.Id);
-        var offset = GetOffset(pagination, totalCount);
 
+        var ordered = query
+            .OrderBy(row => row.Date)
+            .ThenBy(row => row.CreatedOn)
+            .ThenBy(row => row.DocumentNumber)
+            .ThenBy(row => row.JournalEntryLineId);
+        var offset = GetOffset(pagination, totalCount);
         var precedingEffect = offset == 0
             ? 0m
-            : await ordered
-                .Take(offset)
-                .SumAsync(
-                    voucher =>
-                        (decimal?)(voucher.Direction ==
-                            CashDirection.Receipt
-                            ? voucher.Amount
-                            : -voucher.Amount),
-                    cancellationToken) ?? 0m;
-
+            : await ordered.Take(offset).SumAsync(
+                row => (decimal?)(row.ReceiptAmount - row.PaymentAmount),
+                cancellationToken) ?? 0m;
         var precedingBaseEffect = offset == 0
             ? 0m
-            : await ordered
-                .Take(offset)
-                .SumAsync(
-                    voucher =>
-                        (decimal?)(voucher.Direction ==
-                            CashDirection.Receipt
-                            ? voucher.BaseAmount
-                            : -voucher.BaseAmount),
-                    cancellationToken) ?? 0m;
-
+            : await ordered.Take(offset).SumAsync(
+                row => (decimal?)(row.BaseReceiptAmount -
+                    row.BasePaymentAmount),
+                cancellationToken) ?? 0m;
         var pageRows = offset >= totalCount
             ? []
             : await ordered
                 .Skip(offset)
                 .Take(pagination.PageSize)
-                .Select(voucher => new CashboxStatementRaw
-                {
-                    CashVoucherId = voucher.Id,
-                    Date = voucher.VoucherDate,
-                    VoucherNumber = voucher.VoucherNumber,
-                    MovementName = voucher.CashMovementType != null
-                        ? voucher.CashMovementType.Name
-                        : voucher.CashboxTransferId.HasValue
-                            ? voucher.Direction == CashDirection.Payment
-                                ? "تحويل خزائن صادر"
-                                : "تحويل خزائن وارد"
-                            : voucher.Direction == CashDirection.Payment
-                                ? "سند صرف"
-                                : "سند قبض",
-                    Description = voucher.Description,
-                    PartyName = voucher.BusinessPartner != null
-                        ? voucher.BusinessPartner.Name
-                        : voucher.Driver != null
-                            ? voucher.Driver.Name
-                            : voucher.Employee != null
-                                ? voucher.Employee.Name
-                                : voucher.ExternalPartyName,
-                    Currency = voucher.Currency,
-                    ExchangeRate = voucher.ExchangeRate,
-                    ReceiptAmount =
-                        voucher.Direction == CashDirection.Receipt
-                            ? voucher.Amount
-                            : 0m,
-                    PaymentAmount =
-                        voucher.Direction == CashDirection.Payment
-                            ? voucher.Amount
-                            : 0m,
-                    BaseReceiptAmount =
-                        voucher.Direction == CashDirection.Receipt
-                            ? voucher.BaseAmount
-                            : 0m,
-                    BasePaymentAmount =
-                        voucher.Direction == CashDirection.Payment
-                            ? voucher.BaseAmount
-                            : 0m,
-                    ReferenceNumber = voucher.ReferenceNumber
-                })
                 .ToListAsync(cancellationToken);
 
         var runningBalance = openingBalance + precedingEffect;
-        var runningBaseBalance =
-            baseOpeningBalance + precedingBaseEffect;
+        var runningBaseBalance = baseOpeningBalance + precedingBaseEffect;
         var items = pageRows.Select(row =>
         {
             runningBalance += row.ReceiptAmount - row.PaymentAmount;
@@ -280,10 +180,10 @@ public sealed partial class FinancialStatementService(
             return new CashboxStatementItemResponse(
                 CashVoucherId: row.CashVoucherId,
                 Date: row.Date,
-                VoucherNumber: row.VoucherNumber,
-                MovementName: row.MovementName,
+                VoucherNumber: row.DocumentNumber,
+                MovementName: row.MovementName ?? "حركة قيد",
                 Description: row.Description,
-                PartyName: row.PartyName,
+                PartyName: row.PartyName ?? row.ExternalPartyName,
                 ReceiptAmount: row.ReceiptAmount,
                 PaymentAmount: row.PaymentAmount,
                 Balance: runningBalance,
@@ -295,9 +195,12 @@ public sealed partial class FinancialStatementService(
                 IsBaseCurrency = row.Currency == cashbox.BaseCurrency,
                 BaseReceiptAmount = row.BaseReceiptAmount,
                 BasePaymentAmount = row.BasePaymentAmount,
-                BaseBalance = runningBaseBalance
+                BaseBalance = runningBaseBalance,
+                JournalEntryId = row.JournalEntryId,
+                JournalEntryLineId = row.JournalEntryLineId,
+                SourceType = row.SourceType
             };
-        }).ToList();
+        }).ToArray();
 
         return Result<CashboxStatementResponse>.Success(
             new CashboxStatementResponse(
@@ -318,10 +221,8 @@ public sealed partial class FinancialStatementService(
                     BaseOpeningBalance = baseOpeningBalance,
                     BaseTotalReceipts = totalBaseReceipts,
                     BaseTotalPayments = totalBasePayments,
-                    BaseClosingBalance =
-                        baseOpeningBalance +
-                        totalBaseReceipts -
-                        totalBasePayments
+                    BaseClosingBalance = baseOpeningBalance +
+                        totalBaseReceipts - totalBasePayments
                 })
             {
                 BaseCurrency = cashbox.BaseCurrency,
@@ -331,11 +232,10 @@ public sealed partial class FinancialStatementService(
             });
     }
 
-    public async Task<Result<PartnerStatementResponse>>
-        GetPartnerStatementAsync(
-            PaginationRequest pagination,
-            PartnerStatementFilterRequest filters,
-            CancellationToken cancellationToken = default)
+    public async Task<Result<PartnerStatementResponse>> GetPartnerStatementAsync(
+        PaginationRequest pagination,
+        PartnerStatementFilterRequest filters,
+        CancellationToken cancellationToken = default)
     {
         var paginationError = ValidatePagination(pagination);
         if (paginationError is not null)
@@ -364,49 +264,37 @@ public sealed partial class FinancialStatementService(
                 PartnerNotFound(filters.BusinessPartnerId));
         }
 
-        var allRows = CreatePartnerRows(filters.BusinessPartnerId);
+        var allRows = CreatePartnerRows(partner.Id);
         var openingBalance = filters.FromDate.HasValue
             ? await allRows
                 .Where(row => row.Date < filters.FromDate.Value)
-                .SumAsync(
-                    row => (decimal?)(row.Debit - row.Credit),
+                .SumAsync(row => (decimal?)(row.Debit - row.Credit),
                     cancellationToken) ?? 0m
             : 0m;
         var baseOpeningBalance = filters.FromDate.HasValue
             ? await allRows
                 .Where(row => row.Date < filters.FromDate.Value)
-                .SumAsync(
-                    row => (decimal?)
-                        (row.BaseDebit - row.BaseCredit),
+                .SumAsync(row => (decimal?)(row.BaseDebit - row.BaseCredit),
                     cancellationToken) ?? 0m
             : 0m;
 
         var search = filters.Search?.Trim();
         var query = allRows
-            .Where(row =>
-                !filters.FromDate.HasValue ||
+            .Where(row => !filters.FromDate.HasValue ||
                 row.Date >= filters.FromDate.Value)
-            .Where(row =>
-                !filters.ToDate.HasValue ||
+            .Where(row => !filters.ToDate.HasValue ||
                 row.Date <= filters.ToDate.Value)
-            .Where(row =>
-                !filters.SourceType.HasValue ||
+            .Where(row => !filters.SourceType.HasValue ||
                 row.SourceType == filters.SourceType.Value)
-            .Where(row =>
-                !filters.MovementType.HasValue ||
+            .Where(row => !filters.MovementType.HasValue ||
                 row.MovementType == filters.MovementType.Value)
-            .Where(row =>
-                !filters.CashMovementTypeId.HasValue ||
-                row.CashMovementTypeId ==
-                filters.CashMovementTypeId.Value)
-            .Where(row =>
-                !filters.Classification.HasValue ||
+            .Where(row => !filters.CashMovementTypeId.HasValue ||
+                row.CashMovementTypeId == filters.CashMovementTypeId.Value)
+            .Where(row => !filters.Classification.HasValue ||
                 row.Classification == filters.Classification.Value)
-            .Where(row =>
-                string.IsNullOrEmpty(search) ||
+            .Where(row => string.IsNullOrEmpty(search) ||
                 row.DocumentNumber.Contains(search) ||
-                (row.Description != null &&
-                 row.Description.Contains(search)) ||
+                (row.Description != null && row.Description.Contains(search)) ||
                 (row.ReferenceNumber != null &&
                  row.ReferenceNumber.Contains(search)));
 
@@ -425,29 +313,22 @@ public sealed partial class FinancialStatementService(
         var totalCredit = totals?.Credit ?? 0m;
         var totalBaseDebit = totals?.BaseDebit ?? 0m;
         var totalBaseCredit = totals?.BaseCredit ?? 0m;
-
         var ordered = query
             .OrderBy(row => row.Date)
             .ThenBy(row => row.CreatedOn)
             .ThenBy(row => row.DocumentNumber)
-            .ThenBy(row => row.SourceId);
+            .ThenBy(row => row.JournalEntryLineId);
         var offset = GetOffset(pagination, totalCount);
         var precedingEffect = offset == 0
             ? 0m
-            : await ordered
-                .Take(offset)
-                .SumAsync(
-                    row => (decimal?)(row.Debit - row.Credit),
-                    cancellationToken) ?? 0m;
-
+            : await ordered.Take(offset).SumAsync(
+                row => (decimal?)(row.Debit - row.Credit), cancellationToken)
+                ?? 0m;
         var precedingBaseEffect = offset == 0
             ? 0m
-            : await ordered
-                .Take(offset)
-                .SumAsync(
-                    row => (decimal?)
-                        (row.BaseDebit - row.BaseCredit),
-                    cancellationToken) ?? 0m;
+            : await ordered.Take(offset).SumAsync(
+                row => (decimal?)(row.BaseDebit - row.BaseCredit),
+                cancellationToken) ?? 0m;
         var pageRows = offset >= totalCount
             ? []
             : await ordered
@@ -456,8 +337,7 @@ public sealed partial class FinancialStatementService(
                 .ToListAsync(cancellationToken);
 
         var runningBalance = openingBalance + precedingEffect;
-        var runningBaseBalance =
-            baseOpeningBalance + precedingBaseEffect;
+        var runningBaseBalance = baseOpeningBalance + precedingBaseEffect;
         var items = pageRows.Select(row =>
         {
             runningBalance += row.Debit - row.Credit;
@@ -465,7 +345,10 @@ public sealed partial class FinancialStatementService(
             return new PartnerStatementItemResponse(
                 Date: row.Date,
                 DocumentNumber: row.DocumentNumber,
-                MovementName: PartnerMovementName(row.MovementType),
+                MovementName: PartnerMovementName(
+                    row.MovementType,
+                    row.SourceType,
+                    row.EntryType),
                 Description: row.Description,
                 DebitAmount: row.Debit,
                 CreditAmount: row.Credit,
@@ -476,12 +359,14 @@ public sealed partial class FinancialStatementService(
                 ExchangeRate = row.ExchangeRate,
                 BaseDebitAmount = row.BaseDebit,
                 BaseCreditAmount = row.BaseCredit,
-                BaseBalanceAmount = Math.Abs(runningBaseBalance)
+                BaseBalanceAmount = Math.Abs(runningBaseBalance),
+                JournalEntryId = row.JournalEntryId,
+                JournalEntryLineId = row.JournalEntryLineId,
+                SourceType = row.SourceType
             };
-        }).ToList();
+        }).ToArray();
 
-        var closingBalance =
-            openingBalance + totalDebit - totalCredit;
+        var closingBalance = openingBalance + totalDebit - totalCredit;
         var baseClosingBalance =
             baseOpeningBalance + totalBaseDebit - totalBaseCredit;
         return Result<PartnerStatementResponse>.Success(
@@ -496,25 +381,24 @@ public sealed partial class FinancialStatementService(
                 TotalPages: GetTotalPages(totalCount, pagination.PageSize),
                 Summary: new PartnerStatementSummaryResponse(
                     OpeningBalanceAmount: Math.Abs(openingBalance),
-                    OpeningBalanceDescription: PartnerBalanceDescription(openingBalance),
+                    OpeningBalanceDescription:
+                        PartnerBalanceDescription(openingBalance),
                     ClosingBalanceAmount: Math.Abs(closingBalance),
-                    ClosingBalanceDescription: PartnerBalanceDescription(closingBalance))
+                    ClosingBalanceDescription:
+                        PartnerBalanceDescription(closingBalance))
                 {
-                    BaseOpeningBalanceAmount =
-                        Math.Abs(baseOpeningBalance),
-                    BaseClosingBalanceAmount =
-                        Math.Abs(baseClosingBalance)
+                    BaseOpeningBalanceAmount = Math.Abs(baseOpeningBalance),
+                    BaseClosingBalanceAmount = Math.Abs(baseClosingBalance)
                 })
             {
                 BaseCurrency = partner.BaseCurrency
             });
     }
 
-    public async Task<Result<DriverStatementResponse>>
-        GetDriverStatementAsync(
-            PaginationRequest pagination,
-            DriverStatementFilterRequest filters,
-            CancellationToken cancellationToken = default)
+    public async Task<Result<DriverStatementResponse>> GetDriverStatementAsync(
+        PaginationRequest pagination,
+        DriverStatementFilterRequest filters,
+        CancellationToken cancellationToken = default)
     {
         var paginationError = ValidatePagination(pagination);
         if (paginationError is not null)
@@ -530,7 +414,10 @@ public sealed partial class FinancialStatementService(
             .Select(entity => new
             {
                 entity.Id,
-                entity.Name
+                entity.Name,
+                BaseCurrency = entity.Company.Settings == null
+                    ? CurrencyCode.EGP
+                    : entity.Company.Settings.BaseCurrency
             })
             .FirstOrDefaultAsync(cancellationToken);
         if (driver is null)
@@ -539,63 +426,46 @@ public sealed partial class FinancialStatementService(
                 DriverNotFound(filters.DriverId));
         }
 
-        var allRows = CreateDriverRows(filters.DriverId);
+        var allRows = CreateDriverRows(driver.Id);
         var openingBalance = filters.FromDate.HasValue
             ? await allRows
                 .Where(row => row.Date < filters.FromDate.Value)
-                .SumAsync(
-                    row => (decimal?)(row.CashPaid -
-                        row.CashReceived -
-                        row.TripCost),
+                .SumAsync(row => (decimal?)(row.Debit - row.Credit),
                     cancellationToken) ?? 0m
             : 0m;
-
         var search = filters.Search?.Trim();
         var invoiceNumber = filters.InvoiceNumber?.Trim();
         var query = allRows
-            .Where(row =>
-                !filters.FromDate.HasValue ||
+            .Where(row => !filters.FromDate.HasValue ||
                 row.Date >= filters.FromDate.Value)
-            .Where(row =>
-                !filters.ToDate.HasValue ||
+            .Where(row => !filters.ToDate.HasValue ||
                 row.Date <= filters.ToDate.Value)
-            .Where(row =>
-                !filters.Direction.HasValue ||
+            .Where(row => !filters.Direction.HasValue ||
                 row.Direction == filters.Direction.Value)
-            .Where(row =>
-                !filters.CashMovementTypeId.HasValue ||
-                row.CashMovementTypeId ==
-                filters.CashMovementTypeId.Value)
-            .Where(row =>
-                !filters.Classification.HasValue ||
+            .Where(row => !filters.CashMovementTypeId.HasValue ||
+                row.CashMovementTypeId == filters.CashMovementTypeId.Value)
+            .Where(row => !filters.Classification.HasValue ||
                 row.Classification == filters.Classification.Value)
-            .Where(row =>
-                !filters.DriverTripId.HasValue ||
+            .Where(row => !filters.DriverTripId.HasValue ||
                 row.DriverTripId == filters.DriverTripId.Value)
-            .Where(row =>
-                string.IsNullOrEmpty(invoiceNumber) ||
+            .Where(row => string.IsNullOrEmpty(invoiceNumber) ||
                 (row.InvoiceNumber != null &&
                  row.InvoiceNumber.Contains(invoiceNumber)))
-            .Where(row =>
-                !filters.TransactionsWithoutTrip.HasValue ||
+            .Where(row => !filters.TransactionsWithoutTrip.HasValue ||
                 (filters.TransactionsWithoutTrip.Value
-                    ? row.SourceType ==
-                      DriverStatementSourceType.CashVoucher &&
+                    ? row.SourceType == DriverStatementSourceType.CashVoucher &&
                       row.DriverTripId == null
                     : row.DriverTripId != null))
-            .Where(row =>
-                !filters.HasCost.HasValue ||
+            .Where(row => !filters.HasCost.HasValue ||
                 (row.SourceType == DriverStatementSourceType.DriverTrip &&
                  (row.TripCost > 0m) == filters.HasCost.Value))
-            .Where(row =>
-                string.IsNullOrEmpty(search) ||
-                row.SourceNumber.Contains(search) ||
+            .Where(row => string.IsNullOrEmpty(search) ||
+                row.DocumentNumber.Contains(search) ||
                 (row.InvoiceNumber != null &&
                  row.InvoiceNumber.Contains(search)) ||
                 (row.MovementTypeName != null &&
                  row.MovementTypeName.Contains(search)) ||
-                (row.Description != null &&
-                 row.Description.Contains(search)) ||
+                (row.Description != null && row.Description.Contains(search)) ||
                 (row.ReferenceNumber != null &&
                  row.ReferenceNumber.Contains(search)));
 
@@ -604,30 +474,29 @@ public sealed partial class FinancialStatementService(
             .GroupBy(_ => 1)
             .Select(rows => new
             {
+                Debit = rows.Sum(row => row.Debit),
+                Credit = rows.Sum(row => row.Credit),
                 CashPaid = rows.Sum(row => row.CashPaid),
                 CashReceived = rows.Sum(row => row.CashReceived),
                 TripCost = rows.Sum(row => row.TripCost)
             })
             .SingleOrDefaultAsync(cancellationToken);
+        var totalDebit = totals?.Debit ?? 0m;
+        var totalCredit = totals?.Credit ?? 0m;
         var totalCashPaid = totals?.CashPaid ?? 0m;
         var totalCashReceived = totals?.CashReceived ?? 0m;
         var totalTripCost = totals?.TripCost ?? 0m;
-
         var ordered = query
             .OrderBy(row => row.Date)
             .ThenBy(row => row.CreatedOn)
-            .ThenBy(row => row.SourceNumber)
-            .ThenBy(row => row.SourceId);
+            .ThenBy(row => row.DocumentNumber)
+            .ThenBy(row => row.JournalEntryLineId);
         var offset = GetOffset(pagination, totalCount);
         var precedingEffect = offset == 0
             ? 0m
-            : await ordered
-                .Take(offset)
-                .SumAsync(
-                    row => (decimal?)(row.CashPaid -
-                        row.CashReceived -
-                        row.TripCost),
-                    cancellationToken) ?? 0m;
+            : await ordered.Take(offset).SumAsync(
+                row => (decimal?)(row.Debit - row.Credit), cancellationToken)
+                ?? 0m;
         var pageRows = offset >= totalCount
             ? []
             : await ordered
@@ -638,21 +507,18 @@ public sealed partial class FinancialStatementService(
         var runningBalance = openingBalance + precedingEffect;
         var items = pageRows.Select(row =>
         {
-            runningBalance +=
-                row.CashPaid - row.CashReceived - row.TripCost;
+            runningBalance += row.Debit - row.Credit;
             return new DriverStatementItemResponse(
-                SourceId: row.SourceId,
+                SourceId: row.JournalEntryLineId,
                 Date: row.Date,
-                DocumentNumber: row.SourceNumber,
+                DocumentNumber: row.DocumentNumber,
                 SourceName: DriverSourceName(row.SourceType),
                 InvoiceNumber: row.InvoiceNumber,
                 DriverTripId: row.DriverTripId,
                 DriverTripNumber: row.DriverTripId.HasValue
                     ? $"TR-{row.DriverTripId.Value}"
                     : null,
-                MovementName: row.SourceType == DriverStatementSourceType.DriverTrip
-                    ? "تكلفة رحلة"
-                    : row.MovementTypeName ?? "سند نقدية",
+                MovementName: row.MovementTypeName ?? "قيد محاسبي",
                 Description: row.Description,
                 AmountPaidToDriver: row.CashPaid,
                 AmountReceivedFromDriver: row.CashReceived,
@@ -664,15 +530,16 @@ public sealed partial class FinancialStatementService(
             {
                 BusinessPartnerId = row.BusinessPartnerId,
                 BusinessPartnerName = row.BusinessPartnerName,
-                CountryName = row.CountryName
+                CountryName = row.CountryName,
+                DebitAmount = row.Debit,
+                CreditAmount = row.Credit,
+                JournalEntryId = row.JournalEntryId,
+                JournalEntryLineId = row.JournalEntryLineId,
+                SourceType = row.SourceType
             };
-        }).ToList();
+        }).ToArray();
 
-        var closingBalance =
-            openingBalance +
-            totalCashPaid -
-            totalCashReceived -
-            totalTripCost;
+        var closingBalance = openingBalance + totalDebit - totalCredit;
         return Result<DriverStatementResponse>.Success(
             new DriverStatementResponse(
                 DriverId: driver.Id,
@@ -684,169 +551,355 @@ public sealed partial class FinancialStatementService(
                 TotalPages: GetTotalPages(totalCount, pagination.PageSize),
                 Summary: new DriverStatementSummaryResponse(
                     OpeningBalanceAmount: Math.Abs(openingBalance),
-                    OpeningBalanceDescription: DriverBalanceDescription(openingBalance),
+                    OpeningBalanceDescription:
+                        DriverBalanceDescription(openingBalance),
                     TotalPaidToDriver: totalCashPaid,
                     TotalReceivedFromDriver: totalCashReceived,
                     TotalTripCost: totalTripCost,
                     ClosingBalanceAmount: Math.Abs(closingBalance),
-                    ClosingBalanceDescription: DriverBalanceDescription(closingBalance))));
+                    ClosingBalanceDescription:
+                        DriverBalanceDescription(closingBalance))
+                {
+                    TotalDebits = totalDebit,
+                    TotalCredits = totalCredit
+                })
+            {
+                BaseCurrency = driver.BaseCurrency
+            });
     }
 
-    private IQueryable<PartnerStatementRaw> CreatePartnerRows(
-        int businessPartnerId)
+    private IQueryable<CashboxStatementRaw> CreateCashboxRows(int cashboxId)
     {
-        var movements = dbContext.BusinessPartnerMovements
+        var vouchers = dbContext.CashVouchers
             .AsNoTracking()
-            .Where(movement =>
-                movement.CompanyId == companyId &&
-                movement.BusinessPartnerId == businessPartnerId)
-            .Select(movement => new PartnerStatementRaw
-            {
-                SourceId = movement.InvoiceId ??
-                    movement.CashVoucherId!.Value,
-                SourceType = movement.InvoiceId.HasValue
-                    ? PartnerStatementSourceType.Invoice
-                    : PartnerStatementSourceType.CashVoucher,
-                Date = movement.MovementDate,
-                CreatedOn = movement.CreatedOn,
-                DocumentNumber = movement.InvoiceId.HasValue
-                    ? movement.Invoice!.InvoiceNumber
-                    : movement.CashVoucher!.VoucherNumber,
-                MovementType = movement.MovementType,
-                Description = movement.Description,
-                Debit = movement.Debit,
-                Credit = movement.Credit,
-                ExchangeRate = movement.ExchangeRate,
-                BaseDebit = movement.BaseDebit,
-                BaseCredit = movement.BaseCredit,
-                ReferenceNumber = movement.CashVoucherId.HasValue
-                    ? movement.CashVoucher!.ReferenceNumber
-                    : null,
-                CashMovementTypeId = movement.CashVoucherId.HasValue
-                    ? movement.CashVoucher!.CashMovementTypeId
-                    : null,
-                Classification = movement.CashVoucherId.HasValue &&
-                    movement.CashVoucher!.CashMovementType != null
-                        ? movement.CashVoucher.CashMovementType.Classification
-                        : null
-            });
+            .Where(voucher => voucher.CompanyId == companyId);
 
-        var openingBalances = dbContext.PartnerOpeningBalances
+        return
+            from line in PostedLedgerLines()
+            where line.PartyType == JournalPartyType.Cashbox &&
+                  line.PartyId == cashboxId
+            join voucher in vouchers
+                on new
+                {
+                    line.JournalEntry.SourceId,
+                    line.JournalEntry.SourceType
+                }
+                equals new
+                {
+                    SourceId = (int?)voucher.Id,
+                    SourceType = (JournalEntrySourceType?)
+                        JournalEntrySourceType.CashVoucher
+                }
+                into voucherRows
+            from voucher in voucherRows.DefaultIfEmpty()
+            select new CashboxStatementRaw
+            {
+                JournalEntryLineId = line.Id,
+                JournalEntryId = line.JournalEntryId,
+                CashVoucherId = voucher == null ? null : (int?)voucher.Id,
+                SourceType = line.JournalEntry.SourceType,
+                IsOpening = line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.CashboxOpeningBalance,
+                Date = line.JournalEntry.EntryDate,
+                CreatedOn = line.JournalEntry.PostedOn,
+                DocumentNumber = voucher != null
+                    ? voucher.VoucherNumber
+                    : line.JournalEntry.SourceNumber ??
+                      line.JournalEntry.EntryNumber,
+                MovementName = voucher != null
+                    ? voucher.CashMovementType != null
+                        ? voucher.CashMovementType.Name
+                        : voucher.Direction == CashDirection.Receipt
+                            ? "سند قبض"
+                            : "سند صرف"
+                    : line.JournalEntry.SourceType ==
+                          JournalEntrySourceType.CashboxTransfer
+                            ? line.Debit > 0m
+                                ? "تحويل خزائن وارد"
+                                : "تحويل خزائن صادر"
+                            : line.JournalEntry.EntryType ==
+                              JournalEntryType.Adjustment
+                                ? "قيد تسوية"
+                                : line.JournalEntry.EntryType ==
+                                  JournalEntryType.Manual
+                                    ? "قيد يدوي"
+                                    : line.JournalEntry.EntryType ==
+                                      JournalEntryType.Opening
+                                        ? "قيد افتتاحي"
+                                        : "قيد تلقائي",
+                Description = line.Description ??
+                    line.JournalEntry.Description,
+                PartyName = voucher != null &&
+                    voucher.BusinessPartner != null
+                        ? voucher.BusinessPartner.Name
+                        : voucher != null && voucher.Driver != null
+                            ? voucher.Driver.Name
+                            : voucher != null && voucher.Employee != null
+                                ? voucher.Employee.Name
+                                : null,
+                ExternalPartyName = voucher == null
+                    ? null
+                    : voucher.ExternalPartyName,
+                CashPartyType = voucher == null
+                    ? null
+                    : (CashPartyType?)voucher.PartyType,
+                BusinessPartnerId = voucher == null
+                    ? null
+                    : voucher.BusinessPartnerId,
+                DriverId = voucher == null ? null : voucher.DriverId,
+                DriverTripId = voucher == null ? null : voucher.DriverTripId,
+                EmployeeId = voucher == null ? null : voucher.EmployeeId,
+                CashMovementTypeId = voucher == null
+                    ? null
+                    : voucher.CashMovementTypeId,
+                Classification = voucher == null
+                    ? null
+                    : voucher.Classification ??
+                      (voucher.CashMovementType == null
+                          ? null
+                          : voucher.CashMovementType.Classification),
+                Currency = line.Currency,
+                ExchangeRate = line.ExchangeRate,
+                ReceiptAmount = line.TransactionDebit,
+                PaymentAmount = line.TransactionCredit,
+                BaseReceiptAmount = line.Debit,
+                BasePaymentAmount = line.Credit,
+                ReferenceNumber = voucher == null
+                    ? null
+                    : voucher.ReferenceNumber
+            };
+    }
+
+    private IQueryable<PartnerStatementRaw> CreatePartnerRows(int partnerId)
+    {
+        var invoices = dbContext.Invoices
             .AsNoTracking()
-            .Where(balance =>
-                balance.CompanyId == companyId &&
-                balance.BusinessPartnerId == businessPartnerId)
-            .Select(balance => new PartnerStatementRaw
-            {
-                SourceId = balance.Id,
-                SourceType = PartnerStatementSourceType.OpeningBalance,
-                Date = balance.DocumentDate,
-                CreatedOn = balance.CreatedOn,
-                DocumentNumber = balance.DocumentNumber,
-                MovementType = null,
-                Description = balance.Notes,
-                Debit = balance.BalanceType ==
-                    PartnerBalanceType.Receivable
-                    ? balance.Amount
-                    : 0m,
-                Credit = balance.BalanceType ==
-                    PartnerBalanceType.Payable
-                    ? balance.Amount
-                    : 0m,
-                ExchangeRate = balance.ExchangeRate,
-                BaseDebit = balance.BalanceType ==
-                    PartnerBalanceType.Receivable
-                    ? balance.BaseAmount
-                    : 0m,
-                BaseCredit = balance.BalanceType ==
-                    PartnerBalanceType.Payable
-                    ? balance.BaseAmount
-                    : 0m,
-                ReferenceNumber = null,
-                CashMovementTypeId = null,
-                Classification = null
-            });
+            .Where(invoice => invoice.CompanyId == companyId);
+        var vouchers = dbContext.CashVouchers
+            .AsNoTracking()
+            .Where(voucher => voucher.CompanyId == companyId);
 
-        return movements.Concat(openingBalances);
+        return
+            from line in PostedLedgerLines()
+            where (line.PartyType == JournalPartyType.Customer ||
+                   line.PartyType == JournalPartyType.Supplier) &&
+                  line.PartyId == partnerId
+            join invoice in invoices
+                on new
+                {
+                    line.JournalEntry.SourceId,
+                    line.JournalEntry.SourceType
+                }
+                equals new
+                {
+                    SourceId = (int?)invoice.Id,
+                    SourceType = (JournalEntrySourceType?)
+                        JournalEntrySourceType.Invoice
+                }
+                into invoiceRows
+            from invoice in invoiceRows.DefaultIfEmpty()
+            join voucher in vouchers
+                on new
+                {
+                    line.JournalEntry.SourceId,
+                    line.JournalEntry.SourceType
+                }
+                equals new
+                {
+                    SourceId = (int?)voucher.Id,
+                    SourceType = (JournalEntrySourceType?)
+                        JournalEntrySourceType.CashVoucher
+                }
+                into voucherRows
+            from voucher in voucherRows.DefaultIfEmpty()
+            select new PartnerStatementRaw
+            {
+                JournalEntryLineId = line.Id,
+                JournalEntryId = line.JournalEntryId,
+                SourceId = line.Id,
+                SourceType = line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.PartnerOpeningBalance
+                        ? PartnerStatementSourceType.OpeningBalance
+                        : line.JournalEntry.SourceType ==
+                          JournalEntrySourceType.Invoice
+                            ? PartnerStatementSourceType.Invoice
+                            : line.JournalEntry.SourceType ==
+                              JournalEntrySourceType.CashVoucher
+                                ? PartnerStatementSourceType.CashVoucher
+                                : PartnerStatementSourceType.JournalEntry,
+                EntryType = line.JournalEntry.EntryType,
+                Date = line.JournalEntry.EntryDate,
+                CreatedOn = line.JournalEntry.PostedOn,
+                DocumentNumber = invoice != null
+                    ? invoice.InvoiceNumber
+                    : voucher != null
+                        ? voucher.VoucherNumber
+                        : line.JournalEntry.SourceNumber ??
+                          line.JournalEntry.EntryNumber,
+                MovementType = invoice != null
+                    ? invoice.InvoiceType == InvoiceType.Sales
+                        ? BusinessPartnerMovementType.Sales
+                        : invoice.InvoiceType == InvoiceType.Purchase
+                            ? BusinessPartnerMovementType.Purchase
+                            : invoice.InvoiceType == InvoiceType.SalesReturn
+                                ? BusinessPartnerMovementType.SalesReturn
+                                : BusinessPartnerMovementType.PurchaseReturn
+                    : voucher != null
+                        ? voucher.Direction == CashDirection.Receipt
+                            ? BusinessPartnerMovementType.CashReceipt
+                            : BusinessPartnerMovementType.CashPayment
+                        : null,
+                Description = line.Description ??
+                    line.JournalEntry.Description,
+                Debit = line.TransactionDebit,
+                Credit = line.TransactionCredit,
+                ExchangeRate = line.ExchangeRate,
+                BaseDebit = line.Debit,
+                BaseCredit = line.Credit,
+                ReferenceNumber = voucher != null
+                    ? voucher.ReferenceNumber
+                    : invoice != null
+                        ? invoice.PartnerInvoiceNo
+                        : null,
+                CashMovementTypeId = voucher == null
+                    ? null
+                    : voucher.CashMovementTypeId,
+                Classification = voucher == null
+                    ? null
+                    : voucher.Classification ??
+                      (voucher.CashMovementType == null
+                          ? null
+                          : voucher.CashMovementType.Classification)
+            };
     }
 
     private IQueryable<DriverStatementRaw> CreateDriverRows(int driverId)
     {
         var vouchers = dbContext.CashVouchers
             .AsNoTracking()
-            .Where(voucher =>
-                voucher.CompanyId == companyId &&
-                voucher.PartyType == CashPartyType.Driver &&
-                voucher.DriverId == driverId)
-            .Select(voucher => new DriverStatementRaw
-            {
-                SourceId = voucher.Id,
-                SourceType = DriverStatementSourceType.CashVoucher,
-                Date = voucher.VoucherDate,
-                CreatedOn = voucher.CreatedOn,
-                SourceNumber = voucher.VoucherNumber,
-                InvoiceNumber = voucher.DriverTripId.HasValue
-                    ? voucher.DriverTrip!.InvoiceNumber
-                    : null,
-                DriverTripId = voucher.DriverTripId,
-                BusinessPartnerId = voucher.DriverTripId.HasValue
-                    ? voucher.DriverTrip!.BusinessPartnerId
-                    : null,
-                BusinessPartnerName = voucher.DriverTripId.HasValue
-                    ? voucher.DriverTrip!.BusinessPartner.Name
-                    : null,
-                CountryName = voucher.DriverTripId.HasValue &&
-                    voucher.DriverTrip!.Invoice.Country != null
-                        ? voucher.DriverTrip.Invoice.Country!.Name
-                        : null,
-                MovementTypeName = voucher.CashMovementType!.Name,
-                Description = voucher.Description,
-                CashPaid = voucher.Direction == CashDirection.Payment
-                    ? voucher.Amount
-                    : 0m,
-                CashReceived = voucher.Direction == CashDirection.Receipt
-                    ? voucher.Amount
-                    : 0m,
-                TripCost = 0m,
-                CashboxName = voucher.Cashbox!.Name,
-                ReferenceNumber = voucher.ReferenceNumber,
-                Direction = voucher.Direction,
-                CashMovementTypeId = voucher.CashMovementTypeId,
-                Classification = voucher.CashMovementType!.Classification
-            });
-
+            .Where(voucher => voucher.CompanyId == companyId);
         var trips = dbContext.DriverTrips
             .AsNoTracking()
-            .Where(trip =>
-                trip.CompanyId == companyId &&
-                trip.DriverId == driverId)
-            .Select(trip => new DriverStatementRaw
-            {
-                SourceId = trip.Id,
-                SourceType = DriverStatementSourceType.DriverTrip,
-                Date = trip.TripDate,
-                CreatedOn = trip.CreatedOn,
-                SourceNumber = "TR-" + trip.Id,
-                InvoiceNumber = trip.InvoiceNumber,
-                DriverTripId = (int?)trip.Id,
-                BusinessPartnerId = trip.BusinessPartnerId,
-                BusinessPartnerName = trip.BusinessPartner.Name,
-                CountryName = trip.Invoice.Country == null
-                    ? null
-                    : trip.Invoice.Country.Name,
-                MovementTypeName = null,
-                Description = trip.CostNotes,
-                CashPaid = 0m,
-                CashReceived = 0m,
-                TripCost = trip.Cost ?? 0m,
-                CashboxName = null,
-                ReferenceNumber = null,
-                Direction = null,
-                CashMovementTypeId = null,
-                Classification = null
-            });
+            .Where(trip => trip.CompanyId == companyId);
 
-        return vouchers.Concat(trips);
+        return
+            from line in PostedLedgerLines()
+            where line.PartyType == JournalPartyType.Driver &&
+                  line.PartyId == driverId
+            join voucher in vouchers
+                on new
+                {
+                    line.JournalEntry.SourceId,
+                    line.JournalEntry.SourceType
+                }
+                equals new
+                {
+                    SourceId = (int?)voucher.Id,
+                    SourceType = (JournalEntrySourceType?)
+                        JournalEntrySourceType.CashVoucher
+                }
+                into voucherRows
+            from voucher in voucherRows.DefaultIfEmpty()
+            join trip in trips
+                on new
+                {
+                    line.JournalEntry.SourceId,
+                    line.JournalEntry.SourceType
+                }
+                equals new
+                {
+                    SourceId = (int?)trip.Id,
+                    SourceType = (JournalEntrySourceType?)
+                        JournalEntrySourceType.DriverTrip
+                }
+                into tripRows
+            from trip in tripRows.DefaultIfEmpty()
+            select new DriverStatementRaw
+            {
+                JournalEntryLineId = line.Id,
+                JournalEntryId = line.JournalEntryId,
+                SourceType = line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.CashVoucher
+                        ? DriverStatementSourceType.CashVoucher
+                        : line.JournalEntry.SourceType ==
+                          JournalEntrySourceType.DriverTrip
+                            ? DriverStatementSourceType.DriverTrip
+                            : DriverStatementSourceType.JournalEntry,
+                Date = line.JournalEntry.EntryDate,
+                CreatedOn = line.JournalEntry.PostedOn,
+                DocumentNumber = voucher != null
+                    ? voucher.VoucherNumber
+                    : trip != null
+                        ? line.JournalEntry.SourceNumber ?? trip.InvoiceNumber
+                        : line.JournalEntry.SourceNumber ??
+                          line.JournalEntry.EntryNumber,
+                InvoiceNumber = trip != null
+                    ? trip.InvoiceNumber
+                    : voucher != null && voucher.DriverTrip != null
+                        ? voucher.DriverTrip.InvoiceNumber
+                        : null,
+                DriverTripId = trip != null
+                    ? (int?)trip.Id
+                    : voucher == null
+                        ? null
+                        : voucher.DriverTripId,
+                BusinessPartnerId = trip != null
+                    ? (int?)trip.BusinessPartnerId
+                    : voucher != null && voucher.DriverTrip != null
+                        ? voucher.DriverTrip.BusinessPartnerId
+                        : null,
+                BusinessPartnerName = trip != null
+                    ? trip.BusinessPartner.Name
+                    : voucher != null && voucher.DriverTrip != null
+                        ? voucher.DriverTrip.BusinessPartner.Name
+                        : null,
+                CountryName = trip != null
+                    ? trip.Invoice.Country == null
+                        ? null
+                        : trip.Invoice.Country.Name
+                    : voucher != null && voucher.DriverTrip != null &&
+                      voucher.DriverTrip.Invoice != null &&
+                      voucher.DriverTrip.Invoice.Country != null
+                        ? voucher.DriverTrip.Invoice!.Country!.Name
+                        : null,
+                MovementTypeName = voucher != null &&
+                    voucher.CashMovementType != null
+                        ? voucher.CashMovementType.Name
+                        : trip != null
+                            ? "تكلفة رحلة"
+                            : line.JournalEntry.EntryType ==
+                              JournalEntryType.Adjustment
+                                ? "قيد تسوية"
+                                : line.JournalEntry.EntryType ==
+                                  JournalEntryType.Manual
+                                    ? "قيد يدوي"
+                                    : "قيد محاسبي",
+                Description = line.Description ??
+                    line.JournalEntry.Description,
+                Debit = line.Debit,
+                Credit = line.Credit,
+                CashPaid = voucher == null ? 0m : line.Debit,
+                CashReceived = voucher == null ? 0m : line.Credit,
+                TripCost = trip == null ? 0m : line.Credit - line.Debit,
+                CashboxName = voucher != null && voucher.Cashbox != null
+                    ? voucher.Cashbox.Name
+                    : null,
+                ReferenceNumber = voucher == null
+                    ? null
+                    : voucher.ReferenceNumber,
+                Direction = voucher == null
+                    ? null
+                    : (CashDirection?)voucher.Direction,
+                CashMovementTypeId = voucher == null
+                    ? null
+                    : voucher.CashMovementTypeId,
+                Classification = voucher == null
+                    ? null
+                    : voucher.Classification ??
+                      (voucher.CashMovementType == null
+                          ? null
+                          : voucher.CashMovementType.Classification)
+            };
     }
 
     private static Error? ValidatePagination(PaginationRequest pagination) =>
@@ -855,12 +908,9 @@ public sealed partial class FinancialStatementService(
             ? PaginationErrors.Invalid()
             : null;
 
-    private static int GetOffset(
-        PaginationRequest pagination,
-        int totalCount)
+    private static int GetOffset(PaginationRequest pagination, int totalCount)
     {
-        var offset =
-            (long)(pagination.PageNumber - 1) * pagination.PageSize;
+        var offset = (long)(pagination.PageNumber - 1) * pagination.PageSize;
         return offset >= totalCount ? totalCount : (int)offset;
     }
 
@@ -868,24 +918,31 @@ public sealed partial class FinancialStatementService(
         (int)Math.Ceiling(totalCount / (double)pageSize);
 
     private static string PartnerMovementName(
-        BusinessPartnerMovementType? movementType) =>
-        movementType switch
+        BusinessPartnerMovementType? movementType,
+        PartnerStatementSourceType sourceType,
+        JournalEntryType entryType) => movementType switch
         {
-            null => "رصيد افتتاحي",
             BusinessPartnerMovementType.Sales => "فاتورة بيع",
             BusinessPartnerMovementType.SalesReturn => "مرتجع بيع",
             BusinessPartnerMovementType.Purchase => "فاتورة شراء",
             BusinessPartnerMovementType.PurchaseReturn => "مرتجع شراء",
             BusinessPartnerMovementType.CashReceipt => "سند قبض",
             BusinessPartnerMovementType.CashPayment => "سند صرف",
-            _ => "حركة حساب"
+            _ when sourceType == PartnerStatementSourceType.OpeningBalance =>
+                "رصيد افتتاحي",
+            _ when entryType == JournalEntryType.Adjustment => "قيد تسوية",
+            _ when entryType == JournalEntryType.Manual => "قيد يدوي",
+            _ when entryType == JournalEntryType.Opening => "قيد افتتاحي",
+            _ => "قيد محاسبي"
         };
 
-    private static string DriverSourceName(
-        DriverStatementSourceType sourceType) =>
-        sourceType == DriverStatementSourceType.DriverTrip
-            ? "رحلة سائق"
-            : "سند نقدية";
+    private static string DriverSourceName(DriverStatementSourceType sourceType) =>
+        sourceType switch
+        {
+            DriverStatementSourceType.DriverTrip => "رحلة سائق",
+            DriverStatementSourceType.CashVoucher => "سند نقدية",
+            _ => "قيد محاسبي"
+        };
 
     private static string PartnerBalanceDescription(decimal balance) =>
         balance switch
@@ -905,12 +962,25 @@ public sealed partial class FinancialStatementService(
 
     private sealed class CashboxStatementRaw
     {
-        public int CashVoucherId { get; init; }
+        public int JournalEntryLineId { get; init; }
+        public int JournalEntryId { get; init; }
+        public int? CashVoucherId { get; init; }
+        public JournalEntrySourceType? SourceType { get; init; }
+        public bool IsOpening { get; init; }
         public DateOnly Date { get; init; }
-        public string VoucherNumber { get; init; } = string.Empty;
-        public string MovementName { get; init; } = string.Empty;
+        public DateTime CreatedOn { get; init; }
+        public string DocumentNumber { get; init; } = string.Empty;
+        public string? MovementName { get; init; }
         public string? Description { get; init; }
         public string? PartyName { get; init; }
+        public string? ExternalPartyName { get; init; }
+        public CashPartyType? CashPartyType { get; init; }
+        public int? BusinessPartnerId { get; init; }
+        public int? DriverId { get; init; }
+        public int? DriverTripId { get; init; }
+        public int? EmployeeId { get; init; }
+        public int? CashMovementTypeId { get; init; }
+        public CashMovementClassification? Classification { get; init; }
         public CurrencyCode Currency { get; init; }
         public decimal ExchangeRate { get; init; }
         public decimal ReceiptAmount { get; init; }
@@ -922,8 +992,11 @@ public sealed partial class FinancialStatementService(
 
     private sealed class PartnerStatementRaw
     {
+        public int JournalEntryLineId { get; init; }
+        public int JournalEntryId { get; init; }
         public int SourceId { get; init; }
         public PartnerStatementSourceType SourceType { get; init; }
+        public JournalEntryType EntryType { get; init; }
         public DateOnly Date { get; init; }
         public DateTime CreatedOn { get; init; }
         public string DocumentNumber { get; init; } = string.Empty;
@@ -931,11 +1004,8 @@ public sealed partial class FinancialStatementService(
         public string? Description { get; init; }
         public decimal Debit { get; init; }
         public decimal Credit { get; init; }
-
         public decimal ExchangeRate { get; init; }
-
         public decimal BaseDebit { get; init; }
-
         public decimal BaseCredit { get; init; }
         public string? ReferenceNumber { get; init; }
         public int? CashMovementTypeId { get; init; }
@@ -944,11 +1014,12 @@ public sealed partial class FinancialStatementService(
 
     private sealed class DriverStatementRaw
     {
-        public int SourceId { get; init; }
+        public int JournalEntryLineId { get; init; }
+        public int JournalEntryId { get; init; }
         public DriverStatementSourceType SourceType { get; init; }
         public DateOnly Date { get; init; }
         public DateTime CreatedOn { get; init; }
-        public string SourceNumber { get; init; } = string.Empty;
+        public string DocumentNumber { get; init; } = string.Empty;
         public string? InvoiceNumber { get; init; }
         public int? DriverTripId { get; init; }
         public int? BusinessPartnerId { get; init; }
@@ -956,6 +1027,8 @@ public sealed partial class FinancialStatementService(
         public string? CountryName { get; init; }
         public string? MovementTypeName { get; init; }
         public string? Description { get; init; }
+        public decimal Debit { get; init; }
+        public decimal Credit { get; init; }
         public decimal CashPaid { get; init; }
         public decimal CashReceived { get; init; }
         public decimal TripCost { get; init; }

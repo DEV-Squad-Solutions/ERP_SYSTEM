@@ -58,6 +58,9 @@ public sealed class EmployeeMovementServiceTests
         Assert.Equal(500m, bonusVoucher.Amount);
         Assert.Equal(CurrencyCode.EGP, bonusVoucher.Currency);
         Assert.True(bonusVoucher.IsPosted);
+        Assert.Contains(
+            bonusVoucher.Id,
+            database.CashVoucherPostingService.SynchronizedVoucherIds);
 
         // 2. Deduction Movement (Debit -> CashDirection.Payment)
         var deductionResult = await service.AddAsync(new EmployeeMovementRequest(
@@ -86,6 +89,9 @@ public sealed class EmployeeMovementServiceTests
         Assert.Equal(200m, deductionVoucher.Amount);
         Assert.Equal(CurrencyCode.EGP, deductionVoucher.Currency);
         Assert.True(deductionVoucher.IsPosted);
+        Assert.Contains(
+            deductionVoucher.Id,
+            database.CashVoucherPostingService.SynchronizedVoucherIds);
     }
 
     [Fact]
@@ -377,5 +383,45 @@ public sealed class EmployeeMovementServiceTests
 
         var voucherCount = await database.Context.CashVouchers.CountAsync(v => v.CompanyId == 1);
         Assert.Equal(2, voucherCount);
+        Assert.Equal(
+            2,
+            database.CashVoucherPostingService.SynchronizedVoucherIds.Count);
+    }
+
+    [Fact]
+    public async Task AddAsync_PostingFailureRollsBackMovementAndVoucher()
+    {
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        database.CashVoucherPostingService.FailSynchronization = true;
+        var service = database.CreateMovementService();
+
+        var cashbox = new Cashbox
+        {
+            CompanyId = 1,
+            Code = "CB-POST-FAIL",
+            Name = "Posting Failure Safe",
+            Currency = CurrencyCode.EGP,
+            OpeningBalance = 1_000m,
+            IsActive = true
+        };
+        database.Context.Cashboxes.Add(cashbox);
+        await database.Context.SaveChangesAsync();
+
+        var result = await service.AddAsync(new EmployeeMovementRequest(
+            EmployeeId: 1,
+            Type: EmployeeMovementType.Bonus,
+            Amount: 250m,
+            Currency: CurrencyCode.EGP,
+            MovementDate: new DateOnly(2026, 8, 10),
+            CashboxId: cashbox.Id));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Tests.CashVoucherPostingFailed", result.Error.Code);
+        Assert.Empty(await database.Context.EmployeeMovements
+            .Where(movement => movement.CompanyId == 1)
+            .ToListAsync());
+        Assert.Empty(await database.Context.CashVouchers
+            .Where(voucher => voucher.CompanyId == 1)
+            .ToListAsync());
     }
 }

@@ -33,7 +33,7 @@ public sealed class EmployeeOpeningBalanceServiceTests
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value.EmployeeId);
         Assert.Equal("Monthly Employee", result.Value.EmployeeName);
-        Assert.Equal("EMP001", result.Value.EmployeeCode);
+        Assert.Equal("Emp-001", result.Value.EmployeeCode);
         Assert.Equal(5000m, result.Value.Amount);
         Assert.Equal(EmployeeBalanceType.Credit, result.Value.BalanceType);
         Assert.StartsWith("EOB-", result.Value.DocumentNumber);
@@ -47,6 +47,20 @@ public sealed class EmployeeOpeningBalanceServiceTests
         await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
         var payrollService = database.CreatePayrollService();
         var balanceService = database.CreateOpeningBalanceService();
+
+        for (var day = 1; day <= 5; day++)
+        {
+            database.Context.EmployeeAttendances.Add(
+                new MiniErp.Domain.Entities.Employees.EmployeeAttendance
+                {
+                    CompanyId = 1,
+                    EmployeeId = 1,
+                    WorkDate = new DateOnly(2026, 8, day),
+                    Status = EmployeeAttendanceStatus.Present,
+                    WorkDayRatio = WorkDayRatio.FullDay
+                });
+        }
+        await database.Context.SaveChangesAsync();
 
         // Create payroll entry and move salary
         var addResult = await payrollService.AddAsync(new Application.Features.PayrollEntries.PayrollEntryCreateRequest(

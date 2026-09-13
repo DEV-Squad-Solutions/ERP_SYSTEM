@@ -22,4 +22,5 @@ public sealed record CashboxSelectResponse(
     int Id,
     string Name,
     CurrencyCode Currency,
+    CurrencyCode BaseCurrency,
     decimal CurrentBalance);

@@ -45,7 +45,7 @@ public static class InventoryCountErrors
 
     public static Error ReconcileRowVersionRequired() =>
         Error.Validation(
-            "InventoryCounts.RowVersionRequired",
+            "InventoryCounts.ReconcileRowVersionRequired",
             "يجب إرسال إصدار السجل الحالي المكون من 8 بايت للتسوية.",
             nameof(InventoryCountReconcileRequest.RowVersion));
 

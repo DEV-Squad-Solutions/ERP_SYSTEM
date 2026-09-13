@@ -68,13 +68,15 @@ public enum PartnerStatementSourceType
 {
     OpeningBalance = 1,
     Invoice = 2,
-    CashVoucher = 3
+    CashVoucher = 3,
+    JournalEntry = 4
 }
 
 public enum DriverStatementSourceType
 {
     CashVoucher = 1,
-    DriverTrip = 2
+    DriverTrip = 2,
+    JournalEntry = 3
 }
 
 public enum EmployeeStatementSourceType
@@ -82,5 +84,6 @@ public enum EmployeeStatementSourceType
     OpeningBalance = 1,
     SalaryTransfer = 2,
     Movement = 3,
-    CashVoucher = 4
+    CashVoucher = 4,
+    JournalEntry = 5
 }

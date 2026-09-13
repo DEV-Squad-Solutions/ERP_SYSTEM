@@ -66,14 +66,15 @@ public sealed class AccountingReadinessServiceTests
 
             INSERT INTO JournalEntryLines (
                 Id, CompanyId, JournalEntryId, AccountId, Description,
-                Debit, Credit, CreatedById, CreatedOn, CreatedByPc,
+                Debit, Credit, Currency, ExchangeRate, TransactionDebit,
+                TransactionCredit, CreatedById, CreatedOn, CreatedByPc,
                 IsDeleted)
             VALUES
-                (1, 1, 1, 1, NULL, 100, 0,
+                (1, 1, 1, 1, NULL, 100, 0, 1, 1, 100, 0,
                  'test', '2026-03-01', 'test', 0),
-                (2, 1, 1, 2, NULL, 0, 100,
+                (2, 1, 1, 2, NULL, 0, 100, 1, 1, 0, 100,
                  'test', '2026-03-01', 'test', 0),
-                (3, 1, 2, 1, NULL, 25, 0,
+                (3, 1, 2, 1, NULL, 25, 0, 1, 1, 25, 0,
                  'test', '2026-03-02', 'test', 0);
             """);
 

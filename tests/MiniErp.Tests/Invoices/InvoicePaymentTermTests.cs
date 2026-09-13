@@ -140,7 +140,7 @@ public sealed class InvoicePaymentTermTests
     }
 
     [Fact]
-    public void RequestContracts_ExposeOptionalCreateOnlyWBTotalAssertion()
+    public void RequestContracts_ExposeOptionalWBTotalAssertion()
     {
         var createWBTotal = Assert.Single(
             typeof(InvoiceRequest).GetProperties(),
@@ -155,9 +155,17 @@ public sealed class InvoicePaymentTermTests
         Assert.True(createWBTotalParameter.IsOptional);
         Assert.Null(createWBTotalParameter.DefaultValue);
 
-        Assert.DoesNotContain(
+        var updateWBTotal = Assert.Single(
             typeof(InvoiceUpdateRequest).GetProperties(),
-            property => property.Name == "WBTotal");
+            property => property.Name == nameof(InvoiceUpdateRequest.WBTotal));
+        Assert.Equal(typeof(decimal?), updateWBTotal.PropertyType);
+        var updateConstructor = Assert.Single(
+            typeof(InvoiceUpdateRequest).GetConstructors());
+        var updateWBTotalParameter = Assert.Single(
+            updateConstructor.GetParameters(),
+            parameter => parameter.Name == nameof(InvoiceUpdateRequest.WBTotal));
+        Assert.True(updateWBTotalParameter.IsOptional);
+        Assert.Null(updateWBTotalParameter.DefaultValue);
         var detailsWBTotal = Assert.Single(
             typeof(InvoiceResponse).GetProperties(),
             property => property.Name == "WBTotal");

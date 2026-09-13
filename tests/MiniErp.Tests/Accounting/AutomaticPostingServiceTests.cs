@@ -52,6 +52,9 @@ public sealed class AutomaticPostingServiceTests
     public async Task Posting_PersistsForeignTransactionCurrencyAndRate()
     {
         await using var database = await TestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE Cashboxes SET Currency = 2 WHERE Id = 7; " +
+            "UPDATE BusinessPartners SET Currency = 2 WHERE Id = 11;");
         var service = new AutomaticPostingService(
             database.Context,
             new TestCurrentCompanyContext(1),
@@ -93,6 +96,9 @@ public sealed class AutomaticPostingServiceTests
     public async Task Posting_RejectsInconsistentTransactionConversion()
     {
         await using var database = await TestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE Cashboxes SET Currency = 2 WHERE Id = 7; " +
+            "UPDATE BusinessPartners SET Currency = 2 WHERE Id = 11;");
         var service = new AutomaticPostingService(
             database.Context,
             new TestCurrentCompanyContext(1),
@@ -350,6 +356,9 @@ public sealed class AutomaticPostingServiceTests
     public async Task CashVoucherPosting_UsesMappingsAndSynchronizesLifecycle()
     {
         await using var database = await TestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE Cashboxes SET Currency = 2 WHERE Id = 7; " +
+            "UPDATE BusinessPartners SET Currency = 2 WHERE Id = 11;");
         var companyContext = new TestCurrentCompanyContext(1);
         var automaticPostingService = new AutomaticPostingService(
             database.Context,
@@ -1291,6 +1300,7 @@ public sealed class AutomaticPostingServiceTests
                     CompanyId INTEGER NOT NULL,
                     Code TEXT NOT NULL,
                     Name TEXT NOT NULL,
+                    Currency INTEGER NOT NULL DEFAULT 1,
                     IsActive INTEGER NOT NULL,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
@@ -1423,12 +1433,12 @@ public sealed class AutomaticPostingServiceTests
                      'Currency transfer', '2026-08-31');
 
                 INSERT INTO Cashboxes
-                    (Id, CompanyId, Code, Name, OpeningBalanceDate,
-                     BaseOpeningBalance)
+                    (Id, CompanyId, Code, Name, Currency,
+                     OpeningBalanceDate, BaseOpeningBalance)
                 VALUES
-                    (7, 1, 'CBX-0007', 'Main cashbox', '2026-01-01', 500),
-                    (8, 1, 'CBX-0008', 'Destination cashbox', '2026-01-01', 0),
-                    (9, 1, 'CBX-0009', 'Invoice cashbox', '2026-01-01', 0);
+                    (7, 1, 'CBX-0007', 'Main cashbox', 1, '2026-01-01', 500),
+                    (8, 1, 'CBX-0008', 'Destination cashbox', 2, '2026-01-01', 0),
+                    (9, 1, 'CBX-0009', 'Invoice cashbox', 1, '2026-01-01', 0);
 
                 INSERT INTO CashVouchers
                     (Id, CompanyId, CashboxTransferId, Direction, CashboxId,

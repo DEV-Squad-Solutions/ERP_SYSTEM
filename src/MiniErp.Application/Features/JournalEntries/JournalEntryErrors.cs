@@ -1,4 +1,5 @@
 using MiniErp.Application.Common.Results;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.JournalEntries;
 
@@ -85,6 +86,13 @@ public static class JournalEntryErrors
             "JournalEntries.PartyInactive",
             $"الطرف رقم {partyId} غير فعال.",
             $"Lines[{lineIndex}].PartyId");
+
+    public static Error PartyCurrencyMismatch(
+        CurrencyCode partyCurrency,
+        int lineIndex) => Error.Validation(
+            "JournalEntries.PartyCurrencyMismatch",
+            $"يجب أن تطابق عملة السطر عملة الطرف ({partyCurrency}).",
+            $"Lines[{lineIndex}].Currency");
 
     public static Error Unbalanced() => Error.Validation(
         "JournalEntries.Unbalanced",

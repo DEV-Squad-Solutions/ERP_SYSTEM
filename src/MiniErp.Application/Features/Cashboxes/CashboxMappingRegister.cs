@@ -40,7 +40,9 @@ public sealed class CashboxMappingRegister : IRegister
                 cashbox => cashbox.OpeningBalance +
                     cashbox.Vouchers
                         .Where(voucher =>
-                            voucher.IsPosted)
+                            voucher.IsPosted ||
+                            (!voucher.InvoiceId.HasValue &&
+                             !voucher.CashboxTransferId.HasValue))
                         .Sum(voucher =>
                             voucher.Direction == CashDirection.Receipt
                                 ? voucher.Amount
@@ -48,11 +50,18 @@ public sealed class CashboxMappingRegister : IRegister
 
         config.ForType<Cashbox, CashboxSelectResponse>()
             .Map(
+                response => response.BaseCurrency,
+                cashbox => cashbox.Company.Settings == null
+                    ? CurrencyCode.EGP
+                    : cashbox.Company.Settings.BaseCurrency)
+            .Map(
                 response => response.CurrentBalance,
                 cashbox => cashbox.OpeningBalance +
                     cashbox.Vouchers
                         .Where(voucher =>
-                            voucher.IsPosted)
+                            voucher.IsPosted ||
+                            (!voucher.InvoiceId.HasValue &&
+                             !voucher.CashboxTransferId.HasValue))
                         .Sum(voucher =>
                             voucher.Direction == CashDirection.Receipt
                                 ? voucher.Amount

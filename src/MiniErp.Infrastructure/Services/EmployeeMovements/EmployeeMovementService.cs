@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
+using MiniErp.Application.Features.CashVouchers;
 using MiniErp.Application.Features.EmployeeMovements;
 using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Domain.Entities.CashManagement;
@@ -18,7 +19,8 @@ public sealed class EmployeeMovementService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     IExchangeRateResolver exchangeRateResolver,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    ICashVoucherPostingService cashVoucherPostingService)
     : IEmployeeMovementService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -227,7 +229,10 @@ public sealed class EmployeeMovementService(
                 .Select(c =>
                     c.OpeningBalance +
                     (c.Vouchers
-                        .Where(v => v.IsPosted)
+                        .Where(v =>
+                            v.IsPosted ||
+                            (!v.InvoiceId.HasValue &&
+                             !v.CashboxTransferId.HasValue))
                         .Sum(v => (decimal?)(v.Direction == CashDirection.Receipt ? v.Amount : -v.Amount)) ?? 0m))
                 .SingleAsync(cancellationToken);
 
@@ -274,6 +279,17 @@ public sealed class EmployeeMovementService(
         movement.CashVoucherId = cashVoucher.Id;
         dbContext.EmployeeMovements.Add(movement);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        var postingResult = await cashVoucherPostingService
+            .SynchronizeAsync(cashVoucher, cancellationToken);
+        if (postingResult.IsFailure)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<EmployeeMovementResponse>.Failure(
+                postingResult.Errors);
+        }
+
         await transaction.CommitAsync(cancellationToken);
 
         var response = new EmployeeMovementResponse(
@@ -376,7 +392,10 @@ public sealed class EmployeeMovementService(
                 c.Id,
                 Balance = c.OpeningBalance +
                     (c.Vouchers
-                        .Where(v => v.IsPosted)
+                        .Where(v =>
+                            v.IsPosted ||
+                            (!v.InvoiceId.HasValue &&
+                             !v.CashboxTransferId.HasValue))
                         .Sum(v => (decimal?)(v.Direction == CashDirection.Receipt ? v.Amount : -v.Amount)) ?? 0m)
             })
             .ToDictionaryAsync(c => c.Id, c => c.Balance, cancellationToken);
@@ -477,6 +496,20 @@ public sealed class EmployeeMovementService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        foreach (var tuple in voucherList)
+        {
+            var postingResult = await cashVoucherPostingService
+                .SynchronizeAsync(tuple.Voucher, cancellationToken);
+            if (postingResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<List<EmployeeMovementResponse>>.Failure(
+                    postingResult.Errors);
+            }
+        }
+
         await transaction.CommitAsync(cancellationToken);
 
         var results = voucherList.Select(tuple => new EmployeeMovementResponse(

@@ -29,7 +29,11 @@ public static class EmployeeMovementErrors
             "EmployeeMovements.CashboxRequired",
             "لا يمكن إنشاء حركة موظف بدون خزينة.");
 
-    public static Error CashboxRequiredForAdvance() => CashboxRequired();
+    public static Error CashboxRequiredForAdvance() =>
+        Error.Validation(
+            "EmployeeMovements.CashboxRequiredForAdvance",
+            "لا يمكن إنشاء سلفة موظف بدون خزينة.",
+            nameof(EmployeeMovementRequest.CashboxId));
 
     public static Error CashboxNotFound(int cashboxId) =>
         Error.NotFound(

@@ -213,14 +213,18 @@ public sealed class AccountService(
                 {
                     partner.Id,
                     partner.Code,
-                    partner.Name
+                    partner.Name,
+                    partner.Currency
                 })
                 .ToListAsync(cancellationToken);
             businessPartners = rows.Select(party =>
                 new JournalPartySelectResponse(
                     Id: party.Id,
                     Code: party.Code,
-                    Name: party.Name)).ToArray();
+                    Name: party.Name)
+                {
+                    Currency = party.Currency
+                }).ToArray();
         }
 
         IReadOnlyList<JournalPartySelectResponse> employees = [];
@@ -292,14 +296,18 @@ public sealed class AccountService(
                 {
                     cashbox.Id,
                     cashbox.Code,
-                    cashbox.Name
+                    cashbox.Name,
+                    cashbox.Currency
                 })
                 .ToDictionaryAsync(
                     cashbox => cashbox.Id,
                     cashbox => new JournalPartySelectResponse(
                         Id: cashbox.Id,
                         Code: cashbox.Code,
-                        Name: cashbox.Name),
+                        Name: cashbox.Name)
+                    {
+                        Currency = cashbox.Currency
+                    },
                     cancellationToken);
 
         IReadOnlyList<JournalAccountSelectResponse> response = accounts

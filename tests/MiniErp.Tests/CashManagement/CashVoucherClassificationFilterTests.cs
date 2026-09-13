@@ -68,6 +68,49 @@ public sealed class CashVoucherClassificationFilterTests
             CashMovementClassification.Revenue,
             directRevenue.Value.Classification);
 
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 5001,
+            entryNumber: "JV-CLF-EXP-DIRECT",
+            entryDate: new DateOnly(2026, 7, 27),
+            entryType: JournalEntryType.Automatic,
+            sourceType: JournalEntrySourceType.CashVoucher,
+            sourceId: directExpense.Value.Id,
+            sourceNumber: directExpense.Value.VoucherNumber,
+            lines:
+            [
+                new(
+                    AccountId: 1,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 1,
+                    Debit: 0m,
+                    Credit: 30m,
+                    Currency: CurrencyCode.EGP,
+                    ExchangeRate: 1m,
+                    TransactionDebit: 0m,
+                    TransactionCredit: 30m)
+            ]);
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 5002,
+            entryNumber: "JV-CLF-EXP-MOVEMENT",
+            entryDate: new DateOnly(2026, 7, 27),
+            entryType: JournalEntryType.Automatic,
+            sourceType: JournalEntrySourceType.CashVoucher,
+            sourceId: movementExpense.Value.Id,
+            sourceNumber: movementExpense.Value.VoucherNumber,
+            lines:
+            [
+                new(
+                    AccountId: 1,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 1,
+                    Debit: 0m,
+                    Credit: 20m,
+                    Currency: CurrencyCode.EGP,
+                    ExchangeRate: 1m,
+                    TransactionDebit: 0m,
+                    TransactionCredit: 20m)
+            ]);
+
         var postedOnly = await service.GetAllAsync(
             new PaginationRequest { PageNumber = 1, PageSize = 20 },
             new CashVoucherFilterRequest(
@@ -165,7 +208,9 @@ public sealed class CashVoucherClassificationFilterTests
                 Direction: direction,
                 CashboxId: 1,
                 Amount: amount,
-                Description: "Classification filter test"));
+                Description: "Classification filter test",
+                CashMovementTypeId: movementTypeId,
+                AccountId: accountId));
         if (draft.IsFailure)
         {
             return draft;

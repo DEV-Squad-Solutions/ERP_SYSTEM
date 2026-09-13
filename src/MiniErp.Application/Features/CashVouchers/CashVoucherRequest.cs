@@ -7,7 +7,18 @@ public sealed record CashVoucherRequest(
     CashDirection Direction,
     int CashboxId,
     decimal Amount,
-    string? Description)
+    string? Description,
+    int? CashMovementTypeId = null,
+    int? EmployeeId = null,
+    int? BusinessPartnerId = null,
+    int? DriverId = null,
+    int? DriverTripId = null,
+    string? ExternalPartyName = null,
+    string? ReferenceNumber = null,
+    string? Notes = null,
+    decimal? ExchangeRate = null,
+    int? AccountId = null,
+    EmployeeMovementType? EmployeeMovementType = null)
 {
     public const int ExternalPartyNameMaximumLength = 200;
 

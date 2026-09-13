@@ -77,6 +77,9 @@ public sealed class DashboardServiceTests
     {
         await using var database = await TestDatabase.CreateAsync();
         await database.SeedCashboxWithoutVouchersAsync(openingBalance: 250m);
+        await database.SeedCashboxLedgerEntryAsync(
+            amount: 250m,
+            isOpening: true);
 
         var result = await database.Service.GetAsync(
             new DashboardFilterRequest());
@@ -86,6 +89,37 @@ public sealed class DashboardServiceTests
         Assert.Equal(CurrencyCode.EGP, cashBalance.Currency);
         Assert.Equal(1, cashBalance.CashboxCount);
         Assert.Equal(250m, cashBalance.CurrentBalance);
+    }
+
+    [Fact]
+    public async Task Get_IgnoresOperationalCashboxOpeningBalanceWithoutJournal()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.SeedCashboxWithoutVouchersAsync(openingBalance: 250m);
+
+        var result = await database.Service.GetAsync(
+            new DashboardFilterRequest());
+
+        Assert.True(result.IsSuccess);
+        var cashBalance = Assert.Single(result.Value.CashBalances);
+        Assert.Equal(0m, cashBalance.CurrentBalance);
+    }
+
+    [Fact]
+    public async Task Get_IncludesManualCashboxJournalLinesWithoutVoucher()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.SeedCashboxWithoutVouchersAsync(openingBalance: 0m);
+        await database.SeedCashboxLedgerEntryAsync(
+            amount: 75m,
+            isOpening: false);
+
+        var result = await database.Service.GetAsync(
+            new DashboardFilterRequest());
+
+        Assert.True(result.IsSuccess);
+        var cashBalance = Assert.Single(result.Value.CashBalances);
+        Assert.Equal(75m, cashBalance.CurrentBalance);
     }
 
     [Fact]
@@ -196,6 +230,59 @@ public sealed class DashboardServiceTests
             Context.ChangeTracker.Clear();
         }
 
+        public async Task SeedCashboxLedgerEntryAsync(
+            decimal amount,
+            bool isOpening)
+        {
+            var cashbox = await Context.Cashboxes
+                .AsNoTracking()
+                .SingleAsync(entity => entity.Code == "CB-EMPTY");
+            var entryNumber = isOpening ? "JE-CASHBOX-OPEN" : "JE-CASHBOX-MANUAL";
+            var entryDate = isOpening ? "2026-01-01" : "2026-09-02";
+            var entryType = isOpening ? 4 : 1;
+            int? sourceType = isOpening
+                ? (int)JournalEntrySourceType.CashboxOpeningBalance
+                : null;
+            int? sourceId = isOpening ? cashbox.Id : null;
+
+            await Context.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                INSERT INTO JournalEntries (
+                    CompanyId, FiscalYearId, EntryNumber, EntryDate,
+                    Description, EntryType, SourceType, SourceId,
+                    SourceNumber, Status, PostedOn, RowVersion,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES (
+                    1, 1, {entryNumber}, {entryDate}, {entryNumber},
+                    {entryType}, {sourceType}, {sourceId}, NULL, 1,
+                    {entryDate}, randomblob(8), 'test', {entryDate},
+                    'test', 0);
+                """);
+            var journalEntryId = await Context.JournalEntries
+                .AsNoTracking()
+                .Where(entry => entry.EntryNumber == entryNumber)
+                .Select(entry => entry.Id)
+                .SingleAsync();
+            await Context.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                INSERT INTO JournalEntryLines (
+                    CompanyId, JournalEntryId, AccountId, PartyType, PartyId,
+                    Description, Debit, Credit, Currency, ExchangeRate,
+                    TransactionDebit, TransactionCredit,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES (
+                    1, {journalEntryId}, 1, 5, {cashbox.Id}, NULL,
+                    CAST({amount} AS NUMERIC), 0, 1, 1,
+                    CAST({amount} AS NUMERIC), 0,
+                    'test', {entryDate}, 'test', 0),
+                    (1, {journalEntryId}, 2, NULL, NULL, NULL,
+                    0, CAST({amount} AS NUMERIC), 1, 1, 0,
+                    CAST({amount} AS NUMERIC), 'test', {entryDate},
+                    'test', 0);
+                """);
+            Context.ChangeTracker.Clear();
+        }
+
         public async Task SeedInvoicesAsync()
         {
             var auditDate = new DateTime(2026, 9, 1);
@@ -297,6 +384,16 @@ public sealed class DashboardServiceTests
                 VALUES (
                     1, 1, '2026', '2026-01-01', '2026-12-31', 1, 1,
                     randomblob(8), 'test', '2026-01-01', 'test', 0);
+
+                INSERT INTO Accounts (
+                    Id, CompanyId, Code, Name, ParentAccountId,
+                    AccountType, NormalBalance, IsPosting, IsActive,
+                    RowVersion, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES
+                    (1, 1, '1000', 'Cashbox account', NULL, 1, 1, 1, 1,
+                     randomblob(8), 'test', '2026-01-01', 'test', 0),
+                    (2, 1, '3100', 'Opening equity', NULL, 3, 2, 1, 1,
+                     randomblob(8), 'test', '2026-01-01', 'test', 0);
                 """);
 
             var service = new DashboardService(

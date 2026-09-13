@@ -13,69 +13,58 @@ public sealed partial class FinancialStatementService
             CancellationToken cancellationToken = default)
     {
         var balances = new List<OperationalAccountBalance>();
-
-        if (ShouldLoadCategory(
-                filters,
-                OperationalTrialBalanceCategory.Cashbox))
+        if (ShouldLoadCategory(filters, OperationalTrialBalanceCategory.Cashbox))
         {
-            balances.AddRange(await LoadCashboxBalancesAsync(
+            balances.AddRange(await LoadPartyBalancesAsync(
                 filters,
+                JournalPartyType.Cashbox,
+                OperationalTrialBalanceCategory.Cashbox,
                 cancellationToken));
         }
-
-        if (ShouldLoadCategory(
-                filters,
-                OperationalTrialBalanceCategory.Partner))
+        if (ShouldLoadCategory(filters, OperationalTrialBalanceCategory.Partner))
         {
-            balances.AddRange(await LoadPartnerBalancesAsync(
+            balances.AddRange(await LoadPartyBalancesAsync(
                 filters,
+                JournalPartyType.Customer,
+                OperationalTrialBalanceCategory.Partner,
                 cancellationToken));
         }
-
-        if (ShouldLoadCategory(
-                filters,
-                OperationalTrialBalanceCategory.Driver))
+        if (ShouldLoadCategory(filters, OperationalTrialBalanceCategory.Driver))
         {
-            balances.AddRange(await LoadDriverBalancesAsync(
+            balances.AddRange(await LoadPartyBalancesAsync(
                 filters,
+                JournalPartyType.Driver,
+                OperationalTrialBalanceCategory.Driver,
                 cancellationToken));
         }
-
-        if (ShouldLoadCategory(
-                filters,
-                OperationalTrialBalanceCategory.Employee))
+        if (ShouldLoadCategory(filters, OperationalTrialBalanceCategory.Employee))
         {
-            balances.AddRange(await LoadEmployeeBalancesAsync(
+            balances.AddRange(await LoadPartyBalancesAsync(
                 filters,
+                JournalPartyType.Employee,
+                OperationalTrialBalanceCategory.Employee,
                 cancellationToken));
         }
-
-        if (ShouldLoadCategory(
-                filters,
-                OperationalTrialBalanceCategory.Revenue))
+        if (ShouldLoadCategory(filters, OperationalTrialBalanceCategory.Revenue))
         {
-            balances.AddRange(await LoadMovementTypeBalancesAsync(
+            balances.AddRange(await LoadAccountBalancesAsync(
                 filters,
+                AccountType.Revenue,
                 OperationalTrialBalanceCategory.Revenue,
-                CashMovementClassification.Revenue,
                 cancellationToken));
         }
-
-        if (ShouldLoadCategory(
-                filters,
-                OperationalTrialBalanceCategory.Expense))
+        if (ShouldLoadCategory(filters, OperationalTrialBalanceCategory.Expense))
         {
-            balances.AddRange(await LoadMovementTypeBalancesAsync(
+            balances.AddRange(await LoadAccountBalancesAsync(
                 filters,
+                AccountType.Expense,
                 OperationalTrialBalanceCategory.Expense,
-                CashMovementClassification.Expense,
                 cancellationToken));
         }
 
         IReadOnlyList<OperationalTrialBalanceItemResponse> items = balances
             .Select(ToDetailedItem)
-            .Where(item =>
-                filters.IncludeZeroBalances || !IsZero(item))
+            .Where(item => filters.IncludeZeroBalances || !IsZero(item))
             .OrderBy(item => item.Category)
             .ThenBy(item => item.AccountCode)
             .ThenBy(item => item.AccountName)
@@ -84,30 +73,19 @@ public sealed partial class FinancialStatementService
         if (filters.ViewMode == OperationalTrialBalanceViewMode.Summary)
         {
             items = items
-                .GroupBy(item => new
-                {
-                    item.Category,
-                    item.CategoryName
-                })
-                .Select(group =>
-                    new OperationalTrialBalanceItemResponse(
-                        Category: group.Key.Category,
-                        CategoryName: group.Key.CategoryName,
-                        AccountId: null,
-                        AccountCode: null,
-                        AccountName: group.Key.CategoryName,
-                        OpeningDebit: group.Sum(item =>
-                            item.OpeningDebit),
-                        OpeningCredit: group.Sum(item =>
-                            item.OpeningCredit),
-                        PeriodDebit: group.Sum(item =>
-                            item.PeriodDebit),
-                        PeriodCredit: group.Sum(item =>
-                            item.PeriodCredit),
-                        ClosingDebit: group.Sum(item =>
-                            item.ClosingDebit),
-                        ClosingCredit: group.Sum(item =>
-                            item.ClosingCredit)))
+                .GroupBy(item => new { item.Category, item.CategoryName })
+                .Select(group => new OperationalTrialBalanceItemResponse(
+                    Category: group.Key.Category,
+                    CategoryName: group.Key.CategoryName,
+                    AccountId: null,
+                    AccountCode: null,
+                    AccountName: group.Key.CategoryName,
+                    OpeningDebit: group.Sum(item => item.OpeningDebit),
+                    OpeningCredit: group.Sum(item => item.OpeningCredit),
+                    PeriodDebit: group.Sum(item => item.PeriodDebit),
+                    PeriodCredit: group.Sum(item => item.PeriodCredit),
+                    ClosingDebit: group.Sum(item => item.ClosingDebit),
+                    ClosingCredit: group.Sum(item => item.ClosingCredit)))
                 .OrderBy(item => item.Category)
                 .ToArray();
         }
@@ -119,7 +97,6 @@ public sealed partial class FinancialStatementService
             PeriodCredit: items.Sum(item => item.PeriodCredit),
             ClosingDebit: items.Sum(item => item.ClosingDebit),
             ClosingCredit: items.Sum(item => item.ClosingCredit));
-
         var baseCurrency = await dbContext.CompanySettings
             .AsNoTracking()
             .Where(settings => settings.CompanyId == companyId)
@@ -137,100 +114,97 @@ public sealed partial class FinancialStatementService
     }
 
     private async Task<IReadOnlyList<OperationalAccountBalance>>
-        LoadCashboxBalancesAsync(
+        LoadPartyBalancesAsync(
             OperationalTrialBalanceFilterRequest filters,
+            JournalPartyType partyType,
+            OperationalTrialBalanceCategory category,
             CancellationToken cancellationToken)
     {
-        var accounts = (await dbContext.Cashboxes
-                .AsNoTracking()
-                .Where(cashbox => cashbox.CompanyId == companyId)
-                .Select(cashbox => new
-                {
-                    cashbox.Id,
-                    cashbox.Code,
-                    cashbox.Name,
-                    cashbox.OpeningBalanceDate,
-                    cashbox.BaseOpeningBalance
-                })
-                .ToListAsync(cancellationToken))
-            .ToDictionary(
-                cashbox => cashbox.Id,
-                cashbox => new OperationalAccountBalance(
-                    category: OperationalTrialBalanceCategory.Cashbox,
-                    categoryName: CategoryName(
-                        OperationalTrialBalanceCategory.Cashbox),
-                    accountId: cashbox.Id,
-                    accountCode: cashbox.Code,
-                    accountName: cashbox.Name));
-
-        foreach (var cashbox in await dbContext.Cashboxes
-                     .AsNoTracking()
-                     .Where(entity =>
-                         entity.CompanyId == companyId &&
-                         entity.OpeningBalanceDate <= filters.ToDate &&
-                         entity.BaseOpeningBalance != 0m)
-                     .Select(entity => new
-                     {
-                         entity.Id,
-                         Date = entity.OpeningBalanceDate,
-                         Amount = entity.BaseOpeningBalance
-                     })
-                     .ToListAsync(cancellationToken))
+        var parties = partyType switch
         {
-            ApplySignedAmount(
-                accounts[cashbox.Id],
-                cashbox.Date,
-                cashbox.Amount,
-                filters.FromDate);
-        }
+            JournalPartyType.Cashbox => await dbContext.Cashboxes
+                .AsNoTracking()
+                .Where(party => party.CompanyId == companyId)
+                .Select(party => new PartyAccountProjection
+                {
+                    Id = party.Id,
+                    Code = party.Code,
+                    Name = party.Name
+                })
+                .ToListAsync(cancellationToken),
+            JournalPartyType.Customer or JournalPartyType.Supplier =>
+                await dbContext.BusinessPartners
+                    .AsNoTracking()
+                    .Where(party => party.CompanyId == companyId)
+                    .Select(party => new PartyAccountProjection
+                    {
+                        Id = party.Id,
+                        Code = party.Code,
+                        Name = party.Name
+                    })
+                    .ToListAsync(cancellationToken),
+            JournalPartyType.Employee => await dbContext.Employees
+                .AsNoTracking()
+                .Where(party => party.CompanyId == companyId)
+                .Select(party => new PartyAccountProjection
+                {
+                    Id = party.Id,
+                    Code = party.Code,
+                    Name = party.Name
+                })
+                .ToListAsync(cancellationToken),
+            JournalPartyType.Driver => await dbContext.Drivers
+                .AsNoTracking()
+                .Where(party => party.CompanyId == companyId)
+                .Select(party => new PartyAccountProjection
+                {
+                    Id = party.Id,
+                    Code = party.Code,
+                    Name = party.Name
+                })
+                .ToListAsync(cancellationToken),
+            _ => []
+        };
 
-        var voucherGroups = await dbContext.CashVouchers
-            .AsNoTracking()
-            .Where(voucher =>
-                voucher.CompanyId == companyId &&
-                voucher.IsPosted &&
-                voucher.CashboxId.HasValue &&
-                voucher.VoucherDate <= filters.ToDate)
-            .GroupBy(voucher => new
+        var accounts = parties.ToDictionary(
+            party => party.Id,
+            party => new OperationalAccountBalance(
+                category: category,
+                categoryName: CategoryName(category),
+                accountId: party.Id,
+                accountCode: party.Code,
+                accountName: party.Name));
+        var partyTypes = category == OperationalTrialBalanceCategory.Partner
+            ? new[] { JournalPartyType.Customer, JournalPartyType.Supplier }
+            : new[] { partyType };
+        var groups = await PostedLedgerLines()
+            .Where(line =>
+                line.PartyType.HasValue &&
+                partyTypes.Contains(line.PartyType.Value) &&
+                line.PartyId.HasValue &&
+                line.JournalEntry.EntryDate <= filters.ToDate)
+            .GroupBy(line => new
             {
-                AccountId = voucher.CashboxId!.Value,
-                IsOpening = voucher.VoucherDate < filters.FromDate
+                AccountId = line.PartyId!.Value,
+                IsOpening = line.JournalEntry.EntryDate < filters.FromDate
             })
-            .Select(group => new
-            {
-                group.Key.AccountId,
-                group.Key.IsOpening,
-                Debit = group.Sum(voucher =>
-                    voucher.Direction == CashDirection.Receipt
-                        ? voucher.BaseAmount
-                        : 0m),
-                Credit = group.Sum(voucher =>
-                    voucher.Direction == CashDirection.Payment
-                        ? voucher.BaseAmount
-                        : 0m)
-            })
+            .Select(group => new AccountMovementGroup(
+                AccountId: group.Key.AccountId,
+                IsOpening: group.Key.IsOpening,
+                Debit: group.Sum(line => line.Debit),
+                Credit: group.Sum(line => line.Credit)))
             .ToListAsync(cancellationToken);
-
-        ApplyGroups(accounts, voucherGroups.Select(group =>
-            new AccountMovementGroup(
-                AccountId: group.AccountId,
-                IsOpening: group.IsOpening,
-                Debit: group.Debit,
-                Credit: group.Credit)));
-
+        ApplyGroups(accounts, groups);
         return accounts.Values.ToArray();
     }
 
     private async Task<IReadOnlyList<OperationalAccountBalance>>
         LoadAccountBalancesAsync(
             OperationalTrialBalanceFilterRequest filters,
+            AccountType accountType,
             OperationalTrialBalanceCategory category,
-            CashMovementClassification classification,
             CancellationToken cancellationToken)
     {
-        var accountType = classification == CashMovementClassification.Expense
-            ? AccountType.Expense
-            : AccountType.Revenue;
         var accounts = (await dbContext.Accounts
                 .AsNoTracking()
                 .Where(account =>
@@ -251,418 +225,24 @@ public sealed partial class FinancialStatementService
                     accountId: account.Id,
                     accountCode: account.Code,
                     accountName: account.Name));
-
-        var voucherGroups = await dbContext.CashVouchers
-            .AsNoTracking()
-            .Where(voucher =>
-                voucher.CompanyId == companyId &&
-                voucher.IsPosted &&
-                voucher.AccountId.HasValue &&
-                voucher.Account != null &&
-                voucher.Account.AccountType == accountType &&
-                voucher.VoucherDate <= filters.ToDate)
-            .GroupBy(voucher => new
+        var groups = await PostedLedgerLines()
+            .Where(line =>
+                line.Account.CompanyId == companyId &&
+                line.Account.AccountType == accountType &&
+                line.JournalEntry.EntryDate <= filters.ToDate)
+            .GroupBy(line => new
             {
-                AccountId = voucher.AccountId!.Value,
-                IsOpening = voucher.VoucherDate < filters.FromDate
+                AccountId = line.AccountId,
+                IsOpening = line.JournalEntry.EntryDate < filters.FromDate
             })
-            .Select(group => new
-            {
-                group.Key.AccountId,
-                group.Key.IsOpening,
-                Debit = group.Sum(voucher =>
-                    voucher.Direction == CashDirection.Payment
-                        ? voucher.BaseAmount
-                        : 0m),
-                Credit = group.Sum(voucher =>
-                    voucher.Direction == CashDirection.Receipt
-                        ? voucher.BaseAmount
-                        : 0m)
-            })
+            .Select(group => new AccountMovementGroup(
+                AccountId: group.Key.AccountId,
+                IsOpening: group.Key.IsOpening,
+                Debit: group.Sum(line => line.Debit),
+                Credit: group.Sum(line => line.Credit)))
             .ToListAsync(cancellationToken);
-
-        ApplyGroups(accounts, voucherGroups.Select(group =>
-            new AccountMovementGroup(
-                AccountId: group.AccountId,
-                IsOpening: group.IsOpening,
-                Debit: group.Debit,
-                Credit: group.Credit)));
-
+        ApplyGroups(accounts, groups);
         return accounts.Values.ToArray();
-    }
-
-    private async Task<IReadOnlyList<OperationalAccountBalance>>
-        LoadPartnerBalancesAsync(
-            OperationalTrialBalanceFilterRequest filters,
-            CancellationToken cancellationToken)
-    {
-        var accounts = (await dbContext.BusinessPartners
-                .AsNoTracking()
-                .Where(partner => partner.CompanyId == companyId)
-                .Select(partner => new
-                {
-                    partner.Id,
-                    partner.Code,
-                    partner.Name
-                })
-                .ToListAsync(cancellationToken))
-            .ToDictionary(
-                partner => partner.Id,
-                partner => new OperationalAccountBalance(
-                    category: OperationalTrialBalanceCategory.Partner,
-                    categoryName: CategoryName(
-                        OperationalTrialBalanceCategory.Partner),
-                    accountId: partner.Id,
-                    accountCode: partner.Code,
-                    accountName: partner.Name));
-
-        var openingGroups = await dbContext.PartnerOpeningBalances
-            .AsNoTracking()
-            .Where(balance =>
-                balance.CompanyId == companyId &&
-                balance.DocumentDate <= filters.ToDate)
-            .GroupBy(balance => new
-            {
-                AccountId = balance.BusinessPartnerId,
-                IsOpening = balance.DocumentDate < filters.FromDate
-            })
-            .Select(group => new
-            {
-                group.Key.AccountId,
-                group.Key.IsOpening,
-                Debit = group.Sum(balance =>
-                    balance.BalanceType == PartnerBalanceType.Receivable
-                        ? balance.BaseAmount
-                        : 0m),
-                Credit = group.Sum(balance =>
-                    balance.BalanceType == PartnerBalanceType.Payable
-                        ? balance.BaseAmount
-                        : 0m)
-            })
-            .ToListAsync(cancellationToken);
-
-        ApplyGroups(accounts, openingGroups.Select(group =>
-            new AccountMovementGroup(
-                AccountId: group.AccountId,
-                IsOpening: group.IsOpening,
-                Debit: group.Debit,
-                Credit: group.Credit)));
-
-        var movementGroups = await dbContext.BusinessPartnerMovements
-            .AsNoTracking()
-            .Where(movement =>
-                movement.CompanyId == companyId &&
-                movement.MovementDate <= filters.ToDate)
-            .GroupBy(movement => new
-            {
-                AccountId = movement.BusinessPartnerId,
-                IsOpening = movement.MovementDate < filters.FromDate
-            })
-            .Select(group => new
-            {
-                group.Key.AccountId,
-                group.Key.IsOpening,
-                Debit = group.Sum(movement => movement.BaseDebit),
-                Credit = group.Sum(movement => movement.BaseCredit)
-            })
-            .ToListAsync(cancellationToken);
-
-        ApplyGroups(accounts, movementGroups.Select(group =>
-            new AccountMovementGroup(
-                AccountId: group.AccountId,
-                IsOpening: group.IsOpening,
-                Debit: group.Debit,
-                Credit: group.Credit)));
-
-        return accounts.Values.ToArray();
-    }
-
-    private async Task<IReadOnlyList<OperationalAccountBalance>>
-        LoadDriverBalancesAsync(
-            OperationalTrialBalanceFilterRequest filters,
-            CancellationToken cancellationToken)
-    {
-        var accounts = (await dbContext.Drivers
-                .AsNoTracking()
-                .Where(driver => driver.CompanyId == companyId)
-                .Select(driver => new
-                {
-                    driver.Id,
-                    driver.Code,
-                    driver.Name
-                })
-                .ToListAsync(cancellationToken))
-            .ToDictionary(
-                driver => driver.Id,
-                driver => new OperationalAccountBalance(
-                    category: OperationalTrialBalanceCategory.Driver,
-                    categoryName: CategoryName(
-                        OperationalTrialBalanceCategory.Driver),
-                    accountId: driver.Id,
-                    accountCode: driver.Code,
-                    accountName: driver.Name));
-
-        var voucherGroups = await dbContext.CashVouchers
-            .AsNoTracking()
-            .Where(voucher =>
-                voucher.CompanyId == companyId &&
-                voucher.IsPosted &&
-                voucher.DriverId.HasValue &&
-                voucher.VoucherDate <= filters.ToDate)
-            .GroupBy(voucher => new
-            {
-                AccountId = voucher.DriverId!.Value,
-                IsOpening = voucher.VoucherDate < filters.FromDate
-            })
-            .Select(group => new
-            {
-                group.Key.AccountId,
-                group.Key.IsOpening,
-                Debit = group.Sum(voucher =>
-                    voucher.Direction == CashDirection.Payment
-                        ? voucher.BaseAmount
-                        : 0m),
-                Credit = group.Sum(voucher =>
-                    voucher.Direction == CashDirection.Receipt
-                        ? voucher.BaseAmount
-                        : 0m)
-            })
-            .ToListAsync(cancellationToken);
-
-        ApplyGroups(accounts, voucherGroups.Select(group =>
-            new AccountMovementGroup(
-                AccountId: group.AccountId,
-                IsOpening: group.IsOpening,
-                Debit: group.Debit,
-                Credit: group.Credit)));
-
-        var tripGroups = await dbContext.DriverTrips
-            .AsNoTracking()
-            .Where(trip =>
-                trip.CompanyId == companyId &&
-                trip.Cost.HasValue &&
-                trip.TripDate <= filters.ToDate)
-            .GroupBy(trip => new
-            {
-                AccountId = trip.DriverId,
-                IsOpening = trip.TripDate < filters.FromDate
-            })
-            .Select(group => new
-            {
-                group.Key.AccountId,
-                group.Key.IsOpening,
-                Credit = group.Sum(trip => trip.Cost ?? 0m)
-            })
-            .ToListAsync(cancellationToken);
-
-        ApplyGroups(accounts, tripGroups.Select(group =>
-            new AccountMovementGroup(
-                AccountId: group.AccountId,
-                IsOpening: group.IsOpening,
-                Debit: 0m,
-                Credit: group.Credit)));
-
-        return accounts.Values.ToArray();
-    }
-
-    private async Task<IReadOnlyList<OperationalAccountBalance>>
-        LoadEmployeeBalancesAsync(
-            OperationalTrialBalanceFilterRequest filters,
-            CancellationToken cancellationToken)
-    {
-        var accounts = (await dbContext.Employees
-                .AsNoTracking()
-                .Where(employee => employee.CompanyId == companyId)
-                .Select(employee => new
-                {
-                    employee.Id,
-                    employee.Code,
-                    employee.Name
-                })
-                .ToListAsync(cancellationToken))
-            .ToDictionary(
-                employee => employee.Id,
-                employee => new OperationalAccountBalance(
-                    category: OperationalTrialBalanceCategory.Employee,
-                    categoryName: CategoryName(
-                        OperationalTrialBalanceCategory.Employee),
-                    accountId: employee.Id,
-                    accountCode: employee.Code,
-                    accountName: employee.Name));
-
-        var openingBalanceGroups = await dbContext.EmployeeOpeningBalances
-            .AsNoTracking()
-            .Where(balance =>
-                balance.CompanyId == companyId &&
-                balance.DocumentDate <= filters.ToDate)
-            .GroupBy(balance => new
-            {
-                AccountId = balance.EmployeeId,
-                IsOpening = balance.DocumentDate < filters.FromDate
-            })
-            .Select(group => new
-            {
-                group.Key.AccountId,
-                group.Key.IsOpening,
-                Debit = group.Sum(balance =>
-                    balance.BalanceType == EmployeeBalanceType.Debit
-                        ? balance.BaseAmount
-                        : 0m),
-                Credit = group.Sum(balance =>
-                    balance.BalanceType == EmployeeBalanceType.Credit
-                        ? balance.BaseAmount
-                        : 0m)
-            })
-            .ToListAsync(cancellationToken);
-
-        ApplyGroups(accounts, openingBalanceGroups.Select(group =>
-            new AccountMovementGroup(
-                AccountId: group.AccountId,
-                IsOpening: group.IsOpening,
-                Debit: group.Debit,
-                Credit: group.Credit)));
-
-        var movementGroups = await dbContext.EmployeeMovements
-            .AsNoTracking()
-            .Where(movement =>
-                movement.CompanyId == companyId &&
-                movement.MovementDate <= filters.ToDate)
-            .GroupBy(movement => new
-            {
-                AccountId = movement.EmployeeId,
-                IsOpening = movement.MovementDate < filters.FromDate
-            })
-            .Select(group => new
-            {
-                group.Key.AccountId,
-                group.Key.IsOpening,
-                Debit = group.Sum(movement => movement.BaseDebit),
-                Credit = group.Sum(movement => movement.BaseCredit)
-            })
-            .ToListAsync(cancellationToken);
-
-        ApplyGroups(accounts, movementGroups.Select(group =>
-            new AccountMovementGroup(
-                AccountId: group.AccountId,
-                IsOpening: group.IsOpening,
-                Debit: group.Debit,
-                Credit: group.Credit)));
-
-        var directVoucherGroups = await dbContext.CashVouchers
-            .AsNoTracking()
-            .Where(voucher =>
-                voucher.CompanyId == companyId &&
-                voucher.IsPosted &&
-                voucher.EmployeeId.HasValue &&
-                voucher.VoucherDate <= filters.ToDate &&
-                !dbContext.EmployeeMovements.Any(movement =>
-                    movement.CompanyId == companyId &&
-                    movement.CashVoucherId == voucher.Id))
-            .GroupBy(voucher => new
-            {
-                AccountId = voucher.EmployeeId!.Value,
-                IsOpening = voucher.VoucherDate < filters.FromDate
-            })
-            .Select(group => new
-            {
-                group.Key.AccountId,
-                group.Key.IsOpening,
-                Debit = group.Sum(voucher =>
-                    voucher.Direction == CashDirection.Payment
-                        ? voucher.BaseAmount
-                        : 0m),
-                Credit = group.Sum(voucher =>
-                    voucher.Direction == CashDirection.Receipt
-                        ? voucher.BaseAmount
-                        : 0m)
-            })
-            .ToListAsync(cancellationToken);
-
-        ApplyGroups(accounts, directVoucherGroups.Select(group =>
-            new AccountMovementGroup(
-                AccountId: group.AccountId,
-                IsOpening: group.IsOpening,
-                Debit: group.Debit,
-                Credit: group.Credit)));
-
-        return accounts.Values.ToArray();
-    }
-
-    private async Task<IReadOnlyList<OperationalAccountBalance>>
-        LoadMovementTypeBalancesAsync(
-            OperationalTrialBalanceFilterRequest filters,
-            OperationalTrialBalanceCategory category,
-            CashMovementClassification classification,
-            CancellationToken cancellationToken)
-    {
-        var accounts = (await dbContext.CashMovementTypes
-                .AsNoTracking()
-                .Where(movementType =>
-                    movementType.CompanyId == companyId &&
-                    movementType.Classification == classification)
-                .Select(movementType => new
-                {
-                    movementType.Id,
-                    movementType.Name
-                })
-                .ToListAsync(cancellationToken))
-            .ToDictionary(
-                movementType => movementType.Id,
-                movementType => new OperationalAccountBalance(
-                    category: category,
-                    categoryName: CategoryName(category),
-                    accountId: movementType.Id,
-                    accountCode: null,
-                    accountName: movementType.Name));
-
-        var voucherGroups = await dbContext.CashVouchers
-            .AsNoTracking()
-            .Where(voucher =>
-                voucher.CompanyId == companyId &&
-                voucher.IsPosted &&
-                voucher.CashMovementTypeId.HasValue &&
-                !voucher.AccountId.HasValue &&
-                voucher.CashMovementType != null &&
-                (voucher.Classification == classification ||
-                 voucher.CashMovementType.Classification == classification) &&
-                voucher.VoucherDate <= filters.ToDate)
-            .GroupBy(voucher => new
-            {
-                AccountId = voucher.CashMovementTypeId!.Value,
-                IsOpening = voucher.VoucherDate < filters.FromDate
-            })
-            .Select(group => new
-            {
-                group.Key.AccountId,
-                group.Key.IsOpening,
-                Debit = group.Sum(voucher =>
-                    voucher.Direction == CashDirection.Payment
-                        ? voucher.BaseAmount
-                        : 0m),
-                Credit = group.Sum(voucher =>
-                    voucher.Direction == CashDirection.Receipt
-                        ? voucher.BaseAmount
-                        : 0m)
-            })
-            .ToListAsync(cancellationToken);
-
-        ApplyGroups(accounts, voucherGroups.Select(group =>
-            new AccountMovementGroup(
-                AccountId: group.AccountId,
-                IsOpening: group.IsOpening,
-                Debit: group.Debit,
-                Credit: group.Credit)));
-
-        var movementTypeBalances = accounts.Values.ToArray();
-        var accountBalances = await LoadAccountBalancesAsync(
-            filters,
-            category,
-            classification,
-            cancellationToken);
-
-        return movementTypeBalances
-            .Concat(accountBalances)
-            .ToArray();
     }
 
     private static bool ShouldLoadCategory(
@@ -680,7 +260,6 @@ public sealed partial class FinancialStatementService
             {
                 continue;
             }
-
             if (group.IsOpening)
             {
                 account.OpeningSigned += group.Debit - group.Credit;
@@ -693,50 +272,26 @@ public sealed partial class FinancialStatementService
         }
     }
 
-    private static void ApplySignedAmount(
-        OperationalAccountBalance account,
-        DateOnly date,
-        decimal signedAmount,
-        DateOnly fromDate)
-    {
-        if (date < fromDate)
-        {
-            account.OpeningSigned += signedAmount;
-        }
-        else if (signedAmount >= 0m)
-        {
-            account.PeriodDebit += signedAmount;
-        }
-        else
-        {
-            account.PeriodCredit += -signedAmount;
-        }
-    }
-
     private static OperationalTrialBalanceItemResponse ToDetailedItem(
         OperationalAccountBalance account)
     {
-        var openingDebit = Math.Max(account.OpeningSigned, 0m);
-        var openingCredit = Math.Max(-account.OpeningSigned, 0m);
         var closingSigned = account.OpeningSigned +
             account.PeriodDebit - account.PeriodCredit;
-
         return new OperationalTrialBalanceItemResponse(
             Category: account.Category,
             CategoryName: account.CategoryName,
             AccountId: account.AccountId,
             AccountCode: account.AccountCode,
             AccountName: account.AccountName,
-            OpeningDebit: openingDebit,
-            OpeningCredit: openingCredit,
+            OpeningDebit: Math.Max(account.OpeningSigned, 0m),
+            OpeningCredit: Math.Max(-account.OpeningSigned, 0m),
             PeriodDebit: account.PeriodDebit,
             PeriodCredit: account.PeriodCredit,
             ClosingDebit: Math.Max(closingSigned, 0m),
             ClosingCredit: Math.Max(-closingSigned, 0m));
     }
 
-    private static bool IsZero(
-        OperationalTrialBalanceItemResponse item) =>
+    private static bool IsZero(OperationalTrialBalanceItemResponse item) =>
         item.OpeningDebit == 0m &&
         item.OpeningCredit == 0m &&
         item.PeriodDebit == 0m &&
@@ -754,9 +309,7 @@ public sealed partial class FinancialStatementService
             OperationalTrialBalanceCategory.Revenue => "الإيرادات",
             OperationalTrialBalanceCategory.Expense => "المصروفات",
             _ => throw new ArgumentOutOfRangeException(
-                nameof(category),
-                category,
-                null)
+                nameof(category), category, null)
         };
 
     private sealed class OperationalAccountBalance(
@@ -767,20 +320,20 @@ public sealed partial class FinancialStatementService
         string accountName)
     {
         public OperationalTrialBalanceCategory Category { get; } = category;
-
         public string CategoryName { get; } = categoryName;
-
         public int AccountId { get; } = accountId;
-
         public string? AccountCode { get; } = accountCode;
-
         public string AccountName { get; } = accountName;
-
         public decimal OpeningSigned { get; set; }
-
         public decimal PeriodDebit { get; set; }
-
         public decimal PeriodCredit { get; set; }
+    }
+
+    private sealed class PartyAccountProjection
+    {
+        public int Id { get; init; }
+        public string Code { get; init; } = string.Empty;
+        public string Name { get; init; } = string.Empty;
     }
 
     private sealed record AccountMovementGroup(

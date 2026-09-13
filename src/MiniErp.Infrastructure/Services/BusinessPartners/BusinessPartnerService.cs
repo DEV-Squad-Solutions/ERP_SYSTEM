@@ -195,7 +195,7 @@ public sealed class BusinessPartnerService(
             .ProjectToType<StoreResponse>()
             .FirstOrDefaultAsync(cancellationToken);
 
-        var containers = await GetAssignedContainersAsync(
+        var containers = await GetWorkspaceContainersAsync(
             containerStore?.Id ?? 0,
             cancellationToken);
 
@@ -271,6 +271,81 @@ public sealed class BusinessPartnerService(
         return containersByStoreId.TryGetValue(storeId, out var containers)
             ? containers
             : [];
+    }
+
+    private async Task<IReadOnlyList<StoreContainerWorkspaceContainerResponse>>
+        GetWorkspaceContainersAsync(
+            int storeId,
+            CancellationToken cancellationToken)
+    {
+        var containers = await dbContext.Containers
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(container =>
+                container.CompanyId == companyId &&
+                !container.IsDeleted &&
+                (container.IsActive ||
+                 (storeId > 0 && dbContext.StoreContainers
+                     .IgnoreQueryFilters()
+                     .Any(assignment =>
+                         assignment.CompanyId == companyId &&
+                         !assignment.IsDeleted &&
+                         assignment.StoreId == storeId &&
+                         assignment.ContainerId == container.Id &&
+                         assignment.IsActive))))
+            .Select(container => new
+            {
+                container.Id,
+                container.CompanyId,
+                container.Code,
+                container.Name,
+                container.Description,
+                container.IsActive
+            })
+            .OrderBy(container => container.Name)
+            .ThenBy(container => container.Id)
+            .ToListAsync(cancellationToken);
+
+        var assignments = storeId > 0
+            ? await dbContext.StoreContainers
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Where(assignment =>
+                    assignment.CompanyId == companyId &&
+                    !assignment.IsDeleted &&
+                    assignment.StoreId == storeId &&
+                    assignment.IsActive &&
+                    assignment.Container.CompanyId == companyId &&
+                    !assignment.Container.IsDeleted)
+                .Select(assignment => new
+                {
+                    assignment.ContainerId,
+                    StoreContainerId = (int?)assignment.Id
+                })
+                .ToListAsync(cancellationToken)
+            : [];
+
+        var assignmentByContainerId = assignments
+            .GroupBy(assignment => assignment.ContainerId)
+            .ToDictionary(group => group.Key, group => group.First().StoreContainerId);
+
+        return containers
+            .Select(container =>
+            {
+                assignmentByContainerId.TryGetValue(
+                    container.Id,
+                    out var storeContainerId);
+                return new StoreContainerWorkspaceContainerResponse(
+                    Id: container.Id,
+                    CompanyId: container.CompanyId,
+                    Code: container.Code,
+                    Name: container.Name,
+                    Description: container.Description,
+                    IsActive: container.IsActive,
+                    IsAssigned: storeContainerId.HasValue,
+                    StoreContainerId: storeContainerId);
+            })
+            .ToList();
     }
 
     private async Task<Dictionary<

@@ -363,16 +363,38 @@ public sealed class CashManagementValidatorTests
                 Direction: CashDirection.Receipt,
                 CashboxId: 1,
                 Amount: 125m,
-                Description: "Initial receipt"));
+                Description: "Initial receipt",
+                AccountId: 1));
 
         Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void CashVoucherValidator_RequiresPostingTargetForDraftJournal()
+    {
+        var result = new CashVoucherRequestValidator().Validate(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 8, 1),
+                Direction: CashDirection.Receipt,
+                CashboxId: 1,
+                Amount: 125m,
+                Description: "Draft without counterpart"));
+
+        Assert.Contains(result.Errors, error =>
+            error.PropertyName == nameof(CashVoucherRequest.EmployeeId));
     }
 
     [Fact]
     public void CashVoucherContracts_DoNotAcceptVoucherNumber()
     {
         Assert.Equal(
-            ["Amount", "CashboxId", "Description", "Direction", "VoucherDate"],
+            [
+                "AccountId", "Amount", "BusinessPartnerId", "CashboxId",
+                "CashMovementTypeId", "Description", "Direction", "DriverId",
+                "DriverTripId", "EmployeeId", "EmployeeMovementType",
+                "ExchangeRate", "ExternalPartyName", "Notes", "ReferenceNumber",
+                "VoucherDate"
+            ],
             typeof(CashVoucherRequest)
                 .GetProperties()
                 .Select(property => property.Name)
@@ -400,7 +422,8 @@ public sealed class CashManagementValidatorTests
                 Direction: CashDirection.Payment,
                 CashboxId: 0,
                 Amount: 50m,
-                Description: "Initial payment"));
+                Description: "Initial payment",
+                AccountId: 2));
 
         Assert.Contains(
             result.Errors,
