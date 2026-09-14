@@ -354,7 +354,7 @@ public sealed class CashManagementValidatorTests
     }
 
     [Fact]
-    public void CashVoucherValidator_AcceptsInitialDraftFields()
+    public void CashVoucherValidator_AcceptsHandoverDraftWithoutPostingTarget()
     {
         var validator = new CashVoucherRequestValidator();
         var result = validator.Validate(
@@ -363,14 +363,13 @@ public sealed class CashManagementValidatorTests
                 Direction: CashDirection.Receipt,
                 CashboxId: 1,
                 Amount: 125m,
-                Description: "Initial receipt",
-                AccountId: 1));
+                Description: "Initial receipt"));
 
         Assert.True(result.IsValid);
     }
 
     [Fact]
-    public void CashVoucherValidator_RequiresPostingTargetForDraftJournal()
+    public void CashVoucherValidator_RejectsMultiplePostingTargets()
     {
         var result = new CashVoucherRequestValidator().Validate(
             new CashVoucherRequest(
@@ -378,7 +377,9 @@ public sealed class CashManagementValidatorTests
                 Direction: CashDirection.Receipt,
                 CashboxId: 1,
                 Amount: 125m,
-                Description: "Draft without counterpart"));
+                Description: "Draft with conflicting targets",
+                EmployeeId: 1,
+                AccountId: 1));
 
         Assert.Contains(result.Errors, error =>
             error.PropertyName == nameof(CashVoucherRequest.EmployeeId));

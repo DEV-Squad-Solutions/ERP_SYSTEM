@@ -661,6 +661,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
+                voucher.IsPosted &&
                 !voucher.InvoiceId.HasValue &&
                 !voucher.CashboxTransferId.HasValue &&
                 voucher.VoucherDate >= startDate &&
@@ -942,6 +943,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
+                voucher.IsPosted &&
                 !voucher.InvoiceId.HasValue &&
                 !voucher.CashboxTransferId.HasValue &&
                 voucher.VoucherDate >= startDate &&

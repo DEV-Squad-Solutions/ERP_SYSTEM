@@ -27,6 +27,12 @@ public sealed class CashVoucherPostingService(
         CashVoucher voucher,
         CancellationToken cancellationToken = default)
     {
+        if (!voucher.IsPosted)
+        {
+            return Result<AutomaticJournalEntryResult>.Failure(
+                PostingAccountRequired());
+        }
+
         var fiscalYear = await dbContext.FiscalYears
             .AsNoTracking()
             .Where(year =>

@@ -140,6 +140,160 @@ public sealed class CashVoucherService(
             cancellationToken);
     }
 
+    public async Task<Result<CashVoucherHandoverReportResponse>>
+        GetHandoverReportAsync(
+            PaginationRequest pagination,
+            CashVoucherHandoverReportFilterRequest? filters = null,
+            CancellationToken cancellationToken = default)
+    {
+        filters ??= new CashVoucherHandoverReportFilterRequest();
+        var validation = new CashVoucherHandoverReportFilterRequestValidator()
+            .Validate(filters);
+        if (!validation.IsValid ||
+            pagination.PageNumber <= 0 ||
+            pagination.PageSize is <= 0 or > PaginationRequest.MaxPageSize)
+        {
+            var errors = validation.Errors
+                .Select(error => Error.Validation(
+                    "CashVouchers.HandoverReportValidation",
+                    error.ErrorMessage,
+                    error.PropertyName))
+                .ToList();
+            if (pagination.PageNumber <= 0 ||
+                pagination.PageSize is <= 0 or > PaginationRequest.MaxPageSize)
+            {
+                errors.Add(Error.Validation(
+                    "Pagination.Invalid",
+                    "بيانات الصفحات غير صحيحة."));
+            }
+
+            return Result<CashVoucherHandoverReportResponse>.Failure(errors);
+        }
+
+        var query = dbContext.CashVouchers
+            .AsNoTracking()
+            .Where(voucher =>
+                voucher.CompanyId == companyId &&
+                !voucher.IsPosted &&
+                voucher.CashboxId.HasValue &&
+                !voucher.InvoiceId.HasValue &&
+                !voucher.CashboxTransferId.HasValue);
+
+        if (filters.CashboxId.HasValue)
+        {
+            query = query.Where(voucher =>
+                voucher.CashboxId == filters.CashboxId.Value);
+        }
+
+        if (filters.FromDate.HasValue)
+        {
+            query = query.Where(voucher =>
+                voucher.VoucherDate >= filters.FromDate.Value);
+        }
+
+        if (filters.ToDate.HasValue)
+        {
+            query = query.Where(voucher =>
+                voucher.VoucherDate <= filters.ToDate.Value);
+        }
+
+        if (filters.Direction.HasValue)
+        {
+            query = query.Where(voucher =>
+                voucher.Direction == filters.Direction.Value);
+        }
+
+        var search = filters.Search?.Trim();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query = query.Where(voucher =>
+                voucher.VoucherNumber.Contains(search) ||
+                (voucher.Cashbox != null &&
+                 (voucher.Cashbox.Code.Contains(search) ||
+                  voucher.Cashbox.Name.Contains(search))) ||
+                (voucher.Description != null &&
+                 voucher.Description.Contains(search)) ||
+                (voucher.Notes != null && voucher.Notes.Contains(search)));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var summaryRows = await query
+            .GroupBy(voucher => voucher.Currency)
+            .Select(group => new
+            {
+                Currency = group.Key,
+                Receipt = group
+                    .Where(voucher => voucher.Direction == CashDirection.Receipt)
+                    .Sum(voucher => (decimal?)voucher.Amount) ?? 0m,
+                Payment = group
+                    .Where(voucher => voucher.Direction == CashDirection.Payment)
+                    .Sum(voucher => (decimal?)voucher.Amount) ?? 0m,
+                Count = group.Count()
+            })
+            .OrderBy(row => row.Currency)
+            .ToListAsync(cancellationToken);
+
+        var offset = (long)(pagination.PageNumber - 1) * pagination.PageSize;
+        var rows = offset >= totalCount
+            ? []
+            : await query
+                .OrderByDescending(voucher => voucher.VoucherDate)
+                .ThenByDescending(voucher => voucher.Id)
+                .Skip((int)offset)
+                .Take(pagination.PageSize)
+                .Select(voucher => new
+                {
+                    voucher.Id,
+                    voucher.VoucherNumber,
+                    voucher.VoucherDate,
+                    voucher.Direction,
+                    CashboxId = voucher.CashboxId!.Value,
+                    CashboxName = voucher.Cashbox!.Name,
+                    voucher.Amount,
+                    voucher.Currency,
+                    voucher.Description,
+                    voucher.Notes,
+                    voucher.CreatedById,
+                    voucher.CreatedOn
+                })
+                .ToListAsync(cancellationToken);
+
+        var pageItems = rows
+            .Select(row => new CashVoucherHandoverReportItemResponse(
+                Id: row.Id,
+                VoucherNumber: row.VoucherNumber,
+                VoucherDate: row.VoucherDate,
+                Direction: row.Direction,
+                CashboxId: row.CashboxId,
+                CashboxName: row.CashboxName,
+                Amount: row.Amount,
+                Currency: row.Currency,
+                Description: row.Description,
+                Notes: row.Notes,
+                CreatedById: row.CreatedById,
+                CreatedOn: row.CreatedOn))
+            .ToList();
+        var summaries = summaryRows
+            .Select(row => new CashVoucherHandoverCurrencySummary(
+                Currency: row.Currency,
+                Receipt: row.Receipt,
+                Payment: row.Payment,
+                Net: row.Receipt - row.Payment,
+                Count: row.Count))
+            .ToList();
+        var totalPages = (int)Math.Ceiling(
+            totalCount / (double)pagination.PageSize);
+
+        return Result<CashVoucherHandoverReportResponse>.Success(
+            new CashVoucherHandoverReportResponse(
+                Items: pageItems,
+                PageNumber: pagination.PageNumber,
+                PageSize: pagination.PageSize,
+                TotalCount: totalCount,
+                TotalPages: totalPages,
+                Summaries: summaries));
+    }
+
     public async Task<Result<CashVoucherResponse>> GetByIdAsync(
         int id,
         CancellationToken cancellationToken = default)
@@ -283,47 +437,30 @@ public sealed class CashVoucherService(
             }
         }
 
-        var preparationRequest = new CashVoucherUpdateRequest(
-            VoucherDate: request.VoucherDate,
-            Direction: request.Direction,
-            CashboxId: request.CashboxId,
-            CashMovementTypeId: request.CashMovementTypeId,
-            EmployeeId: request.EmployeeId,
-            BusinessPartnerId: request.BusinessPartnerId,
-            DriverId: request.DriverId,
-            DriverTripId: request.DriverTripId,
-            ExternalPartyName: request.ExternalPartyName,
-            Amount: request.Amount,
-            ReferenceNumber: request.ReferenceNumber,
-            Description: request.Description,
-            Notes: request.Notes,
-            RowVersion: null,
-            ExchangeRate: request.ExchangeRate,
-            AccountId: request.AccountId,
-            EmployeeMovementType: request.EmployeeMovementType);
-
-        preparationRequest = await NormalizeEmployeeMovementTypeAsync(
-            preparationRequest,
-            currentVoucher: null,
-            cancellationToken);
-
-        var preparation = await PrepareAsync(
-            preparationRequest,
-            currentVoucher: null,
-            enforceManualPostingTarget: true,
-            cancellationToken: cancellationToken);
-        if (preparation.IsFailure)
+        var cashbox = await dbContext.Cashboxes
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                entity =>
+                    entity.CompanyId == companyId &&
+                    entity.Id == request.CashboxId,
+                cancellationToken);
+        if (cashbox is null)
         {
             await transaction.RollbackAsync(cancellationToken);
-            return Result<CashVoucherResponse>.Failure(preparation.Errors);
+            return Result<CashVoucherResponse>.Failure(
+                CashboxNotFound(request.CashboxId));
         }
 
-        var voucher = request.Adapt<CashVoucher>();
-        voucher.CompanyId = companyId;
+        if (!cashbox.IsActive)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return Result<CashVoucherResponse>.Failure(CashboxInactive());
+        }
+
         var prefix = request.Direction == CashDirection.Receipt
             ? "RCV"
             : "PAY";
-        voucher.VoucherNumber = await EntityIdentifierGenerator
+        var voucherNumber = await EntityIdentifierGenerator
             .GenerateUniqueAsync(
                 dbContext,
                 prefix,
@@ -333,37 +470,37 @@ public sealed class CashVoucherService(
                     .Where(entity => entity.CompanyId == companyId)
                     .Select(entity => entity.VoucherNumber),
                 cancellationToken);
-        voucher.PartyType = preparation.Value.PartyType;
-        voucher.Classification = preparation.Value.Classification;
-        voucher.IsPosted = false;
-        await ApplyPreparationAsync(
-            voucher,
-            preparation.Value,
-            cancellationToken);
+        var voucher = new CashVoucher
+        {
+            CompanyId = companyId,
+            VoucherNumber = voucherNumber,
+            VoucherDate = request.VoucherDate,
+            Direction = request.Direction,
+            CashboxId = cashbox.Id,
+            PartyType = CashPartyType.None,
+            Classification = null,
+            AccountId = null,
+            CashMovementTypeId = null,
+            EmployeeId = null,
+            BusinessPartnerId = null,
+            DriverId = null,
+            DriverTripId = null,
+            ExternalPartyName = null,
+            Amount = request.Amount,
+            ReferenceNumber = null,
+            Description = NormalizeText(request.Description),
+            Notes = NormalizeText(request.Notes),
+            IsPosted = false
+        };
+        voucher.InitializeDraft(cashbox.Currency);
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
 
         dbContext.CashVouchers.Add(voucher);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        await SynchronizePartnerMovementAsync(
-            voucher,
-            preparation.Value.BusinessPartner is not null,
-            cancellationToken);
-        await SynchronizeEmployeeMovementAsync(
-            voucher,
-            preparation.Value.PartyType == CashPartyType.Employee,
-            preparationRequest.EmployeeMovementType,
-            cancellationToken);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        var postingResult = await cashVoucherPostingService
-            .SynchronizeAsync(voucher, cancellationToken);
-        if (postingResult.IsFailure)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            dbContext.ChangeTracker.Clear();
-            return Result<CashVoucherResponse>.Failure(postingResult.Errors);
-        }
+        // Drafts are intentionally operational only. Do not create partner /
+        // employee movements or a journal entry; completion via PUT performs
+        // those side effects atomically.
 
         var response = await ProjectResponseQuery(voucher.Id)
             .AsNoTracking()
@@ -1338,9 +1475,7 @@ public sealed class CashVoucherService(
             {
                 CashboxId: int currentCashboxId
             } &&
-            (currentVoucher.IsPosted ||
-             (!currentVoucher.InvoiceId.HasValue &&
-              !currentVoucher.CashboxTransferId.HasValue)))
+            currentVoucher.IsPosted)
         {
             affectedCashboxIds.Add(currentCashboxId);
         }
@@ -1362,9 +1497,7 @@ public sealed class CashVoucherService(
                     cashbox.OpeningBalance +
                     (cashbox.Vouchers
                         .Where(voucher =>
-                            (voucher.IsPosted ||
-                             (!voucher.InvoiceId.HasValue &&
-                              !voucher.CashboxTransferId.HasValue)) &&
+                            voucher.IsPosted &&
                             (!excludedVoucherId.HasValue ||
                              voucher.Id != excludedVoucherId.Value))
                         .Sum(voucher =>
@@ -1604,5 +1737,8 @@ public sealed class CashVoucherService(
             (selectedPartyOrAccountCount == 0 &&
              request.CashMovementTypeId.HasValue);
     }
+
+    private static string? NormalizeText(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
 }

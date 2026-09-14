@@ -44,6 +44,7 @@ public sealed class ExchangeRatePostingSynchronizer(
         var standaloneVouchers = await dbContext.CashVouchers
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
+                voucher.IsPosted &&
                 voucher.ExchangeRateId == exchangeRateId &&
                 !voucher.InvoiceId.HasValue &&
                 !voucher.CashboxTransferId.HasValue)
