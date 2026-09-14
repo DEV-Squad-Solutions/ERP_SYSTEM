@@ -24,6 +24,8 @@ public sealed class PayrollReportService(
         DateOnly endDate,
         int? employeeId = null,
         bool? isMoved = null,
+        WorkPlaceStatus? workPlaceStatus = null,
+        string? placeName = null,
         CancellationToken cancellationToken = default)
     {
         var query = dbContext.PayrollEntries
@@ -43,6 +45,17 @@ public sealed class PayrollReportService(
             query = query.Where(e => e.IsSalaryMoveToEmployeeAccount == isMoved.Value);
         }
 
+        if (workPlaceStatus.HasValue)
+        {
+            query = query.Where(e => e.Employee.WorkPlaceStatus == workPlaceStatus.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(placeName))
+        {
+            var trimmedPlace = placeName.Trim();
+            query = query.Where(e => e.Employee.PlaceName != null && e.Employee.PlaceName.Contains(trimmedPlace));
+        }
+
         var entries = await query
             .OrderBy(e => e.EmployeeName)
             .Select(e => new
@@ -52,6 +65,8 @@ public sealed class PayrollReportService(
                 e.EmployeeCode,
                 e.EmployeeName,
                 e.EmployeeType,
+                WorkPlaceStatus = e.Employee.WorkPlaceStatus,
+                PlaceName = e.Employee.PlaceName,
                 e.StartDate,
                 e.EndDate,
                 e.PresentDays,
@@ -75,6 +90,8 @@ public sealed class PayrollReportService(
                 EmployeeCode: e.EmployeeCode,
                 EmployeeName: e.EmployeeName,
                 EmployeeType: e.EmployeeType,
+                WorkPlaceStatus: e.WorkPlaceStatus,
+                PlaceName: e.PlaceName,
                 StartDate: e.StartDate,
                 EndDate: e.EndDate,
                 PresentDays: e.PresentDays,
@@ -103,6 +120,12 @@ public sealed class PayrollReportService(
 
             DailyEmployeeCount: entries
                 .Count(e => e.EmployeeType == EmployeeType.Daily),
+
+            InCompanyCount: entries
+                .Count(e => e.WorkPlaceStatus == WorkPlaceStatus.InCompany),
+
+            OutCompanyCount: entries
+                .Count(e => e.WorkPlaceStatus == WorkPlaceStatus.OutCompany),
 
             TotalGrossSalary: entries.Sum(e => e.GrossSalary),
 
@@ -134,6 +157,14 @@ public sealed class PayrollReportService(
 
             PendingAmount: entries
                 .Where(e => !e.IsPaid)
+                .Sum(e => e.NetSalary),
+
+            InCompanyAmount: entries
+                .Where(e => e.WorkPlaceStatus == WorkPlaceStatus.InCompany)
+                .Sum(e => e.NetSalary),
+
+            OutCompanyAmount: entries
+                .Where(e => e.WorkPlaceStatus == WorkPlaceStatus.OutCompany)
                 .Sum(e => e.NetSalary));
 
         return Result<PayrollReportResponse>.Success(

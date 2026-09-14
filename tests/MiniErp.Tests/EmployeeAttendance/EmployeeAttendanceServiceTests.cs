@@ -142,4 +142,82 @@ public sealed class EmployeeAttendanceServiceTests
         Assert.True(result.IsFailure);
         Assert.Equal("Employee.NotFound", result.Error.Code);
     }
+
+    [Fact]
+    public async Task AddAsync_ShouldFail_WhenEmployeeIsOutCompany()
+    {
+        // Arrange
+        await using var database = await EmployeeAttendanceTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreateService();
+
+        var outEmployee = new MiniErp.Domain.Entities.Employees.Employee
+        {
+            Id = 10,
+            CompanyId = 1,
+            Name = "OutCompany Guy",
+            Type = EmployeeType.Monthly,
+            MonthlySalary = 5000,
+            IsActive = true
+        };
+        outEmployee.UpdateWorkPlace(WorkPlaceStatus.OutCompany, "Client Site");
+        database.Context.Employees.Add(outEmployee);
+        await database.Context.SaveChangesAsync();
+
+        var request = new EmployeeAttendanceRequest(
+            EmployeeId: 10,
+            Status: EmployeeAttendanceStatus.Present,
+            WorkDate: new DateOnly(2026, 8, 12),
+            CheckIn: new TimeOnly(9, 0),
+            CheckOut: new TimeOnly(17, 0));
+
+        // Act
+        var result = await service.AddAsync(request);
+
+        // Assert
+        Assert.True(result.IsFailure);
+        Assert.Equal("EmployeeAttendance.EmployeeNotEligible", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task GetEmployeeSelectAsync_ShouldOnlyReturnInCompanyActiveEmployees()
+    {
+        // Arrange
+        await using var database = await EmployeeAttendanceTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreateService();
+
+        var outEmployee = new MiniErp.Domain.Entities.Employees.Employee
+        {
+            Id = 20,
+            CompanyId = 1,
+            Name = "OutCompany Staff",
+            Type = EmployeeType.Monthly,
+            MonthlySalary = 5000,
+            IsActive = true
+        };
+        outEmployee.UpdateWorkPlace(WorkPlaceStatus.OutCompany, "Remote Site");
+
+        var inactiveEmployee = new MiniErp.Domain.Entities.Employees.Employee
+        {
+            Id = 21,
+            CompanyId = 1,
+            Name = "Inactive Staff",
+            Type = EmployeeType.Monthly,
+            MonthlySalary = 5000,
+            IsActive = false
+        };
+        inactiveEmployee.UpdateWorkPlace(WorkPlaceStatus.InCompany, null);
+
+        database.Context.Employees.AddRange(outEmployee, inactiveEmployee);
+        await database.Context.SaveChangesAsync();
+
+        // Act
+        var result = await service.GetEmployeeSelectAsync();
+
+        // Assert
+        Assert.True(result.IsSuccess);
+        Assert.DoesNotContain(result.Value, e => e.Id == 20);
+        Assert.DoesNotContain(result.Value, e => e.Id == 21);
+        Assert.Contains(result.Value, e => e.Id == 1);
+        Assert.Contains(result.Value, e => e.Id == 2);
+    }
 }

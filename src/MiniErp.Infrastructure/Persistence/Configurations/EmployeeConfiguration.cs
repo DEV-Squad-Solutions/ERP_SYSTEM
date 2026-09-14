@@ -32,6 +32,10 @@ public sealed class EmployeeConfiguration : AuditableEntityConfiguration<Employe
                     "CK_Employees_RequiredWorkingDays",
                     "[RequiredWorkingDaysPerMonth] IS NULL OR " +
                     "([RequiredWorkingDaysPerMonth] >= 1 AND [RequiredWorkingDaysPerMonth] <= 31)");
+
+                table.HasCheckConstraint(
+                    "CK_Employees_WorkPlaceStatus",
+                    "[WorkPlaceStatus] IN (1, 2)");
             });
 
         builder.HasKey(employee => employee.Id);
@@ -108,6 +112,13 @@ public sealed class EmployeeConfiguration : AuditableEntityConfiguration<Employe
 
         builder.Property(employee => employee.LastDayOfReceivingSalary)
             .HasColumnType("date");
+
+        builder.Property(employee => employee.WorkPlaceStatus)
+            .HasConversion<int>()
+            .IsRequired();
+
+        builder.Property(employee => employee.PlaceName)
+            .HasMaxLength(200);
 
         builder.Property(employee => employee.IsActive)
             .IsRequired();

@@ -32,7 +32,9 @@ namespace MiniErp.Infrastructure.Services.Employees
                     employee.Address.Contains(search) ||
                     employee.Type.ToString().Contains(search) ||
                     employee.JobTitle != null &&
-                    employee.JobTitle.Contains(search)                     
+                    employee.JobTitle.Contains(search) ||
+                    employee.PlaceName != null &&
+                    employee.PlaceName.Contains(search)                     
                     );
             }
             var name = filters.Name?.Trim();
@@ -55,6 +57,14 @@ namespace MiniErp.Infrastructure.Services.Employees
                     employee.JobTitle.Contains(jobTitle));
             }
 
+            var placeName = filters.PlaceName?.Trim();
+            if (!string.IsNullOrWhiteSpace(placeName))
+            {
+                query = query.Where(employee =>
+                    employee.PlaceName != null &&
+                    employee.PlaceName.Contains(placeName));
+            }
+
             if (filters.MinSalary.HasValue)
             {
                 query = query.Where(employee => 
@@ -72,6 +82,11 @@ namespace MiniErp.Infrastructure.Services.Employees
             {
                 query = query.Where(employee =>
                 employee.Type == filters.EmployeeType.Value);
+            }
+            if (filters.WorkPlaceStatus.HasValue)
+            {
+                query = query.Where(employee =>
+                employee.WorkPlaceStatus == filters.WorkPlaceStatus.Value);
             }
             if(filters.IsActive.HasValue)
             {
@@ -92,14 +107,28 @@ namespace MiniErp.Infrastructure.Services.Employees
                     TotalCount = group.Count(),
                     TotalMonthlyEmployees = group.Count(e => e.Type == EmployeeType.Monthly),
                     TotalDailyEmployees = group.Count(e => e.Type == EmployeeType.Daily),
+                    TotalActiveEmployees = group.Count(e => e.IsActive),
+                    TotalInactiveEmployees = group.Count(e => !e.IsActive),
+                    TotalInCompanyEmployees = group.Count(e => e.WorkPlaceStatus == WorkPlaceStatus.InCompany),
+                    TotalOutCompanyEmployees = group.Count(e => e.WorkPlaceStatus == WorkPlaceStatus.OutCompany)
                 })
                 .SingleOrDefaultAsync(cancellationToken);
             
             return summary is null
-                ? (0, new EmployeeSummaryResponse(0 , 0))
+                ? (0, new EmployeeSummaryResponse(
+                    TotalMonthlyEmployees: 0,
+                    TotalDailyEmployees: 0,
+                    TotalActiveEmployees: 0,
+                    TotalInactiveEmployees: 0,
+                    TotalInCompanyEmployees: 0,
+                    TotalOutCompanyEmployees: 0))
                 : (summary.TotalCount, new EmployeeSummaryResponse(                
-                    summary.TotalMonthlyEmployees,
-                    summary.TotalDailyEmployees
+                    TotalMonthlyEmployees: summary.TotalMonthlyEmployees,
+                    TotalDailyEmployees: summary.TotalDailyEmployees,
+                    TotalActiveEmployees: summary.TotalActiveEmployees,
+                    TotalInactiveEmployees: summary.TotalInactiveEmployees,
+                    TotalInCompanyEmployees: summary.TotalInCompanyEmployees,
+                    TotalOutCompanyEmployees: summary.TotalOutCompanyEmployees
                 ));
         }
         private async Task<(Employee?, IEnumerable<MiniErp.Domain.Entities.Employees.EmployeeAttendance>)> LoadForWriteAsync(

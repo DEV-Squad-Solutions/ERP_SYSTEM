@@ -50,9 +50,8 @@ public sealed class EmployeeFinancialStatementTests
         await database.Context.SaveChangesAsync();
 
         var payrollResult = await payrollService.AddAsync(new PayrollEntryCreateRequest(
-            StartDate: new DateOnly(2026, 8, 1),
-            EndDate: new DateOnly(2026, 8, 10),
-            EmployeeId: 1));
+            EmployeeId: 1,
+            EndDate: new DateOnly(2026, 8, 10)));
         Assert.True(payrollResult.IsSuccess);
 
         var salaryTransferResult = await payrollService.MoveSalaryForEmployeeAccountAsync(

@@ -20,13 +20,13 @@ public sealed class EmployeeAttendanceConfiguration
                     "[Status] IN (0,1)");
                 table.HasCheckConstraint(
                     "CK_EmployeeAttendances_WorkDayRatio",
-                    "[WorkDayRatio] IN (1,2,3,4,5)");
+                    "[WorkDayRatio] IN (1,2,3,4,5,6,7,8,9,10)");
                 table.HasCheckConstraint(
                     "CK_EmployeeAttendances_WorkOverTimeRatio",
-                    "[WorkOverTimeRatio] IS NULL OR [WorkOverTimeRatio] IN (1,2,3,4,5)");
+                    "[WorkOverTimeRatio] IS NULL OR [WorkOverTimeRatio] IN (1,2,3,4,5,6,7,8,9,10)");
                 table.HasCheckConstraint(
                     "CK_EmployeeAttendances_WorkDaysDeductionRatio",
-                    "[WorkDaysDeductionRatio] IS NULL OR [WorkDaysDeductionRatio] IN (1,2,3,4,5)");
+                    "[WorkDaysDeductionRatio] IS NULL OR [WorkDaysDeductionRatio] IN (1,2,3,4,5,6,7,8,9,10)");
             });
 
         builder.HasKey(attendance => attendance.Id);

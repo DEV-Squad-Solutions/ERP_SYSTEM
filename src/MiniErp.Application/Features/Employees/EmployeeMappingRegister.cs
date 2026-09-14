@@ -11,6 +11,8 @@ public sealed class EmployeeMappingRegister : IRegister
         config.ForType<Employee, EmployeeListResponse>()
             .Map(dest => dest.EmployeeType, src => src.Type)
             .Map(dest => dest.Salary, src => src.Type == EmployeeType.Monthly ? (src.MonthlySalary ?? 0) : (src.DailySalary ?? 0))
-            .Map(dest => dest.LastDayOfReceivingSalary, src => src.LastDayOfReceivingSalary ?? default);
+            .Map(dest => dest.LastDayOfReceivingSalary, src => src.LastDayOfReceivingSalary)
+            .Map(dest => dest.WorkPlaceStatus, src => src.WorkPlaceStatus)
+            .Map(dest => dest.PlaceName, src => src.PlaceName);
     }
 }

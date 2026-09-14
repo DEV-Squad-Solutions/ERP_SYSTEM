@@ -4117,7 +4117,7 @@ public static class DevelopmentDataSeeder
             {
                 payrollEntry.IsSalaryMoveToEmployeeAccount = true;
                 payrollEntry.SalaryMovedOn ??= endDate;
-                payrollEntry.Employee.LastDayOfReceivingSalary = endDate;
+                payrollEntry.Employee.UpdateLastDayOfReceivingSalary(endDate);
                 continue;
             }
 
@@ -4141,7 +4141,7 @@ public static class DevelopmentDataSeeder
 
             payrollEntry.IsSalaryMoveToEmployeeAccount = true;
             payrollEntry.SalaryMovedOn = endDate;
-            payrollEntry.Employee.LastDayOfReceivingSalary = endDate;
+            payrollEntry.Employee.UpdateLastDayOfReceivingSalary(endDate);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);

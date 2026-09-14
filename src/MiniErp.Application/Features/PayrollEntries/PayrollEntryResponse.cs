@@ -29,9 +29,14 @@ public record PayrollEntriesListResponse(
     decimal? Bonus,
     decimal? Deduction,
     decimal GrossSalary,
+    decimal CalculatedSalary,
     decimal NetSalary,
     bool IsSalaryMoveToEmployeeAccount,
-    DateOnly? SalaryMovedOn);
+    DateOnly? SalaryMovedOn,
+    WorkPlaceStatus WorkPlaceStatus)
+{
+    public bool IsSalaryMovedToEmployeeAccount => IsSalaryMoveToEmployeeAccount;
+}
 
 public record PayrollEntryResponse(
     int Id,
@@ -45,7 +50,12 @@ public record PayrollEntryResponse(
     decimal? Bonus,
     decimal? Deduction,
     decimal GrossSalary,
+    decimal CalculatedSalary,
     decimal NetSalary,
     bool IsSalaryMoveToEmployeeAccount,
     DateOnly? SalaryMovedOn,
-    AttendanceSummary AttendanceSummary);
+    AttendanceSummary AttendanceSummary,
+    WorkPlaceStatus WorkPlaceStatus)
+{
+    public bool IsSalaryMovedToEmployeeAccount => IsSalaryMoveToEmployeeAccount;
+}

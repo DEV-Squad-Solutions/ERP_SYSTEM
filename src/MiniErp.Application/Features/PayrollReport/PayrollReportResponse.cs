@@ -8,6 +8,8 @@ public sealed record PayrollEmployeeReportLine(
     string EmployeeCode,
     string EmployeeName,
     EmployeeType EmployeeType,
+    WorkPlaceStatus WorkPlaceStatus,
+    string? PlaceName,
     DateOnly StartDate,
     DateOnly EndDate,
     int PresentDays,
@@ -27,6 +29,8 @@ public sealed record PayrollReportSummary(
     int TotalEmployees,
     int MonthlyEmployeeCount,
     int DailyEmployeeCount,
+    int InCompanyCount,
+    int OutCompanyCount,
     decimal TotalGrossSalary,
     decimal TotalCalculatedSalary,
     decimal TotalBonus,
@@ -40,7 +44,9 @@ public sealed record PayrollReportSummary(
     int PaidCount,
     int PendingCount,
     decimal PaidAmount,
-    decimal PendingAmount);
+    decimal PendingAmount,
+    decimal InCompanyAmount,
+    decimal OutCompanyAmount);
 
 public sealed record PayrollReportResponse(
     DateOnly StartDate,

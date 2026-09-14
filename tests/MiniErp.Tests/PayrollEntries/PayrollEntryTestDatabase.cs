@@ -275,48 +275,51 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
         cashbox.ApplyOpeningExchangeRate(new DateOnly(2026, 1, 1), null, 1.0m);
         context.Cashboxes.Add(cashbox);
 
-        var employees = new[]
+        var emp1 = new Employee
         {
-            new Employee
-            {
-                Id = 1,
-                CompanyId = companyId,
-                Code = "EMP001",
-                Name = "Monthly Employee",
-                Email = "emp1@test.com",
-                PhoneNumber = "0123456789",
-                Type = EmployeeType.Monthly,
-                MonthlySalary = 6000m,
-                RequiredWorkingDaysPerMonth = 30,
-                IsActive = true
-            },
-            new Employee
-            {
-                Id = 2,
-                CompanyId = companyId,
-                Code = "EMP002",
-                Name = "Daily Employee",
-                Email = "emp2@test.com",
-                PhoneNumber = "0987654321",
-                Type = EmployeeType.Daily,
-                DailySalary = 200m,
-                IsActive = true
-            },
-            new Employee
-            {
-                Id = 3,
-                CompanyId = companyId,
-                Code = "EMP003",
-                Name = "Third Employee",
-                Email = "emp3@test.com",
-                PhoneNumber = "0112233445",
-                Type = EmployeeType.Monthly,
-                MonthlySalary = 9000m,
-                RequiredWorkingDaysPerMonth = 30,
-                IsActive = true
-            }
+            Id = 1,
+            CompanyId = companyId,
+            Code = "EMP001",
+            Name = "Monthly Employee",
+            Email = "emp1@test.com",
+            PhoneNumber = "0123456789",
+            Type = EmployeeType.Monthly,
+            MonthlySalary = 6000m,
+            RequiredWorkingDaysPerMonth = 30,
+            IsActive = true
         };
-        context.Employees.AddRange(employees);
+        emp1.UpdateWorkPlace(WorkPlaceStatus.InCompany, null);
+
+        var emp2 = new Employee
+        {
+            Id = 2,
+            CompanyId = companyId,
+            Code = "EMP002",
+            Name = "Daily Employee",
+            Email = "emp2@test.com",
+            PhoneNumber = "0987654321",
+            Type = EmployeeType.Daily,
+            DailySalary = 200m,
+            IsActive = true
+        };
+        emp2.UpdateWorkPlace(WorkPlaceStatus.InCompany, null);
+
+        var emp3 = new Employee
+        {
+            Id = 3,
+            CompanyId = companyId,
+            Code = "EMP003",
+            Name = "Third Employee",
+            Email = "emp3@test.com",
+            PhoneNumber = "0112233445",
+            Type = EmployeeType.Monthly,
+            MonthlySalary = 9000m,
+            RequiredWorkingDaysPerMonth = 30,
+            IsActive = true
+        };
+        emp3.UpdateWorkPlace(WorkPlaceStatus.InCompany, null);
+
+        context.Employees.AddRange(emp1, emp2, emp3);
         await context.SaveChangesAsync();
     }
 

@@ -39,5 +39,12 @@ public sealed class PayrollEntry : AuditableEntity
     public decimal NetSalary { get; set; }
 
     public bool IsSalaryMoveToEmployeeAccount { get; set; }
+    public bool IsSalaryMovedToEmployeeAccount
+    {
+        get => IsSalaryMoveToEmployeeAccount;
+        set => IsSalaryMoveToEmployeeAccount = value;
+    }
     public DateOnly? SalaryMovedOn { get; set; }
+
+    public bool CanBeEdited() => !IsSalaryMoveToEmployeeAccount;
 }

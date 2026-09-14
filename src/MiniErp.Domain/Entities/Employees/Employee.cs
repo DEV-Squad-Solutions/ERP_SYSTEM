@@ -1,4 +1,4 @@
-﻿using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Common.Entities;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 using System;
@@ -25,7 +25,40 @@ namespace MiniErp.Domain.Entities.Employees
         public decimal? DailySalary { get; set; } // Applicable if Type is Daily
         public decimal? MonthlySalary { get; set; } // Applicable if Type is Monthly
         public int? RequiredWorkingDaysPerMonth { get; set; } 
-        public DateOnly? LastDayOfReceivingSalary { get; set; }
+        public DateOnly? LastDayOfReceivingSalary { get; private set; }
         public bool IsActive { get; set; } = true;
+        public WorkPlaceStatus WorkPlaceStatus { get; private set; } = WorkPlaceStatus.InCompany;
+        public string? PlaceName { get; private set; }
+
+        public void UpdateWorkPlace(WorkPlaceStatus status, string? placeName)
+        {
+            WorkPlaceStatus = status;
+            PlaceName = string.IsNullOrWhiteSpace(placeName) ? null : placeName.Trim();
+        }
+
+        public void SetIsActive(bool isActive)
+        {
+            IsActive = isActive;
+        }
+
+        public void UpdateLastDayOfReceivingSalary(DateOnly date)
+        {
+            LastDayOfReceivingSalary = date;
+        }
+
+        public void SetRequiredWorkingDays(int? requiredDays)
+        {
+            if (Type == EmployeeType.Daily)
+            {
+                if (requiredDays.HasValue)
+                {
+                    throw new InvalidOperationException("Daily employees cannot have required working days per month.");
+                }
+                RequiredWorkingDaysPerMonth = null;
+                return;
+            }
+
+            RequiredWorkingDaysPerMonth = requiredDays;
+        }
     }
 }

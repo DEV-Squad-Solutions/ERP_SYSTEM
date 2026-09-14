@@ -3,5 +3,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Disable Windows Forms / Component designer attribute discovery in pure Web/API/ClassLib projects -->
+    <EnableDefaultDesignerCategory>false</EnableDefaultDesignerCategory>
+    <!-- Enable Visual Studio SDK build acceleration -->
+    <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
   </PropertyGroup>
 </Project>

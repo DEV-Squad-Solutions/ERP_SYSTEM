@@ -67,7 +67,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
         }
 
-        // ─── ADD ────────────────────────────────────────────────────────────────
+        // ─── ADD (IN COMPANY) ───────────────────────────────────────────────────
 
         public async Task<Result<PayrollEntryResponse>> AddAsync(
             PayrollEntryCreateRequest request,
@@ -86,9 +86,24 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 return Result<PayrollEntryResponse>.Failure(
                     Error.NotFound("Employee.NotFound", "الموظف المحدد غير موجود."));
 
-            var startDate = employee.LastDayOfReceivingSalary?.AddDays(1)
-                ?? DateOnly.FromDateTime(employee.CreatedOn);
+            if (!employee.IsActive)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("Employee.Inactive", "لا يمكن إنشاء مسير رواتب لموظف غير نشط."));
+
+            if (employee.WorkPlaceStatus == WorkPlaceStatus.OutCompany)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation(
+                        "PayrollEntry.OutCompanyNotAllowedHere",
+                        "الموظف يعمل خارج الشركة، يرجى استخدام نقطة نهاية مسير رواتب موظفي خارج الشركة."));
+
+            if (employee.WorkPlaceStatus != WorkPlaceStatus.InCompany)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation(
+                        "PayrollEntry.InvalidWorkPlaceStatus",
+                        "يجب تحديد حالة مكان العمل للموظف كـ داخل الشركة لإنشاء مسير رواتب عادي."));
+
             var endDate = request.EndDate ?? DateOnly.FromDateTime(DateTime.Now);
+            var startDate = employee.GetEffectiveStartDate(endDate);
 
             if (startDate > endDate)
                 return Result<PayrollEntryResponse>.Failure(
@@ -96,16 +111,31 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                         "PayrollEntry.InvalidDateRange",
                         "تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية."));
 
+            var hasOverlap = await dbContext.PayrollEntries
+                .AnyAsync(p => p.CompanyId == companyId &&
+                               p.EmployeeId == employee.Id &&
+                               p.StartDate <= endDate &&
+                               p.EndDate >= startDate,
+                          cancellationToken);
+            if (hasOverlap)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Conflict(
+                        "PayrollEntry.PeriodOverlap",
+                        $"يوجد مسير رواتب مسجل مسبقًا للموظف {employee.Name} يغطي أو يتداخل مع هذه الفترة ({startDate:yyyy-MM-dd} إلى {endDate:yyyy-MM-dd})."));
+
             var attendanceSummary = await GetAttendanceSummaryAsync(
                 employee.Id, companyId, startDate, endDate, cancellationToken);
 
-            var (grossSalary, calculatedSalary) = CalculateSalary(employee, attendanceSummary);
+            var (grossSalary, calculatedSalary, netSalary, salaryPerDay) = CalculateSalaryWithExtras(
+                employee,
+                attendanceSummary,
+                request.Bonus,
+                request.Deduction);
+
             if (grossSalary < 0)
                 return Result<PayrollEntryResponse>.Failure(
                     Error.Validation("Employee.SalaryRequired",
                         "يجب تحديد الراتب أو اليومية للموظف."));
-
-            decimal netSalary = calculatedSalary + (request.Bonus ?? 0) - (request.Deduction ?? 0);
 
             var entry = new PayrollEntry
             {
@@ -121,12 +151,8 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 WorkedDaysbydayunit             = attendanceSummary.TotalPresentDays,
                 Overtimebydayunit               = attendanceSummary.TotalOvertimeDays,
                 Deductionbydayunit              = attendanceSummary.TotalDeductionDays,
-                RequiredWorkingDays             = employee.RequiredWorkingDaysPerMonth,
-                SalaryPerDay                    = employee.Type == EmployeeType.Monthly
-                    ? ((employee.RequiredWorkingDaysPerMonth is > 0)
-                        ? employee.MonthlySalary!.Value / employee.RequiredWorkingDaysPerMonth.Value
-                        : employee.MonthlySalary!.Value)
-                    : employee.DailySalary,
+                RequiredWorkingDays             = employee.Type == EmployeeType.Daily ? null : employee.RequiredWorkingDaysPerMonth,
+                SalaryPerDay                    = salaryPerDay,
                 Bonus                           = request.Bonus,
                 Deduction                       = request.Deduction,
                 GrossSalary                     = grossSalary,
@@ -139,10 +165,11 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             dbContext.PayrollEntries.Add(entry);
             await dbContext.SaveChangesAsync(cancellationToken);
 
+            entry.Employee = employee;
             return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
         }
 
-        // ─── ADD BULK ───────────────────────────────────────────────────────────
+        // ─── ADD BULK (IN COMPANY) ──────────────────────────────────────────────
 
         public async Task<Result<List<PayrollEntryResponse>>> AddBulkAsync(
             BulkPayrollEntryCreateRequest request,
@@ -165,15 +192,27 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                         $"بعض الموظفين المحددين غير موجودين: {string.Join(", ", missingIds)}"));
             }
 
+            var ineligibleEmployees = employees.Values
+                .Where(e => !e.IsActive || e.WorkPlaceStatus != WorkPlaceStatus.InCompany)
+                .Select(e => e.Name)
+                .ToList();
+
+            if (ineligibleEmployees.Count > 0)
+            {
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.Validation(
+                        "PayrollEntry.EmployeeNotEligible",
+                        $"لا يمكن إنشاء مسير رواتب عادي إلا للموظفين النشطين داخل الشركة. الموظفون غير المؤهلين: {string.Join(", ", ineligibleEmployees)}"));
+            }
+
             var today = DateOnly.FromDateTime(DateTime.Now);
             var dateRanges = new Dictionary<int, (DateOnly StartDate, DateOnly EndDate)>();
 
             foreach (var item in request.Entries)
             {
                 var emp = employees[item.EmployeeId];
-                var startDate = (emp.LastDayOfReceivingSalary?.AddDays(1) 
-                                ?? DateOnly.FromDateTime(emp.CreatedOn));
                 var endDate = item.EndDate ?? request.DefaultEndDate ?? today;
+                var startDate = emp.GetEffectiveStartDate(endDate);
 
                 if (startDate > endDate)
                     return Result<List<PayrollEntryResponse>>.Failure(
@@ -185,6 +224,27 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
 
             var minStartDate = dateRanges.Values.Min(r => r.StartDate);
             var maxEndDate   = dateRanges.Values.Max(r => r.EndDate);
+
+            var existingOverlaps = await dbContext.PayrollEntries
+                .AsNoTracking()
+                .Where(p => p.CompanyId == companyId &&
+                            employeeIds.Contains(p.EmployeeId) &&
+                            p.StartDate <= maxEndDate &&
+                            p.EndDate >= minStartDate)
+                .Select(p => new { p.EmployeeId, p.StartDate, p.EndDate })
+                .ToListAsync(cancellationToken);
+
+            foreach (var item in request.Entries)
+            {
+                var (s, e) = dateRanges[item.EmployeeId];
+                if (existingOverlaps.Any(x => x.EmployeeId == item.EmployeeId && x.StartDate <= e && x.EndDate >= s))
+                {
+                    var emp = employees[item.EmployeeId];
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Conflict("PayrollEntry.PeriodOverlap",
+                            $"يوجد مسير رواتب مسجل مسبقًا للموظف {emp.Name} يغطي أو يتداخل مع الفترة المحددة."));
+                }
+            }
 
             var attendances = await dbContext.EmployeeAttendances
                 .AsNoTracking()
@@ -223,15 +283,18 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     TotalOvertimeDays:  empAttendances.Where(a => a.Status == EmployeeAttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkOverTimeRatio)),
                     TotalDeductionDays: empAttendances.Where(a => a.Status == EmployeeAttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkDaysDeductionRatio)));
 
-                var (grossSalary, calculatedSalary) = CalculateSalary(emp, summary);
+                var (grossSalary, calculatedSalary, netSalary, salaryPerDay) = CalculateSalaryWithExtras(
+                    emp,
+                    summary,
+                    item.Bonus,
+                    item.Deduction);
+
                 if (grossSalary < 0)
                     return Result<List<PayrollEntryResponse>>.Failure(
                         Error.Validation("Employee.SalaryRequired",
                             $"يجب تحديد الراتب أو اليومية للموظف {emp.Name}."));
 
-                var netSalary = calculatedSalary + (item.Bonus ?? 0) - (item.Deduction ?? 0);
-
-                entries.Add(new PayrollEntry
+                var entry = new PayrollEntry
                 {
                     StartDate                       = startDate,
                     EndDate                         = endDate,
@@ -245,10 +308,8 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     WorkedDaysbydayunit             = summary.TotalPresentDays,
                     Overtimebydayunit               = summary.TotalOvertimeDays,
                     Deductionbydayunit              = summary.TotalDeductionDays,
-                    RequiredWorkingDays             = emp.RequiredWorkingDaysPerMonth,
-                    SalaryPerDay                    = emp.Type == EmployeeType.Monthly && emp.RequiredWorkingDaysPerMonth is > 0
-                        ? emp.MonthlySalary!.Value / emp.RequiredWorkingDaysPerMonth.Value
-                        : emp.DailySalary,
+                    RequiredWorkingDays             = emp.Type == EmployeeType.Daily ? null : emp.RequiredWorkingDaysPerMonth,
+                    SalaryPerDay                    = salaryPerDay,
                     Bonus                           = item.Bonus,
                     Deduction                       = item.Deduction,
                     GrossSalary                     = grossSalary,
@@ -256,7 +317,9 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     NetSalary                       = netSalary,
                     IsSalaryMoveToEmployeeAccount   = false,
                     SalaryMovedOn                   = null
-                });
+                };
+                entry.Employee = emp;
+                entries.Add(entry);
             }
 
             dbContext.PayrollEntries.AddRange(entries);
@@ -314,9 +377,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 return Result<PayrollEntryResponse>.Failure(exchangeRateResult.Error);
             }
 
-            // Only create a financial ledger entry when there is an actual amount.
-            // A zero-salary period is valid (e.g. employee was absent all month);
-            // the entry is still marked as transferred so the period is closed.
+            // Only create a financial ledger entry when there is an actual positive amount.
             if (entry.NetSalary > 0)
             {
                 var documentNumber = await EntityIdentifierGenerator.GenerateUniqueAsync(
@@ -352,7 +413,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             entry.SalaryMovedOn = request.PostingDate;
 
             if (entry.Employee is not null)
-                entry.Employee.LastDayOfReceivingSalary = entry.EndDate;
+                entry.Employee.UpdateLastDayOfReceivingSalary(entry.EndDate);
 
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -451,8 +512,6 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     return Result<List<PayrollEntryResponse>>.Failure(exchangeRateResult.Error);
                 }
 
-                // Only create a financial ledger entry when there is an actual amount.
-                // Zero salary = period is closed with no credit (e.g. full-month absence).
                 if (entry.NetSalary > 0)
                 {
                     var documentNumber = await EntityIdentifierGenerator.GenerateUniqueAsync(
@@ -488,7 +547,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 entry.SalaryMovedOn = item.PostingDate;
 
                 if (entry.Employee is not null)
-                    entry.Employee.LastDayOfReceivingSalary = entry.EndDate;
+                    entry.Employee.UpdateLastDayOfReceivingSalary(entry.EndDate);
             }
 
             dbContext.EmployeeOpeningBalances.AddRange(openingBalances);
@@ -498,93 +557,13 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             return Result<List<PayrollEntryResponse>>.Success(entries.Select(MapToResponse).ToList());
         }
 
-        // ─── UPDATE ─────────────────────────────────────────────────────────────
+        // ─── UPDATE (IN COMPANY) ────────────────────────────────────────────────
 
         public async Task<Result<PayrollEntryResponse>> UpdateAsync(
             int id,
             PayrollEntryUpdateRequest request,
             CancellationToken cancellationToken = default)
         {
-            var reqError = ValidateAddAsync(
-                new PayrollEntryCreateRequest(
-                    StartDate:  request.StartDate,
-                    EndDate:    request.EndDate,
-                    EmployeeId: request.EmployeeId,
-                    Bonus:      request.Bonus,
-                    Deduction:  request.Deduction),
-                cancellationToken);
-
-            if (reqError is not null)
-                return Result<PayrollEntryResponse>.Failure(reqError);
-
-            var entry = await dbContext.PayrollEntries
-                .Include(e => e.Employee)
-                .FirstOrDefaultAsync(e => e.Id == id && e.CompanyId == companyId, cancellationToken);
-            if (entry is null)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.NotFound("PayrollEntry.NotFound", "لم يتم العثور على قيد الراتب المطلوب."));
-
-            if (request.EndDate != null && request.EndDate > entry.StartDate)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation("PayrollEntry.InvalidDateRange", "تاريخ الانتهاء يجب أن يكون بعد تاريخ أخر تاريخ تم صرف الراتب فيه.", nameof(request.EndDate)));
-            
-            var guardError = ValidateForUpdate(entry);
-            if (guardError is not null)
-                return Result<PayrollEntryResponse>.Failure(guardError);
-            
-            var employee = await dbContext.Employees
-                .FirstOrDefaultAsync(e => e.Id == request.EmployeeId && e.CompanyId == companyId, cancellationToken);
-
-            if (employee is null)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.NotFound("Employee.NotFound", "الموظف المحدد غير موجود."));
-
-            var startDate = entry.StartDate;
-
-            var attendanceSummary = await GetAttendanceSummaryAsync(
-                employee.Id, companyId, startDate, request.EndDate??entry.EndDate, cancellationToken);
-
-            var (grossSalary, calculatedSalary) = CalculateSalary(employee, attendanceSummary);
-            if (grossSalary < 0)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation("Employee.SalaryRequired",
-                        "يجب تحديد الراتب أو اليومية للموظف."));
-
-            
-            var netSalary = calculatedSalary + (request.Bonus ?? 0) - (request.Deduction ?? 0);
-
-            entry.EmployeeId                    = employee.Id;
-            entry.EmployeeCode                  = employee.Code;
-            entry.EmployeeName                  = employee.Name;
-            entry.EmployeeType                  = employee.Type;
-            entry.StartDate                     = entry.StartDate;
-            entry.EndDate                       = request.EndDate ?? entry.EndDate;
-            entry.PresentDays                   = attendanceSummary.PresentDays;
-            entry.AbsentDays                    = attendanceSummary.AbsentDays;
-            entry.WorkedDaysbydayunit           = attendanceSummary.TotalPresentDays;
-            entry.Overtimebydayunit             = attendanceSummary.TotalOvertimeDays;
-            entry.Deductionbydayunit            = attendanceSummary.TotalDeductionDays;
-            entry.RequiredWorkingDays           = employee.RequiredWorkingDaysPerMonth;
-            entry.SalaryPerDay                  = employee.Type == EmployeeType.Monthly && employee.RequiredWorkingDaysPerMonth is > 0
-                ? employee.MonthlySalary!.Value / employee.RequiredWorkingDaysPerMonth.Value
-                : employee.DailySalary;
-            entry.Bonus                         = request.Bonus;
-            entry.Deduction                     = request.Deduction;
-            entry.GrossSalary                   = grossSalary;
-            entry.CalculatedSalary              = calculatedSalary;
-            entry.NetSalary                     = netSalary;
-            employee.LastDayOfReceivingSalary   = request.EndDate;
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
-        }
-
-        // ─── RECALCULATE ─────────────────────────────────────────────────────────
-
-        public async Task<Result<PayrollEntryResponse>> RecalculateAsync(
-            int id,
-            CancellationToken cancellationToken = default)
-        {
             var entry = await dbContext.PayrollEntries
                 .Include(e => e.Employee)
                 .FirstOrDefaultAsync(e => e.Id == id && e.CompanyId == companyId, cancellationToken);
@@ -597,32 +576,72 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             if (guardError is not null)
                 return Result<PayrollEntryResponse>.Failure(guardError);
 
-            if (entry.Employee is null)
+            if (request.EmployeeId.HasValue && request.EmployeeId.Value != entry.EmployeeId)
                 return Result<PayrollEntryResponse>.Failure(
-                    Error.NotFound("Employee.NotFound", "لم يتم العثور على بيانات الموظف المرتبطة بقيد الراتب."));
+                    Error.Validation("PayrollEntry.CannotChangeEmployee", "لا يمكن تغيير الموظف لقيد راتب مسجل مسبقًا."));
 
             var employee = entry.Employee;
+            if (employee is null)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.NotFound("Employee.NotFound", "بيانات الموظف غير موجودة."));
+
+            if (!employee.IsActive)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("Employee.Inactive", "لا يمكن تعديل مسير رواتب لموظف غير نشط."));
+
+            if (employee.WorkPlaceStatus == WorkPlaceStatus.OutCompany)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("PayrollEntry.OutCompanyNotAllowedHere",
+                        "الموظف يعمل خارج الشركة، يرجى استخدام نقطة نهاية مسير رواتب موظفي خارج الشركة."));
+
+            var newEndDate = request.EndDate ?? entry.EndDate;
+            var startDate = employee.GetEffectiveStartDate(newEndDate);
+
+            if (startDate > newEndDate)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("PayrollEntry.InvalidDateRange",
+                        "تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية.",
+                        nameof(request.EndDate)));
+
+            var hasOverlap = await dbContext.PayrollEntries
+                .AnyAsync(p => p.CompanyId == companyId &&
+                               p.EmployeeId == entry.EmployeeId &&
+                               p.Id != entry.Id &&
+                               p.StartDate <= newEndDate &&
+                               p.EndDate >= startDate,
+                          cancellationToken);
+            if (hasOverlap)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Conflict("PayrollEntry.PeriodOverlap", "مسير الرواتب يتداخل مع مسير رواتب آخر مسجل لنفس الموظف."));
 
             var attendanceSummary = await GetAttendanceSummaryAsync(
-                employee.Id, companyId, entry.StartDate, entry.EndDate, cancellationToken);
+                employee.Id, companyId, startDate, newEndDate, cancellationToken);
 
-            var (grossSalary, calculatedSalary) = CalculateSalary(employee, attendanceSummary);
+            var bonus = request.Bonus ?? entry.Bonus;
+            var deduction = request.Deduction ?? entry.Deduction;
+
+            var (grossSalary, calculatedSalary, netSalary, salaryPerDay) = CalculateSalaryWithExtras(
+                employee,
+                attendanceSummary,
+                bonus,
+                deduction);
+
             if (grossSalary < 0)
                 return Result<PayrollEntryResponse>.Failure(
                     Error.Validation("Employee.SalaryRequired",
                         "يجب تحديد الراتب أو اليومية للموظف."));
 
-            var netSalary = calculatedSalary + (entry.Bonus ?? 0) - (entry.Deduction ?? 0);
-
+            entry.StartDate                     = startDate;
+            entry.EndDate                       = newEndDate;
             entry.PresentDays                   = attendanceSummary.PresentDays;
             entry.AbsentDays                    = attendanceSummary.AbsentDays;
             entry.WorkedDaysbydayunit           = attendanceSummary.TotalPresentDays;
             entry.Overtimebydayunit             = attendanceSummary.TotalOvertimeDays;
             entry.Deductionbydayunit            = attendanceSummary.TotalDeductionDays;
-            entry.RequiredWorkingDays           = employee.RequiredWorkingDaysPerMonth;
-            entry.SalaryPerDay                  = employee.Type == EmployeeType.Monthly && employee.RequiredWorkingDaysPerMonth is > 0
-                ? employee.MonthlySalary!.Value / employee.RequiredWorkingDaysPerMonth.Value
-                : employee.DailySalary;
+            entry.RequiredWorkingDays           = employee.Type == EmployeeType.Daily ? null : employee.RequiredWorkingDaysPerMonth;
+            entry.SalaryPerDay                  = salaryPerDay;
+            entry.Bonus                         = bonus;
+            entry.Deduction                     = deduction;
             entry.GrossSalary                   = grossSalary;
             entry.CalculatedSalary              = calculatedSalary;
             entry.NetSalary                     = netSalary;
@@ -631,30 +650,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
         }
 
-        // ─── DELETE ─────────────────────────────────────────────────────────────
-
-        public async Task<Result> DeleteAsync(
-            int id,
-            CancellationToken cancellationToken = default)
-        {
-            var entry = await dbContext.PayrollEntries
-                .FirstOrDefaultAsync(e => e.Id == id && e.CompanyId == companyId, cancellationToken);
-
-            if (entry is null)
-                return Result.Failure(
-                    Error.NotFound("PayrollEntry.NotFound", "لم يتم العثور على قيد الرواتب المطلوب."));
-
-            if (entry.IsSalaryMoveToEmployeeAccount)
-                return Result.Failure(
-                    Error.Conflict("PayrollEntry.AlreadyPaid",
-                        "لا يمكن حذف قيد راتب تم تحويل راتبه إلى حساب الموظف."));
-
-            dbContext.PayrollEntries.Remove(entry);
-            await dbContext.SaveChangesAsync(cancellationToken);
-            return Result.Success();
-        }
-
-        // ─── UPDATE BULK ────────────────────────────────────────────────────────
+        // ─── UPDATE BULK (IN COMPANY) ───────────────────────────────────────────
 
         public async Task<Result<List<PayrollEntryResponse>>> UpdateBulkAsync(
             BulkPayrollEntryUpdateRequest request,
@@ -665,9 +661,9 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     Error.Validation("PayrollEntry.EmptyBulkRequest", "يجب إرسال قيد راتب واحد على الأقل للتعديل."));
 
             var ids = request.Entries.Select(e => e.Id).Distinct().ToList();
-            var employeeIds = request.Entries.Select(e => e.EmployeeId).Distinct().ToList();
 
             var entries = await dbContext.PayrollEntries
+                .Include(e => e.Employee)
                 .Where(e => e.CompanyId == companyId && ids.Contains(e.Id))
                 .ToListAsync(cancellationToken);
 
@@ -680,6 +676,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                         $"بعض قيود الرواتب المحددة غير موجودة: {string.Join(", ", missingIds)}"));
             }
 
+            // Atomic validation: ensure all entries are editable
             foreach (var entry in entries)
             {
                 var guardError = ValidateForUpdate(entry);
@@ -687,16 +684,14 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     return Result<List<PayrollEntryResponse>>.Failure(guardError);
             }
 
-            var employees = await dbContext.Employees
-                .Where(e => e.CompanyId == companyId && employeeIds.Contains(e.Id))
-                .ToDictionaryAsync(e => e.Id, cancellationToken);
-
-            if (employees.Count != employeeIds.Count)
+            var ineligible = entries.Where(e => e.Employee == null || !e.Employee.IsActive || e.Employee.WorkPlaceStatus != WorkPlaceStatus.InCompany)
+                .Select(e => e.EmployeeName)
+                .ToList();
+            if (ineligible.Count > 0)
             {
-                var missingIds = employeeIds.Where(id => !employees.ContainsKey(id)).ToList();
                 return Result<List<PayrollEntryResponse>>.Failure(
-                    Error.NotFound("Employee.NotFound",
-                        $"بعض الموظفين المحددين غير موجودين: {string.Join(", ", missingIds)}"));
+                    Error.Validation("PayrollEntry.EmployeeNotEligible",
+                        $"بعض الموظفين غير مؤهلين للتعديل داخل الشركة: {string.Join(", ", ineligible)}"));
             }
 
             var today = DateOnly.FromDateTime(DateTime.Now);
@@ -704,21 +699,44 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
 
             foreach (var item in request.Entries)
             {
-                var emp = employees[item.EmployeeId];
-                var startDate = emp.LastDayOfReceivingSalary?.AddDays(1)
-                    ?? DateOnly.FromDateTime(emp.CreatedOn);
-                var endDate = item.EndDate ?? today;
+                var entry = entriesMap[item.Id];
+                var emp = entry.Employee!;
+                var newEndDate = item.EndDate ?? request.DefaultEndDate ?? entry.EndDate;
+                var startDate = emp.GetEffectiveStartDate(newEndDate);
 
-                if (startDate > endDate)
+                if (startDate > newEndDate)
                     return Result<List<PayrollEntryResponse>>.Failure(
                         Error.Validation("PayrollEntry.InvalidDateRange",
-                            $"تاريخ البداية للموظف {emp.Name} ({startDate}) يجب أن يكون قبل أو يساوي تاريخ النهاية ({endDate})."));
+                            $"تاريخ البداية للموظف {emp.Name} ({startDate}) يجب أن يكون قبل أو يساوي تاريخ النهاية ({newEndDate})."));
 
-                dateRanges[item.Id] = (startDate, endDate);
+                dateRanges[item.Id] = (startDate, newEndDate);
             }
 
             var minStartDate = dateRanges.Values.Min(r => r.StartDate);
             var maxEndDate = dateRanges.Values.Max(r => r.EndDate);
+            var employeeIds = entries.Select(e => e.EmployeeId).Distinct().ToList();
+
+            var existingOverlaps = await dbContext.PayrollEntries
+                .AsNoTracking()
+                .Where(p => p.CompanyId == companyId &&
+                            employeeIds.Contains(p.EmployeeId) &&
+                            !ids.Contains(p.Id) &&
+                            p.StartDate <= maxEndDate &&
+                            p.EndDate >= minStartDate)
+                .Select(p => new { p.EmployeeId, p.StartDate, p.EndDate })
+                .ToListAsync(cancellationToken);
+
+            foreach (var item in request.Entries)
+            {
+                var (s, e) = dateRanges[item.Id];
+                if (existingOverlaps.Any(x => x.EmployeeId == entriesMap[item.Id].EmployeeId && x.StartDate <= e && x.EndDate >= s))
+                {
+                    var emp = entriesMap[item.Id].Employee!;
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Conflict("PayrollEntry.PeriodOverlap",
+                            $"يوجد مسير رواتب مسجل مسبقًا للموظف {emp.Name} يغطي أو يتداخل مع الفترة المحددة ({s:yyyy-MM-dd} إلى {e:yyyy-MM-dd})."));
+                }
+            }
 
             var attendances = await dbContext.EmployeeAttendances
                 .AsNoTracking()
@@ -746,7 +764,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             foreach (var item in request.Entries)
             {
                 var entry = entriesMap[item.Id];
-                var emp = employees[item.EmployeeId];
+                var emp = entry.Employee!;
                 var (startDate, endDate) = dateRanges[item.Id];
 
                 var empAttendances = attendanceLookup[emp.Id]
@@ -760,18 +778,20 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     TotalOvertimeDays:  empAttendances.Where(a => a.Status == EmployeeAttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkOverTimeRatio)),
                     TotalDeductionDays: empAttendances.Where(a => a.Status == EmployeeAttendanceStatus.Present).Sum(a => GetRatioValue(a.WorkDaysDeductionRatio)));
 
-                var (grossSalary, calculatedSalary) = CalculateSalary(emp, summary);
+                var bonus = item.Bonus ?? entry.Bonus;
+                var deduction = item.Deduction ?? entry.Deduction;
+
+                var (grossSalary, calculatedSalary, netSalary, salaryPerDay) = CalculateSalaryWithExtras(
+                    emp,
+                    summary,
+                    bonus,
+                    deduction);
+
                 if (grossSalary < 0)
                     return Result<List<PayrollEntryResponse>>.Failure(
                         Error.Validation("Employee.SalaryRequired",
                             $"يجب تحديد الراتب أو اليومية للموظف {emp.Name}."));
 
-                var netSalary = calculatedSalary + (item.Bonus ?? 0) - (item.Deduction ?? 0);
-
-                entry.EmployeeId                    = emp.Id;
-                entry.EmployeeCode                  = emp.Code;
-                entry.EmployeeName                  = emp.Name;
-                entry.EmployeeType                  = emp.Type;
                 entry.StartDate                     = startDate;
                 entry.EndDate                       = endDate;
                 entry.PresentDays                   = summary.PresentDays;
@@ -779,12 +799,10 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 entry.WorkedDaysbydayunit           = summary.TotalPresentDays;
                 entry.Overtimebydayunit             = summary.TotalOvertimeDays;
                 entry.Deductionbydayunit            = summary.TotalDeductionDays;
-                entry.RequiredWorkingDays           = emp.RequiredWorkingDaysPerMonth;
-                entry.SalaryPerDay                  = emp.Type == EmployeeType.Monthly && emp.RequiredWorkingDaysPerMonth is > 0
-                    ? emp.MonthlySalary!.Value / emp.RequiredWorkingDaysPerMonth.Value
-                    : emp.DailySalary;
-                entry.Bonus                         = item.Bonus;
-                entry.Deduction                     = item.Deduction;
+                entry.RequiredWorkingDays           = emp.Type == EmployeeType.Daily ? null : emp.RequiredWorkingDaysPerMonth;
+                entry.SalaryPerDay                  = salaryPerDay;
+                entry.Bonus                         = bonus;
+                entry.Deduction                     = deduction;
                 entry.GrossSalary                   = grossSalary;
                 entry.CalculatedSalary              = calculatedSalary;
                 entry.NetSalary                     = netSalary;
@@ -794,6 +812,105 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             await transaction.CommitAsync(cancellationToken);
 
             return Result<List<PayrollEntryResponse>>.Success(entries.Select(MapToResponse).ToList());
+        }
+
+        // ─── RECALCULATE ─────────────────────────────────────────────────────────
+
+        public async Task<Result<PayrollEntryResponse>> RecalculateAsync(
+            int id,
+            CancellationToken cancellationToken = default)
+        {
+            var entry = await dbContext.PayrollEntries
+                .Include(e => e.Employee)
+                .FirstOrDefaultAsync(e => e.Id == id && e.CompanyId == companyId, cancellationToken);
+
+            if (entry is null)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.NotFound("PayrollEntry.NotFound", "لم يتم العثور على قيد الراتب المطلوب."));
+
+            var guardError = ValidateForUpdate(entry);
+            if (guardError is not null)
+                return Result<PayrollEntryResponse>.Failure(guardError);
+
+            if (entry.Employee is null)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.NotFound("Employee.NotFound", "لم يتم العثور على بيانات الموظف المرتبطة بقيد الراتب."));
+
+            var employee = entry.Employee;
+
+            if (employee.WorkPlaceStatus == WorkPlaceStatus.OutCompany)
+            {
+                var workedUnits = entry.WorkedDaysbydayunit
+                    + (entry.Overtimebydayunit ?? 0m)
+                    - (entry.Deductionbydayunit ?? 0m);
+
+                var calc = PayrollCalculator.Calculate(
+                    employee,
+                    workedUnits,
+                    entry.Bonus,
+                    entry.Deduction);
+
+                if (calc.GrossSalary < 0)
+                    return Result<PayrollEntryResponse>.Failure(
+                        Error.Validation("Employee.SalaryRequired", "يجب تحديد الراتب أو اليومية للموظف."));
+
+                entry.GrossSalary       = calc.GrossSalary;
+                entry.CalculatedSalary  = calc.CalculatedSalary;
+                entry.NetSalary         = calc.NetSalary;
+                entry.SalaryPerDay      = calc.SalaryPerDay;
+            }
+            else
+            {
+                var attendanceSummary = await GetAttendanceSummaryAsync(
+                    employee.Id, companyId, entry.StartDate, entry.EndDate, cancellationToken);
+
+                var (grossSalary, calculatedSalary, netSalary, salaryPerDay) = CalculateSalaryWithExtras(
+                    employee,
+                    attendanceSummary,
+                    entry.Bonus,
+                    entry.Deduction);
+
+                if (grossSalary < 0)
+                    return Result<PayrollEntryResponse>.Failure(
+                        Error.Validation("Employee.SalaryRequired",
+                            "يجب تحديد الراتب أو اليومية للموظف."));
+
+                entry.PresentDays                   = attendanceSummary.PresentDays;
+                entry.AbsentDays                    = attendanceSummary.AbsentDays;
+                entry.WorkedDaysbydayunit           = attendanceSummary.TotalPresentDays;
+                entry.Overtimebydayunit             = attendanceSummary.TotalOvertimeDays;
+                entry.Deductionbydayunit            = attendanceSummary.TotalDeductionDays;
+                entry.RequiredWorkingDays           = employee.Type == EmployeeType.Daily ? null : employee.RequiredWorkingDaysPerMonth;
+                entry.SalaryPerDay                  = salaryPerDay;
+                entry.GrossSalary                   = grossSalary;
+                entry.CalculatedSalary              = calculatedSalary;
+                entry.NetSalary                     = netSalary;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
+        }
+
+        // ─── DELETE ─────────────────────────────────────────────────────────────
+
+        public async Task<Result> DeleteAsync(
+            int id,
+            CancellationToken cancellationToken = default)
+        {
+            var entry = await dbContext.PayrollEntries
+                .FirstOrDefaultAsync(e => e.Id == id && e.CompanyId == companyId, cancellationToken);
+
+            if (entry is null)
+                return Result.Failure(
+                    Error.NotFound("PayrollEntry.NotFound", "لم يتم العثور على قيد الرواتب المطلوب."));
+
+            var guardError = ValidateForUpdate(entry);
+            if (guardError is not null)
+                return Result.Failure(guardError);
+
+            dbContext.PayrollEntries.Remove(entry);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return Result.Success();
         }
 
         // ─── DELETE BULK ────────────────────────────────────────────────────────
@@ -821,12 +938,11 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                         $"بعض قيود الرواتب المحددة غير موجودة: {string.Join(", ", missingIds)}"));
             }
 
-            var movedEntries = entries.Where(e => e.IsSalaryMoveToEmployeeAccount).Select(e => e.Id).ToList();
-            if (movedEntries.Count > 0)
+            foreach (var entry in entries)
             {
-                return Result.Failure(
-                    Error.Conflict("PayrollEntry.AlreadyPaid",
-                        $"لا يمكن حذف قيود الرواتب التالية لأن رواتبها تم تحويلها بالفعل إلى حسابات الموظفين: {string.Join(", ", movedEntries)}"));
+                var guardError = ValidateForUpdate(entry);
+                if (guardError is not null)
+                    return Result.Failure(guardError);
             }
 
             dbContext.PayrollEntries.RemoveRange(entries);
@@ -1001,6 +1117,505 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             return Result<PayrollDashboardResponse>.Success(response);
         }
 
+        // ─── ADD OUT COMPANY ───────────────────────────────────────────────────
+
+        public async Task<Result<PayrollEntryResponse>> AddOutCompanyAsync(
+            OutCompanyPayrollEntryRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            var employee = await dbContext.Employees
+                .FirstOrDefaultAsync(
+                    e => e.Id == request.EmployeeId && e.CompanyId == companyId,
+                    cancellationToken);
+
+            if (employee is null)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.NotFound("Employee.NotFound", "الموظف المحدد غير موجود."));
+
+            if (!employee.IsActive)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("Employee.Inactive", "لا يمكن إنشاء مسير رواتب لموظف غير نشط."));
+
+            if (employee.WorkPlaceStatus != WorkPlaceStatus.OutCompany)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation(
+                        "PayrollEntry.NotOutCompany",
+                        "مسير رواتب خارج الشركة مخصص فقط للموظفين الذين يعملون خارج الشركة."));
+
+            if (request.StartDate == default)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("PayrollEntry.StartDateRequired", "تاريخ البداية مطلوب."));
+
+            if (request.EndDate == default)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("PayrollEntry.EndDateRequired", "تاريخ النهاية مطلوب."));
+
+            var startDate = request.StartDate;
+            var endDate = request.EndDate;
+
+            if (startDate > endDate)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation(
+                        "PayrollEntry.InvalidDateRange",
+                        "تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية."));
+
+            var hasOverlap = await dbContext.PayrollEntries
+                .AnyAsync(p => p.CompanyId == companyId &&
+                               p.EmployeeId == employee.Id &&
+                               p.StartDate <= endDate &&
+                               p.EndDate >= startDate,
+                          cancellationToken);
+            if (hasOverlap)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Conflict(
+                        "PayrollEntry.PeriodOverlap",
+                        $"يوجد مسير رواتب مسجل مسبقًا للموظف {employee.Name} يغطي أو يتداخل مع هذه الفترة ({startDate:yyyy-MM-dd} إلى {endDate:yyyy-MM-dd})."));
+
+            var workedDaysUnit = request.WorkedDaysByDayUnit;
+            var overtimeUnit = request.OvertimeByDayUnit ?? 0m;
+            var deductionUnit = request.DeductionByDayUnit ?? 0m;
+
+            var workedUnits = workedDaysUnit + overtimeUnit - deductionUnit;
+
+            var calc = PayrollCalculator.Calculate(
+                employee,
+                workedUnits,
+                request.Bonus,
+                request.Deduction);
+
+            if (calc.GrossSalary < 0)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("Employee.SalaryRequired", "يجب تحديد الراتب أو اليومية للموظف."));
+
+            var entry = new PayrollEntry
+            {
+                StartDate                       = startDate,
+                EndDate                         = endDate,
+                CompanyId                       = companyId,
+                EmployeeId                      = request.EmployeeId,
+                EmployeeCode                    = employee.Code,
+                EmployeeName                    = employee.Name,
+                EmployeeType                    = employee.Type,
+                PresentDays                     = request.PresentDays,
+                AbsentDays                      = 0,
+                WorkedDaysbydayunit             = workedDaysUnit,
+                Overtimebydayunit               = overtimeUnit,
+                Deductionbydayunit              = deductionUnit,
+                RequiredWorkingDays             = employee.Type == EmployeeType.Daily ? null : employee.RequiredWorkingDaysPerMonth,
+                SalaryPerDay                    = calc.SalaryPerDay,
+                Bonus                           = request.Bonus,
+                Deduction                       = request.Deduction,
+                GrossSalary                     = calc.GrossSalary,
+                CalculatedSalary                = calc.CalculatedSalary,
+                NetSalary                       = calc.NetSalary,
+                IsSalaryMoveToEmployeeAccount   = false,
+                SalaryMovedOn                   = null
+            };
+
+            dbContext.PayrollEntries.Add(entry);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            entry.Employee = employee;
+            return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
+        }
+
+        // ─── ADD OUT COMPANY BULK ───────────────────────────────────────────────
+
+        public async Task<Result<List<PayrollEntryResponse>>> AddOutCompanyBulkAsync(
+            BulkOutCompanyPayrollEntryRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (request.Entries is null || request.Entries.Count == 0)
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.Validation("PayrollEntry.EmptyBulkRequest", "يجب إرسال مدخل راتب واحد على الأقل."));
+
+            var duplicateEmployees = request.Entries
+                .GroupBy(e => e.EmployeeId)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .ToList();
+
+            if (duplicateEmployees.Count > 0)
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.Validation(
+                        "PayrollEntry.DuplicateEmployee",
+                        $"لا يجوز تكرار نفس الموظف داخل الطلب الواحد: {string.Join(", ", duplicateEmployees)}"));
+
+            var employeeIds = request.Entries.Select(e => e.EmployeeId).Distinct().ToList();
+            var employees = await dbContext.Employees
+                .Where(e => e.CompanyId == companyId && employeeIds.Contains(e.Id))
+                .ToDictionaryAsync(e => e.Id, cancellationToken);
+
+            if (employees.Count != employeeIds.Count)
+            {
+                var missingIds = employeeIds.Where(id => !employees.ContainsKey(id)).ToList();
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.NotFound("Employee.NotFound",
+                        $"بعض الموظفين المحددين غير موجودين: {string.Join(", ", missingIds)}"));
+            }
+
+            var ineligibleEmployees = employees.Values
+                .Where(e => !e.IsActive || e.WorkPlaceStatus != WorkPlaceStatus.OutCompany)
+                .Select(e => e.Name)
+                .ToList();
+
+            if (ineligibleEmployees.Count > 0)
+            {
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.Validation(
+                        "PayrollEntry.EmployeeNotEligible",
+                        $"لا يمكن إنشاء مسير رواتب خارج الشركة إلا للموظفين النشطين خارج الشركة. الموظفون غير المؤهلين: {string.Join(", ", ineligibleEmployees)}"));
+            }
+
+            var dateRanges = new Dictionary<int, (DateOnly StartDate, DateOnly EndDate)>();
+
+            foreach (var item in request.Entries)
+            {
+                var emp = employees[item.EmployeeId];
+                var startDate = item.StartDate ?? request.DefaultStartDate;
+                if (!startDate.HasValue || startDate.Value == default)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Validation("PayrollEntry.StartDateRequired",
+                            $"تاريخ البداية مطلوب للموظف {emp.Name}."));
+
+                var endDate = item.EndDate ?? request.DefaultEndDate;
+                if (!endDate.HasValue || endDate.Value == default)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Validation("PayrollEntry.EndDateRequired",
+                            $"تاريخ النهاية مطلوب للموظف {emp.Name}."));
+
+                if (startDate.Value > endDate.Value)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Validation("PayrollEntry.InvalidDateRange",
+                            $"تاريخ البداية للموظف {emp.Name} ({startDate.Value}) يجب أن يكون قبل أو يساوي تاريخ النهاية ({endDate.Value})."));
+
+                dateRanges[item.EmployeeId] = (startDate.Value, endDate.Value);
+            }
+
+            var minStartDate = dateRanges.Values.Min(r => r.StartDate);
+            var maxEndDate = dateRanges.Values.Max(r => r.EndDate);
+
+            var existingOverlaps = await dbContext.PayrollEntries
+                .AsNoTracking()
+                .Where(p => p.CompanyId == companyId &&
+                            employeeIds.Contains(p.EmployeeId) &&
+                            p.StartDate <= maxEndDate &&
+                            p.EndDate >= minStartDate)
+                .Select(p => new { p.EmployeeId, p.StartDate, p.EndDate })
+                .ToListAsync(cancellationToken);
+
+            foreach (var item in request.Entries)
+            {
+                var (s, e) = dateRanges[item.EmployeeId];
+                if (existingOverlaps.Any(x => x.EmployeeId == item.EmployeeId && x.StartDate <= e && x.EndDate >= s))
+                {
+                    var emp = employees[item.EmployeeId];
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Conflict("PayrollEntry.PeriodOverlap",
+                            $"يوجد مسير رواتب مسجل مسبقًا للموظف {emp.Name} يغطي أو يتداخل مع الفترة المحددة ({s:yyyy-MM-dd} إلى {e:yyyy-MM-dd})."));
+                }
+            }
+
+            var entries = new List<PayrollEntry>(request.Entries.Count);
+
+            foreach (var item in request.Entries)
+            {
+                var emp = employees[item.EmployeeId];
+                var (startDate, endDate) = dateRanges[item.EmployeeId];
+
+                var workedDaysUnit = item.WorkedDaysByDayUnit;
+                var overtimeUnit = item.OvertimeByDayUnit ?? 0m;
+                var deductionUnit = item.DeductionByDayUnit ?? 0m;
+
+                var workedUnits = workedDaysUnit + overtimeUnit - deductionUnit;
+
+                var calc = PayrollCalculator.Calculate(
+                    emp,
+                    workedUnits,
+                    item.Bonus,
+                    item.Deduction);
+
+                if (calc.GrossSalary < 0)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Validation("Employee.SalaryRequired",
+                            $"يجب تحديد الراتب أو اليومية للموظف {emp.Name}."));
+
+                var entry = new PayrollEntry
+                {
+                    StartDate                       = startDate,
+                    EndDate                         = endDate,
+                    CompanyId                       = companyId,
+                    EmployeeId                      = item.EmployeeId,
+                    EmployeeCode                    = emp.Code,
+                    EmployeeName                    = emp.Name,
+                    EmployeeType                    = emp.Type,
+                    PresentDays                     = item.PresentDays,
+                    AbsentDays                      = 0,
+                    WorkedDaysbydayunit             = workedDaysUnit,
+                    Overtimebydayunit               = overtimeUnit,
+                    Deductionbydayunit              = deductionUnit,
+                    RequiredWorkingDays             = emp.Type == EmployeeType.Daily ? null : emp.RequiredWorkingDaysPerMonth,
+                    SalaryPerDay                    = calc.SalaryPerDay,
+                    Bonus                           = item.Bonus,
+                    Deduction                       = item.Deduction,
+                    GrossSalary                     = calc.GrossSalary,
+                    CalculatedSalary                = calc.CalculatedSalary,
+                    NetSalary                       = calc.NetSalary,
+                    IsSalaryMoveToEmployeeAccount   = false,
+                    SalaryMovedOn                   = null
+                };
+                entry.Employee = emp;
+                entries.Add(entry);
+            }
+
+            dbContext.PayrollEntries.AddRange(entries);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            return Result<List<PayrollEntryResponse>>.Success(entries.Select(MapToResponse).ToList());
+        }
+
+        // ─── UPDATE OUT COMPANY ────────────────────────────────────────────────
+
+        public async Task<Result<PayrollEntryResponse>> UpdateOutCompanyAsync(
+            int id,
+            OutCompanyPayrollEntryUpdateRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            var entry = await dbContext.PayrollEntries
+                .Include(e => e.Employee)
+                .FirstOrDefaultAsync(e => e.Id == id && e.CompanyId == companyId, cancellationToken);
+
+            if (entry is null)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.NotFound("PayrollEntry.NotFound", "لم يتم العثور على قيد الراتب المطلوب."));
+
+            var guardError = ValidateForUpdate(entry);
+            if (guardError is not null)
+                return Result<PayrollEntryResponse>.Failure(guardError);
+
+            var employee = entry.Employee;
+            if (employee is null)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.NotFound("Employee.NotFound", "بيانات الموظف غير موجودة."));
+
+            if (!employee.IsActive)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("Employee.Inactive", "لا يمكن تعديل مسير رواتب لموظف غير نشط."));
+
+            if (employee.WorkPlaceStatus != WorkPlaceStatus.OutCompany)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("PayrollEntry.NotOutCompany",
+                        "مسير رواتب خارج الشركة مخصص فقط للموظفين الذين يعملون خارج الشركة."));
+
+            if (request.StartDate == default)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("PayrollEntry.StartDateRequired", "تاريخ البداية مطلوب."));
+
+            if (request.EndDate == default)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("PayrollEntry.EndDateRequired", "تاريخ النهاية مطلوب."));
+
+            var startDate = request.StartDate;
+            var endDate = request.EndDate;
+
+            if (startDate > endDate)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("PayrollEntry.InvalidDateRange",
+                        "تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية.",
+                        nameof(request.StartDate)));
+
+            var hasOverlap = await dbContext.PayrollEntries
+                .AnyAsync(p => p.CompanyId == companyId &&
+                               p.EmployeeId == entry.EmployeeId &&
+                               p.Id != entry.Id &&
+                               p.StartDate <= endDate &&
+                               p.EndDate >= startDate,
+                          cancellationToken);
+            if (hasOverlap)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Conflict("PayrollEntry.PeriodOverlap", "الفترة المحددة تتداخل مع مسير رواتب آخر مسجل لنفس الموظف."));
+
+            var workedDaysUnit = request.WorkedDaysByDayUnit;
+            var overtimeUnit = request.OvertimeByDayUnit ?? entry.Overtimebydayunit ?? 0m;
+            var deductionUnit = request.DeductionByDayUnit ?? entry.Deductionbydayunit ?? 0m;
+            var workedUnits = workedDaysUnit + overtimeUnit - deductionUnit;
+
+            var bonus = request.Bonus ?? entry.Bonus;
+            var deduction = request.Deduction ?? entry.Deduction;
+
+            var calc = PayrollCalculator.Calculate(
+                employee,
+                workedUnits,
+                bonus,
+                deduction);
+
+            if (calc.GrossSalary < 0)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Validation("Employee.SalaryRequired", "يجب تحديد الراتب أو اليومية للموظف."));
+
+            entry.StartDate                     = startDate;
+            entry.EndDate                       = endDate;
+            entry.PresentDays                   = request.PresentDays;
+            entry.WorkedDaysbydayunit           = workedDaysUnit;
+            entry.Overtimebydayunit             = overtimeUnit;
+            entry.Deductionbydayunit            = deductionUnit;
+            entry.RequiredWorkingDays           = employee.Type == EmployeeType.Daily ? null : employee.RequiredWorkingDaysPerMonth;
+            entry.SalaryPerDay                  = calc.SalaryPerDay;
+            entry.Bonus                         = bonus;
+            entry.Deduction                     = deduction;
+            entry.GrossSalary                   = calc.GrossSalary;
+            entry.CalculatedSalary              = calc.CalculatedSalary;
+            entry.NetSalary                     = calc.NetSalary;
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
+        }
+
+        // ─── UPDATE OUT COMPANY BULK ───────────────────────────────────────────
+
+        public async Task<Result<List<PayrollEntryResponse>>> UpdateOutCompanyBulkAsync(
+            BulkOutCompanyPayrollEntryUpdateRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (request.Entries is null || request.Entries.Count == 0)
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.Validation("PayrollEntry.EmptyBulkRequest", "يجب إرسال قيد راتب واحد على الأقل للتعديل."));
+
+            var ids = request.Entries.Select(e => e.Id).Distinct().ToList();
+
+            var entries = await dbContext.PayrollEntries
+                .Include(e => e.Employee)
+                .Where(e => e.CompanyId == companyId && ids.Contains(e.Id))
+                .ToListAsync(cancellationToken);
+
+            var entriesMap = entries.ToDictionary(e => e.Id);
+            if (entries.Count != ids.Count)
+            {
+                var missingIds = ids.Where(id => !entriesMap.ContainsKey(id)).ToList();
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.NotFound("PayrollEntry.NotFound",
+                        $"بعض قيود الرواتب المحددة غير موجودة: {string.Join(", ", missingIds)}"));
+            }
+
+            // Atomic validation: ensure all entries are editable
+            foreach (var entry in entries)
+            {
+                var guardError = ValidateForUpdate(entry);
+                if (guardError is not null)
+                    return Result<List<PayrollEntryResponse>>.Failure(guardError);
+            }
+
+            var ineligible = entries.Where(e => e.Employee == null || !e.Employee.IsActive || e.Employee.WorkPlaceStatus != WorkPlaceStatus.OutCompany)
+                .Select(e => e.EmployeeName)
+                .ToList();
+            if (ineligible.Count > 0)
+            {
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.Validation("PayrollEntry.EmployeeNotEligible",
+                        $"بعض الموظفين غير مؤهلين للتعديل خارج الشركة: {string.Join(", ", ineligible)}"));
+            }
+
+            var dateRanges = new Dictionary<int, (DateOnly StartDate, DateOnly EndDate)>();
+
+            foreach (var item in request.Entries)
+            {
+                var entry = entriesMap[item.Id];
+                var startDate = item.StartDate ?? request.DefaultStartDate;
+                if (!startDate.HasValue || startDate.Value == default)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Validation("PayrollEntry.StartDateRequired",
+                            $"تاريخ البداية مطلوب للقيد رقم {entry.Id}."));
+
+                var endDate = item.EndDate ?? request.DefaultEndDate;
+                if (!endDate.HasValue || endDate.Value == default)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Validation("PayrollEntry.EndDateRequired",
+                            $"تاريخ النهاية مطلوب للقيد رقم {entry.Id}."));
+
+                if (startDate.Value > endDate.Value)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Validation("PayrollEntry.InvalidDateRange",
+                            $"تاريخ البداية للقيد رقم {entry.Id} ({startDate.Value}) يجب أن يكون قبل أو يساوي تاريخ النهاية ({endDate.Value})."));
+
+                dateRanges[item.Id] = (startDate.Value, endDate.Value);
+            }
+
+            var minStartDate = dateRanges.Values.Min(r => r.StartDate);
+            var maxEndDate = dateRanges.Values.Max(r => r.EndDate);
+            var employeeIds = entries.Select(e => e.EmployeeId).Distinct().ToList();
+
+            var existingOverlaps = await dbContext.PayrollEntries
+                .AsNoTracking()
+                .Where(p => p.CompanyId == companyId &&
+                            employeeIds.Contains(p.EmployeeId) &&
+                            !ids.Contains(p.Id) &&
+                            p.StartDate <= maxEndDate &&
+                            p.EndDate >= minStartDate)
+                .Select(p => new { p.EmployeeId, p.StartDate, p.EndDate })
+                .ToListAsync(cancellationToken);
+
+            foreach (var item in request.Entries)
+            {
+                var (s, e) = dateRanges[item.Id];
+                var empId = entriesMap[item.Id].EmployeeId;
+                if (existingOverlaps.Any(x => x.EmployeeId == empId && x.StartDate <= e && x.EndDate >= s))
+                {
+                    var emp = entriesMap[item.Id].Employee!;
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Conflict("PayrollEntry.PeriodOverlap",
+                            $"تاريخ القيد للموظف {emp.Name} ({s:yyyy-MM-dd} إلى {e:yyyy-MM-dd}) يتداخل مع مسير رواتب مسجل مسبقًا."));
+                }
+            }
+
+            await using var transaction = await dbContext.Database
+                .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+            foreach (var item in request.Entries)
+            {
+                var entry = entriesMap[item.Id];
+                var emp = entry.Employee!;
+                var (startDate, endDate) = dateRanges[item.Id];
+
+                var workedDaysUnit = item.WorkedDaysByDayUnit;
+                var overtimeUnit = item.OvertimeByDayUnit ?? entry.Overtimebydayunit ?? 0m;
+                var deductionUnit = item.DeductionByDayUnit ?? entry.Deductionbydayunit ?? 0m;
+                var workedUnits = workedDaysUnit + overtimeUnit - deductionUnit;
+
+                var bonus = item.Bonus ?? entry.Bonus;
+                var deduction = item.Deduction ?? entry.Deduction;
+
+                var calc = PayrollCalculator.Calculate(
+                    emp,
+                    workedUnits,
+                    bonus,
+                    deduction);
+
+                if (calc.GrossSalary < 0)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Validation("Employee.SalaryRequired",
+                            $"يجب تحديد الراتب أو اليومية للموظف {emp.Name}."));
+
+                entry.StartDate                     = startDate;
+                entry.EndDate                       = endDate;
+                entry.PresentDays                   = item.PresentDays;
+                entry.WorkedDaysbydayunit           = workedDaysUnit;
+                entry.Overtimebydayunit             = overtimeUnit;
+                entry.Deductionbydayunit            = deductionUnit;
+                entry.RequiredWorkingDays           = emp.Type == EmployeeType.Daily ? null : emp.RequiredWorkingDaysPerMonth;
+                entry.SalaryPerDay                  = calc.SalaryPerDay;
+                entry.Bonus                         = bonus;
+                entry.Deduction                     = deduction;
+                entry.GrossSalary                   = calc.GrossSalary;
+                entry.CalculatedSalary              = calc.CalculatedSalary;
+                entry.NetSalary                     = calc.NetSalary;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            return Result<List<PayrollEntryResponse>>.Success(entries.Select(MapToResponse).ToList());
+        }
+
         // ─── MAPPING ────────────────────────────────────────────────────────────
 
         private static PayrollEntryResponse MapToResponse(PayrollEntry entry) =>
@@ -1016,6 +1631,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 Bonus:                          entry.Bonus,
                 Deduction:                      entry.Deduction,
                 GrossSalary:                    entry.GrossSalary,
+                CalculatedSalary:               entry.CalculatedSalary,
                 NetSalary:                      entry.NetSalary,
                 IsSalaryMoveToEmployeeAccount:  entry.IsSalaryMoveToEmployeeAccount,
                 SalaryMovedOn:                  entry.SalaryMovedOn,
@@ -1024,6 +1640,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     AbsentDays:         entry.AbsentDays,
                     TotalPresentDays:   entry.WorkedDaysbydayunit,
                     TotalOvertimeDays:  entry.Overtimebydayunit,
-                    TotalDeductionDays: entry.Deductionbydayunit));
+                    TotalDeductionDays: entry.Deductionbydayunit),
+                WorkPlaceStatus: entry.Employee != null ? entry.Employee.WorkPlaceStatus : WorkPlaceStatus.InCompany);
     }
 }

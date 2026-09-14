@@ -10,6 +10,7 @@ client/*.tsbuildinfo
 graphify-out
 .codex-test-bin
 .artifacts
+artifacts/
 output/pdf
 tmp/pdfs/render
 docs
