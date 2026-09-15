@@ -41,7 +41,7 @@ namespace MiniErp.Infrastructure.Migrations
                 table: "Employees",
                 type: "int",
                 nullable: false,
-                defaultValue: 0);
+                defaultValue: 1);
 
             migrationBuilder.AddCheckConstraint(
                 name: "CK_Employees_WorkPlaceStatus",
