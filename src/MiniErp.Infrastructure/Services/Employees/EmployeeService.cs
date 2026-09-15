@@ -63,11 +63,18 @@ namespace MiniErp.Infrastructure.Services.Employees
 
         }
 
-        public async Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(CancellationToken cancellationToken = default)
+        public async Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
+            EmployeeSelectedFilterRequest filters = null, 
+            CancellationToken cancellationToken = default)
         {
-            var employees = await dbContext.Employees
-                .AsNoTracking()
-                .Where(e => e.CompanyId == campanyId && e.IsActive)
+            filters ??= new EmployeeSelectedFilterRequest();
+            var query = dbContext.Employees.AsNoTracking()
+                .Where(e => e.CompanyId == campanyId);
+
+            query = ApplyFilters(query, filters);
+
+            var employees = 
+                await query.Where(e => e.CompanyId == campanyId)
                 .OrderBy(e => e.Name)
                 .Select(e => new SelectResponse(e.Id, e.Name))
                 .ToListAsync(cancellationToken);
