@@ -17,8 +17,8 @@ namespace MiniErp.Infrastructure.Services.Employees
         private static IQueryable<Employee> ApplyFilters(
             IQueryable<Employee> query,
             EmployeeFilterRequest filters)
-        { 
-            var search=filters.Search?.Trim();
+        {
+            var search = filters.Search?.Trim();
             if (!string.IsNullOrWhiteSpace(search))
             {
                 query = query.Where(employee =>
@@ -34,11 +34,12 @@ namespace MiniErp.Infrastructure.Services.Employees
                     employee.JobTitle != null &&
                     employee.JobTitle.Contains(search) ||
                     employee.PlaceName != null &&
-                    employee.PlaceName.Contains(search)                     
+                    employee.PlaceName.Contains(search)
                     );
             }
             var name = filters.Name?.Trim();
-            if (!string.IsNullOrWhiteSpace(name)) {
+            if (!string.IsNullOrWhiteSpace(name))
+            {
                 query = query.Where(employee =>
                     employee.Name.Contains(name));
             }
@@ -46,14 +47,14 @@ namespace MiniErp.Infrastructure.Services.Employees
             var code = filters.Code?.Trim();
             if (!string.IsNullOrWhiteSpace(code))
             {
-                query = query.Where(employee => 
+                query = query.Where(employee =>
                     employee.Code.Contains(code));
             }
             var jobTitle = filters.JobTitle?.Trim();
             if (!string.IsNullOrWhiteSpace(jobTitle))
             {
-                query = query.Where(employee => 
-                    employee.JobTitle != null && 
+                query = query.Where(employee =>
+                    employee.JobTitle != null &&
                     employee.JobTitle.Contains(jobTitle));
             }
 
@@ -67,16 +68,16 @@ namespace MiniErp.Infrastructure.Services.Employees
 
             if (filters.MinSalary.HasValue)
             {
-                query = query.Where(employee => 
+                query = query.Where(employee =>
                 employee.MonthlySalary.HasValue && employee.MonthlySalary.Value >= filters.MinSalary.Value
                 || employee.DailySalary.HasValue && employee.DailySalary.Value >= filters.MinSalary.Value);
             }
 
             if (filters.MaxSalary.HasValue)
             {
-                query = query.Where(employee => 
-                employee.MonthlySalary.HasValue &&  employee.MonthlySalary.Value <= filters.MaxSalary.Value
-                || employee.DailySalary.HasValue &&  employee.DailySalary.Value <=filters.MaxSalary.Value);
+                query = query.Where(employee =>
+                employee.MonthlySalary.HasValue && employee.MonthlySalary.Value <= filters.MaxSalary.Value
+                || employee.DailySalary.HasValue && employee.DailySalary.Value <= filters.MaxSalary.Value);
             }
             if (filters.EmployeeType.HasValue)
             {
@@ -88,13 +89,35 @@ namespace MiniErp.Infrastructure.Services.Employees
                 query = query.Where(employee =>
                 employee.WorkPlaceStatus == filters.WorkPlaceStatus.Value);
             }
-            if(filters.IsActive.HasValue)
+            if (filters.IsActive.HasValue)
             {
                 query = query.Where(employee =>
                 employee.IsActive == filters.IsActive.Value);
-            }            
+            }
             return query;
         }
+        private static IQueryable<Employee> ApplyFilters(
+            IQueryable<Employee> query,
+            EmployeeSelectedFilterRequest filters)
+        {
+            if (filters.EmployeeType.HasValue)
+            {
+                query = query.Where(employee =>
+                employee.Type == filters.EmployeeType.Value);
+            }
+            if (filters.WorkPlaceStatus.HasValue)
+            {
+                query = query.Where(employee =>
+                employee.WorkPlaceStatus == filters.WorkPlaceStatus.Value);
+            }
+            if (filters.IsActive.HasValue)
+            {
+                query = query.Where(employee =>
+                employee.IsActive == filters.IsActive.Value);
+            }
+            return query;
+        }
+
 
         private static async Task<(int TotalCount, EmployeeSummaryResponse Summary)>
             GetSummaryAsync(IQueryable<Employee> query,

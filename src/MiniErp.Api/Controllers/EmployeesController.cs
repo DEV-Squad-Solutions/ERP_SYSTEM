@@ -29,9 +29,11 @@ public sealed class EmployeesController(
 
     [HttpGet("select")]
     [ProducesResponseType<IReadOnlyList<SelectResponse>>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetSelect(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetSelect(
+        [FromQuery] EmployeeSelectedFilterRequest filters,
+        CancellationToken cancellationToken)
     {
-        var result = await employeeService.GetSelectAsync(cancellationToken);
+        var result = await employeeService.GetSelectAsync(filters, cancellationToken);
         return this.ToActionResult(result);
     }
 
