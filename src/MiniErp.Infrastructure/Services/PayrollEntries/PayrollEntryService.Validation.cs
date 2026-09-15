@@ -1,42 +1,42 @@
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.EmployeeAttendance;
 using MiniErp.Application.Features.PayrollEntries;
+using MiniErp.Domain.Entities.Payroll;
 using MiniErp.Domain.Enums;
 
 namespace MiniErp.Infrastructure.Services.PayrollEntries;
 
 public sealed partial class PayrollEntryService
 {
-    /// <summary>
-    /// Guards the PaySalaryAsync operation before any DB work begins.
-    /// Returns an Error if the entry is already paid or has no salary to disburse.
-    /// </summary>
-
     private static Error? ValidateFilters(PayrollEntryFilterRequest filters, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(filters.Search) && filters.Search.Length > 100)
             return Error.Validation(
                 "PayrollEntry.SearchTooLong",
-                "عبارة البحث طويلة جدًا."
-                , nameof(filters.Search));
+                "عبارة البحث طويلة جدًا.",
+                nameof(filters.Search));
+
         if (filters.EmployeeId != null && filters.EmployeeId <= 0)
             return Error.Validation(
                 "PayrollEntry.InvalidEmployeeId",
-                "معرف الموظف غير صالح."
-                , nameof(filters.EmployeeId));
+                "معرف الموظف غير صالح.",
+                nameof(filters.EmployeeId));
+
         if (filters.StartDate != null && filters.EndDate != null && filters.StartDate > filters.EndDate)
             return Error.Validation(
                 "PayrollEntry.InvalidDateRange",
-                "تاريخ البدء لا يمكن أن يكون بعد تاريخ الانتهاء."
-                , nameof(filters.StartDate));
+                "تاريخ البدء لا يمكن أن يكون بعد تاريخ الانتهاء.",
+                nameof(filters.StartDate));
+
         if (filters.EmployeeType != null && !Enum.IsDefined(typeof(EmployeeType), filters.EmployeeType))
             return Error.Validation(
                 "PayrollEntry.InvalidEmployeeType",
-                "نوع الموظف المحدد غير صالح."
-                , nameof(filters.EmployeeType));
+                "نوع الموظف المحدد غير صالح.",
+                nameof(filters.EmployeeType));
 
         return null;
     }
+
     private static Error? ValidateAddAsync(PayrollEntryCreateRequest request, CancellationToken cancellationToken)
     {
         if (request.EmployeeId <= 0)
@@ -66,12 +66,6 @@ public sealed partial class PayrollEntryService
             return Error.Validation(
                 "PayrollEntry.EmptyBulkRequest",
                 "يجب إرسال مدخل راتب واحد على الأقل.");
-
-        if (request.DefaultStartDate.HasValue && request.DefaultEndDate.HasValue && request.DefaultStartDate.Value > request.DefaultEndDate.Value)
-            return Error.Validation(
-                "PayrollEntry.InvalidDateRange",
-                "تاريخ البدء الافتراضي لا يمكن أن يكون بعد تاريخ الانتهاء الافتراضي.",
-                nameof(request.DefaultStartDate));
 
         var duplicateEmployees = request.Entries
             .GroupBy(e => e.EmployeeId)
@@ -128,28 +122,13 @@ public sealed partial class PayrollEntryService
         return null;
     }
 
-    private static Error? ValidateForPayment(
-        Domain.Entities.Payroll.PayrollEntry entry)
-    {
-        if (entry.IsSalaryMoveToEmployeeAccount)
-            return Error.Conflict(
-                "PayrollEntry.AlreadyPaid",
-                $"تم تحويل راتب القيد رقم {entry.Id} إلى حساب الموظف مسبقًا.");
-
- 
-        return null;
-    }
+    private static Error? ValidateForPayment(PayrollEntry entry) =>
+        entry.EnsureEditable();
 
     /// <summary>
     /// Guards UpdateAsync / RecalculateAsync — entry must not have been paid yet.
+    /// Delegates to the centralized EnsureEditable business rule.
     /// </summary>
-    private static Error? ValidateForUpdate(Domain.Entities.Payroll.PayrollEntry entry)
-    {
-        if (entry.IsSalaryMoveToEmployeeAccount)
-            return Error.Conflict(
-                "PayrollEntry.AlreadyPaid",
-                $"لا يمكن تعديل قيد الراتب رقم {entry.Id} لأن راتبه قد تم تحويله إلى حساب الموظف.");
-
-        return null;
-    }
+    private static Error? ValidateForUpdate(PayrollEntry entry) =>
+        entry.EnsureEditable();
 }

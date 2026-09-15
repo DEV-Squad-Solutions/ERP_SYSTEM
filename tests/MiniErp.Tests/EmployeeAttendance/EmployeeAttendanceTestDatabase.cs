@@ -87,6 +87,8 @@ internal sealed class EmployeeAttendanceTestDatabase : IAsyncDisposable
             RequiredWorkingDaysPerMonth = 26,
             IsActive = true
         };
+        emp1.UpdateWorkPlace(WorkPlaceStatus.InCompany, null);
+
         var emp2 = new Employee
         {
             Id = 2,
@@ -99,6 +101,7 @@ internal sealed class EmployeeAttendanceTestDatabase : IAsyncDisposable
             MonthlySalary = null,
             IsActive = true
         };
+        emp2.UpdateWorkPlace(WorkPlaceStatus.InCompany, null);
 
         context.Employees.AddRange(emp1, emp2);
         await context.SaveChangesAsync();

@@ -17,38 +17,48 @@ namespace MiniErp.Infrastructure.Services.Employees
             if (!string.IsNullOrWhiteSpace(filters.Search) && filters.Search.Length > 100)
                 return Error.Validation(
                     "Employee.SearchTooLong",
-                    "عبارة البحث طويلة جدًا."
+                    "Ø¹Ø¨Ø§Ø±Ø© Ø§Ù„Ø¨Ø­Ø« Ø·ÙˆÙŠÙ„Ø© Ø¬Ø¯Ù‹Ø§."
                     , nameof(filters.Search));
             if (filters.Code?.Trim().Length > 50)
                 return Error.Validation(
                     "Employee.CodeTooLong",
-                    "يجب ألا يزيد كود الموظف عن 50 حرفًا."
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠØ²ÙŠØ¯ ÙƒÙˆØ¯ Ø§Ù„Ù…ÙˆØ¸Ù Ø¹Ù† 50 Ø­Ø±ÙÙ‹Ø§."
                     , nameof(filters.Code));
             if (filters.Name?.Trim().Length > 200)
                 return Error.Validation(
                     "Employee.NameTooLong",
-                    "يجب ألا يزيد اسم الموظف عن 200 حرف."
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠØ²ÙŠØ¯ Ø§Ø³Ù… Ø§Ù„Ù…ÙˆØ¸Ù Ø¹Ù† 200 Ø­Ø±Ù."
                     , nameof(filters.Name));
             if (filters.JobTitle?.Trim().Length > 200)
                 return Error.Validation(
                     "Employee.JobTitleTooLong",
-                    "يجب ألا يزيد المسمى الوظيفي للموظف عن 200 حرف."
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠØ²ÙŠØ¯ Ø§Ù„Ù…Ø³Ù…Ù‰ Ø§Ù„ÙˆØ¸ÙŠÙÙŠ Ù„Ù„Ù…ÙˆØ¸Ù Ø¹Ù† 200 Ø­Ø±Ù."
                     , nameof(filters.JobTitle));
             if (filters.    MinSalary < 0)
                 return Error.Validation(
                     "Employee.MinSalaryNegative",
-                    "يجب ألا يكون الحد الأدنى للراتب للموظف سالبًا."
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠÙƒÙˆÙ† Ø§Ù„Ø­Ø¯ Ø§Ù„Ø£Ø¯Ù†Ù‰ Ù„Ù„Ø±Ø§ØªØ¨ Ù„Ù„Ù…ÙˆØ¸Ù Ø³Ø§Ù„Ø¨Ù‹Ø§."
                     , nameof(filters.MinSalary));
             if (filters.MaxSalary < 0)
                 return Error.Validation(
                     "Employee.MaxSalaryNegative",
-                    "يجب ألا يكون الحد الأعلى للراتب للموظف سالبًا."
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠÙƒÙˆÙ† Ø§Ù„Ø­Ø¯ Ø§Ù„Ø£Ø¹Ù„Ù‰ Ù„Ù„Ø±Ø§ØªØ¨ Ù„Ù„Ù…ÙˆØ¸Ù Ø³Ø§Ù„Ø¨Ù‹Ø§."
                     , nameof(filters.MaxSalary));
             if (filters.EmployeeType is not null && !Enum.IsDefined(typeof(EmployeeType), filters.EmployeeType.Value))
                 return Error.Validation(
                     "Employee.InvalidType",
-                    "نوع الموظف المحدد غير صالح."
+                    "Ù†ÙˆØ¹ Ø§Ù„Ù…ÙˆØ¸Ù Ø§Ù„Ù…Ø­Ø¯Ø¯ ØºÙŠØ± ØµØ§Ù„Ø­."
                     , nameof(filters.EmployeeType));
+            if (filters.PlaceName?.Trim().Length > 200)
+                return Error.Validation(
+                    "Employee.PlaceNameTooLong",
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠØ²ÙŠØ¯ Ø§Ø³Ù… Ù…ÙƒØ§Ù† Ø§Ù„Ø¹Ù…Ù„ Ø¹Ù† 200 Ø­Ø±Ù.",
+                    nameof(filters.PlaceName));
+            if (filters.WorkPlaceStatus.HasValue && !Enum.IsDefined(typeof(WorkPlaceStatus), filters.WorkPlaceStatus.Value))
+                return Error.Validation(
+                    "Employee.InvalidWorkPlaceStatus",
+                    "Ø­Ø§Ù„Ø© Ù…ÙƒØ§Ù† Ø§Ù„Ø¹Ù…Ù„ ØºÙŠØ± ØµØ§Ù„Ø­Ø©.",
+                    nameof(filters.WorkPlaceStatus));
             return null;
         }
 
@@ -57,18 +67,18 @@ namespace MiniErp.Infrastructure.Services.Employees
             if(request==null)
                 return Error.Validation(
                     "Employee.InvalidRequest",
-                    "طلب إنشاء موظف غير صالح."
+                    "Ø·Ù„Ø¨ Ø¥Ù†Ø´Ø§Ø¡ Ù…ÙˆØ¸Ù ØºÙŠØ± ØµØ§Ù„Ø­."
                     , nameof(request));
             if(string.IsNullOrWhiteSpace(request.Name))
                 return Error.Validation(
                     "Employee.InvalidName",
-                    "يجب ألا يكون اسم الموظف فارغًا."
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠÙƒÙˆÙ† Ø§Ø³Ù… Ø§Ù„Ù…ÙˆØ¸Ù ÙØ§Ø±ØºÙ‹Ø§."
                     , nameof(request.Name));
             if (!Enum.IsDefined(typeof(EmployeeType), request.Type))
             if(!Enum.IsDefined(typeof(EmployeeType), request.Type))
                 return Error.Validation(
                     "Employee.InvalidType",
-                    "يجب إدخال نوع الموظف أو النوع المحدد غير صالح."
+                    "ÙŠØ¬Ø¨ Ø¥Ø¯Ø®Ø§Ù„ Ù†ÙˆØ¹ Ø§Ù„Ù…ÙˆØ¸Ù Ø£Ùˆ Ø§Ù„Ù†ÙˆØ¹ Ø§Ù„Ù…Ø­Ø¯Ø¯ ØºÙŠØ± ØµØ§Ù„Ø­."
                     , nameof(request.Type));
             if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
             {
@@ -77,7 +87,7 @@ namespace MiniErp.Infrastructure.Services.Employees
                 if (phoneExists)
                     return Error.Conflict(
                         "Employee.PhoneAlreadyExists",
-                        "رقم الهاتف مستخدم بالفعل لموظف آخر.",
+                        "Ø±Ù‚Ù… Ø§Ù„Ù‡Ø§ØªÙ Ù…Ø³ØªØ®Ø¯Ù… Ø¨Ø§Ù„ÙØ¹Ù„ Ù„Ù…ÙˆØ¸Ù Ø¢Ø®Ø±.",
                         nameof(request.PhoneNumber));
             }
 
@@ -88,24 +98,39 @@ namespace MiniErp.Infrastructure.Services.Employees
                 if (emailExists)
                     return Error.Conflict(
                         "Employee.EmailAlreadyExists",
-                        "البريد الإلكتروني مستخدم بالفعل لموظف آخر.",
+                        "Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ Ù…Ø³ØªØ®Ø¯Ù… Ø¨Ø§Ù„ÙØ¹Ù„ Ù„Ù…ÙˆØ¸Ù Ø¢Ø®Ø±.",
                         nameof(request.Email));
             }
             if(request.Salary.HasValue && request.Salary.Value < 0)
                 return Error.Validation(
                     "Employee.NegativeSalary",
-                    "يجب ألا يكون راتب الموظف سالبًا."
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠÙƒÙˆÙ† Ø±Ø§ØªØ¨ Ø§Ù„Ù…ÙˆØ¸Ù Ø³Ø§Ù„Ø¨Ù‹Ø§."
                     , nameof(request.Salary));
             if(!string.IsNullOrWhiteSpace(request.JobTitle) && request.JobTitle.Trim().Length > 200)
                 return Error.Validation(
                     "Employee.JobTitleTooLong",
-                    "يجب ألا يزيد المسمى الوظيفي للموظف عن 200 حرف."
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠØ²ÙŠØ¯ Ø§Ù„Ù…Ø³Ù…Ù‰ Ø§Ù„ÙˆØ¸ÙŠÙÙŠ Ù„Ù„Ù…ÙˆØ¸Ù Ø¹Ù† 200 Ø­Ø±Ù."
                     , nameof(request.JobTitle));
+            if (request.Type == EmployeeType.Daily && request.RequiredWorkingDaysPerMonth.HasValue)
+                return Error.Validation(
+                    "Employee.RequiredWorkingDaysNotAllowedForDaily",
+                    "لا يمكن تحديد عدد أيام العمل الشهرية لموظف اليومية.",
+                    nameof(request.RequiredWorkingDaysPerMonth));
             if (request.RequiredWorkingDaysPerMonth != null && (request.RequiredWorkingDaysPerMonth < 1 || request.RequiredWorkingDaysPerMonth > 31))
                 return Error.Validation(
                     "Employee.RequiredWorkingDaysPerMonthTooLong",
-                    "يجب أن يكون عدد أيام العمل المطلوبة لكل شهر بين 1 و 31."
+                    "ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø¹Ø¯Ø¯ Ø£ÙŠØ§Ù… Ø§Ù„Ø¹Ù…Ù„ Ø§Ù„Ù…Ø·Ù„ÙˆØ¨Ø© Ù„ÙƒÙ„ Ø´Ù‡Ø± Ø¨ÙŠÙ† 1 Ùˆ 31."
                     , nameof(request.RequiredWorkingDaysPerMonth));
+            if (!string.IsNullOrWhiteSpace(request.PlaceName) && request.PlaceName.Trim().Length > 200)
+                return Error.Validation(
+                    "Employee.PlaceNameTooLong",
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠØ²ÙŠØ¯ Ø§Ø³Ù… Ù…ÙƒØ§Ù† Ø§Ù„Ø¹Ù…Ù„ Ø¹Ù† 200 Ø­Ø±Ù.",
+                    nameof(request.PlaceName));
+            if (!Enum.IsDefined(typeof(WorkPlaceStatus), request.WorkPlaceStatus))
+                return Error.Validation(
+                    "Employee.InvalidWorkPlaceStatus",
+                    "حالة مكان العمل غير صالحة. القيم المقبولة: InCompany أو OutCompany.",
+                    nameof(request.WorkPlaceStatus));
             return null;
         }
 
@@ -114,22 +139,22 @@ namespace MiniErp.Infrastructure.Services.Employees
             if (request == null)
                 return Error.Validation(
                     "Employee.InvalidRequest",
-                    "طلب إنشاء موظف غير صالح."
+                    "Ø·Ù„Ø¨ Ø¥Ù†Ø´Ø§Ø¡ Ù…ÙˆØ¸Ù ØºÙŠØ± ØµØ§Ù„Ø­."
                     , nameof(request));
             if(id <= 0)
                 return Error.Validation(
                     "Employee.InvalidId",
-                    "معرف الموظف غير صالح."
+                    "Ù…Ø¹Ø±Ù Ø§Ù„Ù…ÙˆØ¸Ù ØºÙŠØ± ØµØ§Ù„Ø­."
                     , nameof(id));
             if (request.Name != null && string.IsNullOrWhiteSpace(request.Name))
                 return Error.Validation(
                     "Employee.InvalidName",
-                    "يجب ألا يكون اسم الموظف فارغًا."
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠÙƒÙˆÙ† Ø§Ø³Ù… Ø§Ù„Ù…ÙˆØ¸Ù ÙØ§Ø±ØºÙ‹Ø§."
                     , nameof(request.Name));
             if (request.Type.HasValue && !Enum.IsDefined(typeof(EmployeeType), request.Type.Value))
                 return Error.Validation(
                     "Employee.InvalidType",
-                    "يجب إدخال نوع الموظف أو النوع المحدد غير صالح."
+                    "ÙŠØ¬Ø¨ Ø¥Ø¯Ø®Ø§Ù„ Ù†ÙˆØ¹ Ø§Ù„Ù…ÙˆØ¸Ù Ø£Ùˆ Ø§Ù„Ù†ÙˆØ¹ Ø§Ù„Ù…Ø­Ø¯Ø¯ ØºÙŠØ± ØµØ§Ù„Ø­."
                     , nameof(request.Type));
             if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
             {
@@ -138,7 +163,7 @@ namespace MiniErp.Infrastructure.Services.Employees
                 if (phoneExists)
                     return Error.Conflict(
                         "Employee.PhoneAlreadyExists",
-                        "رقم الهاتف مستخدم بالفعل لموظف آخر.",
+                        "Ø±Ù‚Ù… Ø§Ù„Ù‡Ø§ØªÙ Ù…Ø³ØªØ®Ø¯Ù… Ø¨Ø§Ù„ÙØ¹Ù„ Ù„Ù…ÙˆØ¸Ù Ø¢Ø®Ø±.",
                         nameof(request.PhoneNumber));
             }
 
@@ -149,24 +174,39 @@ namespace MiniErp.Infrastructure.Services.Employees
                 if (emailExists)
                     return Error.Conflict(
                         "Employee.EmailAlreadyExists",
-                        "البريد الإلكتروني مستخدم بالفعل لموظف آخر.",
+                        "Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ Ù…Ø³ØªØ®Ø¯Ù… Ø¨Ø§Ù„ÙØ¹Ù„ Ù„Ù…ÙˆØ¸Ù Ø¢Ø®Ø±.",
                         nameof(request.Email));
             }
             if (request.Salary.HasValue && request.Salary.Value < 0)
                 return Error.Validation(
                     "Employee.NegativeSalary",
-                    "يجب ألا يكون راتب الموظف سالبًا."
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠÙƒÙˆÙ† Ø±Ø§ØªØ¨ Ø§Ù„Ù…ÙˆØ¸Ù Ø³Ø§Ù„Ø¨Ù‹Ø§."
                     , nameof(request.Salary));
             if (!string.IsNullOrWhiteSpace(request.JobTitle) && request.JobTitle.Trim().Length > 200)
                 return Error.Validation(
                     "Employee.JobTitleTooLong",
-                    "يجب ألا يزيد المسمى الوظيفي للموظف عن 200 حرف."
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠØ²ÙŠØ¯ Ø§Ù„Ù…Ø³Ù…Ù‰ Ø§Ù„ÙˆØ¸ÙŠÙÙŠ Ù„Ù„Ù…ÙˆØ¸Ù Ø¹Ù† 200 Ø­Ø±Ù."
                     , nameof(request.JobTitle));
+            if (request.Type == EmployeeType.Daily && request.RequiredWorkingDaysPerMonth.HasValue)
+                return Error.Validation(
+                    "Employee.RequiredWorkingDaysNotAllowedForDaily",
+                    "لا يمكن تحديد عدد أيام العمل الشهرية لموظف اليومية.",
+                    nameof(request.RequiredWorkingDaysPerMonth));
             if (request.RequiredWorkingDaysPerMonth != null && (request.RequiredWorkingDaysPerMonth < 1 || request.RequiredWorkingDaysPerMonth > 31))
                 return Error.Validation(
                     "Employee.RequiredWorkingDaysPerMonthTooLong",
-                    "يجب أن يكون عدد أيام العمل المطلوبة لكل شهر بين 1 و 31."
+                    "ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø¹Ø¯Ø¯ Ø£ÙŠØ§Ù… Ø§Ù„Ø¹Ù…Ù„ Ø§Ù„Ù…Ø·Ù„ÙˆØ¨Ø© Ù„ÙƒÙ„ Ø´Ù‡Ø± Ø¨ÙŠÙ† 1 Ùˆ 31."
                     , nameof(request.RequiredWorkingDaysPerMonth));
+            if (!string.IsNullOrWhiteSpace(request.PlaceName) && request.PlaceName.Trim().Length > 200)
+                return Error.Validation(
+                    "Employee.PlaceNameTooLong",
+                    "ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠØ²ÙŠØ¯ Ø§Ø³Ù… Ù…ÙƒØ§Ù† Ø§Ù„Ø¹Ù…Ù„ Ø¹Ù† 200 Ø­Ø±Ù.",
+                    nameof(request.PlaceName));
+            if (request.WorkPlaceStatus.HasValue && !Enum.IsDefined(typeof(WorkPlaceStatus), request.WorkPlaceStatus.Value))
+                return Error.Validation(
+                    "Employee.InvalidWorkPlaceStatus",
+                    "حالة مكان العمل غير صالحة. القيم المقبولة: InCompany أو OutCompany.",
+                    nameof(request.WorkPlaceStatus));
 
             return null;
         }

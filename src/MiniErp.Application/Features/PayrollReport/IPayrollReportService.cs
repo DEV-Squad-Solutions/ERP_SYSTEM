@@ -10,5 +10,7 @@ public interface IPayrollReportService
         DateOnly endDate,
         int? employeeId = null,
         bool? isMoved = null,
+        Domain.Enums.WorkPlaceStatus? workPlaceStatus = null,
+        string? placeName = null,
         CancellationToken cancellationToken = default);
 }

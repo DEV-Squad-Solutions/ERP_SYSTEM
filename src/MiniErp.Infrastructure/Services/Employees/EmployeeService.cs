@@ -91,18 +91,20 @@ namespace MiniErp.Infrastructure.Services.Employees
 
             return Result<EmployeeResponse>.Success(
                 new EmployeeResponse(
-                    employee.Id,
-                    employee.Code,
-                    employee.Name,
-                    employee.JobTitle,
-                    employee.PhoneNumber,
-                    employee.Email,
-                    employee.Address,
-                    employee.Type,
-                    employee.Type == EmployeeType.Monthly ? employee.MonthlySalary ?? 0 : employee.DailySalary ?? 0,
-                    employee.RequiredWorkingDaysPerMonth,
-                    employee.LastDayOfReceivingSalary,
-                    employee.IsActive
+                    Id: employee.Id,
+                    Code: employee.Code,
+                    Name: employee.Name,
+                    JobTitle: employee.JobTitle,
+                    PhoneNumber: employee.PhoneNumber,
+                    Email: employee.Email,
+                    Address: employee.Address,
+                    EmployeeType: employee.Type,
+                    Salary: employee.Type == EmployeeType.Monthly ? employee.MonthlySalary ?? 0 : employee.DailySalary ?? 0,
+                    RequiredWorkingDaysPerMonth: employee.RequiredWorkingDaysPerMonth,
+                    LastDayOfReceivingSalary: employee.LastDayOfReceivingSalary,
+                    IsActive: employee.IsActive,
+                    WorkPlaceStatus: employee.WorkPlaceStatus,
+                    PlaceName: employee.PlaceName
                 ));
         }
 
@@ -129,6 +131,7 @@ namespace MiniErp.Infrastructure.Services.Employees
                 RequiredWorkingDaysPerMonth = request.Type == EmployeeType.Monthly ? request.RequiredWorkingDaysPerMonth : null,
                 IsActive = request.IsActive
             };
+            employee.UpdateWorkPlace(request.WorkPlaceStatus, request.PlaceName);
 
             dbContext.Employees.Add(employee);
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -136,18 +139,20 @@ namespace MiniErp.Infrastructure.Services.Employees
 
             return Result<EmployeeResponse>.Success(
                 new EmployeeResponse(
-                    employee.Id,
-                    employee.Code,
-                    employee.Name,
-                    employee.JobTitle,
-                    employee.PhoneNumber,
-                    employee.Email,
-                    employee.Address,
-                    employee.Type,
-                    employee.Type == EmployeeType.Monthly ? employee.MonthlySalary ?? 0 : employee.DailySalary ?? 0,
-                    employee.RequiredWorkingDaysPerMonth,
-                    employee.LastDayOfReceivingSalary,
-                    employee.IsActive
+                    Id: employee.Id,
+                    Code: employee.Code,
+                    Name: employee.Name,
+                    JobTitle: employee.JobTitle,
+                    PhoneNumber: employee.PhoneNumber,
+                    Email: employee.Email,
+                    Address: employee.Address,
+                    EmployeeType: employee.Type,
+                    Salary: employee.Type == EmployeeType.Monthly ? employee.MonthlySalary ?? 0 : employee.DailySalary ?? 0,
+                    RequiredWorkingDaysPerMonth: employee.RequiredWorkingDaysPerMonth,
+                    LastDayOfReceivingSalary: employee.LastDayOfReceivingSalary,
+                    IsActive: employee.IsActive,
+                    WorkPlaceStatus: employee.WorkPlaceStatus,
+                    PlaceName: employee.PlaceName
                 ));
         }
 
@@ -193,24 +198,38 @@ namespace MiniErp.Infrastructure.Services.Employees
                 employee.RequiredWorkingDaysPerMonth = request.RequiredWorkingDaysPerMonth ?? employee.RequiredWorkingDaysPerMonth;
             }
 
+            if (request.IsActive.HasValue)
+            {
+                employee.SetIsActive(request.IsActive.Value);
+            }
+
+            if (request.WorkPlaceStatus.HasValue || request.PlaceName != null)
+            {
+                var targetStatus = request.WorkPlaceStatus ?? employee.WorkPlaceStatus;
+                var targetPlace = request.PlaceName ?? employee.PlaceName;
+                employee.UpdateWorkPlace(targetStatus, targetPlace);
+            }
+
             dbContext.Employees.Update(employee).State = Microsoft.EntityFrameworkCore.EntityState.Modified;
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
             return Result<EmployeeResponse>.Success(
                 new EmployeeResponse(
-                    employee.Id,
-                    employee.Code,
-                    employee.Name,
-                    employee.JobTitle,
-                    employee.PhoneNumber,
-                    employee.Email,
-                    employee.Address,
-                    employee.Type,
-                    employee.Type == EmployeeType.Monthly ? employee.MonthlySalary ?? 0 : employee.DailySalary ?? 0,
-                    employee.RequiredWorkingDaysPerMonth,
-                    employee.LastDayOfReceivingSalary,
-                    employee.IsActive
+                    Id: employee.Id,
+                    Code: employee.Code,
+                    Name: employee.Name,
+                    JobTitle: employee.JobTitle,
+                    PhoneNumber: employee.PhoneNumber,
+                    Email: employee.Email,
+                    Address: employee.Address,
+                    EmployeeType: employee.Type,
+                    Salary: employee.Type == EmployeeType.Monthly ? employee.MonthlySalary ?? 0 : employee.DailySalary ?? 0,
+                    RequiredWorkingDaysPerMonth: employee.RequiredWorkingDaysPerMonth,
+                    LastDayOfReceivingSalary: employee.LastDayOfReceivingSalary,
+                    IsActive: employee.IsActive,
+                    WorkPlaceStatus: employee.WorkPlaceStatus,
+                    PlaceName: employee.PlaceName
                 ));
         }
 

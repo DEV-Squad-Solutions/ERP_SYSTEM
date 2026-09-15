@@ -147,6 +147,14 @@ public  sealed partial class EmployeeAttendanceService(
                     "الموظف المحدد غير موجود."));
         }
 
+        if (!employee.IsActive || employee.WorkPlaceStatus != WorkPlaceStatus.InCompany)
+        {
+            return Result<EmployeeAttendanceResponse>.Failure(
+                Error.Validation(
+                    "EmployeeAttendance.EmployeeNotEligible",
+                    "لا يمكن تسجيل الحضور إلا للموظفين النشطين داخل الشركة."));
+        }
+
         var attendance = new Domain.Entities.Employees.EmployeeAttendance
         {
             CompanyId = companyId,
@@ -221,7 +229,22 @@ public  sealed partial class EmployeeAttendanceService(
                         "الموظف المحدد غير موجود."));
             }
 
+            if (!employee.IsActive || employee.WorkPlaceStatus != WorkPlaceStatus.InCompany)
+            {
+                return Result<EmployeeAttendanceResponse>.Failure(
+                    Error.Validation(
+                        "EmployeeAttendance.EmployeeNotEligible",
+                        "لا يمكن تسجيل الحضور إلا للموظفين النشطين داخل الشركة."));
+            }
+
             employeeName = employee.Name;
+        }
+        else if (!attendance.Employee.IsActive || attendance.Employee.WorkPlaceStatus != WorkPlaceStatus.InCompany)
+        {
+            return Result<EmployeeAttendanceResponse>.Failure(
+                Error.Validation(
+                    "EmployeeAttendance.EmployeeNotEligible",
+                    "لا يمكن تعديل الحضور لموظف غير نشط أو ليس داخل الشركة."));
         }
 
         attendance.EmployeeId = request.EmployeeId;
@@ -300,7 +323,7 @@ public  sealed partial class EmployeeAttendanceService(
 
         var employees = await dbContext.Employees
             .Where(e => e.CompanyId == companyId && employeeIds.Contains(e.Id))
-            .Select(e => new { e.Id, e.Name })
+            .Select(e => new { e.Id, e.Name, e.IsActive, e.WorkPlaceStatus })
             .ToListAsync(cancellationToken);
 
         if (employees.Count != employeeIds.Count)
@@ -311,6 +334,19 @@ public  sealed partial class EmployeeAttendanceService(
                 Error.NotFound(
                     "Employee.NotFound",
                     $"بعض الموظفين المحددين غير موجودين: {string.Join(", ", missingIds)}"));
+        }
+
+        var ineligibleEmployees = employees
+            .Where(e => !e.IsActive || e.WorkPlaceStatus != WorkPlaceStatus.InCompany)
+            .Select(e => e.Name)
+            .ToList();
+
+        if (ineligibleEmployees.Count > 0)
+        {
+            return Result<List<EmployeeAttendanceResponse>>.Failure(
+                Error.Validation(
+                    "EmployeeAttendance.EmployeeNotEligible",
+                    $"لا يمكن تسجيل الحضور إلا للموظفين النشطين داخل الشركة. الموظفون غير المؤهلين: {string.Join(", ", ineligibleEmployees)}"));
         }
 
         var employeeMap = employees.ToDictionary(e => e.Id, e => e.Name);
@@ -414,14 +450,27 @@ public  sealed partial class EmployeeAttendanceService(
 
         var employees = await dbContext.Employees
             .Where(e => e.CompanyId == companyId && employeeIds.Contains(e.Id))
-            .Select(e => new { e.Id, e.Name })
-            .ToDictionaryAsync(e => e.Id, e => e.Name, cancellationToken);
+            .Select(e => new { e.Id, e.Name, e.IsActive, e.WorkPlaceStatus })
+            .ToDictionaryAsync(e => e.Id, e => e, cancellationToken);
 
         if (employees.Count != employeeIds.Count)
         {
             var missing = employeeIds.Where(id => !employees.ContainsKey(id)).ToList();
             return Result<List<EmployeeAttendanceResponse>>.Failure(
                 Error.NotFound("Employee.NotFound", $"بعض الموظفين المحددين غير موجودين: {string.Join(", ", missing)}"));
+        }
+
+        var ineligibleBulk = employees.Values
+            .Where(e => !e.IsActive || e.WorkPlaceStatus != WorkPlaceStatus.InCompany)
+            .Select(e => e.Name)
+            .ToList();
+
+        if (ineligibleBulk.Count > 0)
+        {
+            return Result<List<EmployeeAttendanceResponse>>.Failure(
+                Error.Validation(
+                    "EmployeeAttendance.EmployeeNotEligible",
+                    $"لا يمكن تسجيل أو تعديل الحضور إلا للموظفين النشطين داخل الشركة. الموظفون غير المؤهلين: {string.Join(", ", ineligibleBulk)}"));
         }
 
         var existingAttendances = await dbContext.EmployeeAttendances
@@ -476,7 +525,7 @@ public  sealed partial class EmployeeAttendanceService(
             a.Id,
             a.CompanyId,
             a.EmployeeId,
-            employees.GetValueOrDefault(a.EmployeeId) ?? a.Employee?.Name ?? string.Empty,
+            employees.GetValueOrDefault(a.EmployeeId)?.Name ?? a.Employee?.Name ?? string.Empty,
             a.Status,
             a.WorkDate,
             a.CheckIn,
@@ -586,11 +635,31 @@ public  sealed partial class EmployeeAttendanceService(
         return Result<EmployeeAttendanceReportResponse>.Success(response);
     }
 
+    public async Task<Result<IReadOnlyList<SelectResponse>>> GetEmployeeSelectAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var employees = await dbContext.Employees
+            .AsNoTracking()
+            .Where(e => e.CompanyId == companyId
+                        && e.IsActive
+                        && e.WorkPlaceStatus == WorkPlaceStatus.InCompany)
+            .OrderBy(e => e.Name)
+            .Select(e => new SelectResponse(e.Id, e.Name))
+            .ToListAsync(cancellationToken);
+
+        return Result<IReadOnlyList<SelectResponse>>.Success(employees.AsReadOnly());
+    }
+
     private static decimal GetRatioValue(WorkDayRatio? ratio) =>
         ratio switch
         {
-            WorkDayRatio.FullDay         => 1m,
+            WorkDayRatio.OneDay          => 1m,
+            WorkDayRatio.TwoDays         => 2m,
+            WorkDayRatio.ThreeDays       => 3m,
+            WorkDayRatio.FourDays        => 4m,
+            WorkDayRatio.FiveDays        => 5m,
             WorkDayRatio.ThreeQuarterDay => 0.75m,
+            WorkDayRatio.TwoThirdsDay    => 2m / 3m,
             WorkDayRatio.HalfDay         => 0.5m,
             WorkDayRatio.ThirdDay        => 1m / 3m,
             WorkDayRatio.QuarterDay      => 0.25m,

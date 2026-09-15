@@ -1,4 +1,4 @@
-﻿using MiniErp.Domain.Enums;
+using MiniErp.Domain.Enums;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -13,7 +13,9 @@ namespace MiniErp.Application.Features.Employees
     decimal? MinSalary = null,
     decimal? MaxSalary = null,
     EmployeeType? EmployeeType = null,
-    bool? IsActive = null
+    bool? IsActive = null,
+    string? PlaceName = null,
+    WorkPlaceStatus? WorkPlaceStatus = null
     );
     public record EmployeeCreateRequest(
         string Name,
@@ -24,7 +26,9 @@ namespace MiniErp.Application.Features.Employees
         EmployeeType Type,
         decimal? Salary,
         int? RequiredWorkingDaysPerMonth,
-        bool IsActive
+        WorkPlaceStatus WorkPlaceStatus,
+        bool IsActive = true,
+        string? PlaceName = null
     );
     public record EmployeeUpdateRequest(
         int? CompanyId,
@@ -36,6 +40,8 @@ namespace MiniErp.Application.Features.Employees
         EmployeeType? Type,
         decimal? Salary,
         int? RequiredWorkingDaysPerMonth,
-        bool? IsActive 
+        bool? IsActive = null,
+        WorkPlaceStatus? WorkPlaceStatus = null,
+        string? PlaceName = null
     );
 }

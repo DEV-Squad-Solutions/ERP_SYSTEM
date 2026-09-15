@@ -40,6 +40,14 @@ public sealed class EmployeeAttendancesController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("select")]
+    [ProducesResponseType<IReadOnlyList<SelectResponse>>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetSelect(CancellationToken cancellationToken)
+    {
+        var result = await employeeAttendanceService.GetEmployeeSelectAsync(cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("{id:int}")]
     [ProducesResponseType<EmployeeAttendanceResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

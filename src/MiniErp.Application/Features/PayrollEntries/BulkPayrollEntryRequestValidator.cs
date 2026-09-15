@@ -3,6 +3,27 @@ using System.Linq;
 
 namespace MiniErp.Application.Features.PayrollEntries;
 
+public sealed class PayrollEntryCreateRequestValidator
+    : AbstractValidator<PayrollEntryCreateRequest>
+{
+    public PayrollEntryCreateRequestValidator()
+    {
+        RuleFor(item => item.EmployeeId)
+            .GreaterThan(0)
+            .WithMessage("معرف الموظف غير صالح.");
+
+        RuleFor(item => item.Bonus)
+            .GreaterThanOrEqualTo(0)
+            .When(item => item.Bonus.HasValue)
+            .WithMessage("المكافأة يجب أن تكون أكبر من أو تساوي صفر.");
+
+        RuleFor(item => item.Deduction)
+            .GreaterThanOrEqualTo(0)
+            .When(item => item.Deduction.HasValue)
+            .WithMessage("الخصم يجب أن يكون أكبر من أو تساوي صفر.");
+    }
+}
+
 public sealed class IndividualPayrollEntryCreateRequestValidator
     : AbstractValidator<IndividualPayrollEntryCreateRequest>
 {
@@ -21,10 +42,6 @@ public sealed class IndividualPayrollEntryCreateRequestValidator
             .GreaterThanOrEqualTo(0)
             .When(item => item.Deduction.HasValue)
             .WithMessage("الخصم يجب أن يكون أكبر من أو تساوي صفر.");
-
-        RuleFor(item => item)
-            .Must(item => !item.StartDate.HasValue || !item.EndDate.HasValue || item.StartDate.Value <= item.EndDate.Value)
-            .WithMessage("تاريخ البدء يجب أن يكون قبل أو يساوي تاريخ الانتهاء.");
     }
 }
 
@@ -53,10 +70,6 @@ public sealed class BulkPayrollEntryCreateRequestValidator
             .Must(items => items.Select(item => item.EmployeeId).Distinct().Count() == items.Count)
             .When(request => request.Entries is { Count: > 0 })
             .WithMessage("لا يجوز تكرار نفس الموظف داخل الطلب الواحد.");
-
-        RuleFor(request => request)
-            .Must(request => !request.DefaultStartDate.HasValue || !request.DefaultEndDate.HasValue || request.DefaultStartDate.Value <= request.DefaultEndDate.Value)
-            .WithMessage("تاريخ البدء الافتراضي يجب أن يكون قبل أو يساوي تاريخ الانتهاء الافتراضي.");
     }
 }
 
@@ -124,6 +137,7 @@ public sealed class PayrollEntryUpdateRequestValidator
     {
         RuleFor(r => r.EmployeeId)
             .GreaterThan(0)
+            .When(r => r.EmployeeId.HasValue)
             .WithMessage("معرف الموظف غير صالح.");
 
         RuleFor(r => r.Bonus)
@@ -135,9 +149,59 @@ public sealed class PayrollEntryUpdateRequestValidator
             .GreaterThanOrEqualTo(0)
             .When(r => r.Deduction.HasValue)
             .WithMessage("الخصم يجب أن يكون أكبر من أو يساوي صفر.");
+    }
+}
 
-        RuleFor(r => r)
-            .Must(r => !r.StartDate.HasValue || !r.EndDate.HasValue || r.StartDate.Value <= r.EndDate.Value)
-            .WithMessage("تاريخ البدء يجب أن يكون قبل أو يساوي تاريخ الانتهاء.");
+public sealed class IndividualPayrollEntryUpdateRequestValidator
+    : AbstractValidator<IndividualPayrollEntryUpdateRequest>
+{
+    public IndividualPayrollEntryUpdateRequestValidator()
+    {
+        RuleFor(r => r.Id)
+            .GreaterThan(0)
+            .WithMessage("معرف قيد الراتب غير صالح.");
+
+        RuleFor(r => r.EmployeeId)
+            .GreaterThan(0)
+            .When(r => r.EmployeeId.HasValue)
+            .WithMessage("معرف الموظف غير صالح.");
+
+        RuleFor(r => r.Bonus)
+            .GreaterThanOrEqualTo(0)
+            .When(r => r.Bonus.HasValue)
+            .WithMessage("المكافأة يجب أن تكون أكبر من أو تساوي صفر.");
+
+        RuleFor(r => r.Deduction)
+            .GreaterThanOrEqualTo(0)
+            .When(r => r.Deduction.HasValue)
+            .WithMessage("الخصم يجب أن يكون أكبر من أو يساوي صفر.");
+    }
+}
+
+public sealed class BulkPayrollEntryUpdateRequestValidator
+    : AbstractValidator<BulkPayrollEntryUpdateRequest>
+{
+    public const int MaximumItemCount = 1000;
+
+    public BulkPayrollEntryUpdateRequestValidator()
+    {
+        RuleFor(request => request.Entries)
+            .NotNull()
+            .NotEmpty()
+            .WithMessage("يجب إرسال مدخل راتب واحد على الأقل للتعديل.");
+
+        RuleFor(request => request.Entries)
+            .Must(items => items.Count <= MaximumItemCount)
+            .WithMessage($"لا يمكن تعديل قيود رواتب لأكثر من {MaximumItemCount} قيد في طلب واحد.")
+            .When(request => request.Entries is not null);
+
+        RuleForEach(request => request.Entries)
+            .SetValidator(new IndividualPayrollEntryUpdateRequestValidator())
+            .When(request => request.Entries is not null);
+
+        RuleFor(request => request.Entries)
+            .Must(items => items.Select(item => item.Id).Distinct().Count() == items.Count)
+            .When(request => request.Entries is { Count: > 0 })
+            .WithMessage("لا يجوز تكرار قيد الراتب داخل الطلب الواحد.");
     }
 }

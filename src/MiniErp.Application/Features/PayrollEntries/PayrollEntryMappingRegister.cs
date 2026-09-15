@@ -10,6 +10,7 @@ public sealed class PayrollEntryMappingRegister : IRegister
         config.ForType<PayrollEntry, PayrollEntryResponse>()
             .Map(dest => dest.Bonus, src => src.Bonus)
             .Map(dest => dest.Deduction, src => src.Deduction)
+            .Map(dest => dest.WorkPlaceStatus, src => src.Employee != null ? src.Employee.WorkPlaceStatus : MiniErp.Domain.Enums.WorkPlaceStatus.InCompany)
             .Map(dest => dest.AttendanceSummary, src => new AttendanceSummary(
                 PresentDays: src.PresentDays,
                 AbsentDays: src.AbsentDays,
@@ -17,5 +18,8 @@ public sealed class PayrollEntryMappingRegister : IRegister
                 TotalOvertimeDays: src.Overtimebydayunit,
                 TotalDeductionDays: src.Deductionbydayunit
             ));
+
+        config.ForType<PayrollEntry, PayrollEntriesListResponse>()
+            .Map(dest => dest.WorkPlaceStatus, src => src.Employee != null ? src.Employee.WorkPlaceStatus : MiniErp.Domain.Enums.WorkPlaceStatus.InCompany);
     }
 }

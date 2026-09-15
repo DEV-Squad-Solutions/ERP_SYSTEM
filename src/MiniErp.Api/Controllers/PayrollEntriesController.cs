@@ -65,6 +65,8 @@ public sealed class PayrollEntriesController(
             request.EndDate,
             request.EmployeeId,
             request.IsMoved,
+            request.WorkPlaceStatus,
+            request.PlaceName,
             cancellationToken);
         return this.ToActionResult(result);
     }
@@ -96,6 +98,63 @@ public sealed class PayrollEntriesController(
                 nameof(GetById),
                 new { id = result.Value.Id },
                 result.Value);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("out-company")]
+    [ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CreateOutCompany(
+        OutCompanyPayrollEntryRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await payrollEntryService.AddOutCompanyAsync(request, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            TryEnqueueRealtime<PayrollEntriesRealtimeJob>(
+                "Added",
+                result.Value.Id,
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+        }
+
+        return result.IsFailure
+            ? this.ToProblem(result.Errors)
+            : CreatedAtAction(
+                nameof(GetById),
+                new { id = result.Value.Id },
+                result.Value);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("out-company/bulk")]
+    [ProducesResponseType<List<PayrollEntryResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CreateOutCompanyBulk(
+        BulkOutCompanyPayrollEntryRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await payrollEntryService.AddOutCompanyBulkAsync(request, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var operationId = Guid.NewGuid();
+            foreach (var entry in result.Value)
+            {
+                TryEnqueueRealtime<PayrollEntriesRealtimeJob>(
+                    "Added",
+                    entry.Id,
+                    realtime => job => job.ExecuteAsync(realtime),
+                    operationId: operationId);
+            }
+        }
+
+        return this.ToActionResult(result);
     }
 
     [Authorize(Roles = "Admin")]
@@ -158,6 +217,7 @@ public sealed class PayrollEntriesController(
     }
 
     [Authorize(Roles = "Admin")]
+    [HttpPost("move-salary/bulk")]
     [HttpPost("bulk/move-salary")]
     [ProducesResponseType<List<PayrollEntryResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -222,6 +282,52 @@ public sealed class PayrollEntriesController(
         CancellationToken cancellationToken)
     {
         var result = await payrollEntryService.UpdateBulkAsync(request, cancellationToken);
+        if (result.IsSuccess)
+        {
+            foreach (var entry in result.Value)
+            {
+                TryEnqueueRealtime<PayrollEntriesRealtimeJob>(
+                    "Updated",
+                    entry.Id,
+                    realtime => job => job.ExecuteAsync(realtime));
+            }
+        }
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPut("out-company/{id:int}")]
+    [ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> UpdateOutCompany(
+        int id,
+        OutCompanyPayrollEntryUpdateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await payrollEntryService.UpdateOutCompanyAsync(id, request, cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<PayrollEntriesRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPut("out-company/bulk")]
+    [ProducesResponseType<List<PayrollEntryResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> UpdateOutCompanyBulk(
+        BulkOutCompanyPayrollEntryUpdateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await payrollEntryService.UpdateOutCompanyBulkAsync(request, cancellationToken);
         if (result.IsSuccess)
         {
             foreach (var entry in result.Value)

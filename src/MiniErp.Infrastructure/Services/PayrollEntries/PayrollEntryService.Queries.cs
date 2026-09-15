@@ -96,22 +96,25 @@ public sealed partial class PayrollEntryService
             + (summary.TotalOvertimeDays  ?? 0m)
             - (summary.TotalDeductionDays ?? 0m);
 
-        if (employee.Type == EmployeeType.Monthly && employee.MonthlySalary.HasValue)
-        {
-            var gross = employee.MonthlySalary.Value;
-            var calculated = employee.RequiredWorkingDaysPerMonth is > 0
-                ? (gross / employee.RequiredWorkingDaysPerMonth.Value) * workedUnits
-                : gross;
-            return (GrossSalary: gross, CalculatedSalary: calculated);
-        }
+        var calc = PayrollCalculator.Calculate(employee, workedUnits);
+        return (GrossSalary: calc.GrossSalary, CalculatedSalary: calc.CalculatedSalary);
+    }
 
-        if (employee.Type == EmployeeType.Daily && employee.DailySalary.HasValue)
-        {
-            var gross = employee.DailySalary.Value;
-            return (GrossSalary: gross, CalculatedSalary: gross * workedUnits);
-        }
+    private static (decimal GrossSalary, decimal CalculatedSalary, decimal NetSalary, decimal? SalaryPerDay) CalculateSalaryWithExtras(
+        Domain.Entities.Employees.Employee employee,
+        AttendanceSummary summary,
+        decimal? bonus = null,
+        decimal? deduction = null)
+    {
+        var workedUnits = summary.TotalPresentDays
+            + (summary.TotalOvertimeDays  ?? 0m)
+            - (summary.TotalDeductionDays ?? 0m);
 
-        // Sentinel: salary not configured
-        return (GrossSalary: -1m, CalculatedSalary: -1m);
+        var calc = PayrollCalculator.Calculate(employee, workedUnits, bonus, deduction);
+        return (
+            GrossSalary: calc.GrossSalary,
+            CalculatedSalary: calc.CalculatedSalary,
+            NetSalary: calc.NetSalary,
+            SalaryPerDay: calc.SalaryPerDay);
     }
 }

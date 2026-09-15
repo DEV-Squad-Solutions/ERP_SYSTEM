@@ -64,9 +64,8 @@ public sealed class EmployeeOpeningBalanceServiceTests
 
         // Create payroll entry and move salary
         var addResult = await payrollService.AddAsync(new Application.Features.PayrollEntries.PayrollEntryCreateRequest(
-            StartDate: new DateOnly(2026, 8, 1),
-            EndDate: new DateOnly(2026, 8, 5),
-            EmployeeId: 1));
+            EmployeeId: 1,
+            EndDate: new DateOnly(2026, 8, 5)));
         Assert.True(addResult.IsSuccess);
 
         var moveResult = await payrollService.MoveSalaryForEmployeeAccountAsync(

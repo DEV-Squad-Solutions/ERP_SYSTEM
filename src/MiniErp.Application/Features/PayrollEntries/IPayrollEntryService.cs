@@ -55,4 +55,21 @@ public interface IPayrollEntryService
     Task<Result<PayrollDashboardResponse>> GetDashboardAsync(
         PayrollDashboardFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
+
+    Task<Result<PayrollEntryResponse>> AddOutCompanyAsync(
+        OutCompanyPayrollEntryRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<List<PayrollEntryResponse>>> AddOutCompanyBulkAsync(
+        BulkOutCompanyPayrollEntryRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<PayrollEntryResponse>> UpdateOutCompanyAsync(
+        int id,
+        OutCompanyPayrollEntryUpdateRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<List<PayrollEntryResponse>>> UpdateOutCompanyBulkAsync(
+        BulkOutCompanyPayrollEntryUpdateRequest request,
+        CancellationToken cancellationToken = default);
 }

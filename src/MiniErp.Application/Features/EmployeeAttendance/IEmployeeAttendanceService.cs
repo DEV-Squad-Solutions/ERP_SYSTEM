@@ -42,4 +42,7 @@ public interface IEmployeeAttendanceService
     Task<Result<EmployeeAttendanceReportResponse>> GetReportAsync(
         EmployeeAttendanceReportRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<Result<IReadOnlyList<SelectResponse>>> GetEmployeeSelectAsync(
+        CancellationToken cancellationToken = default);
 }
