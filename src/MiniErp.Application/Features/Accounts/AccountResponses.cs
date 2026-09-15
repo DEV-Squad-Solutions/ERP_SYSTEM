@@ -22,6 +22,13 @@ public sealed record AccountSelectResponse(
     string Name,
     AccountType AccountType);
 
+public sealed record ExpenseAccountSelectResponse(
+    int Id,
+    string Code,
+    string Name,
+    int? ParentAccountId,
+    bool IsPosting);
+
 public sealed record JournalAccountSelectResponse(
     int Id,
     string Code,

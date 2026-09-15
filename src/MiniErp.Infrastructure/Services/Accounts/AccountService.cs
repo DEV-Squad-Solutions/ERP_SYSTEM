@@ -121,6 +121,40 @@ public sealed class AccountService(
         return Result<IReadOnlyList<AccountSelectResponse>>.Success(response);
     }
 
+    public async Task<Result<IReadOnlyList<ExpenseAccountSelectResponse>>>
+        GetExpenseSelectAsync(CancellationToken cancellationToken = default)
+    {
+        var rows = await dbContext.Accounts
+            .AsNoTracking()
+            .Where(account =>
+                account.CompanyId == companyId &&
+                account.IsActive &&
+                account.AccountType == AccountType.Expense)
+            .OrderBy(account => account.Code)
+            .ThenBy(account => account.Id)
+            .Select(account => new
+            {
+                account.Id,
+                account.Code,
+                account.Name,
+                account.ParentAccountId,
+                account.IsPosting
+            })
+            .ToListAsync(cancellationToken);
+
+        IReadOnlyList<ExpenseAccountSelectResponse> response = rows
+            .Select(row => new ExpenseAccountSelectResponse(
+                Id: row.Id,
+                Code: row.Code,
+                Name: row.Name,
+                ParentAccountId: row.ParentAccountId,
+                IsPosting: row.IsPosting))
+            .ToArray();
+
+        return Result<IReadOnlyList<ExpenseAccountSelectResponse>>.Success(
+            response);
+    }
+
     public async Task<Result<IReadOnlyList<JournalAccountSelectResponse>>> GetJournalSelectAsync(
         int fiscalYearId,
         CancellationToken cancellationToken = default)

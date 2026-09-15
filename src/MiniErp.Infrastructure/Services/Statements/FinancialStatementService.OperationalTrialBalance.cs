@@ -209,7 +209,9 @@ public sealed partial class FinancialStatementService
                 .AsNoTracking()
                 .Where(account =>
                     account.CompanyId == companyId &&
-                    account.AccountType == accountType)
+                    account.AccountType == accountType &&
+                    (!filters.AccountId.HasValue ||
+                     account.Id == filters.AccountId.Value))
                 .Select(account => new
                 {
                     account.Id,
@@ -229,6 +231,8 @@ public sealed partial class FinancialStatementService
             .Where(line =>
                 line.Account.CompanyId == companyId &&
                 line.Account.AccountType == accountType &&
+                (!filters.AccountId.HasValue ||
+                 line.AccountId == filters.AccountId.Value) &&
                 line.JournalEntry.EntryDate <= filters.ToDate)
             .GroupBy(line => new
             {
@@ -248,7 +252,11 @@ public sealed partial class FinancialStatementService
     private static bool ShouldLoadCategory(
         OperationalTrialBalanceFilterRequest filters,
         OperationalTrialBalanceCategory category) =>
-        !filters.Category.HasValue || filters.Category.Value == category;
+        filters.Category.HasValue
+            ? filters.Category.Value == category
+            : !filters.AccountId.HasValue ||
+              category is OperationalTrialBalanceCategory.Revenue or
+                  OperationalTrialBalanceCategory.Expense;
 
     private static void ApplyGroups(
         IReadOnlyDictionary<int, OperationalAccountBalance> accounts,

@@ -37,6 +37,52 @@ public sealed class CashVoucherService(
         filters ??= new CashVoucherFilterRequest();
         var search = filters.Search?.Trim();
         var voucherNumber = filters.VoucherNumber?.Trim();
+        var accountIds = new HashSet<int>();
+
+        if (filters.AccountId is int accountId &&
+            filters.IncludeSubAccounts)
+        {
+            var expenseAccounts = await dbContext.Accounts
+                .AsNoTracking()
+                .Where(account =>
+                    account.CompanyId == companyId &&
+                    account.AccountType == AccountType.Expense)
+                .Select(account => new
+                {
+                    account.Id,
+                    account.ParentAccountId
+                })
+                .ToListAsync(cancellationToken);
+
+            var childrenByParent = expenseAccounts
+                .Where(account => account.ParentAccountId.HasValue)
+                .GroupBy(account => account.ParentAccountId!.Value)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Select(account => account.Id).ToList());
+
+            if (expenseAccounts.Any(account => account.Id == accountId))
+            {
+                var pending = new Queue<int>();
+                pending.Enqueue(accountId);
+
+                while (pending.TryDequeue(out var currentAccountId))
+                {
+                    if (!accountIds.Add(currentAccountId) ||
+                        !childrenByParent.TryGetValue(
+                            currentAccountId,
+                            out var childAccountIds))
+                    {
+                        continue;
+                    }
+
+                    foreach (var childAccountId in childAccountIds)
+                    {
+                        pending.Enqueue(childAccountId);
+                    }
+                }
+            }
+        }
 
         var query = dbContext.CashVouchers
             .AsNoTracking()
@@ -117,9 +163,6 @@ public sealed class CashVoucherService(
                 !filters.EmployeeId.HasValue ||
                 voucher.EmployeeId == filters.EmployeeId.Value)
             .Where(voucher =>
-                !filters.AccountId.HasValue ||
-                voucher.AccountId == filters.AccountId.Value)
-            .Where(voucher =>
                 !filters.IsDraft.HasValue ||
                 filters.IsDraft.Value ==
                 !voucher.IsPosted)
@@ -128,14 +171,26 @@ public sealed class CashVoucherService(
                 voucher.VoucherDate >= filters.FromDate.Value)
             .Where(voucher =>
                 !filters.ToDate.HasValue ||
-                voucher.VoucherDate <= filters.ToDate.Value)
+                voucher.VoucherDate <= filters.ToDate.Value);
+
+        if (filters.AccountId is int exactAccountId)
+        {
+            query = filters.IncludeSubAccounts
+                ? query.Where(voucher =>
+                    voucher.AccountId.HasValue &&
+                    accountIds.Contains(voucher.AccountId.Value))
+                : query.Where(voucher =>
+                    voucher.AccountId == exactAccountId);
+        }
+
+        var orderedQuery = query
             .OrderByDescending(voucher => voucher.VoucherDate)
             .ThenByDescending(voucher => voucher.Id);
 
         return await paginationService.PaginateAsync<
             CashVoucher,
             CashVoucherResponse>(
-            query,
+            orderedQuery,
             pagination,
             cancellationToken);
     }

@@ -18,6 +18,53 @@ namespace MiniErp.Tests.Accounting;
 public sealed class FinancialStatementReportTests
 {
     [Fact]
+    public async Task ExpenseReport_AccountFilter_UsesOnlySelectedAccountLedgerLines()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Accounts (
+                Id, CompanyId, Code, Name, ParentAccountId, AccountType,
+                NormalBalance, IsPosting, IsActive, RowVersion,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                7, 1, '5200', 'Other expense', NULL, 5, 1, 1, 1,
+                randomblob(8), 'test', '2026-01-01', 'test', 0);
+            """);
+        await AddJournalEntryAsync(
+            database,
+            entryNumber: "JE-OTHER-EXPENSE",
+            entryDate: new DateOnly(2026, 7, 5),
+            lines:
+            [
+                CreateLine(accountId: 7, debit: 120m, credit: 0m),
+                CreateLine(accountId: 1, debit: 0m, credit: 120m)
+            ]);
+
+        var all = await database.Service.GetOperationalTrialBalanceAsync(
+            new OperationalTrialBalanceFilterRequest(
+                FromDate: new DateOnly(2026, 7, 1),
+                ToDate: new DateOnly(2026, 7, 31),
+                Category: OperationalTrialBalanceCategory.Expense));
+        var selected = await database.Service.GetOperationalTrialBalanceAsync(
+            new OperationalTrialBalanceFilterRequest(
+                FromDate: new DateOnly(2026, 7, 1),
+                ToDate: new DateOnly(2026, 7, 31),
+                Category: OperationalTrialBalanceCategory.Expense,
+                AccountId: 6));
+
+        Assert.True(all.IsSuccess);
+        Assert.True(selected.IsSuccess);
+        Assert.Equal(420m, all.Value.Totals.PeriodDebit);
+        var item = Assert.Single(selected.Value.Items);
+        Assert.Equal(6, item.AccountId);
+        Assert.Equal("5100", item.AccountCode);
+        Assert.Equal(300m, item.PeriodDebit);
+        Assert.Equal(300m, selected.Value.Totals.PeriodDebit);
+        Assert.Equal(300m, selected.Value.Totals.ClosingDebit);
+    }
+
+    [Fact]
     public async Task PartnerStatement_UsesManualLedgerAmountsAndExcludesReversals()
     {
         await using var database = await TestDatabase.CreateAsync();

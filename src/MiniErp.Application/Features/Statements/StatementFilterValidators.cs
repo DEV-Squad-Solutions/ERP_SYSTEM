@@ -152,6 +152,9 @@ public sealed class OperationalTrialBalanceFilterRequestValidator
         RuleFor(filter => filter.Category)
             .IsInEnum()
             .When(filter => filter.Category.HasValue);
+        RuleFor(filter => filter.AccountId)
+            .GreaterThan(0)
+            .When(filter => filter.AccountId.HasValue);
     }
 }
 

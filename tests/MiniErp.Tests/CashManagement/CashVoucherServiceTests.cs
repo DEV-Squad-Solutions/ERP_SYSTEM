@@ -186,6 +186,133 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
+    public async Task Voucher_AccountFilterCanIncludeExpenseDescendants()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Accounts (
+                Id, CompanyId, Code, Name, ParentAccountId, AccountType,
+                NormalBalance, IsPosting, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (200, 1, '5210', 'Office Expense - Child', 2, 5, 1, 1, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (201, 1, '5211', 'Office Expense - Grandchild', 200, 5, 1, 1,
+                 1, 'test', '2026-01-01', 'test', 0),
+                (202, 1, '5220', 'Office Expense - Sibling', 2, 5, 1, 1, 1,
+                 'test', '2026-01-01', 'test', 0),
+                (203, 1, '5300', 'Unrelated Expense', NULL, 5, 1, 1, 1,
+                 'test', '2026-01-01', 'test', 0);
+            """);
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreateVoucherService(companyId: 1);
+
+        var parentVoucher = await AddVoucherAsync(
+            service,
+            CreateRequest(
+                "CV-EXP-PARENT",
+                CashDirection.Payment,
+                amount: 10m,
+                accountId: 2));
+        var childVoucher = await AddVoucherAsync(
+            service,
+            CreateRequest(
+                "CV-EXP-CHILD",
+                CashDirection.Payment,
+                amount: 10m,
+                accountId: 200));
+        var grandchildVoucher = await AddVoucherAsync(
+            service,
+            CreateRequest(
+                "CV-EXP-GRANDCHILD",
+                CashDirection.Payment,
+                amount: 10m,
+                accountId: 201));
+        var siblingVoucher = await AddVoucherAsync(
+            service,
+            CreateRequest(
+                "CV-EXP-SIBLING",
+                CashDirection.Payment,
+                amount: 10m,
+                accountId: 202));
+        var unrelatedVoucher = await AddVoucherAsync(
+            service,
+            CreateRequest(
+                "CV-EXP-UNRELATED",
+                CashDirection.Payment,
+                amount: 10m,
+                accountId: 203));
+
+        Assert.True(parentVoucher.IsSuccess);
+        Assert.True(childVoucher.IsSuccess);
+        Assert.True(grandchildVoucher.IsSuccess);
+        Assert.True(siblingVoucher.IsSuccess);
+        Assert.True(unrelatedVoucher.IsSuccess);
+
+        var descendants = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashVoucherFilterRequest(
+                Direction: CashDirection.Payment,
+                Classification: CashMovementClassification.Expense,
+                AccountId: 2,
+                IncludeSubAccounts: true));
+        var exact = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashVoucherFilterRequest(
+                Direction: CashDirection.Payment,
+                Classification: CashMovementClassification.Expense,
+                AccountId: 2));
+        var childDescendants = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashVoucherFilterRequest(
+                Direction: CashDirection.Payment,
+                Classification: CashMovementClassification.Expense,
+                AccountId: 200,
+                IncludeSubAccounts: true));
+
+        Assert.True(descendants.IsSuccess);
+        Assert.True(exact.IsSuccess);
+        Assert.True(childDescendants.IsSuccess);
+        Assert.Equal(
+            new[]
+            {
+                parentVoucher.Value.Id,
+                childVoucher.Value.Id,
+                grandchildVoucher.Value.Id,
+                siblingVoucher.Value.Id
+            }.OrderBy(id => id),
+            descendants.Value.Items
+                .Select(item => item.Id)
+                .OrderBy(id => id));
+        Assert.Equal(
+            [parentVoucher.Value.Id],
+            exact.Value.Items.Select(item => item.Id));
+        Assert.Equal(
+            new[]
+            {
+                childVoucher.Value.Id,
+                grandchildVoucher.Value.Id
+            }.OrderBy(id => id),
+            childDescendants.Value.Items
+                .Select(item => item.Id)
+                .OrderBy(id => id));
+        Assert.DoesNotContain(
+            unrelatedVoucher.Value.Id,
+            descendants.Value.Items.Select(item => item.Id));
+        Assert.All(
+            descendants.Value.Items,
+            item =>
+            {
+                Assert.Equal(CashDirection.Payment, item.Direction);
+                Assert.Equal(
+                    CashMovementClassification.Expense,
+                    item.Classification);
+            });
+    }
+
+    [Fact]
     public async Task ReceiptAndPaymentSupportForeignCurrencyCashbox()
     {
         await using var database =
