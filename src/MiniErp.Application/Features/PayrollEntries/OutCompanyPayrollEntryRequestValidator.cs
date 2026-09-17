@@ -25,6 +25,11 @@ public sealed class OutCompanyPayrollEntryRequestValidator : AbstractValidator<O
             .GreaterThanOrEqualTo(0)
             .WithMessage("يجب أن يكون عدد أيام الحضور صفرًا أو أكبر.");
 
+        RuleFor(x => x)
+            .Must(x => x.PresentDays <= (x.EndDate.DayNumber - x.StartDate.DayNumber + 1))
+            .WithMessage("عدد أيام الحضور لا يمكن أن يتجاوز إجمالي عدد الأيام في الفترة.")
+            .When(x => x.StartDate != default && x.EndDate != default && x.StartDate <= x.EndDate);
+
         RuleFor(x => x.WorkedDaysByDayUnit)
             .GreaterThanOrEqualTo(0)
             .WithMessage("يجب أن تكون وحدات العمل صفرًا أو أكبر.");
@@ -66,6 +71,11 @@ public sealed class IndividualOutCompanyPayrollEntryRequestValidator : AbstractV
         RuleFor(x => x.PresentDays)
             .GreaterThanOrEqualTo(0)
             .WithMessage("يجب أن يكون عدد أيام الحضور صفرًا أو أكبر.");
+
+        RuleFor(x => x)
+            .Must(x => x.PresentDays <= (x.EndDate!.Value.DayNumber - x.StartDate!.Value.DayNumber + 1))
+            .WithMessage("عدد أيام الحضور لا يمكن أن يتجاوز إجمالي عدد الأيام في الفترة.")
+            .When(x => x.StartDate.HasValue && x.EndDate.HasValue && x.StartDate.Value != default && x.EndDate.Value != default && x.StartDate.Value <= x.EndDate.Value);
 
         RuleFor(x => x.WorkedDaysByDayUnit)
             .GreaterThanOrEqualTo(0)
@@ -132,6 +142,18 @@ public sealed class BulkOutCompanyPayrollEntryRequestValidator : AbstractValidat
             .When(x => x.Entries is { Count: > 0 });
 
         RuleFor(x => x.Entries)
+            .Must((req, entries) => entries.All(e =>
+            {
+                var s = e.StartDate ?? req.DefaultStartDate;
+                var end = e.EndDate ?? req.DefaultEndDate;
+                if (!s.HasValue || !end.HasValue || s.Value == default || end.Value == default || s.Value > end.Value) return true;
+                var totalDays = (end.Value.DayNumber - s.Value.DayNumber) + 1;
+                return e.PresentDays <= totalDays;
+            }))
+            .WithMessage("عدد أيام الحضور لا يمكن أن يتجاوز إجمالي عدد الأيام في الفترة لكل مدخل.")
+            .When(x => x.Entries is { Count: > 0 });
+
+        RuleFor(x => x.Entries)
             .Must(items => items.Select(item => item.EmployeeId).Distinct().Count() == items.Count)
             .When(x => x.Entries is { Count: > 0 })
             .WithMessage("لا يجوز تكرار نفس الموظف داخل الطلب الواحد.");
@@ -156,6 +178,11 @@ public sealed class OutCompanyPayrollEntryUpdateRequestValidator : AbstractValid
         RuleFor(x => x.PresentDays)
             .GreaterThanOrEqualTo(0)
             .WithMessage("يجب أن يكون عدد أيام الحضور صفرًا أو أكبر.");
+
+        RuleFor(x => x)
+            .Must(x => x.PresentDays <= (x.EndDate.DayNumber - x.StartDate.DayNumber + 1))
+            .WithMessage("عدد أيام الحضور لا يمكن أن يتجاوز إجمالي عدد الأيام في الفترة.")
+            .When(x => x.StartDate != default && x.EndDate != default && x.StartDate <= x.EndDate);
 
         RuleFor(x => x.WorkedDaysByDayUnit)
             .GreaterThanOrEqualTo(0)
@@ -198,6 +225,11 @@ public sealed class IndividualOutCompanyPayrollEntryUpdateRequestValidator : Abs
         RuleFor(x => x.PresentDays)
             .GreaterThanOrEqualTo(0)
             .WithMessage("يجب أن يكون عدد أيام الحضور صفرًا أو أكبر.");
+
+        RuleFor(x => x)
+            .Must(x => x.PresentDays <= (x.EndDate!.Value.DayNumber - x.StartDate!.Value.DayNumber + 1))
+            .WithMessage("عدد أيام الحضور لا يمكن أن يتجاوز إجمالي عدد الأيام في الفترة.")
+            .When(x => x.StartDate.HasValue && x.EndDate.HasValue && x.StartDate.Value != default && x.EndDate.Value != default && x.StartDate.Value <= x.EndDate.Value);
 
         RuleFor(x => x.WorkedDaysByDayUnit)
             .GreaterThanOrEqualTo(0)
@@ -262,6 +294,18 @@ public sealed class BulkOutCompanyPayrollEntryUpdateRequestValidator : AbstractV
                 return !s.HasValue || !end.HasValue || s.Value <= end.Value;
             }))
             .WithMessage("تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية.")
+            .When(x => x.Entries is { Count: > 0 });
+
+        RuleFor(x => x.Entries)
+            .Must((req, entries) => entries.All(e =>
+            {
+                var s = e.StartDate ?? req.DefaultStartDate;
+                var end = e.EndDate ?? req.DefaultEndDate;
+                if (!s.HasValue || !end.HasValue || s.Value == default || end.Value == default || s.Value > end.Value) return true;
+                var totalDays = (end.Value.DayNumber - s.Value.DayNumber) + 1;
+                return e.PresentDays <= totalDays;
+            }))
+            .WithMessage("عدد أيام الحضور لا يمكن أن يتجاوز إجمالي عدد الأيام في الفترة لكل مدخل.")
             .When(x => x.Entries is { Count: > 0 });
 
         RuleFor(x => x.Entries)

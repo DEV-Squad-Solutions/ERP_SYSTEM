@@ -39,10 +39,14 @@ builder.Services
             0,
             new FlexibleDateOnlyModelBinderProvider()))
     .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new MiniErp.Api.Serialization.FlexibleDateOnlyJsonConverter());
+        options.JsonSerializerOptions.Converters.Add(new MiniErp.Api.Serialization.FlexibleNullableDateOnlyJsonConverter());
         options.JsonSerializerOptions.Converters.Add(
             new JsonStringEnumConverter(
                 namingPolicy: null,
-                allowIntegerValues: true)));
+                allowIntegerValues: true));
+    });
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(

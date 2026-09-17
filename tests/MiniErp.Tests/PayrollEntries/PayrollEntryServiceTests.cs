@@ -1327,4 +1327,500 @@ public sealed class PayrollEntryServiceTests
         Assert.Equal(new DateOnly(2026, 9, 1), bulkUpdate.Value[1].StartDate);
         Assert.Equal(new DateOnly(2026, 9, 10), bulkUpdate.Value[1].EndDate);
     }
+
+    // ─── OUT COMPANY PAYROLL DATE & ABSENT DAYS RULES TESTS ──────────────────
+
+    [Fact]
+    public async Task Case1_FirstPayrollBeforeEmployeeCreationDate_ShouldBeValid()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreatePayrollService();
+
+        var outEmp = new Employee
+        {
+            Id = 201,
+            CompanyId = 1,
+            Code = "OUT201",
+            Name = "Pre-Hire Worker",
+            Type = EmployeeType.Monthly,
+            MonthlySalary = 6000m,
+            RequiredWorkingDaysPerMonth = 30,
+            IsActive = true,
+            CreatedOn = new DateTime(2026, 9, 10, 0, 0, 0, DateTimeKind.Utc)
+        };
+        outEmp.UpdateWorkPlace(WorkPlaceStatus.OutCompany, "Desert Site");
+        database.Context.Employees.Add(outEmp);
+        await database.Context.SaveChangesAsync();
+
+        var startDate = new DateOnly(2026, 9, 5);
+        var endDate = new DateOnly(2026, 9, 15);
+
+        var request = new OutCompanyPayrollEntryRequest(
+            EmployeeId: 201,
+            StartDate: startDate,
+            EndDate: endDate,
+            PresentDays: 10,
+            WorkedDaysByDayUnit: 10m);
+
+        // Act
+        var result = await service.AddOutCompanyAsync(request);
+
+        // Assert
+        Assert.True(result.IsSuccess);
+        Assert.Equal(startDate, result.Value.StartDate);
+        Assert.Equal(endDate, result.Value.EndDate);
+        Assert.Equal(10, result.Value.AttendanceSummary.PresentDays);
+        // TotalDays = (15 - 5) + 1 = 11. AbsentDays = 11 - 10 = 1.
+        Assert.Equal(1, result.Value.AttendanceSummary.AbsentDays);
+    }
+
+    [Fact]
+    public async Task Case2_FirstPayrollAfterEmployeeCreationDate_ShouldBeValid()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreatePayrollService();
+
+        var outEmp = new Employee
+        {
+            Id = 202,
+            CompanyId = 1,
+            Code = "OUT202",
+            Name = "Post-Hire Worker",
+            Type = EmployeeType.Monthly,
+            MonthlySalary = 6000m,
+            RequiredWorkingDaysPerMonth = 30,
+            IsActive = true,
+            CreatedOn = new DateTime(2026, 9, 10, 0, 0, 0, DateTimeKind.Utc)
+        };
+        outEmp.UpdateWorkPlace(WorkPlaceStatus.OutCompany, "Desert Site");
+        database.Context.Employees.Add(outEmp);
+        await database.Context.SaveChangesAsync();
+
+        var startDate = new DateOnly(2026, 9, 17);
+        var endDate = new DateOnly(2026, 9, 30);
+
+        var request = new OutCompanyPayrollEntryRequest(
+            EmployeeId: 202,
+            StartDate: startDate,
+            EndDate: endDate,
+            PresentDays: 12,
+            WorkedDaysByDayUnit: 12m);
+
+        // Act
+        var result = await service.AddOutCompanyAsync(request);
+
+        // Assert
+        Assert.True(result.IsSuccess);
+        Assert.Equal(startDate, result.Value.StartDate);
+        Assert.Equal(endDate, result.Value.EndDate);
+        Assert.Equal(12, result.Value.AttendanceSummary.PresentDays);
+        // TotalDays = (30 - 17) + 1 = 14. AbsentDays = 14 - 12 = 2.
+        Assert.Equal(2, result.Value.AttendanceSummary.AbsentDays);
+    }
+
+    [Fact]
+    public async Task Case3_OverlappingPreviousPayroll_ShouldBeInvalid()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreatePayrollService();
+
+        var outEmp = new Employee
+        {
+            Id = 203,
+            CompanyId = 1,
+            Code = "OUT203",
+            Name = "Overlap Worker",
+            Type = EmployeeType.Daily,
+            DailySalary = 200m,
+            IsActive = true
+        };
+        outEmp.UpdateWorkPlace(WorkPlaceStatus.OutCompany, "North Site");
+        database.Context.Employees.Add(outEmp);
+        await database.Context.SaveChangesAsync();
+
+        // Seed previous payroll: 2026-09-01 to 2026-09-30
+        var firstResult = await service.AddOutCompanyAsync(new OutCompanyPayrollEntryRequest(
+            EmployeeId: 203,
+            StartDate: new DateOnly(2026, 9, 1),
+            EndDate: new DateOnly(2026, 9, 30),
+            PresentDays: 25,
+            WorkedDaysByDayUnit: 25m));
+        Assert.True(firstResult.IsSuccess);
+
+        // Act: Attempt new payroll: 2026-09-20 to 2026-10-10 (overlaps with previous ending 2026-09-30)
+        var overlapResult = await service.AddOutCompanyAsync(new OutCompanyPayrollEntryRequest(
+            EmployeeId: 203,
+            StartDate: new DateOnly(2026, 9, 20),
+            EndDate: new DateOnly(2026, 10, 10),
+            PresentDays: 15,
+            WorkedDaysByDayUnit: 15m));
+
+        // Assert
+        Assert.True(overlapResult.IsFailure);
+        Assert.Equal("PayrollEntry.PeriodOverlap", overlapResult.Error.Code);
+    }
+
+    [Fact]
+    public async Task Case4_ContinuousPayroll_ShouldBeValid()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreatePayrollService();
+
+        var outEmp = new Employee
+        {
+            Id = 204,
+            CompanyId = 1,
+            Code = "OUT204",
+            Name = "Continuous Worker",
+            Type = EmployeeType.Daily,
+            DailySalary = 200m,
+            IsActive = true
+        };
+        outEmp.UpdateWorkPlace(WorkPlaceStatus.OutCompany, "North Site");
+        database.Context.Employees.Add(outEmp);
+        await database.Context.SaveChangesAsync();
+
+        // Seed previous payroll: 2026-09-01 to 2026-09-30
+        var firstResult = await service.AddOutCompanyAsync(new OutCompanyPayrollEntryRequest(
+            EmployeeId: 204,
+            StartDate: new DateOnly(2026, 9, 1),
+            EndDate: new DateOnly(2026, 9, 30),
+            PresentDays: 25,
+            WorkedDaysByDayUnit: 25m));
+        Assert.True(firstResult.IsSuccess);
+
+        // Act: Continuous new payroll: 2026-10-01 to 2026-10-31
+        var nextResult = await service.AddOutCompanyAsync(new OutCompanyPayrollEntryRequest(
+            EmployeeId: 204,
+            StartDate: new DateOnly(2026, 10, 1),
+            EndDate: new DateOnly(2026, 10, 31),
+            PresentDays: 28,
+            WorkedDaysByDayUnit: 28m));
+
+        // Assert
+        Assert.True(nextResult.IsSuccess);
+        Assert.Equal(new DateOnly(2026, 10, 1), nextResult.Value.StartDate);
+        Assert.Equal(new DateOnly(2026, 10, 31), nextResult.Value.EndDate);
+        Assert.Equal(28, nextResult.Value.AttendanceSummary.PresentDays);
+        // TotalDays = 31, AbsentDays = 31 - 28 = 3.
+        Assert.Equal(3, nextResult.Value.AttendanceSummary.AbsentDays);
+    }
+
+    [Fact]
+    public async Task Case5_AbsentDays_Calculation_ShouldBeAccurate()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreatePayrollService();
+
+        var outEmp = new Employee
+        {
+            Id = 205,
+            CompanyId = 1,
+            Code = "OUT205",
+            Name = "Absent Calculation Worker",
+            Type = EmployeeType.Daily,
+            DailySalary = 150m,
+            IsActive = true
+        };
+        outEmp.UpdateWorkPlace(WorkPlaceStatus.OutCompany, "South Site");
+        database.Context.Employees.Add(outEmp);
+        await database.Context.SaveChangesAsync();
+
+        // Start = 2026-09-01, End = 2026-09-30, PresentDays = 25 -> TotalDays = 30, AbsentDays = 5
+        var request = new OutCompanyPayrollEntryRequest(
+            EmployeeId: 205,
+            StartDate: new DateOnly(2026, 9, 1),
+            EndDate: new DateOnly(2026, 9, 30),
+            PresentDays: 25,
+            WorkedDaysByDayUnit: 25m);
+
+        // Act
+        var result = await service.AddOutCompanyAsync(request);
+
+        // Assert
+        Assert.True(result.IsSuccess);
+        Assert.Equal(25, result.Value.AttendanceSummary.PresentDays);
+        Assert.Equal(5, result.Value.AttendanceSummary.AbsentDays);
+
+        var dbEntry = await database.Context.PayrollEntries.FindAsync(result.Value.Id);
+        Assert.NotNull(dbEntry);
+        Assert.Equal(25, dbEntry.PresentDays);
+        Assert.Equal(5, dbEntry.AbsentDays);
+    }
+
+    [Fact]
+    public async Task Case6_InvalidPresentDays_GreaterThanTotalDays_ShouldBeInvalid()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreatePayrollService();
+
+        var outEmp = new Employee
+        {
+            Id = 206,
+            CompanyId = 1,
+            Code = "OUT206",
+            Name = "Excessive Present Worker",
+            Type = EmployeeType.Daily,
+            DailySalary = 150m,
+            IsActive = true
+        };
+        outEmp.UpdateWorkPlace(WorkPlaceStatus.OutCompany, "South Site");
+        database.Context.Employees.Add(outEmp);
+        await database.Context.SaveChangesAsync();
+
+        // TotalDays = (30 - 1) + 1 = 30. PresentDays = 31 -> INVALID
+        var request = new OutCompanyPayrollEntryRequest(
+            EmployeeId: 206,
+            StartDate: new DateOnly(2026, 9, 1),
+            EndDate: new DateOnly(2026, 9, 30),
+            PresentDays: 31,
+            WorkedDaysByDayUnit: 30m);
+
+        // Act
+        var result = await service.AddOutCompanyAsync(request);
+
+        // Assert
+        Assert.True(result.IsFailure);
+        Assert.Equal("PayrollEntry.InvalidPresentDays", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task UpdateOutCompanyAsync_ShouldExcludeSelf_AndCalculateAbsentDays()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreatePayrollService();
+
+        var outEmp = new Employee
+        {
+            Id = 207,
+            CompanyId = 1,
+            Code = "OUT207",
+            Name = "Update Out Worker",
+            Type = EmployeeType.Daily,
+            DailySalary = 200m,
+            IsActive = true
+        };
+        outEmp.UpdateWorkPlace(WorkPlaceStatus.OutCompany, "Site 207");
+        database.Context.Employees.Add(outEmp);
+        await database.Context.SaveChangesAsync();
+
+        var create = await service.AddOutCompanyAsync(new OutCompanyPayrollEntryRequest(
+            EmployeeId: 207,
+            StartDate: new DateOnly(2026, 9, 1),
+            EndDate: new DateOnly(2026, 9, 20),
+            PresentDays: 18,
+            WorkedDaysByDayUnit: 18m));
+        Assert.True(create.IsSuccess);
+
+        // Act: Update dates on same entry to 2026-09-01 to 2026-09-25 with PresentDays = 22
+        var update = await service.UpdateOutCompanyAsync(create.Value.Id, new OutCompanyPayrollEntryUpdateRequest(
+            StartDate: new DateOnly(2026, 9, 1),
+            EndDate: new DateOnly(2026, 9, 25),
+            PresentDays: 22,
+            WorkedDaysByDayUnit: 22m));
+
+        // Assert
+        Assert.True(update.IsSuccess);
+        Assert.Equal(new DateOnly(2026, 9, 1), update.Value.StartDate);
+        Assert.Equal(new DateOnly(2026, 9, 25), update.Value.EndDate);
+        Assert.Equal(22, update.Value.AttendanceSummary.PresentDays);
+        // TotalDays = 25, AbsentDays = 25 - 22 = 3
+        Assert.Equal(3, update.Value.AttendanceSummary.AbsentDays);
+    }
+
+    [Fact]
+    public async Task UpdateOutCompanyAsync_ShouldFail_WhenFinanciallyLocked()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreatePayrollService();
+
+        var outEmp = new Employee
+        {
+            Id = 208,
+            CompanyId = 1,
+            Code = "OUT208",
+            Name = "Locked Out Worker",
+            Type = EmployeeType.Daily,
+            DailySalary = 200m,
+            IsActive = true
+        };
+        outEmp.UpdateWorkPlace(WorkPlaceStatus.OutCompany, "Site 208");
+        database.Context.Employees.Add(outEmp);
+        await database.Context.SaveChangesAsync();
+
+        var create = await service.AddOutCompanyAsync(new OutCompanyPayrollEntryRequest(
+            EmployeeId: 208,
+            StartDate: new DateOnly(2026, 9, 1),
+            EndDate: new DateOnly(2026, 9, 15),
+            PresentDays: 14,
+            WorkedDaysByDayUnit: 14m));
+        Assert.True(create.IsSuccess);
+
+        // Manually lock the payroll entry
+        var entry = await database.Context.PayrollEntries.FindAsync(create.Value.Id);
+        entry!.IsSalaryMovedToEmployeeAccount = true;
+        await database.Context.SaveChangesAsync();
+
+        // Act
+        var update = await service.UpdateOutCompanyAsync(create.Value.Id, new OutCompanyPayrollEntryUpdateRequest(
+            StartDate: new DateOnly(2026, 9, 1),
+            EndDate: new DateOnly(2026, 9, 16),
+            PresentDays: 15,
+            WorkedDaysByDayUnit: 15m));
+
+        // Assert
+        Assert.True(update.IsFailure);
+        Assert.Equal("PayrollEntry.AlreadyPaid", update.Error.Code);
+    }
+
+    [Fact]
+    public async Task BulkOutCompany_AddAndUpdate_ShouldRespectDatesAndCalculateAbsentDays()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreatePayrollService();
+
+        var empA = new Employee
+        {
+            Id = 210,
+            CompanyId = 1,
+            Code = "OUT210",
+            Name = "Bulk Worker A",
+            Type = EmployeeType.Daily,
+            DailySalary = 300m,
+            IsActive = true
+        };
+        empA.UpdateWorkPlace(WorkPlaceStatus.OutCompany, "Field Alpha");
+
+        var empB = new Employee
+        {
+            Id = 211,
+            CompanyId = 1,
+            Code = "OUT211",
+            Name = "Bulk Worker B",
+            Type = EmployeeType.Daily,
+            DailySalary = 350m,
+            IsActive = true
+        };
+        empB.UpdateWorkPlace(WorkPlaceStatus.OutCompany, "Field Beta");
+
+        database.Context.Employees.AddRange(empA, empB);
+        await database.Context.SaveChangesAsync();
+
+        // Act 1: Bulk Create
+        var bulkAddResult = await service.AddOutCompanyBulkAsync(new BulkOutCompanyPayrollEntryRequest(
+            DefaultStartDate: new DateOnly(2026, 9, 1),
+            DefaultEndDate: new DateOnly(2026, 9, 15),
+            Entries:
+            [
+                new IndividualOutCompanyPayrollEntryRequest(
+                    EmployeeId: 210,
+                    PresentDays: 12,
+                    WorkedDaysByDayUnit: 12m),
+                new IndividualOutCompanyPayrollEntryRequest(
+                    EmployeeId: 211,
+                    PresentDays: 14,
+                    WorkedDaysByDayUnit: 14m)
+            ]));
+
+        // Assert 1
+        Assert.True(bulkAddResult.IsSuccess);
+        Assert.Equal(2, bulkAddResult.Value.Count);
+        // TotalDays = (15 - 1) + 1 = 15.
+        // Worker A: AbsentDays = 15 - 12 = 3.
+        // Worker B: AbsentDays = 15 - 14 = 1.
+        Assert.Equal(3, bulkAddResult.Value[0].AttendanceSummary.AbsentDays);
+        Assert.Equal(1, bulkAddResult.Value[1].AttendanceSummary.AbsentDays);
+
+        var idA = bulkAddResult.Value[0].Id;
+        var idB = bulkAddResult.Value[1].Id;
+
+        // Act 2: Bulk Update
+        var bulkUpdateResult = await service.UpdateOutCompanyBulkAsync(new BulkOutCompanyPayrollEntryUpdateRequest(
+            DefaultStartDate: new DateOnly(2026, 9, 1),
+            DefaultEndDate: new DateOnly(2026, 9, 20),
+            Entries:
+            [
+                new IndividualOutCompanyPayrollEntryUpdateRequest(
+                    Id: idA,
+                    PresentDays: 18,
+                    WorkedDaysByDayUnit: 18m),
+                new IndividualOutCompanyPayrollEntryUpdateRequest(
+                    Id: idB,
+                    PresentDays: 19,
+                    WorkedDaysByDayUnit: 19m)
+            ]));
+
+        // Assert 2
+        Assert.True(bulkUpdateResult.IsSuccess);
+        Assert.Equal(2, bulkUpdateResult.Value.Count);
+        // TotalDays = (20 - 1) + 1 = 20.
+        // Worker A: AbsentDays = 20 - 18 = 2.
+        // Worker B: AbsentDays = 20 - 19 = 1.
+        Assert.Equal(2, bulkUpdateResult.Value[0].AttendanceSummary.AbsentDays);
+        Assert.Equal(1, bulkUpdateResult.Value[1].AttendanceSummary.AbsentDays);
+    }
+
+    [Fact]
+    public void Deserialize_OutCompanyBulk_ExactPayload_ShouldSucceed()
+    {
+        var json = """
+        {
+          "entries": [
+            {
+              "employeeId": 1,
+              "startDate": "2026-09-17",
+              "endDate": "2026-09-30",
+              "presentDays": 10,
+              "workedDaysByDayUnit": 10,
+              "overtimeByDayUnit": 0,
+              "deductionByDayUnit": 0,
+              "bonus": 0,
+              "deduction": 0
+            }
+          ]
+        }
+        """;
+
+        var options = new System.Text.Json.JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+        options.Converters.Add(new MiniErp.Api.Serialization.FlexibleDateOnlyJsonConverter());
+        options.Converters.Add(new MiniErp.Api.Serialization.FlexibleNullableDateOnlyJsonConverter());
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<BulkOutCompanyPayrollEntryRequest>(json, options);
+
+        Assert.NotNull(result);
+        Assert.Single(result.Entries);
+        Assert.Equal(1, result.Entries[0].EmployeeId);
+        Assert.Equal(new DateOnly(2026, 9, 17), result.Entries[0].StartDate);
+        Assert.Equal(new DateOnly(2026, 9, 30), result.Entries[0].EndDate);
+
+        // Test ISO datetime format e.g. from frontend / swagger
+        var jsonWithIso = """
+        {
+          "entries": [
+            {
+              "employeeId": 1,
+              "startDate": "2026-09-17T00:00:00Z",
+              "endDate": "2026-09-30T00:00:00.000Z",
+              "presentDays": 10,
+              "workedDaysByDayUnit": 10
+            }
+          ]
+        }
+        """;
+        var resultIso = System.Text.Json.JsonSerializer.Deserialize<BulkOutCompanyPayrollEntryRequest>(jsonWithIso, options);
+        Assert.NotNull(resultIso);
+        Assert.Equal(new DateOnly(2026, 9, 17), resultIso.Entries[0].StartDate);
+    }
 }

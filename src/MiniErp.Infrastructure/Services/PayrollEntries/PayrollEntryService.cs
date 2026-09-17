@@ -1136,44 +1136,41 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 return Result<PayrollEntryResponse>.Failure(
                     Error.NotFound("Employee.NotFound", "الموظف المحدد غير موجود."));
 
-            if (!employee.IsActive)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation("Employee.Inactive", "لا يمكن إنشاء مسير رواتب لموظف غير نشط."));
+            var eligibilityError = PayrollEntryBusinessRules.ValidateOutCompanyEligibility(employee);
+            if (eligibilityError is not null)
+                return Result<PayrollEntryResponse>.Failure(eligibilityError);
 
-            if (employee.WorkPlaceStatus != WorkPlaceStatus.OutCompany)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation(
-                        "PayrollEntry.NotOutCompany",
-                        "مسير رواتب خارج الشركة مخصص فقط للموظفين الذين يعملون خارج الشركة."));
-
-            if (request.StartDate == default)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation("PayrollEntry.StartDateRequired", "تاريخ البداية مطلوب."));
-
-            if (request.EndDate == default)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation("PayrollEntry.EndDateRequired", "تاريخ النهاية مطلوب."));
+            var dateError = PayrollEntryBusinessRules.ValidateOutCompanyDates(request.StartDate, request.EndDate, employee.Name);
+            if (dateError is not null)
+                return Result<PayrollEntryResponse>.Failure(dateError);
 
             var startDate = request.StartDate;
             var endDate = request.EndDate;
 
-            if (startDate > endDate)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation(
-                        "PayrollEntry.InvalidDateRange",
-                        "تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية."));
+            var existingEntries = await dbContext.PayrollEntries
+                .AsNoTracking()
+                .Where(p => p.CompanyId == companyId &&
+                            p.EmployeeId == employee.Id &&
+                            p.Employee.WorkPlaceStatus == WorkPlaceStatus.OutCompany)
+                .Select(p => new PayrollPeriodRecord(p.Id, p.EmployeeId, p.StartDate, p.EndDate))
+                .ToListAsync(cancellationToken);
 
-            var hasOverlap = await dbContext.PayrollEntries
-                .AnyAsync(p => p.CompanyId == companyId &&
-                               p.EmployeeId == employee.Id &&
-                               p.StartDate <= endDate &&
-                               p.EndDate >= startDate,
-                          cancellationToken);
-            if (hasOverlap)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Conflict(
-                        "PayrollEntry.PeriodOverlap",
-                        $"يوجد مسير رواتب مسجل مسبقًا للموظف {employee.Name} يغطي أو يتداخل مع هذه الفترة ({startDate:yyyy-MM-dd} إلى {endDate:yyyy-MM-dd})."));
+            var periodError = PayrollEntryBusinessRules.ValidateOutCompanyPayrollPeriod(
+                startDate,
+                endDate,
+                existingEntries,
+                currentEntryId: null,
+                employeeName: employee.Name);
+
+            if (periodError is not null)
+                return Result<PayrollEntryResponse>.Failure(periodError);
+
+            var totalDays = PayrollEntryBusinessRules.CalculateTotalDays(startDate, endDate);
+            var presentDaysError = PayrollEntryBusinessRules.ValidatePresentDays(request.PresentDays, totalDays);
+            if (presentDaysError is not null)
+                return Result<PayrollEntryResponse>.Failure(presentDaysError);
+
+            var absentDays = PayrollEntryBusinessRules.CalculateAbsentDays(totalDays, request.PresentDays);
 
             var workedDaysUnit = request.WorkedDaysByDayUnit;
             var overtimeUnit = request.OvertimeByDayUnit ?? 0m;
@@ -1201,7 +1198,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 EmployeeName                    = employee.Name,
                 EmployeeType                    = employee.Type,
                 PresentDays                     = request.PresentDays,
-                AbsentDays                      = 0,
+                AbsentDays                      = absentDays,
                 WorkedDaysbydayunit             = workedDaysUnit,
                 Overtimebydayunit               = overtimeUnit,
                 Deductionbydayunit              = deductionUnit,
@@ -1276,48 +1273,48 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             foreach (var item in request.Entries)
             {
                 var emp = employees[item.EmployeeId];
-                var startDate = item.StartDate ?? request.DefaultStartDate;
-                if (!startDate.HasValue || startDate.Value == default)
-                    return Result<List<PayrollEntryResponse>>.Failure(
-                        Error.Validation("PayrollEntry.StartDateRequired",
-                            $"تاريخ البداية مطلوب للموظف {emp.Name}."));
+                var startDate = item.StartDate ?? request.DefaultStartDate ?? default;
+                var endDate = item.EndDate ?? request.DefaultEndDate ?? default;
 
-                var endDate = item.EndDate ?? request.DefaultEndDate;
-                if (!endDate.HasValue || endDate.Value == default)
-                    return Result<List<PayrollEntryResponse>>.Failure(
-                        Error.Validation("PayrollEntry.EndDateRequired",
-                            $"تاريخ النهاية مطلوب للموظف {emp.Name}."));
+                var dateError = PayrollEntryBusinessRules.ValidateOutCompanyDates(startDate, endDate, emp.Name);
+                if (dateError is not null)
+                    return Result<List<PayrollEntryResponse>>.Failure(dateError);
 
-                if (startDate.Value > endDate.Value)
-                    return Result<List<PayrollEntryResponse>>.Failure(
-                        Error.Validation("PayrollEntry.InvalidDateRange",
-                            $"تاريخ البداية للموظف {emp.Name} ({startDate.Value}) يجب أن يكون قبل أو يساوي تاريخ النهاية ({endDate.Value})."));
-
-                dateRanges[item.EmployeeId] = (startDate.Value, endDate.Value);
+                dateRanges[item.EmployeeId] = (startDate, endDate);
             }
 
-            var minStartDate = dateRanges.Values.Min(r => r.StartDate);
-            var maxEndDate = dateRanges.Values.Max(r => r.EndDate);
-
-            var existingOverlaps = await dbContext.PayrollEntries
+            var existingEntries = await dbContext.PayrollEntries
                 .AsNoTracking()
                 .Where(p => p.CompanyId == companyId &&
                             employeeIds.Contains(p.EmployeeId) &&
-                            p.StartDate <= maxEndDate &&
-                            p.EndDate >= minStartDate)
-                .Select(p => new { p.EmployeeId, p.StartDate, p.EndDate })
+                            p.Employee.WorkPlaceStatus == WorkPlaceStatus.OutCompany)
+                .Select(p => new PayrollPeriodRecord(p.Id, p.EmployeeId, p.StartDate, p.EndDate))
                 .ToListAsync(cancellationToken);
+
+            var existingByEmployee = existingEntries
+                .GroupBy(p => p.EmployeeId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<PayrollPeriodRecord>)g.ToList());
 
             foreach (var item in request.Entries)
             {
-                var (s, e) = dateRanges[item.EmployeeId];
-                if (existingOverlaps.Any(x => x.EmployeeId == item.EmployeeId && x.StartDate <= e && x.EndDate >= s))
-                {
-                    var emp = employees[item.EmployeeId];
-                    return Result<List<PayrollEntryResponse>>.Failure(
-                        Error.Conflict("PayrollEntry.PeriodOverlap",
-                            $"يوجد مسير رواتب مسجل مسبقًا للموظف {emp.Name} يغطي أو يتداخل مع الفترة المحددة ({s:yyyy-MM-dd} إلى {e:yyyy-MM-dd})."));
-                }
+                var emp = employees[item.EmployeeId];
+                var (startDate, endDate) = dateRanges[item.EmployeeId];
+
+                existingByEmployee.TryGetValue(item.EmployeeId, out var empExisting);
+                var periodError = PayrollEntryBusinessRules.ValidateOutCompanyPayrollPeriod(
+                    startDate,
+                    endDate,
+                    empExisting ?? Array.Empty<PayrollPeriodRecord>(),
+                    currentEntryId: null,
+                    employeeName: emp.Name);
+
+                if (periodError is not null)
+                    return Result<List<PayrollEntryResponse>>.Failure(periodError);
+
+                var totalDays = PayrollEntryBusinessRules.CalculateTotalDays(startDate, endDate);
+                var presentDaysError = PayrollEntryBusinessRules.ValidatePresentDays(item.PresentDays, totalDays);
+                if (presentDaysError is not null)
+                    return Result<List<PayrollEntryResponse>>.Failure(presentDaysError);
             }
 
             var entries = new List<PayrollEntry>(request.Entries.Count);
@@ -1326,6 +1323,9 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             {
                 var emp = employees[item.EmployeeId];
                 var (startDate, endDate) = dateRanges[item.EmployeeId];
+
+                var totalDays = PayrollEntryBusinessRules.CalculateTotalDays(startDate, endDate);
+                var absentDays = PayrollEntryBusinessRules.CalculateAbsentDays(totalDays, item.PresentDays);
 
                 var workedDaysUnit = item.WorkedDaysByDayUnit;
                 var overtimeUnit = item.OvertimeByDayUnit ?? 0m;
@@ -1354,7 +1354,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     EmployeeName                    = emp.Name,
                     EmployeeType                    = emp.Type,
                     PresentDays                     = item.PresentDays,
-                    AbsentDays                      = 0,
+                    AbsentDays                      = absentDays,
                     WorkedDaysbydayunit             = workedDaysUnit,
                     Overtimebydayunit               = overtimeUnit,
                     Deductionbydayunit              = deductionUnit,
@@ -1402,42 +1402,42 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 return Result<PayrollEntryResponse>.Failure(
                     Error.NotFound("Employee.NotFound", "بيانات الموظف غير موجودة."));
 
-            if (!employee.IsActive)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation("Employee.Inactive", "لا يمكن تعديل مسير رواتب لموظف غير نشط."));
+            var eligibilityError = PayrollEntryBusinessRules.ValidateOutCompanyEligibility(employee);
+            if (eligibilityError is not null)
+                return Result<PayrollEntryResponse>.Failure(eligibilityError);
 
-            if (employee.WorkPlaceStatus != WorkPlaceStatus.OutCompany)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation("PayrollEntry.NotOutCompany",
-                        "مسير رواتب خارج الشركة مخصص فقط للموظفين الذين يعملون خارج الشركة."));
-
-            if (request.StartDate == default)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation("PayrollEntry.StartDateRequired", "تاريخ البداية مطلوب."));
-
-            if (request.EndDate == default)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation("PayrollEntry.EndDateRequired", "تاريخ النهاية مطلوب."));
+            var dateError = PayrollEntryBusinessRules.ValidateOutCompanyDates(request.StartDate, request.EndDate, employee.Name);
+            if (dateError is not null)
+                return Result<PayrollEntryResponse>.Failure(dateError);
 
             var startDate = request.StartDate;
             var endDate = request.EndDate;
 
-            if (startDate > endDate)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Validation("PayrollEntry.InvalidDateRange",
-                        "تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية.",
-                        nameof(request.StartDate)));
+            var existingEntries = await dbContext.PayrollEntries
+                .AsNoTracking()
+                .Where(p => p.CompanyId == companyId &&
+                            p.EmployeeId == entry.EmployeeId &&
+                            p.Employee.WorkPlaceStatus == WorkPlaceStatus.OutCompany &&
+                            p.Id != entry.Id)
+                .Select(p => new PayrollPeriodRecord(p.Id, p.EmployeeId, p.StartDate, p.EndDate))
+                .ToListAsync(cancellationToken);
 
-            var hasOverlap = await dbContext.PayrollEntries
-                .AnyAsync(p => p.CompanyId == companyId &&
-                               p.EmployeeId == entry.EmployeeId &&
-                               p.Id != entry.Id &&
-                               p.StartDate <= endDate &&
-                               p.EndDate >= startDate,
-                          cancellationToken);
-            if (hasOverlap)
-                return Result<PayrollEntryResponse>.Failure(
-                    Error.Conflict("PayrollEntry.PeriodOverlap", "الفترة المحددة تتداخل مع مسير رواتب آخر مسجل لنفس الموظف."));
+            var periodError = PayrollEntryBusinessRules.ValidateOutCompanyPayrollPeriod(
+                startDate,
+                endDate,
+                existingEntries,
+                currentEntryId: entry.Id,
+                employeeName: employee.Name);
+
+            if (periodError is not null)
+                return Result<PayrollEntryResponse>.Failure(periodError);
+
+            var totalDays = PayrollEntryBusinessRules.CalculateTotalDays(startDate, endDate);
+            var presentDaysError = PayrollEntryBusinessRules.ValidatePresentDays(request.PresentDays, totalDays);
+            if (presentDaysError is not null)
+                return Result<PayrollEntryResponse>.Failure(presentDaysError);
+
+            var absentDays = PayrollEntryBusinessRules.CalculateAbsentDays(totalDays, request.PresentDays);
 
             var workedDaysUnit = request.WorkedDaysByDayUnit;
             var overtimeUnit = request.OvertimeByDayUnit ?? entry.Overtimebydayunit ?? 0m;
@@ -1460,6 +1460,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             entry.StartDate                     = startDate;
             entry.EndDate                       = endDate;
             entry.PresentDays                   = request.PresentDays;
+            entry.AbsentDays                    = absentDays;
             entry.WorkedDaysbydayunit           = workedDaysUnit;
             entry.Overtimebydayunit             = overtimeUnit;
             entry.Deductionbydayunit            = deductionUnit;
@@ -1524,51 +1525,53 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             foreach (var item in request.Entries)
             {
                 var entry = entriesMap[item.Id];
-                var startDate = item.StartDate ?? request.DefaultStartDate;
-                if (!startDate.HasValue || startDate.Value == default)
-                    return Result<List<PayrollEntryResponse>>.Failure(
-                        Error.Validation("PayrollEntry.StartDateRequired",
-                            $"تاريخ البداية مطلوب للقيد رقم {entry.Id}."));
+                var emp = entry.Employee!;
+                var startDate = item.StartDate ?? request.DefaultStartDate ?? default;
+                var endDate = item.EndDate ?? request.DefaultEndDate ?? default;
 
-                var endDate = item.EndDate ?? request.DefaultEndDate;
-                if (!endDate.HasValue || endDate.Value == default)
-                    return Result<List<PayrollEntryResponse>>.Failure(
-                        Error.Validation("PayrollEntry.EndDateRequired",
-                            $"تاريخ النهاية مطلوب للقيد رقم {entry.Id}."));
+                var dateError = PayrollEntryBusinessRules.ValidateOutCompanyDates(startDate, endDate, emp.Name);
+                if (dateError is not null)
+                    return Result<List<PayrollEntryResponse>>.Failure(dateError);
 
-                if (startDate.Value > endDate.Value)
-                    return Result<List<PayrollEntryResponse>>.Failure(
-                        Error.Validation("PayrollEntry.InvalidDateRange",
-                            $"تاريخ البداية للقيد رقم {entry.Id} ({startDate.Value}) يجب أن يكون قبل أو يساوي تاريخ النهاية ({endDate.Value})."));
-
-                dateRanges[item.Id] = (startDate.Value, endDate.Value);
+                dateRanges[item.Id] = (startDate, endDate);
             }
 
-            var minStartDate = dateRanges.Values.Min(r => r.StartDate);
-            var maxEndDate = dateRanges.Values.Max(r => r.EndDate);
             var employeeIds = entries.Select(e => e.EmployeeId).Distinct().ToList();
 
-            var existingOverlaps = await dbContext.PayrollEntries
+            var existingEntries = await dbContext.PayrollEntries
                 .AsNoTracking()
                 .Where(p => p.CompanyId == companyId &&
                             employeeIds.Contains(p.EmployeeId) &&
-                            !ids.Contains(p.Id) &&
-                            p.StartDate <= maxEndDate &&
-                            p.EndDate >= minStartDate)
-                .Select(p => new { p.EmployeeId, p.StartDate, p.EndDate })
+                            p.Employee.WorkPlaceStatus == WorkPlaceStatus.OutCompany &&
+                            !ids.Contains(p.Id))
+                .Select(p => new PayrollPeriodRecord(p.Id, p.EmployeeId, p.StartDate, p.EndDate))
                 .ToListAsync(cancellationToken);
+
+            var existingByEmployee = existingEntries
+                .GroupBy(p => p.EmployeeId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<PayrollPeriodRecord>)g.ToList());
 
             foreach (var item in request.Entries)
             {
-                var (s, e) = dateRanges[item.Id];
-                var empId = entriesMap[item.Id].EmployeeId;
-                if (existingOverlaps.Any(x => x.EmployeeId == empId && x.StartDate <= e && x.EndDate >= s))
-                {
-                    var emp = entriesMap[item.Id].Employee!;
-                    return Result<List<PayrollEntryResponse>>.Failure(
-                        Error.Conflict("PayrollEntry.PeriodOverlap",
-                            $"تاريخ القيد للموظف {emp.Name} ({s:yyyy-MM-dd} إلى {e:yyyy-MM-dd}) يتداخل مع مسير رواتب مسجل مسبقًا."));
-                }
+                var entry = entriesMap[item.Id];
+                var emp = entry.Employee!;
+                var (startDate, endDate) = dateRanges[item.Id];
+
+                existingByEmployee.TryGetValue(entry.EmployeeId, out var empExisting);
+                var periodError = PayrollEntryBusinessRules.ValidateOutCompanyPayrollPeriod(
+                    startDate,
+                    endDate,
+                    empExisting ?? Array.Empty<PayrollPeriodRecord>(),
+                    currentEntryId: entry.Id,
+                    employeeName: emp.Name);
+
+                if (periodError is not null)
+                    return Result<List<PayrollEntryResponse>>.Failure(periodError);
+
+                var totalDays = PayrollEntryBusinessRules.CalculateTotalDays(startDate, endDate);
+                var presentDaysError = PayrollEntryBusinessRules.ValidatePresentDays(item.PresentDays, totalDays);
+                if (presentDaysError is not null)
+                    return Result<List<PayrollEntryResponse>>.Failure(presentDaysError);
             }
 
             await using var transaction = await dbContext.Database
@@ -1579,6 +1582,9 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 var entry = entriesMap[item.Id];
                 var emp = entry.Employee!;
                 var (startDate, endDate) = dateRanges[item.Id];
+
+                var totalDays = PayrollEntryBusinessRules.CalculateTotalDays(startDate, endDate);
+                var absentDays = PayrollEntryBusinessRules.CalculateAbsentDays(totalDays, item.PresentDays);
 
                 var workedDaysUnit = item.WorkedDaysByDayUnit;
                 var overtimeUnit = item.OvertimeByDayUnit ?? entry.Overtimebydayunit ?? 0m;
@@ -1602,6 +1608,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 entry.StartDate                     = startDate;
                 entry.EndDate                       = endDate;
                 entry.PresentDays                   = item.PresentDays;
+                entry.AbsentDays                    = absentDays;
                 entry.WorkedDaysbydayunit           = workedDaysUnit;
                 entry.Overtimebydayunit             = overtimeUnit;
                 entry.Deductionbydayunit            = deductionUnit;
