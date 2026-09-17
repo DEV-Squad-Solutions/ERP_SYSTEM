@@ -76,8 +76,14 @@ public sealed partial class PayrollEntryService
     private static decimal GetRatioValue(WorkDayRatio? ratio) =>
         ratio switch
         {
+            
             WorkDayRatio.FullDay         => 1m,
+            WorkDayRatio.TwoDays         => 2m,
+            WorkDayRatio.ThreeDays       => 3m,
+            WorkDayRatio.FourDays        => 4m,
+            WorkDayRatio.FiveDays        => 5m,
             WorkDayRatio.ThreeQuarterDay => 0.75m,
+            WorkDayRatio.TwoThirdsDay    => 2m / 3m,
             WorkDayRatio.HalfDay         => 0.5m,
             WorkDayRatio.ThirdDay        => 1m / 3m,
             WorkDayRatio.QuarterDay      => 0.25m,
@@ -88,17 +94,6 @@ public sealed partial class PayrollEntryService
     /// Computes (grossSalary, calculatedSalary) from an employee and their attendance summary.
     /// Returns (-1, -1) when the employee's salary configuration is incomplete.
     /// </summary>
-    private static (decimal GrossSalary, decimal CalculatedSalary) CalculateSalary(
-        Domain.Entities.Employees.Employee employee,
-        AttendanceSummary summary)
-    {
-        var workedUnits = summary.TotalPresentDays
-            + (summary.TotalOvertimeDays  ?? 0m)
-            - (summary.TotalDeductionDays ?? 0m);
-
-        var calc = PayrollCalculator.Calculate(employee, workedUnits);
-        return (GrossSalary: calc.GrossSalary, CalculatedSalary: calc.CalculatedSalary);
-    }
 
     private static (decimal GrossSalary, decimal CalculatedSalary, decimal NetSalary, decimal? SalaryPerDay) CalculateSalaryWithExtras(
         Domain.Entities.Employees.Employee employee,

@@ -193,7 +193,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             }
 
             var ineligibleEmployees = employees.Values
-                .Where(e => !e.IsActive || e.WorkPlaceStatus != WorkPlaceStatus.InCompany)
+                .Where(e => !e.IsActive || e.WorkPlaceStatus != WorkPlaceStatus.OutCompany)
                 .Select(e => e.Name)
                 .ToList();
 
@@ -827,7 +827,11 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             if (entry is null)
                 return Result<PayrollEntryResponse>.Failure(
                     Error.NotFound("PayrollEntry.NotFound", "لم يتم العثور على قيد الراتب المطلوب."));
-
+            
+            if(entry.IsSalaryMovedToEmployeeAccount == true)
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Conflict("PayrollEntry.AlreadyPaid", "لا يمكن إعادة حساب قيد الراتب بعد تحويل الراتب إلى حساب الموظف."));
+            
             var guardError = ValidateForUpdate(entry);
             if (guardError is not null)
                 return Result<PayrollEntryResponse>.Failure(guardError);
