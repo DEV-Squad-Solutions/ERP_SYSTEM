@@ -76,7 +76,7 @@ namespace MiniErp.Infrastructure.Services.Employees
             var employees = 
                 await query.Where(e => e.CompanyId == campanyId)
                 .OrderBy(e => e.Name)
-                .Select(e => new SelectResponse(e.Id, e.Name))
+                .Select(e => new SelectResponse(e.Id, e.Name,e.LastDayOfReceivingSalary))
                 .ToListAsync(cancellationToken);
 
             return Result<IReadOnlyList<SelectResponse>>.Success(employees.AsReadOnly());
