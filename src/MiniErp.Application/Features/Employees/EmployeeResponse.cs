@@ -13,7 +13,11 @@ namespace MiniErp.Application.Features.Employees
         int TotalPages,
         EmployeeSummaryResponse Summary
      );
-
+    public record SelectEmployeeResponse(
+        int Id,
+        string Name,
+        DateOnly? LastDayOfReceivingSalary = null
+    );
     public record EmployeeSummaryResponse(
         int TotalMonthlyEmployees,
         int TotalDailyEmployees,

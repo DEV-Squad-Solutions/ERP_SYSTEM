@@ -10,7 +10,7 @@ namespace MiniErp.Application.Features.Employees
             EmployeeFilterRequest? filters = null,
             CancellationToken cancellationToken = default);
 
-        Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
+        Task<Result<IReadOnlyList<SelectEmployeeResponse>>> GetSelectAsync(
             EmployeeSelectedFilterRequest filters = null,
             CancellationToken cancellationToken = default);
 

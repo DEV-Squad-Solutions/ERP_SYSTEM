@@ -2,5 +2,4 @@ namespace MiniErp.Application.Common.Models;
 
 public sealed record SelectResponse(
     int Id,
-    string Name,
-    DateOnly? LastDayOfReceivingSalary);
+    string Name);

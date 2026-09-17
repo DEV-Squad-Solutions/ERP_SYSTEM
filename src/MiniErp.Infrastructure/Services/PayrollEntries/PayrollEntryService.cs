@@ -193,7 +193,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             }
 
             var ineligibleEmployees = employees.Values
-                .Where(e => !e.IsActive || e.WorkPlaceStatus != WorkPlaceStatus.OutCompany)
+                .Where(e => !e.IsActive || e.WorkPlaceStatus != WorkPlaceStatus.InCompany)
                 .Select(e => e.Name)
                 .ToList();
 

@@ -63,7 +63,7 @@ namespace MiniErp.Infrastructure.Services.Employees
 
         }
 
-        public async Task<Result<IReadOnlyList<SelectResponse>>> GetSelectAsync(
+        public async Task<Result<IReadOnlyList<SelectEmployeeResponse>>> GetSelectAsync(
             EmployeeSelectedFilterRequest filters = null, 
             CancellationToken cancellationToken = default)
         {
@@ -76,10 +76,10 @@ namespace MiniErp.Infrastructure.Services.Employees
             var employees = 
                 await query.Where(e => e.CompanyId == campanyId)
                 .OrderBy(e => e.Name)
-                .Select(e => new SelectResponse(e.Id, e.Name,e.LastDayOfReceivingSalary))
+                .Select(e => new SelectEmployeeResponse(e.Id, e.Name,e.LastDayOfReceivingSalary))
                 .ToListAsync(cancellationToken);
 
-            return Result<IReadOnlyList<SelectResponse>>.Success(employees.AsReadOnly());
+            return Result<IReadOnlyList<SelectEmployeeResponse>>.Success(employees.AsReadOnly());
         }
 
         public async Task<Result<EmployeeResponse>> GetByIdAsync(int id, CancellationToken cancellationToken = default)
