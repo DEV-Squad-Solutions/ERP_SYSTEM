@@ -17,7 +17,8 @@ public sealed record CashVoucherFilterRequest(
     bool? IsDraft = null,
     DateOnly? FromDate = null,
     DateOnly? ToDate = null,
-    int? AccountId = null)
+    int? AccountId = null,
+    bool IncludeSubAccounts = false)
 {
     public const int VoucherNumberMaximumLength = 100;
 }

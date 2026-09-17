@@ -22,4 +22,5 @@ public sealed record OperationalTrialBalanceFilterRequest(
     OperationalTrialBalanceViewMode ViewMode =
         OperationalTrialBalanceViewMode.Detailed,
     OperationalTrialBalanceCategory? Category = null,
-    bool IncludeZeroBalances = false);
+    bool IncludeZeroBalances = false,
+    int? AccountId = null);

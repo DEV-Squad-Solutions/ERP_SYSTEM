@@ -40,6 +40,7 @@ internal static class ExchangeRateCascadeUpdater
             .IgnoreQueryFilters()
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
+                voucher.IsPosted &&
                 voucher.ExchangeRateId == exchangeRateId)
             .ToListAsync(cancellationToken);
         var transferIds = linkedVouchers

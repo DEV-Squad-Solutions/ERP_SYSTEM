@@ -1,4 +1,6 @@
+using System.Reflection;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
@@ -7,6 +9,7 @@ using MiniErp.Application.Features.AccountStatementMappings;
 using MiniErp.Application.Features.Accounts;
 using MiniErp.Application.Features.FinancialStatementLines;
 using MiniErp.Application.Features.JournalEntries;
+using MiniErp.Api.Controllers;
 using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Enums;
@@ -221,6 +224,41 @@ public sealed class AccountingSetupServiceTests
         Assert.Equal("2100", child2.Value.Code);
         Assert.Equal("2200", child3.Value.Code);
         Assert.Equal("2110", grandchild.Value.Code);
+    }
+
+    [Fact]
+    public async Task ExpenseSelect_ReturnsActiveCurrentCompanyExpensesInCodeOrderWithHierarchyFields()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        await database.AddExpenseAccountFixturesAsync();
+        var service = database.CreateAccountService(companyId: 1);
+
+        var result = await service.GetExpenseSelectAsync();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(["4900", "5000", "5100"], result.Value.Select(account => account.Code));
+
+        var root = Assert.Single(result.Value, account => account.Code == "5000");
+        Assert.Null(root.ParentAccountId);
+        Assert.False(root.IsPosting);
+
+        var child = Assert.Single(result.Value, account => account.Code == "5100");
+        Assert.Equal(root.Id, child.ParentAccountId);
+        Assert.True(child.IsPosting);
+
+        Assert.DoesNotContain(result.Value, account => account.Code is "5200" or "5300" or "5400" or "4000");
+    }
+
+    [Fact]
+    public void ExpenseSelectRouteIsRegistered()
+    {
+        var method = typeof(AccountsController).GetMethod(
+            nameof(AccountsController.GetExpenseSelect),
+            BindingFlags.Public | BindingFlags.Instance);
+
+        Assert.NotNull(method);
+        var route = Assert.Single(method!.GetCustomAttributes<HttpGetAttribute>());
+        Assert.Equal("expense-select", route.Template);
     }
 
     [Fact]
@@ -1052,6 +1090,30 @@ public sealed class AccountingSetupServiceTests
 
                 INSERT INTO Cashboxes (Id, CompanyId, Code, Name, IsActive, IsDeleted)
                 VALUES (1, 1, 'CB-1', 'خزينة رئيسية', 1, 0);
+                """);
+
+        public Task AddExpenseAccountFixturesAsync() =>
+            Context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO Accounts (
+                    Id, CompanyId, Code, Name, ParentAccountId, AccountType,
+                    NormalBalance, IsPosting, IsActive,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES
+                    (20, 1, '5000', 'المصروفات', NULL, 5, 1, 0, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (21, 1, '5100', 'مصروف الإيجار', 20, 5, 1, 1, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (22, 1, '4900', 'مصروف سابق', NULL, 5, 1, 1, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (23, 1, '5200', 'مصروف غير فعال', 20, 5, 1, 1, 0,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (24, 1, '5300', 'مصروف محذوف', 20, 5, 1, 1, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 1),
+                    (25, 2, '5400', 'مصروف شركة أخرى', NULL, 5, 1, 1, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0),
+                    (26, 1, '4000', 'إيرادات', NULL, 4, 2, 1, 1,
+                     'test', CURRENT_TIMESTAMP, 'test', 0);
                 """);
 
         public Task SoftDeleteAccountAsync(int accountId) =>

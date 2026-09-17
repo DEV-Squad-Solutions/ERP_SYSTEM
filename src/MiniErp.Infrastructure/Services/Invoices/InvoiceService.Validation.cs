@@ -878,9 +878,7 @@ public sealed partial class InvoiceService
                     cashbox.OpeningBalance +
                     (cashbox.Vouchers
                         .Where(voucher =>
-                            (voucher.IsPosted ||
-                             (!voucher.InvoiceId.HasValue &&
-                              !voucher.CashboxTransferId.HasValue)) &&
+                            voucher.IsPosted &&
                             (!excludedVoucherId.HasValue ||
                              voucher.Id != excludedVoucherId.Value))
                         .Sum(voucher =>

@@ -229,10 +229,7 @@ public sealed class EmployeeMovementService(
                 .Select(c =>
                     c.OpeningBalance +
                     (c.Vouchers
-                        .Where(v =>
-                            v.IsPosted ||
-                            (!v.InvoiceId.HasValue &&
-                             !v.CashboxTransferId.HasValue))
+                        .Where(v => v.IsPosted)
                         .Sum(v => (decimal?)(v.Direction == CashDirection.Receipt ? v.Amount : -v.Amount)) ?? 0m))
                 .SingleAsync(cancellationToken);
 
@@ -392,10 +389,7 @@ public sealed class EmployeeMovementService(
                 c.Id,
                 Balance = c.OpeningBalance +
                     (c.Vouchers
-                        .Where(v =>
-                            v.IsPosted ||
-                            (!v.InvoiceId.HasValue &&
-                             !v.CashboxTransferId.HasValue))
+                        .Where(v => v.IsPosted)
                         .Sum(v => (decimal?)(v.Direction == CashDirection.Receipt ? v.Amount : -v.Amount)) ?? 0m)
             })
             .ToDictionaryAsync(c => c.Id, c => c.Balance, cancellationToken);

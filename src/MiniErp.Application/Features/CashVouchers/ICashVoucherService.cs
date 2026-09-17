@@ -10,6 +10,11 @@ public interface ICashVoucherService
         CashVoucherFilterRequest? filters = null,
         CancellationToken cancellationToken = default);
 
+    Task<Result<CashVoucherHandoverReportResponse>> GetHandoverReportAsync(
+        PaginationRequest pagination,
+        CashVoucherHandoverReportFilterRequest? filters = null,
+        CancellationToken cancellationToken = default);
+
     Task<Result<CashVoucherResponse>> GetByIdAsync(
         int id,
         CancellationToken cancellationToken = default);

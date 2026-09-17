@@ -40,7 +40,8 @@ public sealed class ExpenseStatementEndpointTests
                 ToDate: toDate,
                 ViewMode: OperationalTrialBalanceViewMode.Detailed,
                 Category: OperationalTrialBalanceCategory.Revenue,
-                IncludeZeroBalances: true),
+                IncludeZeroBalances: true,
+                AccountId: 2),
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -51,6 +52,7 @@ public sealed class ExpenseStatementEndpointTests
         Assert.Equal(fromDate, statementService.CapturedFilters.FromDate);
         Assert.Equal(toDate, statementService.CapturedFilters.ToDate);
         Assert.True(statementService.CapturedFilters.IncludeZeroBalances);
+        Assert.Equal(2, statementService.CapturedFilters.AccountId);
         var response = Assert.IsType<OperationalTrialBalanceResponse>(
             ok.Value);
         Assert.All(

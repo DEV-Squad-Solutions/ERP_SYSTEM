@@ -30,6 +30,21 @@ public sealed class CashVouchersController(
         return this.ToActionResult(result);
     }
 
+    [HttpGet("handover-report")]
+    [ProducesResponseType<CashVoucherHandoverReportResponse>(
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetHandoverReport(
+        [FromQuery] PaginationRequest pagination,
+        [FromQuery] CashVoucherHandoverReportFilterRequest filters,
+        CancellationToken cancellationToken)
+    {
+        var result = await cashVoucherService.GetHandoverReportAsync(
+            pagination,
+            filters,
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("party-select")]
     [ProducesResponseType<CashVoucherPartySelectResponse>(
         StatusCodes.Status200OK)]

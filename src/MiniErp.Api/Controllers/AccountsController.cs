@@ -45,6 +45,17 @@ public sealed class AccountsController(IAccountService accountService)
         return this.ToActionResult(result);
     }
 
+    [HttpGet("expense-select")]
+    [ProducesResponseType<IReadOnlyList<ExpenseAccountSelectResponse>>(
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetExpenseSelect(
+        CancellationToken cancellationToken)
+    {
+        var result = await accountService.GetExpenseSelectAsync(
+            cancellationToken);
+        return this.ToActionResult(result);
+    }
+
     [HttpGet("journal-select")]
     [ProducesResponseType<IReadOnlyList<JournalAccountSelectResponse>>(
         StatusCodes.Status200OK)]

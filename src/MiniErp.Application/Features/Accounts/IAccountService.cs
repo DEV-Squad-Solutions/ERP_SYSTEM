@@ -16,6 +16,9 @@ public interface IAccountService
     Task<Result<IReadOnlyList<AccountSelectResponse>>> GetSelectAsync(
         CancellationToken cancellationToken = default);
 
+    Task<Result<IReadOnlyList<ExpenseAccountSelectResponse>>> GetExpenseSelectAsync(
+        CancellationToken cancellationToken = default);
+
     Task<Result<IReadOnlyList<JournalAccountSelectResponse>>> GetJournalSelectAsync(
         int fiscalYearId,
         CancellationToken cancellationToken = default);

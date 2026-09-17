@@ -53,8 +53,7 @@ public sealed class FinancialStatementServiceTests
                 CashDirection.Receipt,
                 CashboxId: 1,
                 Amount: 500m,
-                Description: "Draft included in the statement",
-                AccountId: 1));
+                 Description: "Draft excluded from the statement"));
 
         Assert.True(draft.IsSuccess, draft.Error.Description);
 
@@ -71,17 +70,19 @@ public sealed class FinancialStatementServiceTests
         Assert.Equal("Main Cashbox", result.Value.CashboxName);
         Assert.Equal(CurrencyCode.EGP, result.Value.Currency);
         Assert.Equal(1100m, result.Value.Summary.OpeningBalance);
-        Assert.Equal(525m, result.Value.Summary.TotalReceipts);
+        Assert.Equal(25m, result.Value.Summary.TotalReceipts);
         Assert.Equal(40m, result.Value.Summary.TotalPayments);
-        Assert.Equal(1585m, result.Value.Summary.ClosingBalance);
-        Assert.Equal(3, result.Value.TotalCount);
+        Assert.Equal(1085m, result.Value.Summary.ClosingBalance);
+        Assert.Equal(2, result.Value.TotalCount);
         Assert.Equal(
-            [1060m, 1085m, 1585m],
+            [1060m, 1085m],
             result.Value.Items.Select(item => item.Balance).ToArray());
+        Assert.DoesNotContain(result.Value.Items, item =>
+            item.CashVoucherId == draft.Value.Id);
     }
 
     [Fact]
-    public async Task CashboxStatementIncludesPostedNullTypeAndDraftWithJournal()
+    public async Task CashboxStatementExcludesUnpostedHandoverDraft()
     {
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
@@ -114,8 +115,7 @@ public sealed class FinancialStatementServiceTests
                 Direction: CashDirection.Receipt,
                 CashboxId: 1,
                 Amount: 50m,
-                Description: "Draft with accounting effect",
-                AccountId: 1));
+                 Description: "Draft handover only"));
 
         Assert.True(bulk.IsSuccess, bulk.Error.Description);
         Assert.True(draft.IsSuccess, draft.Error.Description);
@@ -125,17 +125,15 @@ public sealed class FinancialStatementServiceTests
                 Page(),
                 new CashboxStatementFilterRequest(CashboxId: 1));
         Assert.True(result.IsSuccess);
-        Assert.Equal(2, result.Value.Items.Count);
+        Assert.Single(result.Value.Items);
         Assert.Contains(result.Value.Items, item =>
             item.CashVoucherId == bulk.Value.Items[0].Id &&
             item.MovementName == "سند قبض" &&
             item.ReceiptAmount == 30m);
-        Assert.Contains(result.Value.Items, item =>
-            item.CashVoucherId == draft.Value.Id &&
-            item.ReceiptAmount == 50m &&
-            item.JournalEntryId.HasValue);
-        Assert.Equal(80m, result.Value.Summary.TotalReceipts);
-        Assert.Equal(1080m, result.Value.Summary.ClosingBalance);
+        Assert.DoesNotContain(result.Value.Items, item =>
+            item.CashVoucherId == draft.Value.Id);
+        Assert.Equal(30m, result.Value.Summary.TotalReceipts);
+        Assert.Equal(1030m, result.Value.Summary.ClosingBalance);
     }
 
     [Fact]
