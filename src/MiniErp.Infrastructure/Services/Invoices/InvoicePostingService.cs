@@ -51,6 +51,33 @@ public sealed class InvoicePostingService(
                 InvoiceErrors.NotFound(invoiceId));
         }
 
+        var isItemInvoice = await dbContext.ItemMovements
+            .AsNoTracking()
+            .AnyAsync(
+                movement =>
+                    movement.CompanyId == companyId &&
+                    movement.ReferenceId == invoice.Id &&
+                    (movement.MovementType == ItemMovementType.Sales ||
+                     movement.MovementType == ItemMovementType.SalesReturn ||
+                     movement.MovementType == ItemMovementType.Purchase ||
+                     movement.MovementType == ItemMovementType.PurchaseReturn),
+                cancellationToken);
+        var hasUnresolvedPurchaseReturnCost = isItemInvoice &&
+            invoice.InvoiceType == InvoiceType.PurchaseReturn &&
+            await dbContext.ItemMovements
+                .AsNoTracking()
+                .AnyAsync(
+                    movement =>
+                        movement.CompanyId == companyId &&
+                        movement.ReferenceId == invoice.Id &&
+                        movement.MovementType ==
+                            ItemMovementType.PurchaseReturn &&
+                        (movement.CostStatus ==
+                            InventoryCostStatus.Pending ||
+                         movement.CostStatus ==
+                            InventoryCostStatus.PartiallyCosted),
+                    cancellationToken);
+
         var fiscalYear = await dbContext.FiscalYears
             .AsNoTracking()
             .Where(year =>
@@ -76,10 +103,33 @@ public sealed class InvoicePostingService(
                 Closed(invoice.InvoiceDate, fiscalYear.Name, "InvoiceDate"));
         }
 
+        if (hasUnresolvedPurchaseReturnCost)
+        {
+            var deleteResult = await automaticPostingService.DeleteAsync(
+                JournalEntrySourceType.Invoice,
+                invoice.Id,
+                cancellationToken);
+            if (deleteResult.IsFailure)
+            {
+                return Result<AutomaticJournalEntryResult>.Failure(
+                    deleteResult.Errors);
+            }
+
+            return Result<AutomaticJournalEntryResult>.Success(
+                new AutomaticJournalEntryResult(
+                    JournalEntryId: 0,
+                    EntryNumber: string.Empty,
+                    Created: false));
+        }
+
         var mappingTypes = GetInvoiceMappings(invoice.InvoiceType);
+        var invoiceMappingType = isItemInvoice &&
+            invoice.InvoiceType is InvoiceType.Purchase or InvoiceType.PurchaseReturn
+                ? AccountingMappingType.Inventory
+                : mappingTypes.Invoice;
         var invoiceAccountResult = await accountMappingResolver.ResolveAsync(
             fiscalYear.Id,
-            mappingTypes.Invoice,
+            invoiceMappingType,
             cancellationToken: cancellationToken);
         if (invoiceAccountResult.IsFailure)
         {
@@ -103,19 +153,69 @@ public sealed class InvoicePostingService(
                 invoice.Total,
                 invoice.ExchangeRate);
         var lines = new List<JournalEntryLineRequest>();
-        AddInvoiceAmountLines(
-            lines,
-            invoice.InvoiceType,
-            invoiceAccountResult.Value,
-            controlAccountResult.Value,
-            invoiceAmount,
-            invoice.Currency,
-            invoice.ExchangeRate,
+        var transactionInvoiceAmount =
             ExchangeRateRules.IsValidRate(invoice.ExchangeRate)
-                ? ExchangeRateRules.ConvertFromBase(invoiceAmount, invoice.ExchangeRate)
-                : invoice.Total,
-            invoice.InvoiceNumber,
-            invoice.BusinessPartnerId);
+                ? ExchangeRateRules.ConvertFromBase(
+                    invoiceAmount,
+                    invoice.ExchangeRate)
+                : invoice.Total;
+        if (isItemInvoice &&
+            invoice.InvoiceType == InvoiceType.PurchaseReturn)
+        {
+            var carryingCost = await dbContext.ItemMovements
+                .AsNoTracking()
+                .Where(movement =>
+                    movement.CompanyId == companyId &&
+                    movement.ReferenceId == invoice.Id &&
+                    movement.MovementType == ItemMovementType.PurchaseReturn)
+                .SumAsync(
+                    movement => (decimal?)movement.TotalCost,
+                    cancellationToken) ?? 0m;
+            var costDifference = invoiceAmount - carryingCost;
+            var adjustmentAccountId = 0;
+            if (costDifference != 0m)
+            {
+                var adjustmentResult = await accountMappingResolver.ResolveAsync(
+                    fiscalYear.Id,
+                    costDifference > 0m
+                        ? AccountingMappingType.InventoryAdjustmentGain
+                        : AccountingMappingType.InventoryAdjustmentLoss,
+                    cancellationToken: cancellationToken);
+                if (adjustmentResult.IsFailure)
+                {
+                    return Result<AutomaticJournalEntryResult>.Failure(
+                        adjustmentResult.Errors);
+                }
+
+                adjustmentAccountId = adjustmentResult.Value;
+            }
+            AddPurchaseReturnItemLines(
+                lines,
+                controlAccountResult.Value,
+                invoiceAccountResult.Value,
+                carryingCost,
+                invoiceAmount,
+                invoice.Currency,
+                invoice.ExchangeRate,
+                transactionInvoiceAmount,
+                invoice.InvoiceNumber,
+                invoice.BusinessPartnerId,
+                adjustmentAccountId);
+        }
+        else
+        {
+            AddInvoiceAmountLines(
+                lines,
+                invoice.InvoiceType,
+                invoiceAccountResult.Value,
+                controlAccountResult.Value,
+                invoiceAmount,
+                invoice.Currency,
+                invoice.ExchangeRate,
+                transactionInvoiceAmount,
+                invoice.InvoiceNumber,
+                invoice.BusinessPartnerId);
+        }
 
         var cost = await dbContext.ItemMovements
             .AsNoTracking()
@@ -358,6 +458,58 @@ public sealed class InvoicePostingService(
             ExchangeRate: exchangeRate,
             TransactionDebit: invoiceSideIsDebit ? 0m : transactionAmount,
             TransactionCredit: invoiceSideIsDebit ? transactionAmount : 0m));
+    }
+
+    private static void AddPurchaseReturnItemLines(
+        ICollection<JournalEntryLineRequest> lines,
+        int supplierAccountId,
+        int inventoryAccountId,
+        decimal carryingCost,
+        decimal invoiceAmount,
+        CurrencyCode currency,
+        decimal exchangeRate,
+        decimal transactionInvoiceAmount,
+        string invoiceNumber,
+        int businessPartnerId,
+        int adjustmentAccountId)
+    {
+        lines.Add(new JournalEntryLineRequest(
+            AccountId: supplierAccountId,
+            Description: $"طرف مرتجع الشراء {invoiceNumber}",
+            Debit: invoiceAmount,
+            Credit: 0m,
+            PartyType: JournalPartyType.Supplier,
+            PartyId: businessPartnerId,
+            Currency: currency,
+            ExchangeRate: exchangeRate,
+            TransactionDebit: transactionInvoiceAmount,
+            TransactionCredit: 0m));
+        if (carryingCost > 0m)
+        {
+            lines.Add(new JournalEntryLineRequest(
+                AccountId: inventoryAccountId,
+                Description: $"تكلفة مخزون مرتجع الشراء {invoiceNumber}",
+                Debit: 0m,
+                Credit: carryingCost));
+        }
+
+        var difference = invoiceAmount - carryingCost;
+        if (difference > 0m)
+        {
+            lines.Add(new JournalEntryLineRequest(
+                AccountId: adjustmentAccountId,
+                Description: $"فرق تكلفة مرتجع الشراء {invoiceNumber}",
+                Debit: 0m,
+                Credit: difference));
+        }
+        else if (difference < 0m)
+        {
+            lines.Add(new JournalEntryLineRequest(
+                AccountId: adjustmentAccountId,
+                Description: $"فرق تكلفة مرتجع الشراء {invoiceNumber}",
+                Debit: Math.Abs(difference),
+                Credit: 0m));
+        }
     }
 
     private static void AddPaymentLines(

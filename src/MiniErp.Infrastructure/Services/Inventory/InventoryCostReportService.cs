@@ -284,7 +284,6 @@ public sealed class InventoryCostReportService(
             CurrentInventoryValue: currentBalance?.InventoryValue ?? 0m,
             PendingCostQuantity: asOfMovements
                 .Where(movement =>
-                    movement.QuantityOut > 0m &&
                     movement.PendingCostQuantity > 0m)
                 .Sum(movement => movement.PendingCostQuantity),
             PendingMovementCount: asOfMovements.Count(movement =>

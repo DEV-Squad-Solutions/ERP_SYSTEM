@@ -93,4 +93,10 @@ public static class InventoryErrors
             "Inventory.MovementCostSourceMissing",
             $"تعذر العثور على مصدر تكلفة حركة المخزون رقم {movement.Id}.",
             CostFieldName);
+
+    public static Error TransferCostingCycle() =>
+        Error.Conflict(
+            "Inventory.TransferCostingCycle",
+            "تعذر تثبيت تكلفة التحويلات بسبب اعتماد دائري أو تكرار إعادة الحساب. راجع سلسلة التحويلات بين المخازن.",
+            "transfer");
 }

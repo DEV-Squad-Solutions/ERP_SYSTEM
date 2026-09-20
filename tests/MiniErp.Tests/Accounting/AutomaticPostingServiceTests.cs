@@ -570,6 +570,139 @@ public sealed class AutomaticPostingServiceTests
     }
 
     [Fact]
+    public async Task ItemPurchasePosting_DebitsInventoryAndCreditsSupplier()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Invoices
+                (Id, CompanyId, BusinessPartnerId, InvoiceNumber,
+                 InvoiceDate, InvoiceType, Total, ExchangeRate,
+                 BaseTotal, Notes)
+            VALUES
+                (61, 1, 11, 'PINV-0061', '2026-08-31', 2,
+                 90, 1, 90, 'Item purchase');
+
+            INSERT INTO ItemMovements
+                (Id, CompanyId, StoreId, ItemId, MovementType,
+                 ReferenceId, TotalCost)
+            VALUES (6101, 1, 1, 1, 3, 61, 90);
+            """);
+        var companyContext = new TestCurrentCompanyContext(1);
+        var postingService = new InvoicePostingService(
+            database.Context,
+            companyContext,
+            new AccountMappingResolver(database.Context, companyContext),
+            new AutomaticPostingService(
+                database.Context,
+                companyContext,
+                TimeProvider.System,
+                NullLogger<AutomaticPostingService>.Instance));
+
+        var result = await postingService.SynchronizeAsync(61);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var entry = await database.Context.JournalEntries
+            .AsNoTracking()
+            .Include(value => value.Lines)
+            .SingleAsync();
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 8 && line.Debit == 90m);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 12 && line.Credit == 90m &&
+            line.PartyType == JournalPartyType.Supplier &&
+            line.PartyId == 11);
+        Assert.Equal(90m, entry.Lines.Sum(line => line.Debit));
+        Assert.Equal(90m, entry.Lines.Sum(line => line.Credit));
+    }
+
+    [Fact]
+    public async Task ItemPurchaseReturnPosting_UsesCarryingCostAndBooksLoss()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Invoices
+                (Id, CompanyId, BusinessPartnerId, InvoiceNumber,
+                 InvoiceDate, InvoiceType, Total, ExchangeRate,
+                 BaseTotal, Notes)
+            VALUES
+                (62, 1, 11, 'PRET-0062', '2026-08-31', 4,
+                 40, 1, 40, 'Item purchase return');
+
+            INSERT INTO ItemMovements
+                (Id, CompanyId, StoreId, ItemId, MovementType,
+                 ReferenceId, TotalCost)
+            VALUES (6201, 1, 1, 1, 4, 62, 50);
+            """);
+        var companyContext = new TestCurrentCompanyContext(1);
+        var postingService = new InvoicePostingService(
+            database.Context,
+            companyContext,
+            new AccountMappingResolver(database.Context, companyContext),
+            new AutomaticPostingService(
+                database.Context,
+                companyContext,
+                TimeProvider.System,
+                NullLogger<AutomaticPostingService>.Instance));
+
+        var result = await postingService.SynchronizeAsync(62);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var entry = await database.Context.JournalEntries
+            .AsNoTracking()
+            .Include(value => value.Lines)
+            .SingleAsync();
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 12 && line.Debit == 40m &&
+            line.PartyType == JournalPartyType.Supplier &&
+            line.PartyId == 11);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 8 && line.Credit == 50m);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 6 && line.Debit == 10m);
+        Assert.Equal(50m, entry.Lines.Sum(line => line.Debit));
+        Assert.Equal(50m, entry.Lines.Sum(line => line.Credit));
+    }
+
+    [Fact]
+    public async Task ItemPurchaseReturnPosting_DefersUntilCostIsResolved()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Invoices
+                (Id, CompanyId, BusinessPartnerId, InvoiceNumber,
+                 InvoiceDate, InvoiceType, Total, ExchangeRate,
+                 BaseTotal, Notes)
+            VALUES
+                (63, 1, 11, 'PRET-0063', '2026-08-31', 4,
+                 40, 1, 40, 'Pending item purchase return');
+
+            INSERT INTO ItemMovements
+                (Id, CompanyId, StoreId, ItemId, MovementType,
+                 ReferenceId, TotalCost, CostStatus)
+            VALUES (6301, 1, 1, 1, 4, 63, 0, 3);
+            """);
+        var companyContext = new TestCurrentCompanyContext(1);
+        var postingService = new InvoicePostingService(
+            database.Context,
+            companyContext,
+            new AccountMappingResolver(database.Context, companyContext),
+            new AutomaticPostingService(
+                database.Context,
+                companyContext,
+                TimeProvider.System,
+                NullLogger<AutomaticPostingService>.Instance));
+
+        var result = await postingService.SynchronizeAsync(63);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.False(result.Value.Created);
+        Assert.Empty(await database.Context.JournalEntries.ToListAsync());
+    }
+
+    [Fact]
     public async Task InvoicePosting_ZeroTotalDeletesExistingEntryAndSucceeds()
     {
         await using var database = await TestDatabase.CreateAsync();
@@ -1212,6 +1345,7 @@ public sealed class AutomaticPostingServiceTests
                     MovementType INTEGER NOT NULL,
                     ReferenceId INTEGER NOT NULL,
                     TotalCost TEXT NOT NULL,
+                    CostStatus INTEGER NOT NULL DEFAULT 1,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 

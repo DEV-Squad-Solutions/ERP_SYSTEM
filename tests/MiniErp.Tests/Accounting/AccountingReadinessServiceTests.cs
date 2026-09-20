@@ -92,6 +92,67 @@ public sealed class AccountingReadinessServiceTests
             issue.SourceNumber == "JV-UNBALANCED");
     }
 
+    [Fact]
+    public async Task Backfill_CreatesMissingCanonicalOpeningMovement()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Stores (
+                Id, CompanyId, Code, Name, IsContainerStore, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (1, 1, 'MAIN', 'Main Store', 0, 1,
+                    'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO ItemUnits (
+                Id, CompanyId, Name, IsActive, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (1, 1, 'Piece', 1, 'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO Items (
+                Id, CompanyId, ItemUnitId, Code, Name, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (1, 1, 1, 'ITEM-1', 'Item One', 1,
+                    'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO StockOpeningBalances (
+                Id, CompanyId, StoreId, DocumentNumber, DocumentDate,
+                RowVersion, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (1, 1, 1, 'OPEN-1', '2026-01-01', randomblob(8),
+                    'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO StockOpeningBalanceLines (
+                Id, CompanyId, StockOpeningBalanceId, ItemId, ItemUnitId,
+                Count, Weight, Quantity, Price, Total,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (1, 1, 1, 1, 1, 1, 5, 5, 10, 50,
+                    'test', '2026-01-01', 'test', 0);
+            """);
+
+        var before = await database.Service.GetAsync(1);
+        Assert.True(before.IsSuccess, before.Error.Description);
+        Assert.False(before.Value.IsReady);
+        Assert.Contains(before.Value.Issues, issue =>
+            issue.IssueType == "MissingInventoryMovement" &&
+            issue.SourceId == 1);
+
+        var backfill = await database.Service.BackfillAsync(1);
+
+        Assert.True(backfill.IsSuccess, backfill.Error.Description);
+        var movement = await database.Context.ItemMovements
+            .AsNoTracking()
+            .SingleAsync(value =>
+                value.MovementType ==
+                    MiniErp.Domain.Enums.ItemMovementType.OpeningBalance &&
+                value.ReferenceId == 1 &&
+                value.ItemId == 1);
+        Assert.Equal(5m, movement.QuantityIn);
+        var after = await database.Service.GetAsync(1);
+        Assert.True(after.IsSuccess, after.Error.Description);
+        Assert.DoesNotContain(after.Value.Issues, issue =>
+            issue.IssueType == "MissingInventoryMovement");
+    }
+
     private sealed class TestDatabase : IAsyncDisposable
     {
         private readonly SqliteConnection connection;
@@ -119,6 +180,11 @@ public sealed class AccountingReadinessServiceTests
                 .Options;
             var context = new ApplicationDbContext(options);
             await context.Database.EnsureCreatedAsync();
+            // SQLite maps model decimal columns to TEXT during EnsureCreated,
+            // which makes numeric check constraints compare different storage
+            // classes. SQL Server enforces these constraints in production.
+            await context.Database.ExecuteSqlRawAsync(
+                "PRAGMA ignore_check_constraints = ON;");
             await context.Database.ExecuteSqlRawAsync(
                 """
                 INSERT INTO Companies (

@@ -361,8 +361,8 @@ public sealed class InvoiceServiceTests
         Assert.Equal(40m, line.Total);
         Assert.Equal(0m, result.Value.DiscountAmount);
         Assert.Equal(40m, result.Value.Total);
-        Assert.Equal(15m, line.UnitCost);
-        Assert.Equal(15m, line.AverageCostAfter);
+        Assert.Equal(14.5m, line.UnitCost);
+        Assert.Equal(14.5m, line.AverageCostAfter);
     }
 
     [Theory]
@@ -632,7 +632,7 @@ public sealed class InvoiceServiceTests
         Assert.Equal(10m, line.UnitPrice);
         Assert.Equal(InventoryCostStatus.Final, line.CostStatus);
         Assert.Equal(0m, line.PendingCostQuantity);
-        Assert.Equal(10m, line.UnitCost);
+        Assert.Equal(8m, line.UnitCost);
     }
 
     [Fact]
@@ -1822,6 +1822,98 @@ public sealed class InvoiceServiceTests
         Assert.True(result.IsFailure);
         Assert.Equal("Inventory.ReturnUnitCostRequired", result.Error.Code);
         Assert.Equal(0, await database.Context.Invoices.CountAsync());
+    }
+
+    [Fact]
+    public async Task PurchaseDiscount_IsAllocatedPerItemIntoInventoryCost()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                storeId: 2,
+                discountAmount: 30m,
+                lines:
+                [
+                    new InvoiceLineRequest(1, 10, 1m, 10m, null),
+                    new InvoiceLineRequest(2, 10, 1m, 20m, null)
+                ]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var first = result.Value.Lines.Single(line => line.ItemId == 1);
+        var second = result.Value.Lines.Single(line => line.ItemId == 2);
+        Assert.Equal(10m, first.BaseUnitPrice);
+        Assert.Equal(20m, second.BaseUnitPrice);
+        Assert.Equal(9m, first.UnitCost);
+        Assert.Equal(18m, second.UnitCost);
+        Assert.Equal(270m, result.Value.BaseTotal);
+        Assert.Equal(
+            result.Value.BaseTotal,
+            await database.Context.ItemMovements
+                .Where(movement => movement.ReferenceId == result.Value.Id)
+                .SumAsync(movement => movement.TotalCost));
+    }
+
+    [Fact]
+    public async Task UnlinkedSalesReturn_AcceptsKnownZeroAverageCost()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var purchase = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 0m, null)]));
+        Assert.True(purchase.IsSuccess, purchase.Error.Description);
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 1, 1m, 10m, null)]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var line = Assert.Single(result.Value.Lines);
+        Assert.Equal(InventoryCostStatus.Final, line.CostStatus);
+        Assert.Equal(0m, line.UnitCost);
+        Assert.Equal(0m, line.InventoryTotalCost);
+    }
+
+    [Fact]
+    public async Task LaterPurchase_DoesNotRevaluePendingSaleInClosedPeriod()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            $"UPDATE CompanySettings SET StockBalanceCheckMode = {(int)StockBalanceCheckMode.None} WHERE CompanyId = 1;");
+        var service = database.CreateService();
+        var saleDate = new DateOnly(2026, 7, 10);
+        var sale = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                invoiceDate: saleDate,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 20m, null)]));
+        Assert.True(sale.IsSuccess, sale.Error.Description);
+
+        var guard = new RejectingFiscalYearGuard(saleDate);
+        var purchase = await database.CreateService(guard).AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                storeId: 2,
+                invoiceDate: new DateOnly(2026, 7, 20),
+                lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)]));
+
+        Assert.True(purchase.IsFailure);
+        Assert.Equal("Tests.ClosedFiscalYear", purchase.Error.Code);
+        Assert.Single(await database.Context.Invoices.ToListAsync());
+        var saleMovement = await database.Context.ItemMovements.SingleAsync();
+        Assert.Equal(InventoryCostStatus.Pending, saleMovement.CostStatus);
     }
 
     [Fact]
@@ -3430,6 +3522,50 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public async Task Add_DetectsEarlierSameDateHistoricalDeficit()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        database.Context.ItemMovements.Add(
+            CostedMovement(new ItemMovement
+            {
+                CompanyId = 1,
+                StoreId = 2,
+                ItemId = 1,
+                ItemUnitId = 1,
+                MovementType = ItemMovementType.Sales,
+                ReferenceId = 916,
+                ReferenceNumber = "SALE-916",
+                MovementDate = new DateOnly(2026, 7, 25),
+                QuantityOut = 2m
+            }));
+        await database.Context.SaveChangesAsync();
+        database.Context.ItemMovements.Add(
+            CostedMovement(new ItemMovement
+            {
+                CompanyId = 1,
+                StoreId = 2,
+                ItemId = 1,
+                ItemUnitId = 1,
+                MovementType = ItemMovementType.Purchase,
+                ReferenceId = 917,
+                ReferenceNumber = "PURCHASE-917",
+                MovementDate = new DateOnly(2026, 7, 25),
+                QuantityIn = 3m
+            }));
+        await database.Context.SaveChangesAsync();
+
+        var result = await database.CreateService().AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                storeId: 2,
+                invoiceDate: new DateOnly(2026, 7, 25),
+                lines: [new InvoiceLineRequest(1, 1, 1m, 10m, null)]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Inventory.HistoricalStockConflict", result.Error.Code);
+    }
+
+    [Fact]
     public async Task Add_ProcessesOpeningBalanceBeforeSameDateOutboundMovement()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
@@ -3560,7 +3696,7 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task Update_RejectsMovingOutboundInvoiceToAnEarlierDateWithInsufficientStock()
+    public async Task Update_RejectsMovingOutboundInvoiceWhenItBreaksLaterHistory()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -3585,7 +3721,7 @@ public sealed class InvoiceServiceTests
                 invoiceDate: new DateOnly(2026, 1, 2)));
 
         Assert.True(result.IsFailure);
-        Assert.Equal("Inventory.InsufficientStock", result.Error.Code);
+        Assert.Equal("Inventory.HistoricalStockConflict", result.Error.Code);
     }
 
     [Fact]
@@ -6589,7 +6725,8 @@ public sealed class InvoiceServiceTests
         {
             var companyContext = new TestCurrentCompanyContext(1);
             var invoiceInventoryService = CreateInvoiceInventoryService(
-                companyContext);
+                companyContext,
+                fiscalYearPeriodGuard);
             var invoiceQueryService = new InvoiceQueryService(
                 Context,
                 new PaginationService(),
@@ -6617,7 +6754,8 @@ public sealed class InvoiceServiceTests
         }
 
         private InvoiceInventoryService CreateInvoiceInventoryService(
-            ICurrentCompanyContext companyContext) =>
+            ICurrentCompanyContext companyContext,
+            IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null) =>
             new(
                 Context,
                 companyContext,
@@ -6625,7 +6763,8 @@ public sealed class InvoiceServiceTests
                 new InventoryCostingService(
                     Context,
                     companyContext,
-                    TimeProvider.System));
+                    TimeProvider.System,
+                    fiscalYearPeriodGuard: fiscalYearPeriodGuard));
 
         public PartnerItemReportService CreatePartnerItemReportService() =>
             new(Context, new TestCurrentCompanyContext(1));
