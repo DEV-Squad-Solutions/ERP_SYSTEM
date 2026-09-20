@@ -1033,6 +1033,32 @@ public sealed class InvoiceServiceTests
                 ]));
         Assert.True(returnResult.IsSuccess, returnResult.Error.Description);
 
+        database.Context.ItemPricingExpenses.AddRange(
+            new ItemPricingExpense
+            {
+                CompanyId = 1,
+                ItemId = 1,
+                Name = "نقل",
+                Amount = 3m
+            },
+            new ItemPricingExpense
+            {
+                CompanyId = 1,
+                ItemId = 1,
+                Name = "تحميل",
+                Amount = 2m
+            });
+        await database.Context.SaveChangesAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO ItemPricingExpenses (
+                CompanyId, ItemId, Name, Amount, Notes, IsDeleted)
+            VALUES
+                (2, 1, 'Other company expense', 99, NULL, 0),
+                (1, 1, 'Deleted expense', 100, NULL, 1);
+            """);
+        database.Context.ChangeTracker.Clear();
+
         var reportService = database.CreateProfitabilityReportService();
         var invoiceReport = await reportService.GetInvoicesAsync(
             new PaginationRequest { PageNumber = 1, PageSize = 20 },
@@ -1042,13 +1068,13 @@ public sealed class InvoiceServiceTests
         Assert.Equal(CurrencyCode.EGP, invoiceReport.Value.BaseCurrency);
         Assert.Equal(1, invoiceReport.Value.TotalCount);
         Assert.Equal(90m, invoiceReport.Value.Summary.SalesRevenue);
-        Assert.Equal(40m, invoiceReport.Value.Summary.SalesCost);
+        Assert.Equal(50m, invoiceReport.Value.Summary.SalesCost);
         Assert.Equal(30m, invoiceReport.Value.Summary.ReturnRevenue);
-        Assert.Equal(10m, invoiceReport.Value.Summary.ReturnCost);
+        Assert.Equal(15m, invoiceReport.Value.Summary.ReturnCost);
         Assert.Equal(60m, invoiceReport.Value.Summary.NetRevenue);
-        Assert.Equal(30m, invoiceReport.Value.Summary.RecognizedCost);
-        Assert.Equal(30m, invoiceReport.Value.Summary.GrossProfit);
-        Assert.Equal(50m, invoiceReport.Value.Summary.GrossMarginPercentage);
+        Assert.Equal(35m, invoiceReport.Value.Summary.RecognizedCost);
+        Assert.Equal(25m, invoiceReport.Value.Summary.GrossProfit);
+        Assert.Equal(41.6667m, invoiceReport.Value.Summary.GrossMarginPercentage);
         Assert.Equal(0, invoiceReport.Value.Summary.PendingLineCount);
 
         var saleProfit = Assert.Single(invoiceReport.Value.Invoices);
@@ -1056,8 +1082,15 @@ public sealed class InvoiceServiceTests
         Assert.Equal(70m, saleProfit.GrossRevenue);
         Assert.Equal(10m, saleProfit.DiscountAmount);
         Assert.Equal(60m, saleProfit.NetRevenue);
-        Assert.Equal(30m, saleProfit.RecognizedCost);
-        Assert.Equal(30m, saleProfit.GrossProfit);
+        Assert.Equal(30m, saleProfit.InventoryCost);
+        Assert.Equal(5m, saleProfit.AdditionalCost);
+        Assert.Equal(35m, saleProfit.TotalCost);
+        Assert.Equal(
+            saleProfit.InventoryCost + saleProfit.AdditionalCost,
+            saleProfit.TotalCost);
+        Assert.Equal(35m, saleProfit.RecognizedCost);
+        Assert.Equal(saleProfit.TotalCost, saleProfit.RecognizedCost);
+        Assert.Equal(25m, saleProfit.GrossProfit);
         Assert.Null(
             typeof(InvoiceProfitabilityListItemResponse)
                 .GetProperty("Lines"));
@@ -1066,14 +1099,29 @@ public sealed class InvoiceServiceTests
             sale.Id);
         Assert.True(saleDetails.IsSuccess, saleDetails.Error.Description);
         Assert.Equal(60m, saleDetails.Value.NetRevenue);
-        Assert.Equal(30m, saleDetails.Value.RecognizedCost);
-        Assert.Equal(30m, saleDetails.Value.GrossProfit);
+        Assert.Equal(30m, saleDetails.Value.InventoryCost);
+        Assert.Equal(5m, saleDetails.Value.AdditionalCost);
+        Assert.Equal(35m, saleDetails.Value.TotalCost);
+        Assert.Equal(35m, saleDetails.Value.RecognizedCost);
+        Assert.Equal(
+            saleDetails.Value.InventoryCost + saleDetails.Value.AdditionalCost,
+            saleDetails.Value.TotalCost);
+        Assert.Equal(
+            saleDetails.Value.TotalCost,
+            saleDetails.Value.RecognizedCost);
+        Assert.Equal(25m, saleDetails.Value.GrossProfit);
         Assert.Equal(3, saleDetails.Value.Lines.Count);
         Assert.Equal(
             54m,
             saleDetails.Value.Lines.Single(line =>
                 line.ItemId == 1 &&
                 line.InvoiceType == InvoiceType.Sales).NetRevenue);
+        var soldItem = saleDetails.Value.Lines.Single(line =>
+            line.ItemId == 1 &&
+            line.InvoiceType == InvoiceType.Sales);
+        Assert.Equal(10m, soldItem.AverageCost);
+        Assert.Equal(5m, soldItem.AdditionalCost);
+        Assert.Equal(15m, soldItem.TotalCost);
         Assert.Equal(
             36m,
             saleDetails.Value.Lines.Single(line =>
@@ -1082,8 +1130,11 @@ public sealed class InvoiceServiceTests
             line.InvoiceType == InvoiceType.SalesReturn);
         Assert.Equal(-1m, returnedItem.Quantity);
         Assert.Equal(-30m, returnedItem.NetRevenue);
-        Assert.Equal(-10m, returnedItem.RecognizedCost);
-        Assert.Equal(-20m, returnedItem.GrossProfit);
+        Assert.Equal(-15m, returnedItem.RecognizedCost);
+        Assert.Equal(10m, returnedItem.AverageCost);
+        Assert.Equal(5m, returnedItem.AdditionalCost);
+        Assert.Equal(15m, returnedItem.TotalCost);
+        Assert.Equal(-15m, returnedItem.GrossProfit);
 
         var returnDetails = await reportService.GetInvoiceDetailsAsync(
             returnResult.Value.Id);
@@ -1107,10 +1158,13 @@ public sealed class InvoiceServiceTests
         Assert.Equal(54m, firstItem.SalesRevenue);
         Assert.Equal(30m, firstItem.ReturnRevenue);
         Assert.Equal(24m, firstItem.NetRevenue);
-        Assert.Equal(20m, firstItem.SalesCost);
-        Assert.Equal(10m, firstItem.ReturnCost);
-        Assert.Equal(10m, firstItem.RecognizedCost);
-        Assert.Equal(14m, firstItem.GrossProfit);
+        Assert.Equal(30m, firstItem.SalesCost);
+        Assert.Equal(15m, firstItem.ReturnCost);
+        Assert.Equal(10m, firstItem.AverageCost);
+        Assert.Equal(5m, firstItem.AdditionalCost);
+        Assert.Equal(15m, firstItem.TotalCost);
+        Assert.Equal(15m, firstItem.RecognizedCost);
+        Assert.Equal(9m, firstItem.GrossProfit);
         Assert.Equal(2, firstItem.InvoiceCount);
         Assert.Equal(2, firstItem.LineCount);
         Assert.Equal(0, firstItem.PendingLineCount);
@@ -1137,8 +1191,8 @@ public sealed class InvoiceServiceTests
         var filteredInvoice = Assert.Single(
             netItemInvoice.Value.Invoices);
         Assert.Equal(24m, filteredInvoice.NetRevenue);
-        Assert.Equal(10m, filteredInvoice.RecognizedCost);
-        Assert.Equal(14m, filteredInvoice.GrossProfit);
+        Assert.Equal(15m, filteredInvoice.RecognizedCost);
+        Assert.Equal(9m, filteredInvoice.GrossProfit);
         Assert.Equal(24m, netItemInvoice.Value.Summary.NetRevenue);
         Assert.Equal(2, netItemInvoice.Value.Summary.InvoiceCount);
         Assert.Equal(1, netItemInvoice.Value.Summary.ItemCount);
@@ -1156,8 +1210,8 @@ public sealed class InvoiceServiceTests
             filteredItemReport.Value.Items);
         Assert.Equal(1m, filteredItem.NetQuantity);
         Assert.Equal(24m, filteredItem.NetRevenue);
-        Assert.Equal(10m, filteredItem.RecognizedCost);
-        Assert.Equal(14m, filteredItem.GrossProfit);
+        Assert.Equal(15m, filteredItem.RecognizedCost);
+        Assert.Equal(9m, filteredItem.GrossProfit);
     }
 
     [Fact]
@@ -1174,6 +1228,15 @@ public sealed class InvoiceServiceTests
                 storeId: 2,
                 lines: [new InvoiceLineRequest(1, 2, 1m, 30m, null)]));
         Assert.True(sale.IsSuccess, sale.Error.Description);
+        database.Context.ItemPricingExpenses.Add(
+            new ItemPricingExpense
+            {
+                CompanyId = 1,
+                ItemId = 1,
+                Name = "نقل",
+                Amount = 5m
+            });
+        await database.Context.SaveChangesAsync();
 
         var report = await database.CreateProfitabilityReportService()
             .GetInvoicesAsync(
@@ -1184,9 +1247,13 @@ public sealed class InvoiceServiceTests
         var invoice = Assert.Single(report.Value.Invoices);
         Assert.Equal(InventoryCostStatus.Pending, invoice.CostStatus);
         Assert.Equal(2m, invoice.PendingCostQuantity);
-        Assert.Equal(0m, invoice.RecognizedCost);
+        Assert.Equal(0m, invoice.InventoryCost);
+        Assert.Equal(10m, invoice.AdditionalCost);
+        Assert.Equal(10m, invoice.TotalCost);
+        Assert.Equal(10m, invoice.RecognizedCost);
         Assert.Null(invoice.GrossProfit);
         Assert.Null(invoice.GrossMarginPercentage);
+        Assert.Equal(10m, report.Value.Summary.RecognizedCost);
         Assert.Null(report.Value.Summary.GrossProfit);
         Assert.Equal(60m, report.Value.Summary.PendingRevenue);
         Assert.Equal(2m, report.Value.Summary.PendingCostQuantity);
@@ -1202,6 +1269,10 @@ public sealed class InvoiceServiceTests
         Assert.Equal(InventoryCostStatus.Pending, item.CostStatus);
         Assert.Equal(2m, item.PendingCostQuantity);
         Assert.Equal(1, item.PendingLineCount);
+        Assert.Null(item.AverageCost);
+        Assert.Equal(5m, item.AdditionalCost);
+        Assert.Null(item.TotalCost);
+        Assert.Equal(10m, item.RecognizedCost);
         Assert.Null(item.GrossProfit);
         Assert.Null(item.GrossMarginPercentage);
 
@@ -1210,6 +1281,10 @@ public sealed class InvoiceServiceTests
         Assert.True(details.IsSuccess, details.Error.Description);
         var pendingLine = Assert.Single(details.Value.Lines);
         Assert.Equal(InventoryCostStatus.Pending, pendingLine.CostStatus);
+        Assert.Equal(10m, pendingLine.RecognizedCost);
+        Assert.Null(pendingLine.AverageCost);
+        Assert.Equal(5m, pendingLine.AdditionalCost);
+        Assert.Null(pendingLine.TotalCost);
         Assert.Null(pendingLine.GrossProfit);
     }
 

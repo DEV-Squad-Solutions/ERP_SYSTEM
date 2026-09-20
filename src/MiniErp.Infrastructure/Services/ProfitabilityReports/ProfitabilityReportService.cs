@@ -367,8 +367,16 @@ public sealed class ProfitabilityReportService(
                 })
             .ToListAsync(cancellationToken);
 
+        var additionalCostsByItem = await LoadAdditionalCostsAsync(
+            projections
+                .Select(projection => projection.ItemId)
+                .Distinct()
+                .ToArray(),
+            cancellationToken);
         var lines = projections
-            .Select(BuildLine)
+            .Select(projection => BuildLine(
+                projection,
+                additionalCostsByItem.GetValueOrDefault(projection.ItemId)))
             .ToArray();
         var baseCurrency = await dbContext.CompanySettings
             .AsNoTracking()
@@ -393,7 +401,8 @@ public sealed class ProfitabilityReportService(
     }
 
     private static ProfitabilityLine BuildLine(
-        ProfitabilityLineProjection projection)
+        ProfitabilityLineProjection projection,
+        decimal additionalCostPerUnit)
     {
         var sign = projection.InvoiceType == InvoiceType.Sales
             ? 1m
@@ -410,8 +419,13 @@ public sealed class ProfitabilityReportService(
             sign * allocatedDiscount);
         var netRevenue = InventoryCostRules.RoundValue(
             grossRevenue - discountAmount);
-        var recognizedCost = InventoryCostRules.RoundValue(
+        var inventoryRecognizedCost = InventoryCostRules.RoundValue(
             sign * projection.TotalCost.GetValueOrDefault());
+        var additionalRecognizedCost = InventoryCostRules.CalculateTotal(
+            sign * projection.Quantity,
+            additionalCostPerUnit);
+        var recognizedCost = InventoryCostRules.RoundValue(
+            inventoryRecognizedCost + additionalRecognizedCost);
         var costStatus = projection.CostStatus ??
             InventoryCostStatus.Pending;
         var pendingCostQuantity = projection.PendingCostQuantity ??
@@ -449,6 +463,10 @@ public sealed class ProfitabilityReportService(
             CostStatus: costStatus,
             PendingCostQuantity: pendingCostQuantity,
             UnitCost: projection.UnitCost,
+            InventoryRecognizedCost: inventoryRecognizedCost,
+            AdditionalCostPerUnit: additionalCostPerUnit,
+            AdditionalRecognizedCost: additionalRecognizedCost,
+            InventoryCostKnown: isCostFinal,
             RecognizedCost: recognizedCost,
             GrossProfit: grossProfit,
             GrossMarginPercentage: Margin(grossProfit, netRevenue),
@@ -463,7 +481,13 @@ public sealed class ProfitabilityReportService(
         var grossRevenue = Sum(lines, line => line.GrossRevenue);
         var discount = Sum(lines, line => line.DiscountAmount);
         var netRevenue = Sum(lines, line => line.NetRevenue);
-        var cost = Sum(lines, line => line.RecognizedCost);
+        var inventoryCost = Sum(lines, line => line.InventoryRecognizedCost);
+        var additionalCost = Sum(
+            lines,
+            line => line.AdditionalRecognizedCost);
+        var totalCost = InventoryCostRules.RoundValue(
+            inventoryCost + additionalCost);
+        var cost = totalCost;
         decimal? profit = lines.All(line => line.IsCostFinal)
             ? InventoryCostRules.RoundValue(netRevenue - cost)
             : null;
@@ -480,6 +504,9 @@ public sealed class ProfitabilityReportService(
             GrossRevenue: grossRevenue,
             DiscountAmount: discount,
             NetRevenue: netRevenue,
+            InventoryCost: inventoryCost,
+            AdditionalCost: additionalCost,
+            TotalCost: totalCost,
             RecognizedCost: cost,
             GrossProfit: profit,
             GrossMarginPercentage: Margin(profit, netRevenue),
@@ -518,6 +545,21 @@ public sealed class ProfitabilityReportService(
             salesRevenue - returnRevenue);
         var recognizedCost = InventoryCostRules.RoundValue(
             salesCost - returnCost);
+        var inventoryCost = InventoryCostRules.RoundValue(
+            Sum(sales, line => line.InventoryRecognizedCost) -
+            Sum(returns, line => -line.InventoryRecognizedCost));
+        var netQuantity = InventoryCostRules.RoundQuantity(
+            salesQuantity - returnQuantity);
+        var additionalCost = first.AdditionalCostPerUnit;
+        var averageCost = lines.All(line => line.InventoryCostKnown) &&
+            netQuantity != 0m
+            ? (decimal?)InventoryCostRules.RoundUnitCost(
+                inventoryCost / netQuantity)
+            : null;
+        var totalCost = averageCost.HasValue
+            ? (decimal?)InventoryCostRules.RoundUnitCost(
+                averageCost.Value + additionalCost)
+            : null;
         decimal? grossProfit = pending.Length == 0
             ? InventoryCostRules.RoundValue(
                 netRevenue - recognizedCost)
@@ -532,8 +574,10 @@ public sealed class ProfitabilityReportService(
                 salesQuantity),
             ReturnQuantity: InventoryCostRules.RoundQuantity(
                 returnQuantity),
-            NetQuantity: InventoryCostRules.RoundQuantity(
-                salesQuantity - returnQuantity),
+            NetQuantity: netQuantity,
+            AverageCost: averageCost,
+            AdditionalCost: additionalCost,
+            TotalCost: totalCost,
             SalesRevenue: salesRevenue,
             SalesCost: salesCost,
             ReturnRevenue: returnRevenue,
@@ -647,6 +691,14 @@ public sealed class ProfitabilityReportService(
             CostStatus: line.CostStatus,
             PendingCostQuantity: line.PendingCostQuantity,
             UnitCost: line.UnitCost,
+            AverageCost: line.InventoryCostKnown
+                ? line.UnitCost
+                : null,
+            AdditionalCost: line.AdditionalCostPerUnit,
+            TotalCost: line.InventoryCostKnown && line.UnitCost.HasValue
+                ? InventoryCostRules.RoundUnitCost(
+                    line.UnitCost.Value + line.AdditionalCostPerUnit)
+                : null,
             RecognizedCost: line.RecognizedCost,
             GrossProfit: line.GrossProfit,
             GrossMarginPercentage: line.GrossMarginPercentage);
@@ -665,6 +717,9 @@ public sealed class ProfitabilityReportService(
             GrossRevenue: invoice.GrossRevenue,
             DiscountAmount: invoice.DiscountAmount,
             NetRevenue: invoice.NetRevenue,
+            InventoryCost: invoice.InventoryCost,
+            AdditionalCost: invoice.AdditionalCost,
+            TotalCost: invoice.TotalCost,
             RecognizedCost: invoice.RecognizedCost,
             GrossProfit: invoice.GrossProfit,
             GrossMarginPercentage: invoice.GrossMarginPercentage,
@@ -681,7 +736,7 @@ public sealed class ProfitabilityReportService(
         if (pending.Length > 0)
         {
             return pending.Length == lines.Count &&
-                pending.All(line => line.RecognizedCost == 0m)
+                pending.All(line => line.InventoryRecognizedCost == 0m)
                     ? InventoryCostStatus.Pending
                     : InventoryCostStatus.PartiallyCosted;
         }
@@ -706,6 +761,36 @@ public sealed class ProfitabilityReportService(
                 profit.Value / revenue * 100m,
                 4,
                 MidpointRounding.AwayFromZero);
+
+    private async Task<IReadOnlyDictionary<int, decimal>>
+        LoadAdditionalCostsAsync(
+            IReadOnlyCollection<int> itemIds,
+            CancellationToken cancellationToken)
+    {
+        if (itemIds.Count == 0)
+        {
+            return new Dictionary<int, decimal>();
+        }
+
+        var expenses = await dbContext.ItemPricingExpenses
+            .AsNoTracking()
+            .Where(expense =>
+                expense.CompanyId == companyId &&
+                itemIds.Contains(expense.ItemId))
+            .Select(expense => new
+            {
+                expense.ItemId,
+                expense.Amount
+            })
+            .ToListAsync(cancellationToken);
+
+        return expenses
+            .GroupBy(expense => expense.ItemId)
+            .ToDictionary(
+                group => group.Key,
+                group => InventoryCostRules.RoundValue(
+                    group.Sum(expense => expense.Amount)));
+    }
 
     private static IReadOnlyList<T> Paginate<T>(
         IReadOnlyList<T> items,
@@ -829,6 +914,10 @@ public sealed class ProfitabilityReportService(
         InventoryCostStatus CostStatus,
         decimal PendingCostQuantity,
         decimal? UnitCost,
+        decimal InventoryRecognizedCost,
+        decimal AdditionalCostPerUnit,
+        decimal AdditionalRecognizedCost,
+        bool InventoryCostKnown,
         decimal RecognizedCost,
         decimal? GrossProfit,
         decimal? GrossMarginPercentage,
