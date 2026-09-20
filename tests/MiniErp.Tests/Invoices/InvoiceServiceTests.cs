@@ -879,6 +879,492 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public async Task Update_RepricesSourceWithLinkedSalesReturnAndSynchronizesFinancials()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var stock = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                invoiceDate: new DateOnly(2026, 7, 1),
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+        Assert.True(stock.IsSuccess, stock.Error.Description);
+
+        var source = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 0m, null)]));
+        Assert.True(source.IsSuccess, source.Error.Description);
+        var sourceLine = Assert.Single(source.Value.Lines);
+
+        var linkedReturn = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        1,
+                        1,
+                        1m,
+                        99m,
+                        null,
+                        sourceLine.Id)
+                ]));
+        Assert.True(linkedReturn.IsSuccess, linkedReturn.Error.Description);
+        var returnLine = Assert.Single(linkedReturn.Value.Lines);
+        var originalReturnLineId = returnLine.Id;
+
+        var updated = await service.UpdateAsync(
+            source.Value.Id,
+            CreateUpdateRequest(
+                source.Value,
+                [new InvoiceLineRequest(1, 2, 1m, 30m, null)]));
+
+        Assert.True(updated.IsSuccess, updated.Error.Description);
+        Assert.Equal(60m, updated.Value.Total);
+        var updatedSourceLine = Assert.Single(updated.Value.Lines);
+        Assert.Equal(sourceLine.Id, updatedSourceLine.Id);
+
+        database.Context.ChangeTracker.Clear();
+        var profitability = await database.CreateProfitabilityReportService()
+            .GetInvoiceDetailsAsync(source.Value.Id);
+        Assert.True(profitability.IsSuccess, profitability.Error.Description);
+        Assert.Equal(30m, profitability.Value.NetRevenue);
+
+        var persistedReturn = await database.Context.Invoices
+            .AsNoTracking()
+            .Include(invoice => invoice.Lines)
+            .SingleAsync(invoice => invoice.Id == linkedReturn.Value.Id);
+        var persistedReturnLine = Assert.Single(persistedReturn.Lines);
+        Assert.Equal(originalReturnLineId, persistedReturnLine.Id);
+        Assert.Equal(sourceLine.Id, persistedReturnLine.SourceInvoiceLineId);
+        Assert.Equal(30m, persistedReturnLine.Price);
+        Assert.Equal(30m, persistedReturn.Total);
+
+        var invoiceMovements = await database.Context.BusinessPartnerMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.InvoiceId == source.Value.Id ||
+                movement.InvoiceId == linkedReturn.Value.Id)
+            .OrderBy(movement => movement.InvoiceId)
+            .ToListAsync();
+        Assert.Equal(2, invoiceMovements.Count);
+        Assert.Equal(60m, invoiceMovements[0].Debit);
+        Assert.Equal(30m, invoiceMovements[1].Credit);
+    }
+
+    [Fact]
+    public async Task Update_RepricesFullLinkedReturnAndKeepsSourceDiscount()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var stock = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                invoiceDate: new DateOnly(2026, 7, 1),
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+        Assert.True(stock.IsSuccess, stock.Error.Description);
+
+        var source = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                discountAmount: 6m,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)]));
+        Assert.True(source.IsSuccess, source.Error.Description);
+        var sourceLine = Assert.Single(source.Value.Lines);
+        var linkedReturn = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        1,
+                        2,
+                        1m,
+                        99m,
+                        null,
+                        sourceLine.Id)
+                ]));
+        Assert.True(linkedReturn.IsSuccess, linkedReturn.Error.Description);
+        Assert.Equal(6m, linkedReturn.Value.DiscountAmount);
+
+        var updated = await service.UpdateAsync(
+            source.Value.Id,
+            CreateUpdateRequest(
+                source.Value,
+                [new InvoiceLineRequest(1, 2, 1m, 30m, null)]));
+
+        Assert.True(updated.IsSuccess, updated.Error.Description);
+        database.Context.ChangeTracker.Clear();
+        var persistedReturn = await database.Context.Invoices
+            .AsNoTracking()
+            .SingleAsync(invoice => invoice.Id == linkedReturn.Value.Id);
+        var persistedLine = await database.Context.InvoiceLines
+            .AsNoTracking()
+            .SingleAsync(line => line.InvoiceId == persistedReturn.Id);
+        Assert.Equal(6m, persistedReturn.DiscountAmount);
+        Assert.Equal(54m, persistedReturn.Total);
+        Assert.Equal(30m, persistedLine.Price);
+    }
+
+    [Fact]
+    public async Task Update_RejectsSourceQuantityBelowLinkedReturnQuantity()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var stock = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+        Assert.True(stock.IsSuccess, stock.Error.Description);
+        var source = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 4, 1m, 10m, null)]));
+        Assert.True(source.IsSuccess, source.Error.Description);
+        var sourceLine = Assert.Single(source.Value.Lines);
+        var linkedReturn = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        1,
+                        3,
+                        1m,
+                        10m,
+                        null,
+                        sourceLine.Id)
+                ]));
+        Assert.True(linkedReturn.IsSuccess, linkedReturn.Error.Description);
+
+        var result = await service.UpdateAsync(
+            source.Value.Id,
+            CreateUpdateRequest(
+                source.Value,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.LinkedReturnSourceQuantityTooSmall",
+            result.Error.Code);
+        database.Context.ChangeTracker.Clear();
+        var persisted = await database.Context.Invoices
+            .AsNoTracking()
+            .SingleAsync(invoice => invoice.Id == source.Value.Id);
+        Assert.Equal(40m, persisted.Total);
+    }
+
+    [Fact]
+    public async Task Update_RejectsReplacingReferencedSourceItemAndPreservesData()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var stock = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+        Assert.True(stock.IsSuccess, stock.Error.Description);
+        var source = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)]));
+        Assert.True(source.IsSuccess, source.Error.Description);
+        var sourceLine = Assert.Single(source.Value.Lines);
+        var linkedReturn = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        1,
+                        1,
+                        1m,
+                        10m,
+                        null,
+                        sourceLine.Id)
+                ]));
+        Assert.True(linkedReturn.IsSuccess, linkedReturn.Error.Description);
+
+        var result = await service.UpdateAsync(
+            source.Value.Id,
+            CreateUpdateRequest(
+                source.Value,
+                [new InvoiceLineRequest(2, 2, 1m, 10m, null)]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.LinkedReturnSourceLineCannotRemove",
+            result.Error.Code);
+        database.Context.ChangeTracker.Clear();
+        var persisted = await database.Context.Invoices
+            .AsNoTracking()
+            .Include(invoice => invoice.Lines)
+            .SingleAsync(invoice => invoice.Id == source.Value.Id);
+        var persistedLine = Assert.Single(persisted.Lines);
+        Assert.Equal(1, persistedLine.ItemId);
+        Assert.Equal(10m, persistedLine.Price);
+        Assert.Equal(20m, persisted.Total);
+    }
+
+    [Fact]
+    public async Task Update_RejectsUnsafeSourceHeaderChangesWithLinkedReturn()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var stock = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+        Assert.True(stock.IsSuccess, stock.Error.Description);
+        var source = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)]));
+        Assert.True(source.IsSuccess, source.Error.Description);
+        var sourceLine = Assert.Single(source.Value.Lines);
+        var linkedReturn = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        1,
+                        1,
+                        1m,
+                        10m,
+                        null,
+                        sourceLine.Id)
+                ]));
+        Assert.True(linkedReturn.IsSuccess, linkedReturn.Error.Description);
+
+        var typeChange = await service.UpdateAsync(
+            source.Value.Id,
+            CreateUpdateRequest(
+                source.Value,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
+                invoiceType: InvoiceType.Purchase));
+        Assert.True(typeChange.IsFailure);
+        Assert.Equal(
+            "Invoices.LinkedReturnSourceHeaderCannotChange",
+            typeChange.Error.Code);
+
+        var contentChange = await service.UpdateAsync(
+            source.Value.Id,
+            CreateUpdateRequest(
+                source.Value,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)]) with
+            {
+                ContentType = InvoiceContentType.Containers
+            });
+        Assert.True(contentChange.IsFailure);
+        Assert.Equal(
+            "Invoices.LinkedReturnSourceHeaderCannotChange",
+            contentChange.Error.Code);
+
+        var partnerChange = await service.UpdateAsync(
+            source.Value.Id,
+            CreateUpdateRequest(
+                source.Value,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
+                businessPartnerId: 2));
+        Assert.True(partnerChange.IsFailure);
+        Assert.Equal(
+            "Invoices.LinkedReturnSourceHeaderCannotChange",
+            partnerChange.Error.Code);
+
+        var storeChange = await service.UpdateAsync(
+            source.Value.Id,
+            CreateUpdateRequest(
+                source.Value,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
+                storeId: 1));
+        Assert.True(storeChange.IsFailure);
+        Assert.Equal(
+            "Invoices.LinkedReturnSourceHeaderCannotChange",
+            storeChange.Error.Code);
+
+        var dateChange = await service.UpdateAsync(
+            source.Value.Id,
+            CreateUpdateRequest(
+                source.Value,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
+                invoiceDate: new DateOnly(2026, 7, 26)));
+        Assert.True(dateChange.IsFailure);
+        Assert.Equal(
+            "Invoices.LinkedReturnSourceDateCannotMoveAfterReturn",
+            dateChange.Error.Code);
+
+        database.Context.ChangeTracker.Clear();
+        var persisted = await database.Context.Invoices
+            .AsNoTracking()
+            .SingleAsync(invoice => invoice.Id == source.Value.Id);
+        Assert.Equal(InvoiceType.Sales, persisted.InvoiceType);
+        Assert.Equal(1, persisted.BusinessPartnerId);
+        Assert.Equal(2, persisted.StoreId);
+        Assert.Equal(new DateOnly(2026, 7, 25), persisted.InvoiceDate);
+    }
+
+    [Fact]
+    public async Task Update_LinkedReturnPaymentConflictRollsBackSourceAndReturn()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var stock = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+        Assert.True(stock.IsSuccess, stock.Error.Description);
+        var source = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)]));
+        Assert.True(source.IsSuccess, source.Error.Description);
+        var sourceLine = Assert.Single(source.Value.Lines);
+        var linkedReturn = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Cash,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        1,
+                        1,
+                        1m,
+                        10m,
+                        null,
+                        sourceLine.Id)
+                ]));
+        Assert.True(linkedReturn.IsSuccess, linkedReturn.Error.Description);
+
+        var result = await service.UpdateAsync(
+            source.Value.Id,
+            CreateUpdateRequest(
+                source.Value,
+                [new InvoiceLineRequest(1, 2, 1m, 5m, null)]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.LinkedReturnUpdateConflict",
+            result.Error.Code);
+        database.Context.ChangeTracker.Clear();
+        var persistedSource = await database.Context.Invoices
+            .AsNoTracking()
+            .SingleAsync(invoice => invoice.Id == source.Value.Id);
+        var persistedReturn = await database.Context.Invoices
+            .AsNoTracking()
+            .SingleAsync(invoice => invoice.Id == linkedReturn.Value.Id);
+        var persistedReturnLine = await database.Context.InvoiceLines
+            .AsNoTracking()
+            .SingleAsync(line => line.InvoiceId == linkedReturn.Value.Id);
+        Assert.Equal(20m, persistedSource.Total);
+        Assert.Equal(10m, persistedReturn.Total);
+        Assert.Equal(10m, persistedReturnLine.Price);
+        Assert.Equal(
+            [10m, 120m],
+            (await database.Context.CashVouchers
+                .OrderBy(voucher => voucher.Amount)
+                .Select(voucher => voucher.Amount)
+                .ToListAsync()));
+    }
+
+    [Fact]
+    public async Task Update_NotesOnlyWithLinkedReturnDoesNotTouchReturnOrGuardItsFiscalPeriod()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var stock = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                invoiceDate: new DateOnly(2026, 7, 1),
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+        Assert.True(stock.IsSuccess, stock.Error.Description);
+        var source = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                invoiceDate: new DateOnly(2026, 7, 1),
+                lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)]));
+        Assert.True(source.IsSuccess, source.Error.Description);
+        var sourceLine = Assert.Single(source.Value.Lines);
+        var linkedReturn = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                invoiceDate: new DateOnly(2026, 7, 20),
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        1,
+                        1,
+                        1m,
+                        10m,
+                        null,
+                        sourceLine.Id)
+                ]));
+        Assert.True(linkedReturn.IsSuccess, linkedReturn.Error.Description);
+
+        database.Context.ChangeTracker.Clear();
+        var originalReturn = await database.Context.Invoices
+            .AsNoTracking()
+            .SingleAsync(invoice => invoice.Id == linkedReturn.Value.Id);
+        var guard = new RejectingFiscalYearGuard(linkedReturn.Value.InvoiceDate);
+        var guardedService = database.CreateService(guard);
+
+        var updateRequest = CreateUpdateRequest(
+            source.Value,
+            [new InvoiceLineRequest(1, 2, 1m, 10m, null)]) with
+        {
+            Notes = "ملاحظة جديدة"
+        };
+        var updated = await guardedService.UpdateAsync(
+            source.Value.Id,
+            updateRequest);
+
+        Assert.True(updated.IsSuccess, updated.Error.Description);
+        Assert.Equal(2, guard.Calls);
+        database.Context.ChangeTracker.Clear();
+        var persistedReturn = await database.Context.Invoices
+            .AsNoTracking()
+            .SingleAsync(invoice => invoice.Id == linkedReturn.Value.Id);
+        Assert.True(originalReturn.RowVersion.SequenceEqual(
+            persistedReturn.RowVersion));
+        Assert.Equal(originalReturn.LastModifiedAt, persistedReturn.LastModifiedAt);
+    }
+
+    [Fact]
     public async Task LinkedSalesReturn_PersistsPendingCostAndRevaluesLater()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
@@ -6098,7 +6584,8 @@ public sealed class InvoiceServiceTests
             return new InvoiceTestDatabase(connection, context);
         }
 
-        public InvoiceService CreateService()
+        public InvoiceService CreateService(
+            IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
         {
             var companyContext = new TestCurrentCompanyContext(1);
             var invoiceInventoryService = CreateInvoiceInventoryService(
@@ -6115,7 +6602,8 @@ public sealed class InvoiceServiceTests
                 invoiceQueryService,
                 new MiniErp.Tests.TestExchangeRateResolver(),
                 invoiceInventoryService,
-                TimeProvider.System);
+                TimeProvider.System,
+                fiscalYearPeriodGuard);
         }
 
         public InvoiceQueryService CreateQueryService()
@@ -6873,6 +7361,27 @@ public sealed class InvoiceServiceTests
                     (1, 1, 1, 1, 10, 0),
                     (2, 1, 1, 2, 10, 0);
                 """);
+        }
+    }
+
+    private sealed class RejectingFiscalYearGuard(DateOnly rejectedDate)
+        : IFiscalYearPeriodGuard
+    {
+        public int Calls { get; private set; }
+
+        public Task<Result> EnsureOpenAsync(
+            DateOnly date,
+            string fieldName,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return Task.FromResult(
+                date == rejectedDate
+                    ? Result.Failure(
+                        Error.Conflict(
+                            "Tests.ClosedFiscalYear",
+                            "closed"))
+                    : Result.Success());
         }
     }
 
