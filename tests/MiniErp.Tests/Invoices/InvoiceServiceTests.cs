@@ -365,6 +365,233 @@ public sealed class InvoiceServiceTests
         Assert.Equal(14.5m, line.AverageCostAfter);
     }
 
+    [Fact]
+    public async Task LinkedPurchaseReturn_ManualPricePreservesCommercialPriceAndSourceCost()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 10m, null)]))).Value;
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                discountAmount: 2m,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 2,
+                        Weight: 1m,
+                        Price: 7m,
+                        Notes: null,
+                        SourceInvoiceLineId: source.Lines.Single().Id,
+                        ReturnPriceMode: ReturnPriceMode.ManualPrice,
+                        ReturnPriceDifferenceReason: "اتفاق سعر مرتجع")
+                ]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var line = Assert.Single(result.Value.Lines);
+        Assert.Equal(7m, line.Price);
+        Assert.Equal(10m, line.SourceUnitPriceSnapshot);
+        Assert.Equal(-3m, line.PriceDifference);
+        Assert.Equal(ReturnPriceMode.ManualPrice, line.ReturnPriceMode);
+        Assert.Equal("اتفاق سعر مرتجع", line.ReturnPriceDifferenceReason);
+        Assert.Equal(10m, line.UnitCost);
+        Assert.Equal(12m, result.Value.Total);
+    }
+
+    [Fact]
+    public async Task LinkedSalesReturn_ManualPriceUsesSourceCostIndependently()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var purchase = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 10m, null)]));
+        Assert.True(purchase.IsSuccess, purchase.Error.Description);
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 4, 1m, 30m, null)]))).Value;
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 2,
+                        Weight: 1m,
+                        Price: 18m,
+                        Notes: null,
+                        SourceInvoiceLineId: source.Lines.Single().Id,
+                        ReturnPriceMode: ReturnPriceMode.ManualPrice,
+                        ReturnPriceDifferenceReason: "خصم خدمة")
+                ]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var line = Assert.Single(result.Value.Lines);
+        Assert.Equal(18m, line.Price);
+        Assert.Equal(30m, line.SourceUnitPriceSnapshot);
+        Assert.Equal(-12m, line.PriceDifference);
+        Assert.Equal(10m, line.UnitCost);
+        Assert.Equal(36m, result.Value.Total);
+
+        var profitability = await database.CreateProfitabilityReportService()
+            .GetInvoiceDetailsAsync(source.Id);
+        Assert.True(profitability.IsSuccess, profitability.Error.Description);
+        Assert.Equal(84m, profitability.Value.NetRevenue);
+        Assert.Equal(20m, profitability.Value.InventoryCost);
+        Assert.Equal(64m, profitability.Value.GrossProfit);
+    }
+
+    [Fact]
+    public async Task LinkedReturn_ManualPriceRequiresDifferenceReason()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 2, 1m, 10m, null)]))).Value;
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 1,
+                        Weight: 1m,
+                        Price: 8m,
+                        Notes: null,
+                        SourceInvoiceLineId: source.Lines.Single().Id,
+                        ReturnPriceMode: ReturnPriceMode.ManualPrice)
+                ]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "Invoices.ReturnPriceDifferenceReasonRequired",
+            result.Error.Code);
+    }
+
+    [Fact]
+    public async Task ReturnPriceMetadataIsRejectedForUnlinkedOrNonReturnLines()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var purchaseResult = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 1,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null,
+                        ReturnPriceMode: ReturnPriceMode.ManualPrice,
+                        ReturnPriceDifferenceReason: "غير مسموح")
+                ]));
+        Assert.True(purchaseResult.IsFailure);
+        Assert.Equal("Invoices.ReturnCostFieldsNotAllowed", purchaseResult.Error.Code);
+
+        var returnResult = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 1,
+                        Weight: 1m,
+                        Price: 8m,
+                        Notes: null,
+                        ReturnPriceMode: ReturnPriceMode.ManualPrice,
+                        ReturnPriceDifferenceReason: "غير مرتبط")
+                ]));
+        Assert.True(returnResult.IsFailure);
+        Assert.Equal("Invoices.ReturnPriceFieldsNotAllowed", returnResult.Error.Code);
+    }
+
+    [Fact]
+    public async Task MultipleManualPartialReturnsKeepQuantityLimit()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var source = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 5, 1m, 10m, null)]))).Value;
+        var sourceLineId = source.Lines.Single().Id;
+
+        var first = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [new InvoiceLineRequest(
+                    1, 2, 1m, 8m, null, sourceLineId,
+                    ReturnPriceMode: ReturnPriceMode.ManualPrice,
+                    ReturnPriceDifferenceReason: "الدفعة الأولى")]));
+        Assert.True(first.IsSuccess, first.Error.Description);
+
+        var second = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [new InvoiceLineRequest(
+                    1, 3, 1m, 9m, null, sourceLineId,
+                    ReturnPriceMode: ReturnPriceMode.ManualPrice,
+                    ReturnPriceDifferenceReason: "الدفعة الثانية")]));
+        Assert.True(second.IsSuccess, second.Error.Description);
+        Assert.Equal(8m, first.Value.Lines.Single().Price);
+        Assert.Equal(9m, second.Value.Lines.Single().Price);
+
+        var tooMuch = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [new InvoiceLineRequest(
+                    1, 1, 1m, 9m, null, sourceLineId,
+                    ReturnPriceMode: ReturnPriceMode.ManualPrice,
+                    ReturnPriceDifferenceReason: "كمية زائدة")]));
+        Assert.True(tooMuch.IsFailure);
+        Assert.Equal("Invoices.ReturnQuantityExceedsAvailable", tooMuch.Error.Code);
+    }
+
     [Theory]
     [InlineData(InvoiceType.Purchase, InvoiceType.PurchaseReturn)]
     [InlineData(InvoiceType.Sales, InvoiceType.SalesReturn)]
@@ -464,6 +691,55 @@ public sealed class InvoiceServiceTests
         Assert.Equal(3m, secondLine.Quantity);
         Assert.Equal(20m, secondLine.Price);
         Assert.Equal(60m, secondLine.Total);
+    }
+
+    [Fact]
+    public async Task LinkedReturn_FullManualPriceUsesReturnDiscount()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var sourceResult = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                storeId: 2,
+                discountAmount: 8m,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 2,
+                        Weight: 1m,
+                        Price: 10m,
+                        Notes: null)
+                ]));
+        Assert.True(sourceResult.IsSuccess, sourceResult.Error.Description);
+        var sourceLine = Assert.Single(sourceResult.Value.Lines);
+
+        var result = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.PurchaseReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                discountAmount: 3m,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 2,
+                        Weight: 1m,
+                        Price: 15m,
+                        Notes: null,
+                        SourceInvoiceLineId: sourceLine.Id,
+                        ReturnPriceMode: ReturnPriceMode.ManualPrice,
+                        ReturnPriceDifferenceReason: "اتفاق سعر كامل")
+                ]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(30m, result.Value.Subtotal);
+        Assert.Equal(3m, result.Value.DiscountAmount);
+        Assert.Equal(27m, result.Value.Total);
+        Assert.Equal(15m, Assert.Single(result.Value.Lines).Price);
     }
 
     [Fact]
@@ -956,6 +1232,63 @@ public sealed class InvoiceServiceTests
         Assert.Equal(2, invoiceMovements.Count);
         Assert.Equal(60m, invoiceMovements[0].Debit);
         Assert.Equal(30m, invoiceMovements[1].Credit);
+    }
+
+    [Fact]
+    public async Task Update_RepricingSourceDoesNotOverwriteManualReturnPrice()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var stock = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 10, 1m, 12m, null)]));
+        Assert.True(stock.IsSuccess, stock.Error.Description);
+        var source = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines: [new InvoiceLineRequest(1, 4, 1m, 30m, null)]));
+        Assert.True(source.IsSuccess, source.Error.Description);
+        var sourceLine = Assert.Single(source.Value.Lines);
+        var linkedReturn = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                PaymentTerm.Credit,
+                storeId: 2,
+                lines:
+                [
+                    new InvoiceLineRequest(
+                        ItemId: 1,
+                        Count: 1,
+                        Weight: 1m,
+                        Price: 18m,
+                        Notes: null,
+                        SourceInvoiceLineId: sourceLine.Id,
+                        ReturnPriceMode: ReturnPriceMode.ManualPrice,
+                        ReturnPriceDifferenceReason: "اتفاق تجاري")
+                ]));
+        Assert.True(linkedReturn.IsSuccess, linkedReturn.Error.Description);
+
+        var updated = await service.UpdateAsync(
+            source.Value.Id,
+            CreateUpdateRequest(
+                source.Value,
+                [new InvoiceLineRequest(1, 4, 1m, 40m, null)]));
+        Assert.True(updated.IsSuccess, updated.Error.Description);
+
+        database.Context.ChangeTracker.Clear();
+        var persistedReturn = await database.Context.Invoices
+            .AsNoTracking()
+            .Include(invoice => invoice.Lines)
+            .SingleAsync(invoice => invoice.Id == linkedReturn.Value.Id);
+        var returnLine = Assert.Single(persistedReturn.Lines);
+        Assert.Equal(18m, returnLine.Price);
+        Assert.Equal(30m, returnLine.SourceUnitPriceSnapshot);
+        Assert.Equal(ReturnPriceMode.ManualPrice, returnLine.ReturnPriceMode);
+        Assert.Equal("اتفاق تجاري", returnLine.ReturnPriceDifferenceReason);
     }
 
     [Fact]
@@ -7022,6 +7355,9 @@ public sealed class InvoiceServiceTests
                     ItemUnitId INTEGER NOT NULL,
                     SourceInvoiceLineId INTEGER NULL,
                     ReturnUnitCost NUMERIC NULL,
+                    ReturnPriceMode INTEGER NULL,
+                    SourceUnitPriceSnapshot NUMERIC NULL,
+                    ReturnPriceDifferenceReason TEXT NULL,
                     Count INTEGER NOT NULL,
                     Weight NUMERIC NOT NULL,
                     Quantity NUMERIC NOT NULL,

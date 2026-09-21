@@ -121,6 +121,30 @@ public static class InvoiceErrors
             "تكلفة وحدة المرتجع يجب أن تكون صفرًا أو أكثر.",
             nameof(InvoiceLineRequest.ReturnUnitCost));
 
+    public static Error ReturnPriceFieldsNotAllowed() =>
+        Error.Validation(
+            "Invoices.ReturnPriceFieldsNotAllowed",
+            "طريقة وسعر المرتجع وسبب اختلاف السعر تستخدم فقط مع سطر مرتجع مرتبط بفاتورة أصلية.",
+            nameof(InvoiceLineRequest.ReturnPriceMode));
+
+    public static Error ReturnPriceModeInvalid() =>
+        Error.Validation(
+            "Invoices.ReturnPriceModeInvalid",
+            "طريقة تسعير المرتجع غير صحيحة.",
+            nameof(InvoiceLineRequest.ReturnPriceMode));
+
+    public static Error ReturnPriceDifferenceReasonRequired() =>
+        Error.Validation(
+            "Invoices.ReturnPriceDifferenceReasonRequired",
+            "اذكر سبب اختلاف سعر المرتجع عن سعر الفاتورة الأصلية.",
+            nameof(InvoiceLineRequest.ReturnPriceDifferenceReason));
+
+    public static Error ReturnPriceDifferenceReasonNotAllowed() =>
+        Error.Validation(
+            "Invoices.ReturnPriceDifferenceReasonNotAllowed",
+            "سبب اختلاف السعر يستخدم فقط مع طريقة السعر اليدوي.",
+            nameof(InvoiceLineRequest.ReturnPriceDifferenceReason));
+
     public static Error InvalidSalesReturnSource() =>
         Error.Validation(
             "Invoices.InvalidSalesReturnSource",

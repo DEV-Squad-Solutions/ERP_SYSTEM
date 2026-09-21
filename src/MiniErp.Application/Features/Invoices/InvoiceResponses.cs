@@ -23,6 +23,17 @@ public sealed record InvoiceLineResponse(
 {
     public int? SourceInvoiceLineId { get; init; }
 
+    public ReturnPriceMode? ReturnPriceMode { get; init; }
+
+    public decimal? SourceUnitPriceSnapshot { get; init; }
+
+    public string? ReturnPriceDifferenceReason { get; init; }
+
+    public decimal? PriceDifference =>
+        SourceUnitPriceSnapshot.HasValue
+            ? Price - SourceUnitPriceSnapshot.Value
+            : null;
+
     public decimal? ReturnUnitCost { get; init; }
 
     public InventoryCostStatus? CostStatus { get; init; }

@@ -60,9 +60,12 @@ public sealed class InvoicesController(
     /// SalesReturn selects from Sales invoices. PurchaseReturn selects from
     /// Purchase invoices. Results are limited to the current company, selected
     /// partner and store, and invoices dated on or before asOfDate. When a
-    /// returned line is linked to a source line, the backend uses the original
-    /// unit price. The original invoice discount applies only when this return
-    /// document includes every original line at its full original quantity.
+    /// A linked line defaults to the original unit price. Clients can opt into
+    /// ReturnPriceMode=ManualPrice and provide a non-empty
+    /// ReturnPriceDifferenceReason to use a different commercial price. The
+    /// original invoice discount applies only when every linked line uses
+    /// OriginalPrice and this return includes every original line at its full
+    /// original quantity.
     /// </remarks>
     [HttpGet("return-sources")]
     [ProducesResponseType<PagedResponse<InvoiceReturnSourceResponse>>(

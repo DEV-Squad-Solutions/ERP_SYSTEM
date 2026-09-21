@@ -16,7 +16,9 @@ public sealed partial class InvoiceService
     private sealed record PreparedReturnSourceLine(
         int SourceInvoiceLineId,
         int SourceInvoiceId,
-        decimal UnitPrice);
+        decimal UnitPrice,
+        ReturnPriceMode PriceMode,
+        string? DifferenceReason);
 
     private sealed record PreparedReturnSources(
         IReadOnlyDictionary<int, PreparedReturnSourceLine> Lines,

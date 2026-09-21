@@ -80,10 +80,52 @@ public sealed partial class InvoiceService
             (InvoiceType.SalesReturn or InvoiceType.PurchaseReturn) &&
             lines.Any(line =>
                 line.SourceInvoiceLineId.HasValue ||
-                line.ReturnUnitCost.HasValue))
+                line.ReturnUnitCost.HasValue ||
+                line.ReturnPriceMode.HasValue ||
+                !string.IsNullOrWhiteSpace(line.ReturnPriceDifferenceReason)))
         {
             return Failure(
                 ReturnCostFieldsNotAllowed());
+        }
+
+        if (lines.Any(line =>
+                line.ReturnPriceMode.HasValue &&
+                !Enum.IsDefined(typeof(ReturnPriceMode), line.ReturnPriceMode.Value)))
+        {
+            return Failure(ReturnPriceModeInvalid());
+        }
+
+        if (invoice.InvoiceType is InvoiceType.SalesReturn or InvoiceType.PurchaseReturn)
+        {
+            if (lines.Any(line =>
+                    line.ReturnPriceDifferenceReason is not null &&
+                    line.ReturnPriceDifferenceReason.Length >
+                    InvoiceRequest.ReturnPriceDifferenceReasonMaximumLength))
+            {
+                return Failure(ReturnPriceDifferenceReasonNotAllowed());
+            }
+
+            if (lines.Any(line =>
+                    !line.SourceInvoiceLineId.HasValue &&
+                    (line.ReturnPriceMode.HasValue ||
+                     !string.IsNullOrWhiteSpace(line.ReturnPriceDifferenceReason))))
+            {
+                return Failure(ReturnPriceFieldsNotAllowed());
+            }
+
+            if (lines.Any(line =>
+                    line.ReturnPriceMode == ReturnPriceMode.ManualPrice &&
+                    string.IsNullOrWhiteSpace(line.ReturnPriceDifferenceReason)))
+            {
+                return Failure(ReturnPriceDifferenceReasonRequired());
+            }
+
+            if (lines.Any(line =>
+                    (line.ReturnPriceMode is null or ReturnPriceMode.OriginalPrice) &&
+                    !string.IsNullOrWhiteSpace(line.ReturnPriceDifferenceReason)))
+            {
+                return Failure(ReturnPriceDifferenceReasonNotAllowed());
+            }
         }
 
         if (invoice.InvoiceType == InvoiceType.PurchaseReturn &&
@@ -553,6 +595,7 @@ public sealed partial class InvoiceService
 
         var sourceById = sourceLines.ToDictionary(source => source.Id);
         var requestedQuantities = new Dictionary<int, decimal>();
+        var preparedPriceModes = new Dictionary<int, ReturnPriceMode>();
         foreach (var line in linkedLines)
         {
             if (!sourceById.TryGetValue(
@@ -591,6 +634,9 @@ public sealed partial class InvoiceService
             }
 
             requestedQuantities[source.Id] = requestedQuantity;
+
+            var priceMode = line.ReturnPriceMode ?? ReturnPriceMode.OriginalPrice;
+            preparedPriceModes[source.Id] = priceMode;
         }
 
         var sourceInvoiceId = sourceLines[0].InvoiceId;
@@ -610,21 +656,37 @@ public sealed partial class InvoiceService
                     source.Id,
                     out var requestedQuantity) &&
                 requestedQuantity == source.SourceQuantity);
-        var discountAmount = isFullOriginalInvoiceReturn
-            ? sourceDiscount
-            : 0m;
+        var allOriginalPrice = linkedLines.All(line =>
+            (line.ReturnPriceMode ?? ReturnPriceMode.OriginalPrice) ==
+            ReturnPriceMode.OriginalPrice);
+        var hasManualPrice = !allOriginalPrice;
+        decimal? discountAmount = hasManualPrice
+            ? null
+            : isFullOriginalInvoiceReturn
+                ? sourceDiscount
+                : 0m;
         var preparedLines = sourceLines.ToDictionary(
             source => source.Id,
             source => new PreparedReturnSourceLine(
                 SourceInvoiceLineId: source.Id,
                 SourceInvoiceId: source.InvoiceId,
-                UnitPrice: source.UnitPrice));
+                UnitPrice: source.UnitPrice,
+                PriceMode: preparedPriceModes[source.Id],
+                DifferenceReason: NormalizeReturnPriceReason(
+                    linkedLines.First(line =>
+                        line.SourceInvoiceLineId == source.Id)
+                        .ReturnPriceDifferenceReason)));
 
         return Result<PreparedReturnSources>.Success(
             new PreparedReturnSources(
                 Lines: preparedLines,
                 DiscountAmount: discountAmount));
     }
+
+    private static string? NormalizeReturnPriceReason(string? reason) =>
+        string.IsNullOrWhiteSpace(reason)
+            ? null
+            : reason.Trim();
 
     private static Error? ValidateAmounts(
         Invoice invoice,

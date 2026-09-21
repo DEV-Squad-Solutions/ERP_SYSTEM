@@ -147,6 +147,7 @@ public sealed partial class InvoiceService
         foreach (var returnInvoice in linkedReturns)
         {
             var targetPrices = new Dictionary<InvoiceLine, decimal>();
+            var targetSourceSnapshots = new Dictionary<InvoiceLine, decimal>();
             foreach (var returnLine in returnInvoice.Lines.Where(
                          line =>
                              !line.IsDeleted &&
@@ -162,7 +163,12 @@ public sealed partial class InvoiceService
                             "أحد سطور المصدر المرتبطة لم يعد موجودًا."));
                 }
 
-                targetPrices[returnLine] = sourceLine.Price;
+                if ((returnLine.ReturnPriceMode ?? ReturnPriceMode.OriginalPrice) ==
+                    ReturnPriceMode.OriginalPrice)
+                {
+                    targetPrices[returnLine] = sourceLine.Price;
+                    targetSourceSnapshots[returnLine] = sourceLine.Price;
+                }
             }
 
             var returnLines = returnInvoice.Lines
@@ -173,13 +179,21 @@ public sealed partial class InvoiceService
             var isFullOriginalInvoiceReturn =
                 linkedReturns.Count == 1 &&
                 returnLines.Length == sourceLineCount &&
+                returnLines.All(returnLine =>
+                    (returnLine.ReturnPriceMode ?? ReturnPriceMode.OriginalPrice) ==
+                    ReturnPriceMode.OriginalPrice) &&
                 sourceLines.Values.All(sourceLine =>
                     returnLines.Any(returnLine =>
                         returnLine.SourceInvoiceLineId == sourceLine.Id &&
                         returnLine.Quantity == sourceLine.Quantity));
-            var targetDiscountAmount = isFullOriginalInvoiceReturn
-                ? sourceInvoice.DiscountAmount
-                : 0m;
+            var hasManualPrice = returnLines.Any(returnLine =>
+                (returnLine.ReturnPriceMode ?? ReturnPriceMode.OriginalPrice) ==
+                ReturnPriceMode.ManualPrice);
+            var targetDiscountAmount = hasManualPrice
+                ? returnInvoice.DiscountAmount
+                : isFullOriginalInvoiceReturn
+                    ? sourceInvoice.DiscountAmount
+                    : 0m;
 
             var targetSubtotal = 0m;
             foreach (var returnLine in returnInvoice.Lines.Where(
@@ -213,7 +227,9 @@ public sealed partial class InvoiceService
             var financialValuesChanged =
                 targetDiscountAmount != returnInvoice.DiscountAmount ||
                 targetTotal != returnInvoice.Total ||
-                targetPrices.Any(pair => pair.Key.Price != pair.Value);
+                targetPrices.Any(pair => pair.Key.Price != pair.Value) ||
+                targetSourceSnapshots.Any(pair =>
+                    pair.Key.SourceUnitPriceSnapshot != pair.Value);
             if (!financialValuesChanged)
             {
                 continue;
@@ -241,6 +257,11 @@ public sealed partial class InvoiceService
             foreach (var (returnLine, targetPrice) in targetPrices)
             {
                 returnLine.Price = targetPrice;
+            }
+
+            foreach (var (returnLine, targetSnapshot) in targetSourceSnapshots)
+            {
+                returnLine.SourceUnitPriceSnapshot = targetSnapshot;
             }
 
             returnInvoice.DiscountAmount = targetDiscountAmount;
