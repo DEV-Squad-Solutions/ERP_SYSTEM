@@ -50,7 +50,7 @@ public sealed partial class FinancialStatementService(
                 CashboxNotFound(filters.CashboxId));
         }
 
-        var allRows = CreateCashboxRows(cashbox.Id);
+        var allRows = CreateCashboxRows(cashbox.Id, cashbox.Currency);
         var openingJournal = await allRows
             .Where(row => row.IsOpening)
             .GroupBy(_ => 1)
@@ -607,11 +607,16 @@ public sealed partial class FinancialStatementService(
             });
     }
 
-    private IQueryable<CashboxStatementRaw> CreateCashboxRows(int cashboxId)
+    private IQueryable<CashboxStatementRaw> CreateCashboxRows(
+        int cashboxId,
+        CurrencyCode cashboxCurrency)
     {
         var vouchers = dbContext.CashVouchers
             .AsNoTracking()
             .Where(voucher => voucher.CompanyId == companyId);
+        var revaluations = dbContext.CashboxRevaluations
+            .AsNoTracking()
+            .Where(revaluation => revaluation.CompanyId == companyId);
 
         return
             from line in PostedLedgerLines()
@@ -631,6 +636,20 @@ public sealed partial class FinancialStatementService(
                 }
                 into voucherRows
             from voucher in voucherRows.DefaultIfEmpty()
+            join revaluation in revaluations
+                on new
+                {
+                    SourceId = line.JournalEntry.SourceId,
+                    SourceType = line.JournalEntry.SourceType
+                }
+                equals new
+                {
+                    SourceId = (int?)revaluation.Id,
+                    SourceType = (JournalEntrySourceType?)
+                        JournalEntrySourceType.CashboxRevaluation
+                }
+                into revaluationRows
+            from revaluation in revaluationRows.DefaultIfEmpty()
             select new CashboxStatementRaw
             {
                 JournalEntryLineId = line.Id,
@@ -645,7 +664,10 @@ public sealed partial class FinancialStatementService(
                     ? voucher.VoucherNumber
                     : line.JournalEntry.SourceNumber ??
                       line.JournalEntry.EntryNumber,
-                MovementName = voucher != null
+                MovementName = line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.CashboxRevaluation
+                    ? "إعادة تقييم عملة"
+                    : voucher != null
                     ? voucher.CashMovementType != null
                         ? voucher.CashMovementType.Name
                         : voucher.Direction == CashDirection.Receipt
@@ -697,10 +719,21 @@ public sealed partial class FinancialStatementService(
                       (voucher.CashMovementType == null
                           ? null
                           : voucher.CashMovementType.Classification),
-                Currency = line.Currency,
-                ExchangeRate = line.ExchangeRate,
-                ReceiptAmount = line.TransactionDebit,
-                PaymentAmount = line.TransactionCredit,
+                Currency = line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.CashboxRevaluation
+                    ? cashboxCurrency
+                    : line.Currency,
+                ExchangeRate = revaluation == null
+                    ? line.ExchangeRate
+                    : revaluation.ClosingRate,
+                ReceiptAmount = line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.CashboxRevaluation
+                    ? 0m
+                    : line.TransactionDebit,
+                PaymentAmount = line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.CashboxRevaluation
+                    ? 0m
+                    : line.TransactionCredit,
                 BaseReceiptAmount = line.Debit,
                 BasePaymentAmount = line.Credit,
                 ReferenceNumber = voucher == null

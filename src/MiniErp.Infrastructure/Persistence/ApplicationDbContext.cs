@@ -62,6 +62,12 @@ public sealed class ApplicationDbContext
     public DbSet<CashboxTransfer> CashboxTransfers =>
         Set<CashboxTransfer>();
 
+    public DbSet<CashboxRevaluation> CashboxRevaluations =>
+        Set<CashboxRevaluation>();
+
+    public DbSet<MonetaryAccountRevaluation> MonetaryAccountRevaluations =>
+        Set<MonetaryAccountRevaluation>();
+
     public DbSet<PartnerOpeningBalance> PartnerOpeningBalances =>
         Set<PartnerOpeningBalance>();
 

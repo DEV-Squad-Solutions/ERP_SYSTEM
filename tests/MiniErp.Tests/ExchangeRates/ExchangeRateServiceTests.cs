@@ -110,7 +110,7 @@ public sealed class ExchangeRateServiceTests
     }
 
     [Fact]
-    public async Task Resolver_WithRequestedRate_PersistsAndReturnsManualRate()
+    public async Task Resolver_WithRequestedRate_ReturnsManualSnapshotWithoutPersisting()
     {
         await using var database = await ExchangeRateTestDatabase.CreateAsync();
         var resolver = database.CreateResolver(1);
@@ -122,7 +122,7 @@ public sealed class ExchangeRateServiceTests
             requestedRate: 60m);
 
         Assert.True(result.IsSuccess);
-        Assert.NotNull(result.Value.ExchangeRateId);
+        Assert.Null(result.Value.ExchangeRateId);
         Assert.Equal(CurrencyCode.EGP, result.Value.BaseCurrency);
         Assert.Equal(CurrencyCode.GBP, result.Value.Currency);
         Assert.Equal(requestedDate, result.Value.RequestedDate);
@@ -131,13 +131,46 @@ public sealed class ExchangeRateServiceTests
         Assert.Equal(ExchangeRateSource.Manual, result.Value.Source);
         Assert.False(result.Value.IsBaseCurrency);
 
+        Assert.False(await database.Context.ExchangeRates.AnyAsync(rate =>
+            rate.CompanyId == 1 &&
+            rate.Currency == CurrencyCode.GBP &&
+            rate.RateDate == requestedDate));
+    }
+
+    [Fact]
+    public async Task Resolver_WithRequestedRate_DoesNotReuseOrMutateExistingDailyRate()
+    {
+        await using var database = await ExchangeRateTestDatabase.CreateAsync();
+        var requestedDate = new DateOnly(2026, 1, 4);
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO ExchangeRates
+                (CompanyId, Currency, RateDate, Rate, Source, Notes,
+                 LastModifiedAt, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 4, '2026-01-04', 55, 1, 'Global daily rate',
+                 '2026-01-04', 'test', '2026-01-04', 'test', 0);
+            """);
+        var resolver = database.CreateResolver(1);
+
+        var result = await resolver.ResolveAsync(
+            CurrencyCode.GBP,
+            requestedDate,
+            requestedRate: 60m);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Value.ExchangeRateId);
+        Assert.Equal(60m, result.Value.Rate);
+        Assert.Equal(requestedDate, result.Value.RateDate);
+        Assert.Equal(ExchangeRateSource.Manual, result.Value.Source);
+
         var persisted = await database.Context.ExchangeRates
             .AsNoTracking()
-            .SingleAsync(rate => rate.Id == result.Value.ExchangeRateId);
-        Assert.Equal(1, persisted.CompanyId);
-        Assert.Equal(CurrencyCode.GBP, persisted.Currency);
-        Assert.Equal(requestedDate, persisted.RateDate);
-        Assert.Equal(60m, persisted.Rate);
+            .SingleAsync(rate =>
+                rate.CompanyId == 1 &&
+                rate.Currency == CurrencyCode.GBP &&
+                rate.RateDate == requestedDate);
+        Assert.Equal(55m, persisted.Rate);
         Assert.Equal(ExchangeRateSource.Manual, persisted.Source);
     }
 

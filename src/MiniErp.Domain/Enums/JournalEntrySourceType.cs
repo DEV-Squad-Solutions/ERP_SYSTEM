@@ -14,5 +14,7 @@ public enum JournalEntrySourceType
     EmployeeOpeningBalance = 10,
     CashboxOpeningBalance = 11,
     DriverTrip = 12,
-    FiscalYearClosing = 13
+    FiscalYearClosing = 13,
+    CashboxRevaluation = 14
+    ,MonetaryAccountRevaluation = 15
 }

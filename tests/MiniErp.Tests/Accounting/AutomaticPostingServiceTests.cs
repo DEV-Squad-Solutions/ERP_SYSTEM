@@ -1307,6 +1307,14 @@ public sealed class AutomaticPostingServiceTests
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 
+                CREATE TABLE CashboxRevaluations (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    CashboxId INTEGER NOT NULL,
+                    RevaluationDate TEXT NOT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
                 CREATE TABLE CashVouchers (
                     Id INTEGER PRIMARY KEY,
                     CompanyId INTEGER NOT NULL,

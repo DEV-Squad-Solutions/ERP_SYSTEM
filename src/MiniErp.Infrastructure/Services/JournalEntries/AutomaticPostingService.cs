@@ -9,6 +9,7 @@ using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.CashboxRevaluations;
 using static MiniErp.Application.Features.JournalEntries.JournalEntryErrors;
 
 namespace MiniErp.Infrastructure.Services.JournalEntries;
@@ -93,6 +94,22 @@ public sealed class AutomaticPostingService(
                     entry.FiscalYearId,
                     failureKind: "FiscalYearClosed");
                 return Result.Failure(FiscalYearClosed());
+            }
+
+            if (sourceType != JournalEntrySourceType.CashboxRevaluation)
+            {
+                var revaluationGuardError = await CashboxRevaluationGuard.ValidateAsync(
+                    dbContext,
+                    companyId,
+                    entry.EntryDate,
+                    entry.Lines
+                        .Where(line => line.PartyType == JournalPartyType.Cashbox)
+                        .Select(line => line.PartyId ?? 0),
+                    cancellationToken);
+                if (revaluationGuardError is not null)
+                {
+                    return Result.Failure(revaluationGuardError);
+                }
             }
 
             dbContext.JournalEntryLines.RemoveRange(entry.Lines);
@@ -233,6 +250,29 @@ public sealed class AutomaticPostingService(
                 RecordOperation("create_or_get", "idempotent", request.SourceType);
                 return Result<AutomaticJournalEntryResult>.Success(
                     ToResult(existing, created: false));
+            }
+
+            if (request.SourceType != JournalEntrySourceType.CashboxRevaluation)
+            {
+                var affectedCashboxIds = request.Lines
+                    .Where(line => line.PartyType == JournalPartyType.Cashbox)
+                    .Select(line => line.PartyId ?? 0)
+                    .Concat(existing?.Lines
+                        .Where(line => line.PartyType == JournalPartyType.Cashbox)
+                        .Select(line => line.PartyId ?? 0) ?? []);
+                var revaluationGuardError = await CashboxRevaluationGuard.ValidateAsync(
+                    dbContext,
+                    companyId,
+                    existing is null || existing.EntryDate >= request.EntryDate
+                        ? request.EntryDate
+                        : existing.EntryDate,
+                    affectedCashboxIds,
+                    cancellationToken);
+                if (revaluationGuardError is not null)
+                {
+                    return Result<AutomaticJournalEntryResult>.Failure(
+                        revaluationGuardError);
+                }
             }
 
             var now = timeProvider.GetUtcNow().UtcDateTime;
@@ -401,6 +441,25 @@ public sealed class AutomaticPostingService(
             return Result.Failure(AutomaticSourceRequired());
         }
 
+        if (request.SourceType == JournalEntrySourceType.CashboxRevaluation)
+        {
+            var sourceCashboxId = await dbContext.CashboxRevaluations
+                .Where(row =>
+                    row.CompanyId == companyId &&
+                    row.Id == request.SourceId &&
+                    !row.IsDeleted)
+                .Select(row => (int?)row.CashboxId)
+                .SingleOrDefaultAsync(cancellationToken);
+            var cashboxLines = request.Lines
+                .Where(line => line.PartyType == JournalPartyType.Cashbox)
+                .ToArray();
+            if (!sourceCashboxId.HasValue || cashboxLines.Length != 1 ||
+                cashboxLines[0].PartyId != sourceCashboxId.Value)
+            {
+                return Result.Failure(AutomaticSourceRequired());
+            }
+        }
+
         if (ValidateBalance(request.Lines) is { } balanceError)
         {
             return Result.Failure(balanceError);
@@ -437,6 +496,8 @@ public sealed class AutomaticPostingService(
         return await ValidateAccountsAsync(
             request.Lines,
             request.FiscalYearId,
+            request.SourceType,
+            await GetBaseCurrencyAsync(cancellationToken),
             cancellationToken)
             is { } accountError
             ? Result.Failure(accountError)
@@ -545,6 +606,8 @@ public sealed class AutomaticPostingService(
     private async Task<Error?> ValidateAccountsAsync(
         IReadOnlyList<JournalEntryLineRequest> lines,
         int fiscalYearId,
+        JournalEntrySourceType sourceType,
+        CurrencyCode baseCurrency,
         CancellationToken cancellationToken)
     {
         var accountIds = lines
@@ -675,6 +738,9 @@ public sealed class AutomaticPostingService(
             }
 
             if (partyState.Currency.HasValue &&
+                !(sourceType == JournalEntrySourceType.CashboxRevaluation &&
+                  line.PartyType == JournalPartyType.Cashbox &&
+                  line.Currency == baseCurrency) &&
                 line.Currency != partyState.Currency.Value)
             {
                 return PartyCurrencyMismatch(

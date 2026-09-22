@@ -72,6 +72,34 @@ public sealed class CashboxExchangeRateCascadeTests
         Assert.Contains(500m, voucherBaseAmounts);
         Assert.Contains(1_000m, voucherBaseAmounts);
         Assert.Contains(5_500m, voucherBaseAmounts);
+
+        var editedCashbox = await database.Context.Cashboxes
+            .AsNoTracking()
+            .SingleAsync(entity => entity.Id == database.PrimaryCashboxId);
+        Assert.Null(editedCashbox.OpeningExchangeRateId);
+
+        var globalRate = await database.Context.ExchangeRates
+            .AsNoTracking()
+            .SingleAsync(entity => entity.Id == database.UsdRateId);
+        var globalRateUpdate = await database.CreateExchangeRateService()
+            .UpdateAsync(
+                database.UsdRateId,
+                new ExchangeRateUpdateRequest(
+                    Currency: globalRate.Currency,
+                    RateDate: globalRate.RateDate,
+                    Rate: 70m,
+                    Source: globalRate.Source,
+                    Notes: globalRate.Notes,
+                    RowVersion: globalRate.RowVersion,
+                    UpdateLinkedTransactions: true));
+
+        Assert.True(globalRateUpdate.IsSuccess);
+        database.Context.ChangeTracker.Clear();
+        editedCashbox = await database.Context.Cashboxes
+            .AsNoTracking()
+            .SingleAsync(entity => entity.Id == database.PrimaryCashboxId);
+        Assert.Equal(60m, editedCashbox.OpeningExchangeRate);
+        Assert.Equal(6_000m, editedCashbox.BaseOpeningBalance);
     }
 
     [Fact]
@@ -167,8 +195,10 @@ public sealed class CashboxExchangeRateCascadeTests
 
         Assert.Equal(60m, transferPayment.ExchangeRate);
         Assert.Equal(6_600m, transferPayment.BaseAmount);
-        Assert.Equal(120m, transferReceipt.Amount);
-        Assert.Equal(6_600m, transferReceipt.BaseAmount);
+        // A linked-rate cascade updates the base carrying value only; the
+        // foreign quantity physically received by the destination stays 100.
+        Assert.Equal(100m, transferReceipt.Amount);
+        Assert.Equal(5_500m, transferReceipt.BaseAmount);
     }
 
     [Fact]

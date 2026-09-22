@@ -10,6 +10,7 @@ using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Accounting;
+using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Entities.Logistics;
 using MiniErp.Domain.Enums;
@@ -34,6 +35,15 @@ public sealed class CashVoucherService(
         CashVoucherFilterRequest? filters = null,
         CancellationToken cancellationToken = default)
     {
+        _ = paginationService;
+
+        if (pagination.PageNumber <= 0 ||
+            pagination.PageSize is <= 0 or > PaginationRequest.MaxPageSize)
+        {
+            return Result<PagedResponse<CashVoucherResponse>>.Failure(
+                PaginationErrors.Invalid());
+        }
+
         filters ??= new CashVoucherFilterRequest();
         var search = filters.Search?.Trim();
         var voucherNumber = filters.VoucherNumber?.Trim();
@@ -187,12 +197,129 @@ public sealed class CashVoucherService(
             .OrderByDescending(voucher => voucher.VoucherDate)
             .ThenByDescending(voucher => voucher.Id);
 
-        return await paginationService.PaginateAsync<
-            CashVoucher,
-            CashVoucherResponse>(
-            orderedQuery,
-            pagination,
-            cancellationToken);
+        // Opening balances are owned by Cashbox, not CashVoucher. They are
+        // included as read-only rows in this list so the cash-voucher screen
+        // has one chronological source for the opening and later movements.
+        // They are never inserted into CashVouchers or into the journal here.
+        var canIncludeOpeningBalances =
+            !filters.CashMovementTypeId.HasValue &&
+            !filters.Classification.HasValue &&
+            !filters.PartyType.HasValue &&
+            !filters.EmployeeId.HasValue &&
+            !filters.BusinessPartnerId.HasValue &&
+            !filters.DriverId.HasValue &&
+            !filters.DriverTripId.HasValue &&
+            !filters.AccountId.HasValue &&
+            filters.IsDraft != true;
+
+        var openingQuery = dbContext.Cashboxes
+            .AsNoTracking()
+            .Where(cashbox =>
+                canIncludeOpeningBalances &&
+                cashbox.CompanyId == companyId &&
+                cashbox.OpeningBalance != 0m)
+            .Where(cashbox =>
+                !filters.CashboxId.HasValue ||
+                cashbox.Id == filters.CashboxId.Value)
+            .Where(cashbox =>
+                !filters.Direction.HasValue ||
+                (cashbox.OpeningBalance > 0m
+                    ? CashDirection.Receipt
+                    : CashDirection.Payment) == filters.Direction.Value)
+            .Where(cashbox =>
+                !filters.FromDate.HasValue ||
+                cashbox.OpeningBalanceDate >= filters.FromDate.Value)
+            .Where(cashbox =>
+                !filters.ToDate.HasValue ||
+                cashbox.OpeningBalanceDate <= filters.ToDate.Value)
+            .Where(cashbox =>
+                string.IsNullOrEmpty(search) ||
+                ("OPENING-BALANCE-" + cashbox.Code).Contains(search) ||
+                cashbox.Code.Contains(search) ||
+                cashbox.Name.Contains(search) ||
+                "رصيد افتتاحي".Contains(search) ||
+                "الرصيد الافتتاحي".Contains(search))
+            .Where(cashbox =>
+                string.IsNullOrEmpty(voucherNumber) ||
+                ("OPENING-BALANCE-" + cashbox.Code).Contains(voucherNumber));
+
+        var realVoucherCount = await query.CountAsync(cancellationToken);
+        var openingBalanceCount = canIncludeOpeningBalances
+            ? await openingQuery.CountAsync(cancellationToken)
+            : 0;
+        var totalCount = realVoucherCount + openingBalanceCount;
+        var offset = (long)(pagination.PageNumber - 1) * pagination.PageSize;
+        var totalPages = (int)Math.Ceiling(
+            totalCount / (double)pagination.PageSize);
+
+        // The first (offset + page size) rows from each independently ordered
+        // source are sufficient to produce the same page after merging. This
+        // keeps the endpoint bounded and avoids loading every voucher.
+        var window = offset + pagination.PageSize;
+        var take = window > int.MaxValue ? int.MaxValue : (int)window;
+        var realRows = offset >= totalCount || take <= 0
+            ? []
+            : await orderedQuery
+                .Take(take)
+                .ProjectToType<CashVoucherResponse>()
+                .ToListAsync(cancellationToken);
+
+        var baseCurrency = openingBalanceCount == 0
+            ? CurrencyCode.EGP
+            : await dbContext.CompanySettings
+                .AsNoTracking()
+                .Where(setting => setting.CompanyId == companyId)
+                .Select(setting => (CurrencyCode?)setting.BaseCurrency)
+                .FirstOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
+        var openingRows = openingBalanceCount == 0 || offset >= totalCount
+            ? []
+            : (await openingQuery
+                .OrderByDescending(cashbox => cashbox.OpeningBalanceDate)
+                .ThenByDescending(cashbox => cashbox.Id)
+                .Take(take)
+                .Select(cashbox => new
+                {
+                    CashboxId = cashbox.Id,
+                    CashboxName = cashbox.Name,
+                    CashboxCode = cashbox.Code,
+                    VoucherDate = cashbox.OpeningBalanceDate,
+                    Direction = cashbox.OpeningBalance > 0m
+                        ? CashDirection.Receipt
+                        : CashDirection.Payment,
+                    Amount = cashbox.OpeningBalance,
+                    Currency = cashbox.Currency,
+                    ExchangeRate = cashbox.OpeningExchangeRate,
+                    BaseOpeningBalance = cashbox.BaseOpeningBalance
+                })
+                .ToListAsync(cancellationToken))
+                .Select(row => new OpeningBalanceRow(
+                    CashboxId: row.CashboxId,
+                    CashboxName: row.CashboxName,
+                    CashboxCode: row.CashboxCode,
+                    VoucherDate: row.VoucherDate,
+                    Direction: row.Direction,
+                    Amount: row.Amount,
+                    Currency: row.Currency,
+                    ExchangeRate: row.ExchangeRate,
+                    BaseOpeningBalance: row.BaseOpeningBalance))
+                .ToList();
+
+        var mergedRows = realRows
+            .Concat(openingRows.Select(row =>
+                CreateOpeningBalanceResponse(row, companyId, baseCurrency)))
+            .OrderByDescending(row => row.VoucherDate)
+            .ThenByDescending(row => row.Id)
+            .Skip(offset >= int.MaxValue ? int.MaxValue : (int)offset)
+            .Take(pagination.PageSize)
+            .ToList();
+
+        return Result<PagedResponse<CashVoucherResponse>>.Success(
+            new PagedResponse<CashVoucherResponse>(
+                Items: mergedRows,
+                PageNumber: pagination.PageNumber,
+                PageSize: pagination.PageSize,
+                TotalCount: totalCount,
+                TotalPages: totalPages));
     }
 
     public async Task<Result<CashVoucherHandoverReportResponse>>
@@ -1705,6 +1832,70 @@ public sealed class CashVoucherService(
         existing.ApplyAmounts(effectiveType, voucher.Amount);
         existing.ApplyExchangeRate(voucher.ExchangeRate);
     }
+
+    private static CashVoucherResponse CreateOpeningBalanceResponse(
+        OpeningBalanceRow row,
+        int companyId,
+        CurrencyCode baseCurrency)
+    {
+        var amount = Math.Abs(row.Amount);
+        var exchangeRate = row.Currency == baseCurrency
+            ? 1m
+            : row.ExchangeRate > 0m
+                ? row.ExchangeRate
+                : 1m;
+        var baseAmount = row.Currency == baseCurrency
+            ? amount
+            : Math.Abs(row.BaseOpeningBalance) > 0m
+                ? Math.Abs(row.BaseOpeningBalance)
+                : ExchangeRateRules.ConvertToBase(amount, exchangeRate);
+
+        return new CashVoucherResponse(
+            Id: -row.CashboxId,
+            CompanyId: companyId,
+            VoucherNumber: $"OPENING-BALANCE-{row.CashboxCode}",
+            VoucherDate: row.VoucherDate,
+            Direction: row.Direction,
+            CashboxId: row.CashboxId,
+            CashboxName: row.CashboxName,
+            CashMovementTypeId: null,
+            CashMovementTypeName: "رصيد افتتاحي",
+            Classification: null,
+            PartyType: CashPartyType.None,
+            EmployeeId: null,
+            EmployeeName: null,
+            BusinessPartnerId: null,
+            BusinessPartnerName: null,
+            DriverId: null,
+            DriverName: null,
+            DriverTripId: null,
+            DriverTripInvoiceNumber: null,
+            ExternalPartyName: null,
+            Amount: amount,
+            Currency: row.Currency,
+            BaseCurrency: baseCurrency,
+            ExchangeRate: exchangeRate,
+            BaseAmount: baseAmount,
+            ReferenceNumber: null,
+            Description: "الرصيد الافتتاحي",
+            Notes: null,
+            RowVersion: [])
+        {
+            IsDraft = false,
+            IsOpeningBalance = true
+        };
+    }
+
+    private sealed record OpeningBalanceRow(
+        int CashboxId,
+        string CashboxName,
+        string CashboxCode,
+        DateOnly VoucherDate,
+        CashDirection Direction,
+        decimal Amount,
+        CurrencyCode Currency,
+        decimal ExchangeRate,
+        decimal BaseOpeningBalance);
 
     private IQueryable<CashVoucherResponse> ProjectResponseQuery(int id) =>
         dbContext.CashVouchers

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using MiniErp.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using MiniErp.Infrastructure.Persistence;
 namespace MiniErp.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260922161421_AddCashboxRevaluation")]
+    partial class AddCashboxRevaluation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -867,110 +870,6 @@ namespace MiniErp.Infrastructure.Migrations
                             t.HasCheckConstraint("CK_JournalEntryLines_PartyShape", "(([PartyType] IS NULL AND [PartyId] IS NULL) OR ([PartyType] IN (1, 2, 3, 4, 5) AND [PartyId] IS NOT NULL))");
 
                             t.HasCheckConstraint("CK_JournalEntryLines_TransactionAmounts", "(([TransactionDebit] > 0 AND [TransactionCredit] = 0 AND [Debit] > 0 AND [Credit] = 0) OR ([TransactionCredit] > 0 AND [TransactionDebit] = 0 AND [Credit] > 0 AND [Debit] = 0))");
-                        });
-                });
-
-            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.MonetaryAccountRevaluation", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("AccountId")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("CarryingBaseAmount")
-                        .HasPrecision(28, 8)
-                        .HasColumnType("decimal(28,8)");
-
-                    b.Property<decimal>("ClosingRate")
-                        .HasPrecision(28, 12)
-                        .HasColumnType("decimal(28,12)");
-
-                    b.Property<int>("CompanyId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("CreatedById")
-                        .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("CreatedByPc")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<DateTime>("CreatedOn")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("Currency")
-                        .HasColumnType("int");
-
-                    b.Property<string>("DeletedById")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("DeletedByPc")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<DateTime?>("DeletedOn")
-                        .HasColumnType("datetime2");
-
-                    b.Property<decimal>("DeltaBaseAmount")
-                        .HasPrecision(28, 8)
-                        .HasColumnType("decimal(28,8)");
-
-                    b.Property<decimal>("ForeignAmount")
-                        .HasPrecision(19, 4)
-                        .HasColumnType("decimal(19,4)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<int?>("JournalEntryId")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("PartyId")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("PartyType")
-                        .HasColumnType("int");
-
-                    b.Property<DateOnly>("RevaluationDate")
-                        .HasColumnType("date");
-
-                    b.Property<decimal>("TargetBaseAmount")
-                        .HasPrecision(28, 8)
-                        .HasColumnType("decimal(28,8)");
-
-                    b.Property<string>("UpdatedById")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("UpdatedByPc")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<DateTime?>("UpdatedOn")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CompanyId", "JournalEntryId");
-
-                    b.HasIndex("CompanyId", "AccountId", "Currency", "PartyType", "PartyId", "RevaluationDate")
-                        .IsUnique()
-                        .HasDatabaseName("UX_MonetaryAccountRevaluations_Target_Date")
-                        .HasFilter("[IsDeleted] = 0");
-
-                    b.ToTable("MonetaryAccountRevaluations", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_MonetaryAccountRevaluations_Party", "(([PartyType] IS NULL AND [PartyId] IS NULL) OR ([PartyType] IS NOT NULL AND [PartyId] IS NOT NULL))");
-
-                            t.HasCheckConstraint("CK_MonetaryAccountRevaluations_Rate", "[ClosingRate] > 0");
                         });
                 });
 
@@ -5646,34 +5545,6 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasPrincipalKey("CompanyId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.Navigation("Account");
-
-                    b.Navigation("Company");
-
-                    b.Navigation("JournalEntry");
-                });
-
-            modelBuilder.Entity("MiniErp.Domain.Entities.Accounting.MonetaryAccountRevaluation", b =>
-                {
-                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("MiniErp.Domain.Entities.Accounting.Account", "Account")
-                        .WithMany()
-                        .HasForeignKey("CompanyId", "AccountId")
-                        .HasPrincipalKey("CompanyId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("MiniErp.Domain.Entities.Accounting.JournalEntry", "JournalEntry")
-                        .WithMany()
-                        .HasForeignKey("CompanyId", "JournalEntryId")
-                        .HasPrincipalKey("CompanyId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Account");
 
