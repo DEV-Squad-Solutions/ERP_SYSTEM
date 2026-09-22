@@ -130,7 +130,7 @@ public sealed partial class FinancialStatementService(
                  row.ReferenceNumber.Contains(search)) ||
                 (row.Description != null && row.Description.Contains(search)));
 
-        var totalCount = await query.CountAsync(cancellationToken);
+        var movementCount = await query.CountAsync(cancellationToken);
         var totals = await query
             .GroupBy(_ => 1)
             .Select(rows => new
@@ -151,28 +151,67 @@ public sealed partial class FinancialStatementService(
             .ThenBy(row => row.CreatedOn)
             .ThenBy(row => row.DocumentNumber)
             .ThenBy(row => row.JournalEntryLineId);
+        // The opening balance is a statement anchor, not a movement. Keep it
+        // outside the movement query so filters/search cannot remove it, then
+        // account for it as one logical row during pagination.
+        var totalCount = movementCount + 1;
         var offset = GetOffset(pagination, totalCount);
-        var precedingEffect = offset == 0
+        var openingRowIncluded = offset == 0;
+        var movementOffset = openingRowIncluded ? 0 : offset - 1;
+        var movementPageSize = openingRowIncluded
+            ? Math.Max(pagination.PageSize - 1, 0)
+            : pagination.PageSize;
+        var precedingEffect = movementOffset == 0
             ? 0m
-            : await ordered.Take(offset).SumAsync(
+            : await ordered.Take(movementOffset).SumAsync(
                 row => (decimal?)(row.ReceiptAmount - row.PaymentAmount),
                 cancellationToken) ?? 0m;
-        var precedingBaseEffect = offset == 0
+        var precedingBaseEffect = movementOffset == 0
             ? 0m
-            : await ordered.Take(offset).SumAsync(
+            : await ordered.Take(movementOffset).SumAsync(
                 row => (decimal?)(row.BaseReceiptAmount -
                     row.BasePaymentAmount),
                 cancellationToken) ?? 0m;
-        var pageRows = offset >= totalCount
+        var pageRows = movementPageSize == 0 || movementOffset >= movementCount
             ? []
             : await ordered
-                .Skip(offset)
-                .Take(pagination.PageSize)
+                .Skip(movementOffset)
+                .Take(movementPageSize)
                 .ToListAsync(cancellationToken);
 
         var runningBalance = openingBalance + precedingEffect;
         var runningBaseBalance = baseOpeningBalance + precedingBaseEffect;
-        var items = pageRows.Select(row =>
+        var items = new List<CashboxStatementItemResponse>(pagination.PageSize);
+        if (openingRowIncluded)
+        {
+            items.Add(new CashboxStatementItemResponse(
+                CashVoucherId: null,
+                Date: filters.FromDate ?? cashbox.OpeningBalanceDate,
+                VoucherNumber: "OPENING-BALANCE",
+                MovementName: "رصيد افتتاحي",
+                Description: filters.FromDate.HasValue
+                    ? $"رصيد افتتاحي للفترة قبل {filters.FromDate.Value:yyyy-MM-dd}"
+                    : "الرصيد الافتتاحي",
+                PartyName: null,
+                ReceiptAmount: 0m,
+                PaymentAmount: 0m,
+                Balance: openingBalance,
+                ReferenceNumber: null)
+            {
+                Currency = cashbox.Currency,
+                BaseCurrency = cashbox.BaseCurrency,
+                ExchangeRate = cashbox.OpeningExchangeRate,
+                IsBaseCurrency = cashbox.Currency == cashbox.BaseCurrency,
+                BaseReceiptAmount = 0m,
+                BasePaymentAmount = 0m,
+                BaseBalance = baseOpeningBalance,
+                JournalEntryId = null,
+                JournalEntryLineId = null,
+                SourceType = JournalEntrySourceType.CashboxOpeningBalance
+            });
+        }
+
+        items.AddRange(pageRows.Select(row =>
         {
             runningBalance += row.ReceiptAmount - row.PaymentAmount;
             runningBaseBalance +=
@@ -200,7 +239,7 @@ public sealed partial class FinancialStatementService(
                 JournalEntryLineId = row.JournalEntryLineId,
                 SourceType = row.SourceType
             };
-        }).ToArray();
+        }));
 
         return Result<CashboxStatementResponse>.Success(
             new CashboxStatementResponse(

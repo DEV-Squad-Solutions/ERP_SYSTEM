@@ -335,8 +335,15 @@ public sealed class FinancialStatementReportTests
             .Where(entity => entity.Id == cashboxId)
             .Select(entity => entity.OpeningBalance)
             .SingleAsync());
-        Assert.Equal(1, cashboxStatement.Value.TotalCount);
-        var cashItem = Assert.Single(cashboxStatement.Value.Items);
+        Assert.Equal(2, cashboxStatement.Value.TotalCount);
+        Assert.Equal("رصيد افتتاحي",
+            cashboxStatement.Value.Items[0].MovementName);
+        Assert.Equal(
+            JournalEntrySourceType.CashboxOpeningBalance,
+            cashboxStatement.Value.Items[0].SourceType);
+        var cashItem = Assert.Single(
+            cashboxStatement.Value.Items,
+            item => item.SourceType is null && item.JournalEntryId.HasValue);
         Assert.Equal(75m, cashItem.ReceiptAmount);
         Assert.Equal(75m, cashItem.BaseReceiptAmount);
         Assert.NotNull(cashItem.JournalEntryId);
