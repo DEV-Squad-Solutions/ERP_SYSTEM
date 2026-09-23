@@ -21,11 +21,7 @@ public sealed class UpdatesHub : Hub
             Context.ConnectionId,
             RealtimeHubGroups.Company(companyId));
 
-        foreach (var role in new[]
-                 {
-                     ApplicationRoles.Admin,
-                     ApplicationRoles.User
-                 })
+        foreach (var role in ApplicationRoles.All)
         {
             if (Context.User?.IsInRole(role) == true)
             {

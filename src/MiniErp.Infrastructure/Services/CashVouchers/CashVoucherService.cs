@@ -361,6 +361,75 @@ public sealed class CashVoucherService(
                 !voucher.InvoiceId.HasValue &&
                 !voucher.CashboxTransferId.HasValue);
 
+        // The official balance is always based on posted vouchers, while the
+        // handover amounts are shown separately as an operational expectation.
+        // Keep draft totals independent from date/direction/search filters so
+        // filtering the report cannot change how much cash is expected in the
+        // employee's hands. A selected cashbox only narrows the cards shown.
+        var balanceRows = await dbContext.Cashboxes
+            .AsNoTracking()
+            .Where(cashbox =>
+                cashbox.CompanyId == companyId &&
+                (!filters.CashboxId.HasValue ||
+                 cashbox.Id == filters.CashboxId.Value) &&
+                cashbox.Vouchers.Any(voucher =>
+                    voucher.CompanyId == companyId &&
+                    !voucher.IsPosted &&
+                    voucher.CashboxId.HasValue &&
+                    !voucher.InvoiceId.HasValue &&
+                    !voucher.CashboxTransferId.HasValue))
+            .Select(cashbox => new
+            {
+                CashboxId = cashbox.Id,
+                CashboxName = cashbox.Name,
+                cashbox.Currency,
+                CurrentBalance = cashbox.OpeningBalance +
+                    (cashbox.Vouchers
+                        .Where(voucher =>
+                            voucher.CompanyId == companyId &&
+                            voucher.IsPosted)
+                        .Select(voucher => (decimal?)
+                            (voucher.Direction == CashDirection.Receipt
+                                ? voucher.Amount
+                                : -voucher.Amount))
+                        .Sum() ?? 0m),
+                DraftReceipt = cashbox.Vouchers
+                    .Where(voucher =>
+                        voucher.CompanyId == companyId &&
+                        !voucher.IsPosted &&
+                        voucher.CashboxId.HasValue &&
+                        !voucher.InvoiceId.HasValue &&
+                        !voucher.CashboxTransferId.HasValue &&
+                        voucher.Direction == CashDirection.Receipt)
+                    .Select(voucher => (decimal?)voucher.Amount)
+                    .Sum() ?? 0m,
+                DraftPayment = cashbox.Vouchers
+                    .Where(voucher =>
+                        voucher.CompanyId == companyId &&
+                        !voucher.IsPosted &&
+                        voucher.CashboxId.HasValue &&
+                        !voucher.InvoiceId.HasValue &&
+                        !voucher.CashboxTransferId.HasValue &&
+                        voucher.Direction == CashDirection.Payment)
+                    .Select(voucher => (decimal?)voucher.Amount)
+                    .Sum() ?? 0m
+            })
+            .OrderBy(row => row.CashboxName)
+            .ThenBy(row => row.CashboxId)
+            .ToListAsync(cancellationToken);
+
+        var cashboxBalances = balanceRows
+            .Select(row => new CashVoucherHandoverCashboxBalance(
+                CashboxId: row.CashboxId,
+                CashboxName: row.CashboxName,
+                Currency: row.Currency,
+                CurrentBalance: row.CurrentBalance,
+                DraftReceipt: row.DraftReceipt,
+                DraftPayment: row.DraftPayment,
+                ExpectedBalance: row.CurrentBalance +
+                    row.DraftReceipt - row.DraftPayment))
+            .ToList();
+
         if (filters.CashboxId.HasValue)
         {
             query = query.Where(voucher =>
@@ -473,7 +542,8 @@ public sealed class CashVoucherService(
                 PageSize: pagination.PageSize,
                 TotalCount: totalCount,
                 TotalPages: totalPages,
-                Summaries: summaries));
+                Summaries: summaries,
+                CashboxBalances: cashboxBalances));
     }
 
     public async Task<Result<CashVoucherResponse>> GetByIdAsync(
