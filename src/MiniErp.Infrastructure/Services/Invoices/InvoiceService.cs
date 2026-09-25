@@ -133,10 +133,16 @@ public sealed partial class InvoiceService(
         dbContext.Invoices.Add(invoice);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        await SaveSideEffectsAsync(
+        var sideEffectsResult = await SaveSideEffectsAsync(
             invoice,
             paymentPreparation.Value,
             cancellationToken);
+        if (sideEffectsResult.IsFailure)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<InvoiceResponse>.Failure(sideEffectsResult.Errors);
+        }
 
         var costingError = await invoiceInventoryService.RecalculateCostingAsync(
             GetCostingKeys(invoice),
@@ -250,7 +256,8 @@ public sealed partial class InvoiceService(
             }
         }
 
-        if (await HasCashVoucherTripReferencesAsync(id, cancellationToken))
+        if (invoice.DriverId != request.DriverId &&
+            await HasCashVoucherTripReferencesAsync(id, cancellationToken))
         {
             return Result<InvoiceResponse>.Failure(
                 DriverTripHasCashVouchers());
@@ -364,6 +371,7 @@ public sealed partial class InvoiceService(
             var removalResult = await RemoveSideEffectsAsync(
                 invoice,
                 removeItemMovements: false,
+                removeDriverTrip: false,
                 cancellationToken);
             if (removalResult.IsFailure)
             {
@@ -373,10 +381,17 @@ public sealed partial class InvoiceService(
             }
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            await SaveSideEffectsAsync(
+            var sideEffectsResult = await SaveSideEffectsAsync(
                 invoice,
                 paymentPreparation.Value,
                 cancellationToken);
+            if (sideEffectsResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<InvoiceResponse>.Failure(
+                    sideEffectsResult.Errors);
+            }
 
             var costingError = await invoiceInventoryService.RecalculateCostingAsync(
                 oldCostingKeys
@@ -525,6 +540,7 @@ public sealed partial class InvoiceService(
         var removalResult = await RemoveSideEffectsAsync(
             invoice,
             removeItemMovements: true,
+            removeDriverTrip: true,
             cancellationToken);
         if (removalResult.IsFailure)
         {

@@ -6,11 +6,13 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
+using MiniErp.Application.Features.DriverTrips;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Application.Features.PartnerItemReports;
 using MiniErp.Application.Features.ProfitabilityReports;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Catalog;
+using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Containers;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Inventory;
@@ -3100,7 +3102,91 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task Update_ReplacesDriverTripSideEffect()
+    public async Task Update_PreservesCostedDriverTripAndSynchronizesPosting()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var postingService = new RecordingDriverTripPostingService(
+            database.Context);
+        var service = database.CreateService(
+            driverTripPostingService: postingService);
+        var created = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                driverId: 1))).Value;
+        var originalTrip = await database.Context.DriverTrips.SingleAsync();
+        var originalTripId = originalTrip.Id;
+        originalTrip.Price = 30m;
+        originalTrip.Cost = 12.5m;
+        originalTrip.CostNotes = "Keep this cost";
+        await database.Context.SaveChangesAsync();
+        database.Context.ChangeTracker.Clear();
+
+        var result = await service.UpdateAsync(
+            created.Id,
+            CreateUpdateRequest(
+                created,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
+                invoiceDate: new DateOnly(2026, 7, 26),
+                businessPartnerId: 2,
+                driverId: 2) with
+            {
+                ExportInvoiceCode = "EXP-UPDATED"
+            });
+
+        Assert.True(result.IsSuccess);
+        var trip = await database.Context.DriverTrips
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal(originalTripId, trip.Id);
+        Assert.Equal(2, trip.DriverId);
+        Assert.Equal(2, trip.BusinessPartnerId);
+        Assert.Equal(created.Id, trip.InvoiceId);
+        Assert.Equal(new DateOnly(2026, 7, 26), trip.TripDate);
+        Assert.Equal("EXP-UPDATED", trip.ExportInvoiceCode);
+        Assert.Equal(30m, trip.Price);
+        Assert.Equal(12.5m, trip.Cost);
+        Assert.Equal("Keep this cost", trip.CostNotes);
+        var posting = Assert.Single(postingService.SynchronizedTrips);
+        Assert.Equal(originalTripId, posting.Id);
+        Assert.Equal(2, posting.DriverId);
+        Assert.Equal(new DateOnly(2026, 7, 26), posting.TripDate);
+        Assert.Empty(postingService.DeletedTripIds);
+    }
+
+    [Fact]
+    public async Task Update_RemovesUnreferencedDriverTripAndPosting()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var postingService = new RecordingDriverTripPostingService(
+            database.Context);
+        var service = database.CreateService(
+            driverTripPostingService: postingService);
+        var created = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                driverId: 1))).Value;
+        var tripId = await database.Context.DriverTrips
+            .Select(trip => trip.Id)
+            .SingleAsync();
+
+        var result = await service.UpdateAsync(
+            created.Id,
+            CreateUpdateRequest(
+                created,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)]) with
+            {
+                DriverId = null,
+                ActualDriverName = null
+            });
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(await database.Context.DriverTrips.ToListAsync());
+        Assert.Equal([tripId], postingService.DeletedTripIds);
+        Assert.Empty(postingService.SynchronizedTrips);
+    }
+
+    [Fact]
+    public async Task Update_WithReferencedDriverTripAllowsNonDriverChanges()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -3108,6 +3194,43 @@ public sealed class InvoiceServiceTests
             CreateRequest(
                 InvoiceType.SalesReturn,
                 driverId: 1))).Value;
+        var trip = await database.Context.DriverTrips.SingleAsync();
+        database.Context.CashVouchers.Add(CreateDriverTripVoucher(trip));
+        await database.Context.SaveChangesAsync();
+        database.Context.ChangeTracker.Clear();
+
+        var result = await service.UpdateAsync(
+            created.Id,
+            CreateUpdateRequest(
+                created,
+                [new InvoiceLineRequest(1, 2, 1m, 11m, null)]));
+
+        Assert.True(result.IsSuccess);
+        var preservedTrip = await database.Context.DriverTrips
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal(trip.Id, preservedTrip.Id);
+        Assert.Equal(
+            trip.Id,
+            await database.Context.CashVouchers
+                .Where(voucher => voucher.DriverTripId.HasValue)
+                .Select(voucher => voucher.DriverTripId)
+                .SingleAsync());
+    }
+
+    [Fact]
+    public async Task Update_WithReferencedDriverTripRejectsDriverChange()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var created = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                driverId: 1))).Value;
+        var trip = await database.Context.DriverTrips.SingleAsync();
+        database.Context.CashVouchers.Add(CreateDriverTripVoucher(trip));
+        await database.Context.SaveChangesAsync();
+        database.Context.ChangeTracker.Clear();
 
         var result = await service.UpdateAsync(
             created.Id,
@@ -3116,10 +3239,13 @@ public sealed class InvoiceServiceTests
                 [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
                 driverId: 2));
 
-        Assert.True(result.IsSuccess);
-        var trip = await database.Context.DriverTrips.SingleAsync();
-        Assert.Equal(2, trip.DriverId);
-        Assert.Equal(created.Id, trip.InvoiceId);
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.DriverTripHasCashVouchers", result.Error.Code);
+        var preservedTrip = await database.Context.DriverTrips
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal(trip.Id, preservedTrip.Id);
+        Assert.Equal(1, preservedTrip.DriverId);
     }
 
     [Fact]
@@ -6992,6 +7118,30 @@ public sealed class InvoiceServiceTests
         return movement;
     }
 
+    private static CashVoucher CreateDriverTripVoucher(DriverTrip trip)
+    {
+        var voucher = new CashVoucher
+        {
+            CompanyId = trip.CompanyId,
+            VoucherNumber = $"DRV-{trip.Id}",
+            VoucherDate = trip.TripDate,
+            Direction = CashDirection.Payment,
+            CashboxId = 1,
+            CashMovementTypeId = 1,
+            PartyType = CashPartyType.Driver,
+            DriverId = trip.DriverId,
+            DriverTripId = trip.Id,
+            Amount = 5m,
+            Currency = CurrencyCode.EGP,
+            IsPosted = true
+        };
+        voucher.ApplyExchangeRate(
+            exchangeRateId: null,
+            exchangeRate: 1m);
+        voucher.Touch(DateTime.UtcNow);
+        return voucher;
+    }
+
     private static async Task<Error?> InvokeValidateStockAsync(
         InvoiceService service,
         Invoice invoice,
@@ -7018,6 +7168,43 @@ public sealed class InvoiceServiceTests
         var task = Assert.IsType<Task<Error?>>(invocation);
         return await task;
     }
+
+    private sealed class RecordingDriverTripPostingService(
+        ApplicationDbContext context) : IDriverTripPostingService
+    {
+        public List<DriverTripPostingSnapshot> SynchronizedTrips { get; } = [];
+
+        public List<int> DeletedTripIds { get; } = [];
+
+        public async Task<Result> SynchronizeAsync(
+            int driverTripId,
+            CancellationToken cancellationToken = default)
+        {
+            var trip = await context.DriverTrips
+                .AsNoTracking()
+                .Where(candidate => candidate.Id == driverTripId)
+                .Select(candidate => new DriverTripPostingSnapshot(
+                    Id: candidate.Id,
+                    DriverId: candidate.DriverId,
+                    TripDate: candidate.TripDate))
+                .SingleAsync(cancellationToken);
+            SynchronizedTrips.Add(trip);
+            return Result.Success();
+        }
+
+        public Task<Result> DeleteAsync(
+            int driverTripId,
+            CancellationToken cancellationToken = default)
+        {
+            DeletedTripIds.Add(driverTripId);
+            return Task.FromResult(Result.Success());
+        }
+    }
+
+    private sealed record DriverTripPostingSnapshot(
+        int Id,
+        int DriverId,
+        DateOnly TripDate);
 
     private sealed class InvoiceTestDatabase : IAsyncDisposable
     {
@@ -7054,7 +7241,8 @@ public sealed class InvoiceServiceTests
         }
 
         public InvoiceService CreateService(
-            IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
+            IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
+            IDriverTripPostingService? driverTripPostingService = null)
         {
             var companyContext = new TestCurrentCompanyContext(1);
             var invoiceInventoryService = CreateInvoiceInventoryService(
@@ -7073,7 +7261,8 @@ public sealed class InvoiceServiceTests
                 new MiniErp.Tests.TestExchangeRateResolver(),
                 invoiceInventoryService,
                 TimeProvider.System,
-                fiscalYearPeriodGuard);
+                fiscalYearPeriodGuard,
+                driverTripPostingService: driverTripPostingService);
         }
 
         public InvoiceQueryService CreateQueryService()

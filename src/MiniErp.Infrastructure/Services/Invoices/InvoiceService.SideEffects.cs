@@ -13,7 +13,7 @@ namespace MiniErp.Infrastructure.Services.Invoices;
 
 public sealed partial class InvoiceService
 {
-    private async Task SaveSideEffectsAsync(
+    private async Task<Result> SaveSideEffectsAsync(
         Invoice invoice,
         PaymentPreparation? paymentPreparation,
         CancellationToken cancellationToken)
@@ -73,30 +73,35 @@ public sealed partial class InvoiceService
             paymentPreparation,
             cancellationToken);
 
-        if (invoice.DriverId.HasValue)
+        var driverTripResult = await SynchronizeDriverTripAsync(
+            invoice,
+            cancellationToken);
+        if (driverTripResult.IsFailure)
         {
-            dbContext.DriverTrips.Add(
-                new DriverTrip
-                {
-                    CompanyId = companyId,
-                    DriverId = invoice.DriverId.Value,
-                    ActualDriverName = invoice.UsesExternalDriver
-                        ? null
-                        : invoice.ActualDriverName,
-                    InvoiceId = invoice.Id,
-                    BusinessPartnerId = invoice.BusinessPartnerId,
-                    InvoiceNumber = invoice.InvoiceNumber,
-                    ExportInvoiceCode = invoice.ExportInvoiceCode,
-                    TripDate = invoice.InvoiceDate
-                });
+            return Result.Failure(driverTripResult.Errors);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        var driverTrip = driverTripResult.Value;
+        if (driverTripPostingService is not null &&
+            driverTrip?.Cost is not null)
+        {
+            var postingResult = await driverTripPostingService
+                .SynchronizeAsync(driverTrip.Id, cancellationToken);
+            if (postingResult.IsFailure)
+            {
+                return Result.Failure(postingResult.Errors);
+            }
+        }
+
+        return Result.Success();
     }
 
     private async Task<Result> RemoveSideEffectsAsync(
         Invoice invoice,
         bool removeItemMovements,
+        bool removeDriverTrip,
         CancellationToken cancellationToken)
     {
         var itemMovements = removeItemMovements
@@ -112,11 +117,13 @@ public sealed partial class InvoiceService
                 movement.CompanyId == companyId &&
                 movement.InvoiceId == invoice.Id)
             .ToListAsync(cancellationToken);
-        var driverTrips = await dbContext.DriverTrips
-            .Where(trip =>
-                trip.CompanyId == companyId &&
-                trip.InvoiceId == invoice.Id)
-            .ToListAsync(cancellationToken);
+        var driverTrips = removeDriverTrip
+            ? await dbContext.DriverTrips
+                .Where(trip =>
+                    trip.CompanyId == companyId &&
+                    trip.InvoiceId == invoice.Id)
+                .ToListAsync(cancellationToken)
+            : [];
 
         if (driverTripPostingService is not null)
         {
@@ -166,6 +173,61 @@ public sealed partial class InvoiceService
         dbContext.CashVouchers.RemoveRange(paymentVouchers);
         dbContext.DriverTrips.RemoveRange(driverTrips);
         return Result.Success();
+    }
+
+    private async Task<Result<DriverTrip?>> SynchronizeDriverTripAsync(
+        Invoice invoice,
+        CancellationToken cancellationToken)
+    {
+        var driverTrip = await dbContext.DriverTrips
+            .SingleOrDefaultAsync(
+                trip =>
+                    trip.CompanyId == companyId &&
+                    trip.InvoiceId == invoice.Id,
+                cancellationToken);
+
+        if (!invoice.DriverId.HasValue)
+        {
+            if (driverTrip is null)
+            {
+                return Result<DriverTrip?>.Success(null);
+            }
+
+            if (driverTripPostingService is not null)
+            {
+                var postingResult = await driverTripPostingService.DeleteAsync(
+                    driverTrip.Id,
+                    cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    return Result<DriverTrip?>.Failure(postingResult.Errors);
+                }
+            }
+
+            dbContext.DriverTrips.Remove(driverTrip);
+            return Result<DriverTrip?>.Success(null);
+        }
+
+        if (driverTrip is null)
+        {
+            driverTrip = new DriverTrip
+            {
+                CompanyId = companyId,
+                InvoiceId = invoice.Id
+            };
+            dbContext.DriverTrips.Add(driverTrip);
+        }
+
+        driverTrip.DriverId = invoice.DriverId.Value;
+        driverTrip.ActualDriverName = invoice.UsesExternalDriver
+            ? null
+            : invoice.ActualDriverName;
+        driverTrip.BusinessPartnerId = invoice.BusinessPartnerId;
+        driverTrip.InvoiceNumber = invoice.InvoiceNumber;
+        driverTrip.ExportInvoiceCode = invoice.ExportInvoiceCode;
+        driverTrip.TripDate = invoice.InvoiceDate;
+
+        return Result<DriverTrip?>.Success(driverTrip);
     }
 
     private async Task SynchronizePaymentVoucherAsync(
