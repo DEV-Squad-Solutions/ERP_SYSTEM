@@ -54,6 +54,14 @@ public sealed class InvoiceLineRequestValidator
             .GreaterThan(0)
             .When(line => line.SourceInvoiceLineId.HasValue);
 
+        RuleFor(line => line.ReturnPriceMode)
+            .IsInEnum()
+            .When(line => line.ReturnPriceMode.HasValue);
+
+        RuleFor(line => line.ReturnPriceDifferenceReason)
+            .MaximumLength(InvoiceRequest.ReturnPriceDifferenceReasonMaximumLength)
+            .When(line => line.ReturnPriceDifferenceReason is not null);
+
         RuleFor(line => line.ReturnUnitCost)
             .GreaterThanOrEqualTo(0m)
             .When(line => line.ReturnUnitCost.HasValue)

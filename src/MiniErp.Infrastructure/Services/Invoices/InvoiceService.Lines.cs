@@ -38,7 +38,8 @@ public sealed partial class InvoiceService
             ApplyReturnCostInput(
                 invoice.InvoiceType,
                 line,
-                requestLine);
+                requestLine,
+                preparation);
             invoice.Lines.Add(line);
         }
     }
@@ -87,7 +88,8 @@ public sealed partial class InvoiceService
             ApplyReturnCostInput(
                 invoice.InvoiceType,
                 existingLine,
-                incoming);
+                incoming,
+                preparation);
             existingLine.Notes = string.IsNullOrWhiteSpace(incoming.Notes)
                 ? null
                 : incoming.Notes.Trim();
@@ -125,7 +127,8 @@ public sealed partial class InvoiceService
             ApplyReturnCostInput(
                 invoice.InvoiceType,
                 line,
-                incoming);
+                incoming,
+                preparation);
             invoice.Lines.Add(line);
         }
 
@@ -147,7 +150,8 @@ public sealed partial class InvoiceService
             ApplyReturnCostInput(
                 invoice.InvoiceType,
                 line,
-                incoming);
+                incoming,
+                preparation);
             invoice.Lines.Add(line);
         }
     }
@@ -155,12 +159,24 @@ public sealed partial class InvoiceService
     private static void ApplyReturnCostInput(
         InvoiceType invoiceType,
         InvoiceLine line,
-        InvoiceLineRequest request)
+        InvoiceLineRequest request,
+        PreparedInvoice preparation)
     {
+        var previousSourceLineId = line.SourceInvoiceLineId;
+        var previousPriceMode = line.ReturnPriceMode;
+        var previousSourcePriceSnapshot = line.SourceUnitPriceSnapshot;
+
         if (invoiceType == InvoiceType.SalesReturn)
         {
             line.SourceInvoiceLineId = request.SourceInvoiceLineId;
             line.ReturnUnitCost = request.ReturnUnitCost;
+            ApplyReturnPriceMetadata(
+                line,
+                request,
+                preparation,
+                previousSourceLineId,
+                previousPriceMode,
+                previousSourcePriceSnapshot);
             return;
         }
 
@@ -168,11 +184,21 @@ public sealed partial class InvoiceService
         {
             line.SourceInvoiceLineId = request.SourceInvoiceLineId;
             line.ReturnUnitCost = null;
+            ApplyReturnPriceMetadata(
+                line,
+                request,
+                preparation,
+                previousSourceLineId,
+                previousPriceMode,
+                previousSourcePriceSnapshot);
             return;
         }
 
         line.SourceInvoiceLineId = null;
         line.ReturnUnitCost = null;
+        line.ReturnPriceMode = null;
+        line.SourceUnitPriceSnapshot = null;
+        line.ReturnPriceDifferenceReason = null;
     }
 
     private static decimal GetPreparedReturnPrice(
@@ -182,8 +208,40 @@ public sealed partial class InvoiceService
         preparation.ReturnSourceLines.TryGetValue(
             sourceInvoiceLineId,
             out var source)
-            ? source.UnitPrice
+            ? source.PriceMode == ReturnPriceMode.OriginalPrice
+                ? source.UnitPrice
+                : request.Price
             : request.Price;
+
+    private static void ApplyReturnPriceMetadata(
+        InvoiceLine line,
+        InvoiceLineRequest request,
+        PreparedInvoice preparation,
+        int? previousSourceLineId,
+        ReturnPriceMode? previousPriceMode,
+        decimal? previousSourcePriceSnapshot)
+    {
+        if (request.SourceInvoiceLineId is not int sourceInvoiceLineId ||
+            !preparation.ReturnSourceLines.TryGetValue(
+                sourceInvoiceLineId,
+                out var source))
+        {
+            line.ReturnPriceMode = null;
+            line.SourceUnitPriceSnapshot = null;
+            line.ReturnPriceDifferenceReason = null;
+            return;
+        }
+
+        line.ReturnPriceMode = source.PriceMode;
+        line.SourceUnitPriceSnapshot =
+            source.PriceMode == ReturnPriceMode.ManualPrice &&
+            previousSourceLineId == sourceInvoiceLineId &&
+            previousPriceMode == ReturnPriceMode.ManualPrice &&
+            previousSourcePriceSnapshot.HasValue
+                ? previousSourcePriceSnapshot
+                : source.UnitPrice;
+        line.ReturnPriceDifferenceReason = source.DifferenceReason;
+    }
 
     private static void ApplyPreparedReturnDiscount(
         Invoice invoice,

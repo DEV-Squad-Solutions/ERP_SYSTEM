@@ -218,6 +218,56 @@ public sealed class StockTransferServiceTests
     }
 
     [Fact]
+    public async Task BackdatedSourceCostChange_PropagatesAcrossTransferChain()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Stores (
+                Id, CompanyId, BusinessPartnerId, Code, Name, Address,
+                IsContainerStore, IsActive, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (5, 1, NULL, 'THIRD', 'Third Store', NULL,
+                    0, 1, 'test', '2026-01-01', 'test', 0);
+            """);
+        await AddSourceCostAsync(database, 10m, 20m);
+        var transferService = database.CreateStockTransferService();
+        var first = await transferService.AddAsync(Request(5m));
+        Assert.True(first.IsSuccess, first.Error.Description);
+        var second = await transferService.AddAsync(
+            new StockTransferRequest(
+                TransferDate: new DateOnly(2026, 7, 3),
+                SourceStoreId: 4,
+                DestinationStoreId: 5,
+                Notes: null,
+                Lines: [new StockTransferLineRequest(1, 5m, null)]));
+        Assert.True(second.IsSuccess, second.Error.Description);
+
+        var backdated = await database.CreateStockAdjustmentService().AddAsync(
+            new StockAdjustmentRequest(
+                StoreId: 1,
+                DocumentDate: new DateOnly(2026, 7, 1),
+                Direction: StockAdjustmentDirection.Increase,
+                Reason: null,
+                Lines:
+                [
+                    new StockAdjustmentLineRequest(1, 10m, null)
+                    {
+                        UnitCost = 30m
+                    }
+                ]));
+
+        Assert.True(backdated.IsSuccess, backdated.Error.Description);
+        var refreshed = await transferService.GetByIdAsync(second.Value.Id);
+        Assert.True(refreshed.IsSuccess, refreshed.Error.Description);
+        var line = Assert.Single(refreshed.Value.Lines);
+        Assert.Equal(16.66666667m, line.SourceUnitCost);
+        Assert.Equal(16.66666667m, line.DestinationUnitCost);
+        Assert.Equal(83.33333335m, line.DestinationInventoryValueAfter);
+    }
+
+    [Fact]
     public async Task GetById_DoesNotExposeAnotherCompanyTransfer()
     {
         await using var database = await InventoryDocumentTestDatabase.CreateAsync();

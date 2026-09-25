@@ -121,6 +121,30 @@ public static class InvoiceErrors
             "تكلفة وحدة المرتجع يجب أن تكون صفرًا أو أكثر.",
             nameof(InvoiceLineRequest.ReturnUnitCost));
 
+    public static Error ReturnPriceFieldsNotAllowed() =>
+        Error.Validation(
+            "Invoices.ReturnPriceFieldsNotAllowed",
+            "طريقة وسعر المرتجع وسبب اختلاف السعر تستخدم فقط مع سطر مرتجع مرتبط بفاتورة أصلية.",
+            nameof(InvoiceLineRequest.ReturnPriceMode));
+
+    public static Error ReturnPriceModeInvalid() =>
+        Error.Validation(
+            "Invoices.ReturnPriceModeInvalid",
+            "طريقة تسعير المرتجع غير صحيحة.",
+            nameof(InvoiceLineRequest.ReturnPriceMode));
+
+    public static Error ReturnPriceDifferenceReasonRequired() =>
+        Error.Validation(
+            "Invoices.ReturnPriceDifferenceReasonRequired",
+            "اذكر سبب اختلاف سعر المرتجع عن سعر الفاتورة الأصلية.",
+            nameof(InvoiceLineRequest.ReturnPriceDifferenceReason));
+
+    public static Error ReturnPriceDifferenceReasonNotAllowed() =>
+        Error.Validation(
+            "Invoices.ReturnPriceDifferenceReasonNotAllowed",
+            "سبب اختلاف السعر يستخدم فقط مع طريقة السعر اليدوي.",
+            nameof(InvoiceLineRequest.ReturnPriceDifferenceReason));
+
     public static Error InvalidSalesReturnSource() =>
         Error.Validation(
             "Invoices.InvalidSalesReturnSource",
@@ -441,6 +465,44 @@ public static class InvoiceErrors
         Error.Conflict(
             "Invoices.LinkedSalesReturnsExist",
             "لا يمكن تعديل أو حذف الفاتورة لوجود مرتجع مرتبط بها.");
+
+    public static Error LinkedReturnSourceHeaderCannotChange(
+        string fieldName,
+        string fieldLabel) =>
+        Error.Conflict(
+            "Invoices.LinkedReturnSourceHeaderCannotChange",
+            $"لا يمكن تغيير {fieldLabel} للفاتورة لوجود مرتجع مرتبط بها.",
+            fieldName);
+
+    public static Error LinkedReturnSourceDateCannotMoveAfterReturn(
+        DateOnly returnDate) =>
+        Error.Conflict(
+            "Invoices.LinkedReturnSourceDateCannotMoveAfterReturn",
+            $"لا يمكن جعل تاريخ الفاتورة الأصلية بعد تاريخ المرتجع المرتبط ({returnDate:yyyy-MM-dd}).",
+            nameof(InvoiceUpdateRequest.InvoiceDate));
+
+    public static Error LinkedReturnSourceLineCannotRemove(
+        int sourceInvoiceLineId) =>
+        Error.Conflict(
+            "Invoices.LinkedReturnSourceLineCannotRemove",
+            $"لا يمكن حذف سطر الصنف رقم {sourceInvoiceLineId} لأنه مستخدم في مرتجع مرتبط.",
+            nameof(InvoiceUpdateRequest.Lines));
+
+    public static Error LinkedReturnSourceQuantityTooSmall(
+        int sourceInvoiceLineId,
+        decimal returnedQuantity) =>
+        Error.Conflict(
+            "Invoices.LinkedReturnSourceQuantityTooSmall",
+            $"كمية السطر رقم {sourceInvoiceLineId} لا يمكن أن تقل عن الكمية المرتجعة {returnedQuantity}.",
+            nameof(InvoiceUpdateRequest.Lines));
+
+    public static Error LinkedReturnUpdateConflict(
+        string? invoiceNumber,
+        string reason) =>
+        Error.Conflict(
+            "Invoices.LinkedReturnUpdateConflict",
+            $"لا يمكن مزامنة المرتجع المرتبط {invoiceNumber ?? ""}: {reason}",
+            nameof(InvoiceUpdateRequest.Lines));
 
     public static Error CashInvoiceMustBeFullyPaid() =>
         Error.Validation(

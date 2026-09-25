@@ -7,6 +7,7 @@ using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.CashboxRevaluations;
 using static MiniErp.Application.Features.JournalEntries.JournalEntryErrors;
 
 namespace MiniErp.Infrastructure.Services.JournalEntries;
@@ -152,6 +153,18 @@ public sealed class JournalEntryService(
                 accountValidation.Errors);
         }
 
+        var revaluationGuardError = await CashboxRevaluationGuard.ValidateAsync(
+            dbContext,
+            companyId,
+            request.EntryDate,
+            lines.Where(line => line.PartyType == JournalPartyType.Cashbox)
+                .Select(line => line.PartyId ?? 0),
+            cancellationToken);
+        if (revaluationGuardError is not null)
+        {
+            return Result<JournalEntryResponse>.Failure(revaluationGuardError);
+        }
+
         var entryNumber = await EntityIdentifierGenerator.GenerateUniqueAsync(
             dbContext,
             prefix: "JV",
@@ -260,6 +273,24 @@ public sealed class JournalEntryService(
             entry.ReversalOfEntryId.HasValue)
         {
             return Result<JournalEntryResponse>.Failure(ReversedReadOnly());
+        }
+
+        var affectedCashboxIds = entry.Lines
+            .Where(line => line.PartyType == JournalPartyType.Cashbox)
+            .Select(line => line.PartyId ?? 0)
+            .Concat(lines.Where(line => line.PartyType == JournalPartyType.Cashbox)
+                .Select(line => line.PartyId ?? 0));
+        var revaluationGuardError = await CashboxRevaluationGuard.ValidateAsync(
+            dbContext,
+            companyId,
+            entry.EntryDate <= request.EntryDate
+                ? entry.EntryDate
+                : request.EntryDate,
+            affectedCashboxIds,
+            cancellationToken);
+        if (revaluationGuardError is not null)
+        {
+            return Result<JournalEntryResponse>.Failure(revaluationGuardError);
         }
 
         var fiscalYearValidation = await ValidateFiscalYearAsync(
@@ -381,6 +412,18 @@ public sealed class JournalEntryService(
             entry.ReversalOfEntryId.HasValue)
         {
             return Result.Failure(ReversedReadOnly());
+        }
+
+        var revaluationGuardError = await CashboxRevaluationGuard.ValidateAsync(
+            dbContext,
+            companyId,
+            entry.EntryDate,
+            entry.Lines.Where(line => line.PartyType == JournalPartyType.Cashbox)
+                .Select(line => line.PartyId ?? 0),
+            cancellationToken);
+        if (revaluationGuardError is not null)
+        {
+            return Result.Failure(revaluationGuardError);
         }
 
         var fiscalYearValidation = await ValidateFiscalYearAsync(

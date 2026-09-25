@@ -14,6 +14,7 @@ using MiniErp.Infrastructure.Services.DriverTrips;
 using MiniErp.Infrastructure.Services.JournalEntries;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.Statements;
+using MiniErp.Infrastructure.Services.CashboxRevaluations;
 using MiniErp.Domain.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using MiniErp.Tests.TestDoubles;
@@ -147,6 +148,26 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
         new(
             context ?? Context,
             new TestCurrentCompanyContext(companyId));
+
+    public CashboxRevaluationService CreateCashboxRevaluationService(
+        int companyId,
+        ApplicationDbContext? context = null)
+    {
+        var serviceContext = context ?? Context;
+        var companyContext = new TestCurrentCompanyContext(companyId);
+        var resolver = new AccountMappingResolver(serviceContext, companyContext);
+        var posting = new AutomaticPostingService(
+            serviceContext,
+            companyContext,
+            TimeProvider.System,
+            NullLogger<AutomaticPostingService>.Instance);
+        return new CashboxRevaluationService(
+            serviceContext,
+            companyContext,
+            resolver,
+            posting,
+            TimeProvider.System);
+    }
 
     public async Task SeedPostedJournalEntryAsync(
         int journalEntryId,
@@ -368,6 +389,32 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 DeletedByPc TEXT NULL,
                 IsDeleted INTEGER NOT NULL
             );
+
+            CREATE TABLE CashboxRevaluations (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                CashboxId INTEGER NOT NULL,
+                RevaluationDate TEXT NOT NULL,
+                ClosingRate NUMERIC NOT NULL,
+                ForeignAmount NUMERIC NOT NULL,
+                CarryingBaseAmount NUMERIC NOT NULL,
+                TargetBaseAmount NUMERIC NOT NULL,
+                DeltaBaseAmount NUMERIC NOT NULL,
+                JournalEntryId INTEGER NULL,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE UNIQUE INDEX IX_CashboxRevaluations_Company_Cashbox_Date
+            ON CashboxRevaluations (CompanyId, CashboxId, RevaluationDate)
+            WHERE IsDeleted = 0;
 
             CREATE TABLE BusinessPartners (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1113,6 +1160,13 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 (1, 1, 1, 5, 100, 'test', '2026-01-01', 'test', 0),
                 (1, 1, 1, 6, 100, 'test', '2026-01-01', 'test', 0),
                 (2, 2, 1, 4, 100, 'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO AccountMappings (
+                CompanyId, FiscalYearId, MappingType, SourceId, AccountId,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 13, NULL, 1, 'test', '2026-01-01', 'test', 0),
+                (1, 1, 14, NULL, 1, 'test', '2026-01-01', 'test', 0);
 
             INSERT INTO CashMovementTypes (
                 Id, CompanyId, Name, Direction, Classification, PartnerEffect, IsActive,

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
 
@@ -31,6 +32,9 @@ public sealed class InvoiceLineConfiguration
                 table.HasCheckConstraint(
                     "CK_InvoiceLines_Total_NonNegative",
                     "[Total] >= 0");
+                table.HasCheckConstraint(
+                    "CK_InvoiceLines_ReturnPriceMode_Valid",
+                    "[ReturnPriceMode] IS NULL OR [ReturnPriceMode] IN (1, 2)");
             });
 
         builder.HasKey(line => line.Id);
@@ -63,6 +67,17 @@ public sealed class InvoiceLineConfiguration
             .HasPrecision(
                 InventoryCostRules.UnitCostPrecision,
                 InventoryCostRules.UnitCostScale);
+
+        builder.Property(line => line.ReturnPriceMode)
+            .HasConversion<int>();
+
+        builder.Property(line => line.SourceUnitPriceSnapshot)
+            .HasPrecision(
+                InvoiceAmountRules.MoneyPrecision,
+                InvoiceAmountRules.MoneyScale);
+
+        builder.Property(line => line.ReturnPriceDifferenceReason)
+            .HasMaxLength(InvoiceRequest.ReturnPriceDifferenceReasonMaximumLength);
 
         builder.Property(line => line.Count)
             .IsRequired();

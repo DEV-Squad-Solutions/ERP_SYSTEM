@@ -1277,6 +1277,14 @@ public sealed class AccountingSetupServiceTests
                     FOREIGN KEY (CompanyId) REFERENCES Companies (Id)
                 );
 
+                CREATE TABLE CashboxRevaluations (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    CashboxId INTEGER NOT NULL,
+                    RevaluationDate TEXT NOT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
                 CREATE UNIQUE INDEX UX_Cashboxes_Company_Code
                 ON Cashboxes (CompanyId, Code) WHERE IsDeleted = 0;
 

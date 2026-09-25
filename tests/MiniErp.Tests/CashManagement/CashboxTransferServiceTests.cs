@@ -395,7 +395,13 @@ public sealed class CashboxTransferServiceTests
                 new CashboxStatementFilterRequest(CashboxId: 1));
 
         Assert.True(statement.IsSuccess);
-        var item = Assert.Single(statement.Value.Items);
+        Assert.Equal(2, statement.Value.TotalCount);
+        Assert.Equal("رصيد افتتاحي", statement.Value.Items[0].MovementName);
+        Assert.Null(statement.Value.Items[0].CashVoucherId);
+        var item = Assert.Single(
+            statement.Value.Items,
+            candidate => candidate.SourceType ==
+                JournalEntrySourceType.CashboxTransfer);
         Assert.Equal("تحويل خزائن صادر", item.MovementName);
         Assert.Equal(75m, item.PaymentAmount);
         Assert.Equal(925m, item.Balance);

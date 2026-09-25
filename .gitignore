@@ -13,5 +13,6 @@ graphify-out
 artifacts/
 output/pdf
 tmp/pdfs/render
-docs
+docs/*
+!docs/manual-return-pricing-strategy.md
 tmp

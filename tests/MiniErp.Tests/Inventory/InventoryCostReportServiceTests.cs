@@ -1,5 +1,6 @@
 using MiniErp.Application.Features.InventoryCostReports;
 using MiniErp.Application.Features.StockAdjustments;
+using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
 
 namespace MiniErp.Tests.Inventory;
@@ -97,6 +98,44 @@ public sealed class InventoryCostReportServiceTests
                 allocation.RelatedMovementId == result.Value.Items[0].MovementId);
         Assert.Equal(1, result.Value.Summary.RevaluedMovementCount);
         Assert.Equal(0m, result.Value.Summary.PendingCostQuantity);
+    }
+
+    [Fact]
+    public async Task PendingSummary_IncludesInboundPendingQuantity()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        var movement = new ItemMovement
+        {
+            CompanyId = 1,
+            StoreId = 1,
+            ItemId = 2,
+            ItemUnitId = 1,
+            MovementType = ItemMovementType.SalesReturn,
+            ReferenceId = 500,
+            ReferenceNumber = "RETURN-PENDING-500",
+            MovementDate = new DateOnly(2026, 1, 5),
+            QuantityIn = 3m,
+            QuantityOut = 0m
+        };
+        movement.ApplyCostSnapshot(
+            costStatus: InventoryCostStatus.Pending,
+            pendingCostQuantity: 3m,
+            unitCost: null,
+            totalCost: 0m,
+            quantityAfter: 3m,
+            averageCostAfter: 0m,
+            inventoryValueAfter: 0m);
+        database.Context.ItemMovements.Add(movement);
+        await database.Context.SaveChangesAsync();
+
+        var result = await database.CreateInventoryCostReportService().GetAsync(
+            new() { PageNumber = 1, PageSize = 20 },
+            new InventoryCostReportFilterRequest(StoreId: 1, ItemId: 2));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(3m, result.Value.Summary.PendingCostQuantity);
+        Assert.Equal(1, result.Value.Summary.PendingMovementCount);
     }
 
     private static async Task AddAdjustmentAsync(

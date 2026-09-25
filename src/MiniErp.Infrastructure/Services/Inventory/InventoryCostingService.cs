@@ -15,7 +15,8 @@ public sealed class InventoryCostingService(
     ICurrentCompanyContext currentCompanyContext,
     TimeProvider timeProvider,
     IInventoryCostPostingSynchronizer?
-        inventoryCostPostingSynchronizer = null)
+        inventoryCostPostingSynchronizer = null,
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     : IInventoryCostingService
 {
     private const string CostFieldName = "unitCost";
@@ -52,13 +53,48 @@ public sealed class InventoryCostingService(
         });
         var pendingKeys = new SortedSet<InventoryCostingKey>(keys, keyComparer);
         var recalculatedKeys = new HashSet<InventoryCostingKey>();
+        var processedTransferFingerprints =
+            new Dictionary<InventoryCostingKey, string>();
+        var transferKeys = await LoadTransferKeysAsync(
+            pendingKeys,
+            cancellationToken);
+        foreach (var transferKey in transferKeys)
+        {
+            pendingKeys.Add(transferKey);
+        }
 
         await LockAsync(pendingKeys.ToArray(), cancellationToken);
 
+        var maxIterations = Math.Max(
+            1000L,
+            (long)pendingKeys.Count * 4L);
+        var iterations = 0L;
+
         while (pendingKeys.Count > 0)
         {
+            if (++iterations > maxIterations)
+            {
+                return TransferCostingCycle();
+            }
+
             var key = pendingKeys.Min!;
             pendingKeys.Remove(key);
+
+            var transferFingerprint = await BuildTransferInputFingerprintAsync(
+                key,
+                cancellationToken);
+            if (processedTransferFingerprints.TryGetValue(
+                    key,
+                    out var previousFingerprint) &&
+                string.Equals(
+                    previousFingerprint,
+                    transferFingerprint,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            processedTransferFingerprints[key] = transferFingerprint;
             recalculatedKeys.Add(key);
             var balance = await LockBalanceAsync(
                 key,
@@ -171,6 +207,91 @@ public sealed class InventoryCostingService(
         }
 
         return new TransferSynchronizationResult(null, dependentKeys);
+    }
+
+    private async Task<IReadOnlyCollection<InventoryCostingKey>>
+        LoadTransferKeysAsync(
+            IReadOnlyCollection<InventoryCostingKey> initialKeys,
+            CancellationToken cancellationToken)
+    {
+        var transferRows = await dbContext.ItemMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                (movement.MovementType == ItemMovementType.TransferIn ||
+                 movement.MovementType == ItemMovementType.TransferOut))
+            .Select(movement => new
+            {
+                movement.ReferenceId,
+                movement.StoreId,
+                movement.ItemId,
+                movement.MovementType
+            })
+            .ToListAsync(cancellationToken);
+        var adjacency = new Dictionary<InventoryCostingKey, HashSet<InventoryCostingKey>>();
+        foreach (var group in transferRows.GroupBy(row =>
+                     (row.ReferenceId, row.ItemId)))
+        {
+            var groupKeys = group
+                .Select(row => new InventoryCostingKey(row.StoreId, row.ItemId))
+                .Distinct()
+                .ToArray();
+            foreach (var groupKey in groupKeys)
+            {
+                if (!adjacency.TryGetValue(groupKey, out var neighbours))
+                {
+                    neighbours = [];
+                    adjacency[groupKey] = neighbours;
+                }
+
+                foreach (var neighbour in groupKeys.Where(candidate => candidate != groupKey))
+                {
+                    neighbours.Add(neighbour);
+                }
+            }
+        }
+
+        var closure = new HashSet<InventoryCostingKey>(initialKeys);
+        var queue = new Queue<InventoryCostingKey>(initialKeys);
+        while (queue.Count > 0)
+        {
+            var key = queue.Dequeue();
+            if (!adjacency.TryGetValue(key, out var neighbours))
+            {
+                continue;
+            }
+
+            foreach (var neighbour in neighbours)
+            {
+                if (closure.Add(neighbour))
+                {
+                    queue.Enqueue(neighbour);
+                }
+            }
+        }
+
+        return closure;
+    }
+
+    private async Task<string> BuildTransferInputFingerprintAsync(
+        InventoryCostingKey key,
+        CancellationToken cancellationToken)
+    {
+        var movements = await dbContext.ItemMovements
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.StoreId == key.StoreId &&
+                movement.ItemId == key.ItemId &&
+                movement.MovementType == ItemMovementType.TransferIn)
+            .OrderBy(movement => movement.Id)
+            .ToListAsync(cancellationToken);
+
+        return string.Join(
+            ";",
+            movements
+                .OrderBy(movement => movement.Id)
+                .Select(movement =>
+                    $"{movement.Id}:{movement.UnitCost?.ToString("G29", System.Globalization.CultureInfo.InvariantCulture) ?? "null"}"));
     }
 
     private sealed record TransferSynchronizationResult(
@@ -303,6 +424,18 @@ public sealed class InventoryCostingService(
             .ThenBy(movement => movement.Id)
             .ToListAsync(cancellationToken);
 
+        var originalSnapshots = movements.ToDictionary(
+            movement => movement.Id,
+            movement => new CostSnapshot(
+                GetOriginalMovementDate(movement),
+                movement.CostStatus,
+                movement.PendingCostQuantity,
+                movement.UnitCost,
+                movement.TotalCost,
+                movement.QuantityAfter,
+                movement.AverageCostAfter,
+                movement.InventoryValueAfter));
+
         var allocations = await dbContext.InventoryCostAllocations
             .Where(allocation =>
                 allocation.CompanyId == companyId &&
@@ -326,6 +459,15 @@ public sealed class InventoryCostingService(
             initialReplay.PendingSalesReturns);
         if (sourceCostOverrides.Count == 0)
         {
+            var openError = await EnsureCostChangesOpenAsync(
+                movements,
+                originalSnapshots,
+                cancellationToken);
+            if (openError is not null)
+            {
+                return openError;
+            }
+
             dbContext.InventoryCostAllocations.AddRange(initialAllocations);
             balance.Apply(
                 initialReplay.Quantity,
@@ -345,6 +487,15 @@ public sealed class InventoryCostingService(
             return finalReplay.Error;
         }
 
+        var finalOpenError = await EnsureCostChangesOpenAsync(
+            movements,
+            originalSnapshots,
+            cancellationToken);
+        if (finalOpenError is not null)
+        {
+            return finalOpenError;
+        }
+
         dbContext.InventoryCostAllocations.AddRange(finalAllocations);
         balance.Apply(
             finalReplay.Quantity,
@@ -352,6 +503,79 @@ public sealed class InventoryCostingService(
             finalReplay.InventoryValue);
         return null;
     }
+
+    private async Task<Error?> EnsureCostChangesOpenAsync(
+        IReadOnlyCollection<ItemMovement> movements,
+        IReadOnlyDictionary<int, CostSnapshot> originalSnapshots,
+        CancellationToken cancellationToken)
+    {
+        if (fiscalYearPeriodGuard is null)
+        {
+            return null;
+        }
+
+        foreach (var movement in movements)
+        {
+            if (!originalSnapshots.TryGetValue(movement.Id, out var original) ||
+                !HasCostChanged(movement, original))
+            {
+                continue;
+            }
+
+            var currentResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                movement.MovementDate,
+                "movementDate",
+                cancellationToken);
+            if (currentResult.IsFailure)
+            {
+                return currentResult.Error;
+            }
+
+            if (original.MovementDate != movement.MovementDate)
+            {
+                var originalResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                    original.MovementDate,
+                    "movementDate",
+                    cancellationToken);
+                if (originalResult.IsFailure)
+                {
+                    return originalResult.Error;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private DateOnly GetOriginalMovementDate(ItemMovement movement)
+    {
+        var entry = dbContext.Entry(movement);
+        return entry.State == EntityState.Added
+            ? movement.MovementDate
+            : entry.Property(current => current.MovementDate).OriginalValue;
+    }
+
+    private static bool HasCostChanged(
+        ItemMovement movement,
+        CostSnapshot original) =>
+        movement.CostStatus != original.CostStatus ||
+        movement.PendingCostQuantity != original.PendingCostQuantity ||
+        movement.UnitCost != original.UnitCost ||
+        movement.TotalCost != original.TotalCost ||
+        movement.QuantityAfter != original.QuantityAfter ||
+        movement.AverageCostAfter != original.AverageCostAfter ||
+        movement.InventoryValueAfter != original.InventoryValueAfter ||
+        movement.MovementDate != original.MovementDate;
+
+    private sealed record CostSnapshot(
+        DateOnly MovementDate,
+        InventoryCostStatus CostStatus,
+        decimal PendingCostQuantity,
+        decimal? UnitCost,
+        decimal TotalCost,
+        decimal QuantityAfter,
+        decimal AverageCostAfter,
+        decimal InventoryValueAfter);
 
     private async Task<TimelineReplayResult> ReplayTimelineAsync(
         IReadOnlyList<ItemMovement> movements,
@@ -434,11 +658,11 @@ public sealed class InventoryCostingService(
         {
             case ItemMovementType.Purchase:
                 {
-                    var line = await FindInvoiceLineAsync(
+                    var purchaseCost = await ResolvePurchaseUnitCostAsync(
                         movement,
                         cancellationToken);
-                    return line is not null
-                        ? InboundCostResult.Success(line.BaseUnitPrice)
+                    return purchaseCost.HasValue
+                        ? InboundCostResult.Success(purchaseCost.Value)
                         : movement.UnitCost.HasValue
                             ? InboundCostResult.Success(movement.UnitCost.Value)
                             : InboundCostResult.Failure(
@@ -514,7 +738,7 @@ public sealed class InventoryCostingService(
                             sourceMovement.UnitCost.Value);
                     }
 
-                    if (quantityBefore > 0m && averageCostBefore > 0m)
+                    if (quantityBefore > 0m)
                     {
                         return InboundCostResult.Success(averageCostBefore);
                     }
@@ -580,6 +804,78 @@ public sealed class InventoryCostingService(
                     line.InvoiceId == movement.ReferenceId &&
                     line.ItemId == movement.ItemId,
                 cancellationToken);
+
+    private async Task<decimal?> ResolvePurchaseUnitCostAsync(
+        ItemMovement movement,
+        CancellationToken cancellationToken)
+    {
+        var invoice = await dbContext.Invoices
+            .AsNoTracking()
+            .Where(invoice =>
+                invoice.CompanyId == companyId &&
+                invoice.Id == movement.ReferenceId)
+            .Select(invoice => new
+            {
+                invoice.BaseTotal,
+                invoice.BaseSubtotal
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (invoice is null)
+        {
+            return null;
+        }
+
+        var lines = await dbContext.InvoiceLines
+            .AsNoTracking()
+            .Where(line =>
+                line.CompanyId == companyId &&
+                line.InvoiceId == movement.ReferenceId &&
+                !line.IsDeleted)
+            .OrderBy(line => line.Id)
+            .Select(line => new
+            {
+                line.Id,
+                line.ItemId,
+                line.Quantity,
+                line.BaseTotal
+            })
+            .ToListAsync(cancellationToken);
+        if (lines.Count == 0 || lines.Sum(line => line.Quantity) <= 0m)
+        {
+            return null;
+        }
+
+        var linesSubtotal = InventoryCostRules.RoundValue(
+            lines.Sum(line => line.BaseTotal));
+        var totalSubtotal = invoice.BaseSubtotal > 0m
+            ? invoice.BaseSubtotal
+            : linesSubtotal;
+        var targetTotal = InventoryCostRules.RoundValue(invoice.BaseTotal);
+        var allocated = 0m;
+        var itemTotal = 0m;
+        for (var index = 0; index < lines.Count; index++)
+        {
+            var line = lines[index];
+            var amount = index == lines.Count - 1
+                ? targetTotal - allocated
+                : totalSubtotal <= 0m
+                    ? 0m
+                    : InventoryCostRules.RoundValue(
+                        targetTotal * line.BaseTotal / totalSubtotal);
+            allocated = InventoryCostRules.RoundValue(allocated + amount);
+            if (line.ItemId == movement.ItemId)
+            {
+                itemTotal = InventoryCostRules.RoundValue(itemTotal + amount);
+            }
+        }
+
+        var itemQuantity = lines
+            .Where(line => line.ItemId == movement.ItemId)
+            .Sum(line => line.Quantity);
+        return itemQuantity <= 0m
+            ? null
+            : InventoryCostRules.RoundUnitCost(itemTotal / itemQuantity);
+    }
 
     private void ProcessInbound(
         ItemMovement movement,

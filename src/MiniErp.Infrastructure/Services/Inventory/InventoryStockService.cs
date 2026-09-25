@@ -187,6 +187,43 @@ public sealed class InventoryStockService(
                 storeIds.Contains(movement.StoreId) &&
                 itemIds.Contains(movement.ItemId));
 
+        var replacedOrders = new Dictionary<
+            (int StoreId, int ItemId),
+            (DateTime CreatedOn, int Id)>();
+        if (proposal.ReplacedMovement is not null)
+        {
+            var replacedMovementTypes = proposal.ReplacedMovement
+                .MovementTypes
+                .Distinct()
+                .ToArray();
+            var replacedMovements = await movementQuery
+                .Where(movement =>
+                    replacedMovementTypes.Contains(movement.MovementType) &&
+                    movement.ReferenceId ==
+                        proposal.ReplacedMovement.ReferenceId &&
+                    movement.ReferenceNumber ==
+                        proposal.ReplacedMovement.ReferenceNumber)
+                .Select(movement => new
+                {
+                    movement.StoreId,
+                    movement.ItemId,
+                    movement.CreatedOn,
+                    movement.Id
+                })
+                .ToListAsync(cancellationToken);
+            replacedOrders = replacedMovements
+                .GroupBy(movement =>
+                    (movement.StoreId, movement.ItemId))
+                .ToDictionary(
+                    group => group.Key,
+                    group => group
+                        .OrderBy(movement => movement.CreatedOn)
+                        .ThenBy(movement => movement.Id)
+                        .Select(movement =>
+                            (movement.CreatedOn, movement.Id))
+                        .First());
+        }
+
         movementQuery = ExcludeMovement(
             movementQuery,
             proposal.ReplacedMovement);
@@ -198,6 +235,7 @@ public sealed class InventoryStockService(
                 movement.StoreId,
                 movement.ItemId,
                 movement.MovementDate,
+                movement.CreatedOn,
                 movement.QuantityIn,
                 movement.QuantityOut
             })
@@ -246,8 +284,9 @@ public sealed class InventoryStockService(
                         line.ItemId == itemId)
                     .Select(line => new StockEvent(
                         line.Date,
-                        Priority: 0,
+                        Priority: -1,
                         line.Id,
+                        CreatedOn: DateTime.MinValue,
                         QuantityIn: line.Quantity,
                         QuantityOut: 0m,
                         IsProposed: false)));
@@ -262,8 +301,9 @@ public sealed class InventoryStockService(
                     events.Add(
                         new StockEvent(
                             movement.MovementDate,
-                            Priority: 1,
+                            Priority: 0,
                             movement.Id,
+                            movement.CreatedOn,
                             movement.QuantityIn,
                             QuantityOut: 0m,
                             IsProposed: false));
@@ -274,8 +314,9 @@ public sealed class InventoryStockService(
                     events.Add(
                         new StockEvent(
                             movement.MovementDate,
-                            Priority: 2,
+                            Priority: 0,
                             movement.Id,
+                            movement.CreatedOn,
                             QuantityIn: 0m,
                             movement.QuantityOut,
                             IsProposed: false));
@@ -285,11 +326,19 @@ public sealed class InventoryStockService(
             if (storeId == proposal.StoreId &&
                 requestedQuantity > 0m)
             {
+                var hasReplacedOrder = replacedOrders.TryGetValue(
+                    (storeId, itemId),
+                    out var replacedOrder);
                 events.Add(
                     new StockEvent(
                         proposal.MovementDate,
-                        Priority: proposal.IsInbound ? 1 : 2,
-                        Id: int.MaxValue,
+                        Priority: 0,
+                        Id: hasReplacedOrder
+                            ? replacedOrder.Id
+                            : int.MaxValue,
+                        CreatedOn: hasReplacedOrder
+                            ? replacedOrder.CreatedOn
+                            : DateTime.MaxValue,
                         QuantityIn: proposal.IsInbound
                             ? requestedQuantity
                             : 0m,
@@ -303,6 +352,7 @@ public sealed class InventoryStockService(
             foreach (var stockEvent in events
                          .OrderBy(stockEvent => stockEvent.Date)
                          .ThenBy(stockEvent => stockEvent.Priority)
+                         .ThenBy(stockEvent => stockEvent.CreatedOn)
                          .ThenBy(stockEvent => stockEvent.Id))
             {
                 var availableBeforeMovement = balance;
@@ -565,6 +615,7 @@ public sealed class InventoryStockService(
         DateOnly Date,
         int Priority,
         int Id,
+        DateTime CreatedOn,
         decimal QuantityIn,
         decimal QuantityOut,
         bool IsProposed);

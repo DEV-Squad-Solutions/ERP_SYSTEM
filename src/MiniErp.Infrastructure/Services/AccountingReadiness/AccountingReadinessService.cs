@@ -11,6 +11,7 @@ using MiniErp.Application.Features.Companies;
 using MiniErp.Application.Features.DriverTrips;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Application.Features.JournalEntries;
+using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 using static MiniErp.Application.Features.AccountingReadiness.AccountingReadinessErrors;
@@ -280,6 +281,23 @@ public sealed class AccountingReadinessService(
                 $"تكلفة حركة المخزون ما زالت {movement.CostStatus}."));
         }
 
+        var missingOpeningLines = await LoadMissingOpeningLinesAsync(
+            fiscalYear.StartDate,
+            fiscalYear.EndDate,
+            cancellationToken);
+        foreach (var line in missingOpeningLines)
+        {
+            issues.Add(new AccountingReadinessIssue(
+                IssueType: "MissingInventoryMovement",
+                SourceType: JournalEntrySourceType.StockOpeningBalance,
+                SourceId: line.OpeningBalanceId,
+                SourceNumber: line.DocumentNumber,
+                SourceDate: line.DocumentDate,
+                MappingType: AccountingMappingType.Inventory,
+                MappingSourceId: null,
+                Message: $"سطر الرصيد الافتتاحي للصنف {line.ItemId} لا يملك حركة OpeningBalance."));
+        }
+
         var unresolvedCounts = await dbContext.InventoryCounts
             .AsNoTracking()
             .Where(count =>
@@ -348,6 +366,7 @@ public sealed class AccountingReadinessService(
             duplicateGroups.Length == 0 &&
             unbalancedEntries.Length == 0 &&
             pendingCosts.Count == 0 &&
+            missingOpeningLines.Count == 0 &&
             unresolvedCounts.Count == 0 &&
             mappingIssues.Count == 0;
 
@@ -460,6 +479,32 @@ public sealed class AccountingReadinessService(
                 companyId,
                 fiscalYear.Id,
                 cancellationToken);
+        }
+
+        var missingOpeningLines = await LoadMissingOpeningLinesAsync(
+            fiscalYear.StartDate,
+            fiscalYear.EndDate,
+            cancellationToken);
+        foreach (var line in missingOpeningLines)
+        {
+            dbContext.ItemMovements.Add(new ItemMovement
+            {
+                CompanyId = companyId,
+                StoreId = line.StoreId,
+                ItemId = line.ItemId,
+                ItemUnitId = line.ItemUnitId,
+                MovementType = ItemMovementType.OpeningBalance,
+                ReferenceId = line.OpeningBalanceId,
+                ReferenceNumber = line.DocumentNumber,
+                MovementDate = line.DocumentDate,
+                QuantityIn = line.Quantity,
+                QuantityOut = 0m,
+                Description = $"Opening balance {line.DocumentNumber}"
+            });
+        }
+        if (missingOpeningLines.Count > 0)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
 
         var sources = await LoadSourcesAsync(
@@ -793,6 +838,35 @@ public sealed class AccountingReadinessService(
             .ToList();
     }
 
+    private Task<List<MissingOpeningLine>> LoadMissingOpeningLinesAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken) =>
+        dbContext.StockOpeningBalanceLines
+            .AsNoTracking()
+            .Where(line =>
+                line.CompanyId == companyId &&
+                line.StockOpeningBalance.CompanyId == companyId &&
+                line.StockOpeningBalance.DocumentDate >= startDate &&
+                line.StockOpeningBalance.DocumentDate <= endDate &&
+                !dbContext.ItemMovements.Any(movement =>
+                    movement.CompanyId == companyId &&
+                    movement.StoreId == line.StockOpeningBalance.StoreId &&
+                    movement.ItemId == line.ItemId &&
+                    movement.MovementType == ItemMovementType.OpeningBalance &&
+                    movement.ReferenceId == line.StockOpeningBalanceId))
+            .Select(line => new MissingOpeningLine
+            {
+                OpeningBalanceId = line.StockOpeningBalanceId,
+                StoreId = line.StockOpeningBalance.StoreId,
+                ItemId = line.ItemId,
+                ItemUnitId = line.ItemUnitId,
+                Quantity = line.Quantity,
+                DocumentNumber = line.StockOpeningBalance.DocumentNumber,
+                DocumentDate = line.StockOpeningBalance.DocumentDate
+            })
+            .ToListAsync(cancellationToken);
+
     private async Task<List<AccountingReadinessIssue>> LoadMappingIssuesAsync(
         int fiscalYearId,
         DateOnly startDate,
@@ -881,12 +955,36 @@ public sealed class AccountingReadinessService(
                 invoice.InvoiceNumber,
                 invoice.InvoiceDate,
                 invoice.InvoiceType,
+                invoice.BaseTotal,
+                IsItemInvoice = dbContext.ItemMovements.Any(movement =>
+                    movement.CompanyId == companyId &&
+                    movement.ReferenceId == invoice.Id &&
+                    (movement.MovementType == ItemMovementType.Sales ||
+                     movement.MovementType == ItemMovementType.SalesReturn ||
+                     movement.MovementType == ItemMovementType.Purchase ||
+                     movement.MovementType == ItemMovementType.PurchaseReturn)),
                 HasCost = dbContext.ItemMovements.Any(movement =>
                     movement.CompanyId == companyId &&
                     movement.ReferenceId == invoice.Id &&
                     movement.TotalCost > 0m &&
                     (movement.MovementType == ItemMovementType.Sales ||
-                     movement.MovementType == ItemMovementType.SalesReturn))
+                     movement.MovementType == ItemMovementType.SalesReturn)),
+                PurchaseReturnCarryingCost = dbContext.ItemMovements
+                    .Where(movement =>
+                        movement.CompanyId == companyId &&
+                        movement.ReferenceId == invoice.Id &&
+                        movement.MovementType == ItemMovementType.PurchaseReturn)
+                    .Sum(movement => (decimal?)movement.TotalCost) ?? 0m,
+                HasPendingPurchaseReturnCost = dbContext.ItemMovements.Any(
+                    movement =>
+                        movement.CompanyId == companyId &&
+                        movement.ReferenceId == invoice.Id &&
+                        movement.MovementType ==
+                            ItemMovementType.PurchaseReturn &&
+                        (movement.CostStatus ==
+                            InventoryCostStatus.Pending ||
+                         movement.CostStatus ==
+                            InventoryCostStatus.PartiallyCosted))
             })
             .ToListAsync(cancellationToken);
         foreach (var invoice in invoices)
@@ -906,6 +1004,11 @@ public sealed class AccountingReadinessService(
                     AccountingMappingType.PurchaseReturn,
                     AccountingMappingType.SupplierControl)
             };
+            if (invoice.IsItemInvoice &&
+                invoice.InvoiceType is InvoiceType.Purchase or InvoiceType.PurchaseReturn)
+            {
+                invoiceMapping = AccountingMappingType.Inventory;
+            }
             requirements.Add(MappingRequirement.For(
                 invoiceMapping,
                 null,
@@ -936,6 +1039,26 @@ public sealed class AccountingReadinessService(
                     invoice.Id,
                     invoice.InvoiceNumber,
                     invoice.InvoiceDate));
+            }
+
+            if (invoice.IsItemInvoice &&
+                invoice.InvoiceType == InvoiceType.PurchaseReturn &&
+                !invoice.HasPendingPurchaseReturnCost)
+            {
+                var difference = invoice.BaseTotal -
+                    invoice.PurchaseReturnCarryingCost;
+                if (difference != 0m)
+                {
+                    requirements.Add(MappingRequirement.For(
+                        difference > 0m
+                            ? AccountingMappingType.InventoryAdjustmentGain
+                            : AccountingMappingType.InventoryAdjustmentLoss,
+                        null,
+                        JournalEntrySourceType.Invoice,
+                        invoice.Id,
+                        invoice.InvoiceNumber,
+                        invoice.InvoiceDate));
+                }
             }
         }
 
@@ -1271,6 +1394,17 @@ public sealed class AccountingReadinessService(
         SourceKey Key,
         string SourceNumber,
         DateOnly SourceDate);
+
+    private sealed class MissingOpeningLine
+    {
+        public int OpeningBalanceId { get; init; }
+        public int StoreId { get; init; }
+        public int ItemId { get; init; }
+        public int? ItemUnitId { get; init; }
+        public decimal Quantity { get; init; }
+        public string DocumentNumber { get; init; } = string.Empty;
+        public DateOnly DocumentDate { get; init; }
+    }
 
     private sealed record MappingRequirement(
         AccountingMappingType MappingType,

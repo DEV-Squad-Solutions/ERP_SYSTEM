@@ -23,6 +23,8 @@ public sealed class ExchangeRateResolver(
         decimal? requestedRate = null,
         CancellationToken cancellationToken = default)
     {
+        _ = timeProvider;
+
         if (!Enum.IsDefined(currency))
         {
             return Result<ResolvedExchangeRate>.Failure(InvalidCurrency());
@@ -58,35 +60,9 @@ public sealed class ExchangeRateResolver(
 
             var roundedRate = ExchangeRateRules.RoundRate(requestedRate.Value);
 
-            var existingRate = await dbContext.ExchangeRates
-                .FirstOrDefaultAsync(entity =>
-                    entity.CompanyId == companyId &&
-                    entity.Currency == currency &&
-                    entity.RateDate == date,
-                    cancellationToken);
-
-            int? exchangeRateId = existingRate?.Id;
-            if (existingRate is null)
-            {
-                var persisted = new ExchangeRate
-                {
-                    CompanyId = companyId,
-                    Currency = currency,
-                    RateDate = date,
-                    Rate = roundedRate,
-                    Source = ExchangeRateSource.Manual,
-                    Provider = null,
-                    Notes = null
-                };
-                persisted.Touch(timeProvider.GetUtcNow().UtcDateTime);
-                dbContext.ExchangeRates.Add(persisted);
-                await dbContext.SaveChangesAsync(cancellationToken);
-                exchangeRateId = persisted.Id;
-            }
-
             return Result<ResolvedExchangeRate>.Success(
                 new ResolvedExchangeRate(
-                    ExchangeRateId: exchangeRateId,
+                    ExchangeRateId: null,
                     BaseCurrency: baseCurrency,
                     Currency: currency,
                     RequestedDate: date,

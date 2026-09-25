@@ -233,11 +233,21 @@ public sealed partial class InvoiceService(
             }
         }
 
-        if (await HasActiveLinkedReturnsAsync(
-                invoice.Lines.Select(line => line.Id).ToArray(),
-                cancellationToken))
+        var linkedReturns = await LoadActiveLinkedReturnsAsync(
+            invoice.Lines.Select(line => line.Id).ToArray(),
+            cancellationToken);
+        if (linkedReturns.Count > 0)
         {
-            return Result<InvoiceResponse>.Failure(LinkedSalesReturnsExist());
+            var linkedReturnSourceError =
+                ValidateLinkedReturnSourceUpdate(
+                    invoice,
+                    request,
+                    linkedReturns);
+            if (linkedReturnSourceError is not null)
+            {
+                return Result<InvoiceResponse>.Failure(
+                    linkedReturnSourceError);
+            }
         }
 
         if (await HasCashVoucherTripReferencesAsync(id, cancellationToken))
@@ -325,6 +335,25 @@ public sealed partial class InvoiceService(
                 paymentPreparation.Error);
         }
 
+        IReadOnlyList<int> changedLinkedReturnIds = [];
+        if (linkedReturns.Count > 0)
+        {
+            var linkedReturnFinancialResult =
+                await SynchronizeLinkedReturnFinancialsAsync(
+                    invoice,
+                    linkedReturns,
+                    cancellationToken);
+            if (linkedReturnFinancialResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<InvoiceResponse>.Failure(
+                    linkedReturnFinancialResult.Errors);
+            }
+
+            changedLinkedReturnIds = linkedReturnFinancialResult.Value;
+        }
+
         invoice.Touch(timeProvider.GetUtcNow().UtcDateTime);
         entry.Property(item => item.LastModifiedAt).IsModified = true;
 
@@ -366,15 +395,26 @@ public sealed partial class InvoiceService(
 
             if (invoicePostingService is not null)
             {
-                var postingResult = await invoicePostingService.SynchronizeAsync(
-                    invoice.Id,
-                    cancellationToken);
-                if (postingResult.IsFailure)
+                var postingInvoiceIds = linkedReturns
+                    .Where(linkedReturn =>
+                        changedLinkedReturnIds.Contains(linkedReturn.Id))
+                    .Select(linkedReturn => linkedReturn.Id)
+                    .Prepend(invoice.Id)
+                    .Distinct()
+                    .ToArray();
+                foreach (var postingInvoiceId in postingInvoiceIds)
                 {
-                    await transaction.RollbackAsync(cancellationToken);
-                    dbContext.ChangeTracker.Clear();
-                    return Result<InvoiceResponse>.Failure(
-                        postingResult.Errors);
+                    var postingResult =
+                        await invoicePostingService.SynchronizeAsync(
+                            postingInvoiceId,
+                            cancellationToken);
+                    if (postingResult.IsFailure)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        dbContext.ChangeTracker.Clear();
+                        return Result<InvoiceResponse>.Failure(
+                            postingResult.Errors);
+                    }
                 }
             }
         }

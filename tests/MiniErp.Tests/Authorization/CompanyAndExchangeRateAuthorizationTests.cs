@@ -13,7 +13,7 @@ public sealed class CompanyAndExchangeRateAuthorizationTests
             .GetCustomAttributes<AuthorizeAttribute>()
             .Single();
 
-        Assert.Equal("Admin,User", authorize.Roles);
+        Assert.Equal("Admin,User,Accountant,Cashier", authorize.Roles);
     }
 
     [Fact]

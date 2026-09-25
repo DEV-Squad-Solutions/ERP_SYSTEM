@@ -245,8 +245,9 @@ public sealed class CashboxService(
         var keepsExistingRateReference =
             cashbox.Currency == request.Currency &&
             cashbox.OpeningBalanceDate == openingDate &&
-            (cashbox.OpeningExchangeRateId.HasValue ||
-             !request.OpeningExchangeRate.HasValue);
+            (!request.OpeningExchangeRate.HasValue ||
+             (request.UpdateLinkedTransactions &&
+              cashbox.OpeningExchangeRateId.HasValue));
         if (keepsExistingRateReference)
         {
             if (request.OpeningExchangeRate is decimal requestedRate &&

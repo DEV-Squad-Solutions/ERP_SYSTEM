@@ -73,12 +73,76 @@ public sealed class FinancialStatementServiceTests
         Assert.Equal(25m, result.Value.Summary.TotalReceipts);
         Assert.Equal(40m, result.Value.Summary.TotalPayments);
         Assert.Equal(1085m, result.Value.Summary.ClosingBalance);
-        Assert.Equal(2, result.Value.TotalCount);
+        Assert.Equal(3, result.Value.TotalCount);
         Assert.Equal(
-            [1060m, 1085m],
+            [1100m, 1060m, 1085m],
             result.Value.Items.Select(item => item.Balance).ToArray());
+        Assert.Equal("OPENING-BALANCE", result.Value.Items[0].VoucherNumber);
+        Assert.Equal("رصيد افتتاحي", result.Value.Items[0].MovementName);
+        Assert.Equal("رصيد افتتاحي للفترة قبل 2026-07-20",
+            result.Value.Items[0].Description);
+        Assert.Null(result.Value.Items[0].CashVoucherId);
+        Assert.Equal(
+            JournalEntrySourceType.CashboxOpeningBalance,
+            result.Value.Items[0].SourceType);
         Assert.DoesNotContain(result.Value.Items, item =>
             item.CashVoucherId == draft.Value.Id);
+    }
+
+    [Fact]
+    public async Task CashboxStatementPaginatesOpeningBalanceAsFirstLogicalItem()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var vouchers = database.CreateVoucherService(companyId: 1);
+        var first = await AddVoucherAsync(database, vouchers,
+            CreateGeneralVoucher(
+                "CV-PAGE-RECEIPT",
+                new DateOnly(2026, 7, 10),
+                CashDirection.Receipt,
+                9,
+                10m));
+        var second = await AddVoucherAsync(database, vouchers,
+            CreateGeneralVoucher(
+                "CV-PAGE-PAYMENT",
+                new DateOnly(2026, 7, 11),
+                CashDirection.Payment,
+                10,
+                4m));
+
+        Assert.True(first.IsSuccess, first.Error.Description);
+        Assert.True(second.IsSuccess, second.Error.Description);
+
+        var statements = database.CreateStatementService(1);
+        var page1 = await statements.GetCashboxStatementAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 1 },
+            new CashboxStatementFilterRequest(CashboxId: 1));
+        var page2 = await statements.GetCashboxStatementAsync(
+            new PaginationRequest { PageNumber = 2, PageSize = 1 },
+            new CashboxStatementFilterRequest(CashboxId: 1));
+        var page3 = await statements.GetCashboxStatementAsync(
+            new PaginationRequest { PageNumber = 3, PageSize = 1 },
+            new CashboxStatementFilterRequest(CashboxId: 1));
+
+        Assert.True(page1.IsSuccess, page1.Error.Description);
+        Assert.True(page2.IsSuccess, page2.Error.Description);
+        Assert.True(page3.IsSuccess, page3.Error.Description);
+        Assert.Equal(3, page1.Value.TotalCount);
+        Assert.Equal(3, page1.Value.TotalPages);
+
+        var opening = Assert.Single(page1.Value.Items);
+        Assert.Null(opening.CashVoucherId);
+        Assert.Equal("OPENING-BALANCE", opening.VoucherNumber);
+        Assert.Equal(1000m, opening.Balance);
+
+        var firstMovement = Assert.Single(page2.Value.Items);
+        Assert.Equal(first.Value.Id, firstMovement.CashVoucherId);
+        Assert.Equal(1010m, firstMovement.Balance);
+
+        var secondMovement = Assert.Single(page3.Value.Items);
+        Assert.Equal(second.Value.Id, secondMovement.CashVoucherId);
+        Assert.Equal(1006m, secondMovement.Balance);
+        Assert.NotEqual(firstMovement.CashVoucherId, secondMovement.CashVoucherId);
     }
 
     [Fact]
@@ -125,7 +189,8 @@ public sealed class FinancialStatementServiceTests
                 Page(),
                 new CashboxStatementFilterRequest(CashboxId: 1));
         Assert.True(result.IsSuccess);
-        Assert.Single(result.Value.Items);
+        Assert.Equal(2, result.Value.Items.Count);
+        Assert.Equal("رصيد افتتاحي", result.Value.Items[0].MovementName);
         Assert.Contains(result.Value.Items, item =>
             item.CashVoucherId == bulk.Value.Items[0].Id &&
             item.MovementName == "سند قبض" &&
@@ -164,10 +229,12 @@ public sealed class FinancialStatementServiceTests
                     CashboxId: 1,
                     Classification: CashMovementClassification.Expense));
 
-        var item = Assert.Single(result.Value.Items);
+        var item = Assert.Single(result.Value.Items,
+            candidate => candidate.CashVoucherId == expense.Value.Id);
         Assert.Equal(expense.Value.Id, item.CashVoucherId);
         Assert.Equal(10m, result.Value.Summary.TotalPayments);
         Assert.Equal(0m, result.Value.Summary.TotalReceipts);
+        Assert.Equal("رصيد افتتاحي", result.Value.Items[0].MovementName);
     }
 
     [Fact]
@@ -190,10 +257,12 @@ public sealed class FinancialStatementServiceTests
                     EmployeeId: 1));
 
         Assert.True(employeeVoucher.IsSuccess);
-        var item = Assert.Single(result.Value.Items);
+        var item = Assert.Single(result.Value.Items,
+            candidate => candidate.CashVoucherId == employeeVoucher.Value.Id);
         Assert.Equal(employeeVoucher.Value.Id, item.CashVoucherId);
         Assert.Equal("Employee One", item.PartyName);
         Assert.Equal(30m, result.Value.Summary.TotalPayments);
+        Assert.Equal("رصيد افتتاحي", result.Value.Items[0].MovementName);
     }
 
     [Fact]
@@ -254,7 +323,13 @@ public sealed class FinancialStatementServiceTests
         Assert.Equal(48m, result.Value.OpeningExchangeRate);
         Assert.Equal(4800m, result.Value.Summary.BaseOpeningBalance);
 
-        var item = Assert.Single(result.Value.Items);
+        Assert.Equal(2, result.Value.Items.Count);
+        var item = Assert.Single(result.Value.Items,
+            candidate => candidate.CashVoucherId == usdVoucherId);
+        var opening = result.Value.Items[0];
+        Assert.Null(opening.CashVoucherId);
+        Assert.Equal(100m, opening.Balance);
+        Assert.Equal(4800m, opening.BaseBalance);
         Assert.Equal(CurrencyCode.USD, item.Currency);
         Assert.Equal(CurrencyCode.EGP, item.BaseCurrency);
         Assert.Equal(50m, item.ExchangeRate);
@@ -557,7 +632,10 @@ public sealed class FinancialStatementServiceTests
                 1,
                 Search: "CV-DELETED"));
 
-        Assert.Empty(cashbox.Value.Items);
+        var opening = Assert.Single(cashbox.Value.Items);
+        Assert.Null(opening.CashVoucherId);
+        Assert.Equal("رصيد افتتاحي", opening.MovementName);
+        Assert.Equal(1, cashbox.Value.TotalCount);
         Assert.Empty(driver.Value.Items);
         Assert.Equal(1000m, cashbox.Value.Summary.ClosingBalance);
     }

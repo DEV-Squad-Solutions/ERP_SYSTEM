@@ -900,6 +900,11 @@ public sealed class InventoryMasterDeletionTests
                     CompanyId INTEGER NOT NULL,
                     ItemId INTEGER NOT NULL,
                     ItemUnitId INTEGER NOT NULL,
+                    SourceInvoiceLineId INTEGER NULL,
+                    ReturnUnitCost NUMERIC NULL,
+                    ReturnPriceMode INTEGER NULL,
+                    SourceUnitPriceSnapshot NUMERIC NULL,
+                    ReturnPriceDifferenceReason TEXT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
 

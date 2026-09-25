@@ -186,6 +186,77 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
+    public async Task Voucher_ListIncludesReadOnlyCashboxOpeningBalancesWithFiltersAndPagination()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE Cashboxes
+            SET OpeningBalance = -100,
+                BaseOpeningBalance = -100,
+                OpeningExchangeRate = 1
+            WHERE CompanyId = 1 AND Id = 1;
+            """);
+        database.Context.ChangeTracker.Clear();
+
+        var companyOne = database.CreateVoucherService(companyId: 1);
+        var firstPage = await companyOne.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 2 });
+        var paymentOpening = await companyOne.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 10 },
+            new CashVoucherFilterRequest(
+                CashboxId: 1,
+                Direction: CashDirection.Payment,
+                IsDraft: false));
+        var searched = await companyOne.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 10 },
+            new CashVoucherFilterRequest(Search: "OPENING-BALANCE-USD"));
+        var drafts = await companyOne.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 10 },
+            new CashVoucherFilterRequest(IsDraft: true));
+        var movementFiltered = await companyOne.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 10 },
+            new CashVoucherFilterRequest(CashMovementTypeId: 9));
+        var companyTwo = await database.CreateVoucherService(companyId: 2)
+            .GetAllAsync(
+                new PaginationRequest { PageNumber = 1, PageSize = 10 });
+
+        Assert.True(firstPage.IsSuccess);
+        Assert.Equal(5, firstPage.Value.TotalCount);
+        Assert.Equal(3, firstPage.Value.TotalPages);
+        Assert.Equal(2, firstPage.Value.Items.Count);
+        Assert.All(firstPage.Value.Items,
+            item => Assert.True(item.IsOpeningBalance));
+
+        var opening = Assert.Single(paymentOpening.Value.Items);
+        Assert.True(opening.IsOpeningBalance);
+        Assert.False(opening.IsDraft);
+        Assert.Equal(-1, opening.Id);
+        Assert.Equal(1, opening.CompanyId);
+        Assert.Equal(1, opening.CashboxId);
+        Assert.Equal("Main Cashbox", opening.CashboxName);
+        Assert.Equal("OPENING-BALANCE-MAIN", opening.VoucherNumber);
+        Assert.Equal(new DateOnly(2026, 1, 1), opening.VoucherDate);
+        Assert.Equal(CashDirection.Payment, opening.Direction);
+        Assert.Equal("رصيد افتتاحي", opening.CashMovementTypeName);
+        Assert.Equal(CashPartyType.None, opening.PartyType);
+        Assert.Equal(100m, opening.Amount);
+        Assert.Equal(CurrencyCode.EGP, opening.Currency);
+        Assert.Equal(CurrencyCode.EGP, opening.BaseCurrency);
+        Assert.Equal(1m, opening.ExchangeRate);
+        Assert.Equal(100m, opening.BaseAmount);
+        Assert.Empty(opening.RowVersion);
+
+        Assert.Equal(5, Assert.Single(searched.Value.Items).CashboxId);
+        Assert.Empty(drafts.Value.Items);
+        Assert.Empty(movementFiltered.Value.Items);
+        var otherCompanyOpening = Assert.Single(companyTwo.Value.Items);
+        Assert.Equal(2, otherCompanyOpening.CompanyId);
+        Assert.Equal(4, otherCompanyOpening.CashboxId);
+    }
+
+    [Fact]
     public async Task Voucher_AccountFilterCanIncludeExpenseDescendants()
     {
         await using var database =
@@ -392,7 +463,9 @@ public sealed class CashVoucherServiceTests
             result.Value.Description);
         Assert.Equal(1000m, cashbox.Value.CurrentBalance);
         Assert.Single(drafts.Value.Items);
-        Assert.Empty(completed.Value.Items);
+        Assert.Equal(5, completed.Value.Items.Count);
+        Assert.All(completed.Value.Items,
+            item => Assert.True(item.IsOpeningBalance));
         Assert.Empty(await database.Context.BusinessPartnerMovements
             .Where(movement => movement.CashVoucherId == result.Value.Id)
             .ToListAsync());
@@ -1171,6 +1244,36 @@ public sealed class CashVoucherServiceTests
         Assert.True(companyOneUsd.IsSuccess, companyOneUsd.Error.Description);
         Assert.True(companyTwoReceipt.IsSuccess, companyTwoReceipt.Error.Description);
 
+        var postedService = database.CreatePostingVoucherService(1);
+        var postedDraft = await postedService.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 8, 4),
+                Direction: CashDirection.Receipt,
+                CashboxId: 1,
+                Amount: 25m,
+                Description: "Posted cash movement"));
+        Assert.True(postedDraft.IsSuccess, postedDraft.Error.Description);
+        var posted = await postedService.UpdateAsync(
+            postedDraft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: postedDraft.Value.VoucherDate,
+                Direction: postedDraft.Value.Direction,
+                CashboxId: 1,
+                CashMovementTypeId: null,
+                EmployeeId: null,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: postedDraft.Value.Amount,
+                ReferenceNumber: null,
+                Description: postedDraft.Value.Description,
+                Notes: null,
+                RowVersion: postedDraft.Value.RowVersion,
+                AccountId: 1));
+        Assert.True(posted.IsSuccess, posted.Error.Description);
+        Assert.False(posted.Value.IsDraft);
+
         var all = await companyOne.GetHandoverReportAsync(
             new PaginationRequest { PageNumber = 1, PageSize = 50 });
 
@@ -1191,6 +1294,19 @@ public sealed class CashVoucherServiceTests
             summary.Payment == 0m &&
             summary.Net == 10m &&
             summary.Count == 1);
+        var mainBalance = Assert.Single(all.Value.CashboxBalances, balance =>
+            balance.CashboxId == 1);
+        Assert.Equal(1025m, mainBalance.CurrentBalance);
+        Assert.Equal(100m, mainBalance.DraftReceipt);
+        Assert.Equal(40m, mainBalance.DraftPayment);
+        Assert.Equal(1085m, mainBalance.ExpectedBalance);
+        var usdBalance = Assert.Single(all.Value.CashboxBalances, balance =>
+            balance.CashboxId == 5);
+        Assert.Equal(100m, usdBalance.CurrentBalance);
+        Assert.Equal(10m, usdBalance.DraftReceipt);
+        Assert.Equal(110m, usdBalance.ExpectedBalance);
+        Assert.DoesNotContain(all.Value.CashboxBalances, balance =>
+            balance.CashboxId == 4);
 
         var paymentOnly = await companyOne.GetHandoverReportAsync(
             new PaginationRequest { PageNumber = 1, PageSize = 50 },
@@ -1199,6 +1315,9 @@ public sealed class CashVoucherServiceTests
         Assert.True(paymentOnly.IsSuccess, paymentOnly.Error.Description);
         Assert.Single(paymentOnly.Value.Items);
         Assert.Equal("South handover", paymentOnly.Value.Items[0].Description);
+        mainBalance = Assert.Single(paymentOnly.Value.CashboxBalances, balance =>
+            balance.CashboxId == 1);
+        Assert.Equal(1085m, mainBalance.ExpectedBalance);
 
         var dateOnly = await companyOne.GetHandoverReportAsync(
             new PaginationRequest { PageNumber = 1, PageSize = 50 },
@@ -1208,6 +1327,9 @@ public sealed class CashVoucherServiceTests
         Assert.True(dateOnly.IsSuccess, dateOnly.Error.Description);
         Assert.Single(dateOnly.Value.Items);
         Assert.Equal(CurrencyCode.USD, dateOnly.Value.Items[0].Currency);
+        usdBalance = Assert.Single(dateOnly.Value.CashboxBalances, balance =>
+            balance.CashboxId == 5);
+        Assert.Equal(110m, usdBalance.ExpectedBalance);
 
         var searched = await companyOne.GetHandoverReportAsync(
             new PaginationRequest { PageNumber = 1, PageSize = 50 },
@@ -1222,6 +1344,13 @@ public sealed class CashVoucherServiceTests
                 Search: "Other company handover"));
         Assert.True(isolated.IsSuccess, isolated.Error.Description);
         Assert.Empty(isolated.Value.Items);
+
+        var selected = await companyOne.GetHandoverReportAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 50 },
+            new CashVoucherHandoverReportFilterRequest(CashboxId: 1));
+        Assert.True(selected.IsSuccess, selected.Error.Description);
+        Assert.Single(selected.Value.CashboxBalances);
+        Assert.Equal(1, selected.Value.CashboxBalances[0].CashboxId);
     }
 
     [Fact]

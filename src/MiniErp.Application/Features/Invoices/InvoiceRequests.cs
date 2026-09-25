@@ -11,7 +11,9 @@ public sealed record InvoiceLineRequest(
     int? SourceInvoiceLineId = null,
     decimal? ReturnUnitCost = null,
     decimal? Quantity = null,
-    string? ItemName = null);
+    string? ItemName = null,
+    ReturnPriceMode? ReturnPriceMode = null,
+    string? ReturnPriceDifferenceReason = null);
 
 public sealed record InvoiceContainerLineRequest(
     int ContainerId,
@@ -64,6 +66,8 @@ public sealed record InvoiceRequest(
     public const int VehicleNumberMaximumLength = 100;
 
     public const int NotesMaximumLength = 1_000;
+
+    public const int ReturnPriceDifferenceReasonMaximumLength = 500;
 
     public const int MaximumLineCount = 100;
 

@@ -1,6 +1,7 @@
 using MiniErp.Domain.Common.Entities;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Domain.Entities.Invoicing;
 
@@ -31,6 +32,16 @@ public sealed class InvoiceLine : AuditableEntity
     public InvoiceLine? SourceInvoiceLine { get; set; }
 
     public decimal? ReturnUnitCost { get; set; }
+
+    /// <summary>
+    /// The commercial price policy used by a linked return line. Null is
+    /// retained for legacy rows and is interpreted as <see cref="ReturnPriceMode.OriginalPrice"/>.
+    /// </summary>
+    public ReturnPriceMode? ReturnPriceMode { get; set; }
+
+    public decimal? SourceUnitPriceSnapshot { get; set; }
+
+    public string? ReturnPriceDifferenceReason { get; set; }
 
     public int Count { get; set; }
 

@@ -57,10 +57,20 @@ public sealed record CashVoucherHandoverCurrencySummary(
     decimal Net,
     int Count);
 
+public sealed record CashVoucherHandoverCashboxBalance(
+    int CashboxId,
+    string CashboxName,
+    CurrencyCode Currency,
+    decimal CurrentBalance,
+    decimal DraftReceipt,
+    decimal DraftPayment,
+    decimal ExpectedBalance);
+
 public sealed record CashVoucherHandoverReportResponse(
     IReadOnlyList<CashVoucherHandoverReportItemResponse> Items,
     int PageNumber,
     int PageSize,
     int TotalCount,
     int TotalPages,
-    IReadOnlyList<CashVoucherHandoverCurrencySummary> Summaries);
+    IReadOnlyList<CashVoucherHandoverCurrencySummary> Summaries,
+    IReadOnlyList<CashVoucherHandoverCashboxBalance> CashboxBalances);

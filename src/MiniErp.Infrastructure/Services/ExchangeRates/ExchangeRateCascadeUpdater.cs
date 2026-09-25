@@ -115,12 +115,12 @@ internal static class ExchangeRateCascadeUpdater
             paymentVoucher.ApplyExchangeRate(
                 paymentVoucher.ExchangeRateId,
                 paymentRate);
-            receiptVoucher.Amount = paymentVoucher.Currency ==
-                receiptVoucher.Currency
-                    ? paymentVoucher.Amount
-                    : Domain.Entities.Companies.ExchangeRateRules.ConvertFromBase(
-                        paymentVoucher.BaseAmount,
-                        receiptRate);
+            // A transfer's receipt amount is the physical amount actually
+            // received.  Updating a daily rate may change its base carrying
+            // value, but must never rewrite the historical foreign quantity
+            // (for example, 90 EUR received stays 90 EUR).  The posting
+            // synchronizer balances the resulting base-currency difference
+            // through the exchange gain/loss mapping.
             receiptVoucher.ApplyExchangeRate(
                 receiptVoucher.ExchangeRateId,
                 receiptRate);

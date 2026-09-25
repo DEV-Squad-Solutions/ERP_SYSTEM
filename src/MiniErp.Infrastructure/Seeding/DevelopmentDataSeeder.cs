@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MiniErp.Application.Common.Abstractions;
+using MiniErp.Application.Common.Authentication;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Entities.CashManagement;
@@ -32,7 +33,12 @@ public static class DevelopmentDataSeeder
         new(
             "admin",
             "admin@minierp.local",
-            ["Admin", "User"],
+            [
+                ApplicationRoles.Admin,
+                ApplicationRoles.User,
+                ApplicationRoles.Accountant,
+                ApplicationRoles.Cashier
+            ],
             "System",
             "Administrator"),
         new(
@@ -459,18 +465,35 @@ public static class DevelopmentDataSeeder
         IReadOnlyList<Company> companies,
         CancellationToken cancellationToken)
     {
+        var existingRoles = await roleManager.Roles.ToListAsync(cancellationToken);
         foreach (var roleName in SeedUsers
                      .SelectMany(seedUser => seedUser.Roles)
+                     .Concat(ApplicationRoles.All)
                      .Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            if (await roleManager.RoleExistsAsync(roleName))
+            var existingRole = existingRoles.SingleOrDefault(role =>
+                string.Equals(
+                    role.Name,
+                    roleName,
+                    StringComparison.OrdinalIgnoreCase));
+            if (existingRole is not null)
             {
+                if (!string.Equals(existingRole.Name, roleName, StringComparison.Ordinal))
+                {
+                    existingRole.Name = roleName;
+                    var renameResult = await roleManager.UpdateAsync(existingRole);
+                    EnsureSucceeded(
+                        renameResult,
+                        $"renaming the '{roleName}' role");
+                }
+
                 continue;
             }
 
             var roleResult = await roleManager.CreateAsync(
                 new IdentityRole<Guid>(roleName));
             EnsureSucceeded(roleResult, $"creating the '{roleName}' role");
+            existingRoles.Add(new IdentityRole<Guid>(roleName));
         }
 
         foreach (var seedUser in SeedUsers)

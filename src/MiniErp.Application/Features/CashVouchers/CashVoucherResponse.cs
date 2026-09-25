@@ -35,6 +35,13 @@ public sealed record CashVoucherResponse(
 {
     public bool IsDraft { get; init; }
 
+    /// <summary>
+    /// Indicates that this row is a read-only synthetic opening-balance row.
+    /// Opening balances are stored on the cashbox and are intentionally not
+    /// persisted as CashVoucher records.
+    /// </summary>
+    public bool IsOpeningBalance { get; init; }
+
     public int? InvoiceId { get; init; }
 
     public int? CashboxTransferId { get; init; }
