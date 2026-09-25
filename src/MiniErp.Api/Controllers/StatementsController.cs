@@ -167,6 +167,7 @@ public sealed class StatementsController(
     }
 
     [HttpGet("employee")]
+    [HttpGet("/api/v{version:apiVersion}/dashboard/payroll/employees/statement")]
     [ProducesResponseType<EmployeeStatementResponse>(
         StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

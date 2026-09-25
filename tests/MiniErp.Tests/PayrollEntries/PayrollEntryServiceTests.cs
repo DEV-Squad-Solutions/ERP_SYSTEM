@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.PayrollEntries;
+using MiniErp.Application.Features.Statements;
 using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Enums;
 using System;
@@ -509,11 +511,10 @@ public sealed class PayrollEntryServiceTests
 
         var advanceResult = await movementService.AddAsync(new MiniErp.Application.Features.EmployeeMovements.EmployeeMovementRequest(
             EmployeeId: 1,
-            Type: EmployeeMovementType.Advance,
+            Type: EmployeeMovementType.Debit,
             Amount: 300m,
             Currency: CurrencyCode.EGP,
-            MovementDate: new DateOnly(2026, 8, 6),
-            CashboxId: cashbox.Id));
+            MovementDate: new DateOnly(2026, 8, 6)));
         Assert.True(advanceResult.IsSuccess);
 
         // Act - Get Dashboard
@@ -527,7 +528,7 @@ public sealed class PayrollEntryServiceTests
         Assert.Equal(1050m, dashboard.NetPayable);    // 5 days * 200 + 100 - 50 = 1050
         Assert.Equal(1050m, dashboard.TotalPaid);     // Salary moved
         Assert.Equal(50m, dashboard.TotalDeductions); // 50
-        Assert.Equal(300m, dashboard.TotalAdvances);  // 300
+        Assert.Equal(300m, dashboard.TotalDebits);     // 300
         Assert.True(dashboard.EmployeeCount >= 1);
         Assert.NotEmpty(dashboard.RecentOperations);
     }
@@ -1822,5 +1823,269 @@ public sealed class PayrollEntryServiceTests
         var resultIso = System.Text.Json.JsonSerializer.Deserialize<BulkOutCompanyPayrollEntryRequest>(jsonWithIso, options);
         Assert.NotNull(resultIso);
         Assert.Equal(new DateOnly(2026, 9, 17), resultIso.Entries[0].StartDate);
+    }
+
+    [Fact]
+    public async Task MoveSalaryForEmployeeAccountAsync_ShouldCreditNetSalaryOnly_NotGrossSalaryNotDeductions_AndReflectInStatementAndAccount()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var payrollService = database.CreatePayrollService();
+        var statementService = database.CreateStatementService();
+
+        // Setup employee with MonthlySalary = 20,000, 30 required days
+        var employee = await database.Context.Employees.FindAsync(1);
+        Assert.NotNull(employee);
+        employee.MonthlySalary = 20000m;
+        employee.RequiredWorkingDaysPerMonth = 30;
+        employee.UpdateLastDayOfReceivingSalary(new DateOnly(2026, 8, 31));
+        await database.Context.SaveChangesAsync();
+
+        // 30 days attendance in September (Gross = 20,000)
+        for (int day = 1; day <= 30; day++)
+        {
+            database.Context.EmployeeAttendances.Add(new AttendanceEntity
+            {
+                CompanyId = 1,
+                EmployeeId = 1,
+                WorkDate = new DateOnly(2026, 9, day),
+                Status = EmployeeAttendanceStatus.Present,
+                WorkDayRatio = WorkDayRatio.FullDay
+            });
+        }
+        await database.Context.SaveChangesAsync();
+
+        // Step 1: Create PayrollEntry with Deduction = 2,000 -> NetSalary = 18,000
+        var addResult = await payrollService.AddAsync(new PayrollEntryCreateRequest(
+            EmployeeId: 1,
+            EndDate: new DateOnly(2026, 9, 30),
+            Bonus: null,
+            Deduction: 2000m));
+
+        Assert.True(addResult.IsSuccess);
+        var entry = addResult.Value;
+        Assert.Equal(20000m, entry.GrossSalary);
+        Assert.Equal(20000m, entry.CalculatedSalary);
+        Assert.Equal(2000m, entry.Deduction);
+        Assert.Equal(18000m, entry.NetSalary);
+        Assert.False(entry.IsSalaryMoveToEmployeeAccount);
+        Assert.False(entry.IsSalaryMovedToEmployeeAccount);
+
+        // Verification: Employee Account remains UNCHANGED after creation
+        var balancesBeforeMove = await database.Context.EmployeeOpeningBalances
+            .Where(b => b.CompanyId == 1 && b.EmployeeId == 1)
+            .ToListAsync();
+        Assert.Empty(balancesBeforeMove);
+
+        var statementBeforeMove = await statementService.GetEmployeeStatementAsync(
+            pagination: new PaginationRequest { PageNumber = 1, PageSize = 10 },
+            filters: new EmployeeStatementFilterRequest(EmployeeId: 1));
+        Assert.True(statementBeforeMove.IsSuccess);
+        Assert.Empty(statementBeforeMove.Value.Items);
+        Assert.Equal(0m, statementBeforeMove.Value.Summary.ClosingBalanceAmount);
+
+        // Step 2: Move Salary to Employee Account
+        var moveDate = new DateOnly(2026, 9, 30);
+        var moveResult = await payrollService.MoveSalaryForEmployeeAccountAsync(
+            id: entry.Id,
+            request: new PayrollEntrySalaryPaymentRequest(
+                PostingDate: moveDate,
+                Notes: "September salary movement"));
+
+        Assert.True(moveResult.IsSuccess);
+        Assert.True(moveResult.Value.IsSalaryMoveToEmployeeAccount);
+        Assert.True(moveResult.Value.IsSalaryMovedToEmployeeAccount);
+        Assert.Equal(moveDate, moveResult.Value.SalaryMovedOn);
+
+        // Verification: Employee Account transaction created using exactly NetSalary (18,000)
+        var openingBalances = await database.Context.EmployeeOpeningBalances
+            .Where(b => b.CompanyId == 1 && b.EmployeeId == 1)
+            .ToListAsync();
+        Assert.Single(openingBalances);
+        var ob = openingBalances[0];
+        Assert.Equal(EmployeeBalanceType.Credit, ob.BalanceType);
+        Assert.Equal(entry.Id, ob.PayrollEntryId);
+        Assert.Equal(18000m, ob.Amount);
+        Assert.NotEqual(20000m, ob.Amount); // GrossSalary must NOT be added
+        Assert.NotEqual(2000m, ob.Amount);  // Deduction must NOT be added
+        Assert.Equal(moveDate, ob.DocumentDate);
+        Assert.StartsWith("EOB-", ob.DocumentNumber);
+
+        // Verification: Employee.LastDayOfReceivingSalary updated to PayrollEntry.EndDate
+        var updatedEmployee = await database.Context.Employees.FindAsync(1);
+        Assert.NotNull(updatedEmployee);
+        Assert.Equal(entry.EndDate, updatedEmployee.LastDayOfReceivingSalary);
+
+        // Step 3: Employee Statement reflects the exact NetSalary salary transaction
+        var statementAfterMove = await statementService.GetEmployeeStatementAsync(
+            pagination: new PaginationRequest { PageNumber = 1, PageSize = 10 },
+            filters: new EmployeeStatementFilterRequest(EmployeeId: 1));
+        Assert.True(statementAfterMove.IsSuccess);
+        Assert.Single(statementAfterMove.Value.Items);
+        var statementItem = statementAfterMove.Value.Items[0];
+        Assert.Equal(EmployeeStatementSourceType.SalaryTransfer, statementItem.SourceType);
+        Assert.Equal(18000m, statementItem.CreditAmount);
+        Assert.Equal(0m, statementItem.DebitAmount);
+        Assert.Equal(18000m, statementItem.BalanceAmount);
+        Assert.Equal(18000m, statementItem.RunningBalance);
+        Assert.Equal($"PAY-{entry.Id}", statementItem.ReferenceNumber);
+        Assert.Equal(moveDate, statementItem.Date);
+        Assert.Equal(18000m, statementAfterMove.Value.Summary.ClosingBalanceAmount);
+
+        // Step 4: Duplicate Protection — Attempting to move again must fail and NOT alter balance
+        var duplicateMoveResult = await payrollService.MoveSalaryForEmployeeAccountAsync(
+            id: entry.Id,
+            request: new PayrollEntrySalaryPaymentRequest(
+                PostingDate: moveDate,
+                Notes: "Duplicate attempt"));
+        Assert.True(duplicateMoveResult.IsFailure);
+        Assert.Equal("PayrollEntry.AlreadyPaid", duplicateMoveResult.Error.Code);
+
+        // Verify balance still unchanged at 18,000
+        var balancesAfterDuplicate = await database.Context.EmployeeOpeningBalances
+            .Where(b => b.CompanyId == 1 && b.EmployeeId == 1)
+            .ToListAsync();
+        Assert.Single(balancesAfterDuplicate);
+        Assert.Equal(18000m, balancesAfterDuplicate[0].Amount);
+    }
+
+    [Fact]
+    public async Task MoveSalaryForEmployeeAccountAsync_OutCompany_ShouldCreditNetSalaryOnly_NotGrossSalary()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var payrollService = database.CreatePayrollService();
+
+        var emp = await database.Context.Employees.FindAsync(2);
+        Assert.NotNull(emp);
+        emp.DailySalary = 1000m;
+        emp.UpdateWorkPlace(WorkPlaceStatus.OutCompany, null);
+        emp.UpdateLastDayOfReceivingSalary(new DateOnly(2026, 8, 31));
+        await database.Context.SaveChangesAsync();
+
+        // 20 worked days, DailySalary 1000 => Gross 20,000, Deduction 2,000 => Net 18,000
+        var addResult = await payrollService.AddOutCompanyAsync(new OutCompanyPayrollEntryRequest(
+            EmployeeId: 2,
+            StartDate: new DateOnly(2026, 9, 1),
+            EndDate: new DateOnly(2026, 9, 20),
+            PresentDays: 20,
+            WorkedDaysByDayUnit: 20m,
+            Deduction: 2000m));
+        Assert.True(addResult.IsSuccess);
+        var entry = addResult.Value;
+        Assert.Equal(1000m, entry.GrossSalary);
+        Assert.Equal(20000m, entry.CalculatedSalary);
+        Assert.Equal(18000m, entry.NetSalary);
+        Assert.False(entry.IsSalaryMoveToEmployeeAccount);
+
+        // Move salary
+        var moveResult = await payrollService.MoveSalaryForEmployeeAccountAsync(
+            id: entry.Id,
+            request: new PayrollEntrySalaryPaymentRequest(
+                PostingDate: new DateOnly(2026, 9, 21),
+                Notes: "OutCompany salary move"));
+        Assert.True(moveResult.IsSuccess);
+
+        // Verify ledger record is exactly NetSalary (18,000)
+        // Neither GrossSalary (1,000) nor CalculatedSalary (20,000) nor Deduction (2,000) is credited
+        var ob = await database.Context.EmployeeOpeningBalances
+            .SingleAsync(b => b.CompanyId == 1 && b.PayrollEntryId == entry.Id);
+        Assert.Equal(18000m, ob.Amount);
+        Assert.NotEqual(1000m, ob.Amount);
+        Assert.NotEqual(20000m, ob.Amount);
+        Assert.NotEqual(2000m, ob.Amount);
+        Assert.Equal(EmployeeBalanceType.Credit, ob.BalanceType);
+    }
+
+    [Fact]
+    public async Task MoveSalaryForEmployeeAccountBulkAsync_ShouldCreditNetSalaryOnly_ForMultipleEmployees_AndPreventDuplicate()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var payrollService = database.CreatePayrollService();
+
+        var emp1 = await database.Context.Employees.FindAsync(1);
+        var emp3 = await database.Context.Employees.FindAsync(3);
+        Assert.NotNull(emp1);
+        Assert.NotNull(emp3);
+
+        emp1.MonthlySalary = 20000m;
+        emp1.RequiredWorkingDaysPerMonth = 30;
+        emp1.UpdateLastDayOfReceivingSalary(new DateOnly(2026, 8, 31));
+
+        emp3.MonthlySalary = 15000m;
+        emp3.RequiredWorkingDaysPerMonth = 30;
+        emp3.UpdateLastDayOfReceivingSalary(new DateOnly(2026, 8, 31));
+        await database.Context.SaveChangesAsync();
+
+        // 30 days attendance for both
+        for (int day = 1; day <= 30; day++)
+        {
+            database.Context.EmployeeAttendances.Add(new AttendanceEntity
+            {
+                CompanyId = 1,
+                EmployeeId = 1,
+                WorkDate = new DateOnly(2026, 9, day),
+                Status = EmployeeAttendanceStatus.Present,
+                WorkDayRatio = WorkDayRatio.FullDay
+            });
+            database.Context.EmployeeAttendances.Add(new AttendanceEntity
+            {
+                CompanyId = 1,
+                EmployeeId = 3,
+                WorkDate = new DateOnly(2026, 9, day),
+                Status = EmployeeAttendanceStatus.Present,
+                WorkDayRatio = WorkDayRatio.FullDay
+            });
+        }
+        await database.Context.SaveChangesAsync();
+
+        // Emp 1: Gross 20,000, Deduction 2,000 -> Net 18,000
+        var addResult1 = await payrollService.AddAsync(new PayrollEntryCreateRequest(
+            EmployeeId: 1,
+            EndDate: new DateOnly(2026, 9, 30),
+            Deduction: 2000m));
+        Assert.True(addResult1.IsSuccess);
+        Assert.Equal(18000m, addResult1.Value.NetSalary);
+
+        // Emp 3: Gross 15,000, Bonus 1,000, Deduction 500 -> Net 15,500
+        var addResult3 = await payrollService.AddAsync(new PayrollEntryCreateRequest(
+            EmployeeId: 3,
+            EndDate: new DateOnly(2026, 9, 30),
+            Bonus: 1000m,
+            Deduction: 500m));
+        Assert.True(addResult3.IsSuccess);
+        Assert.Equal(15500m, addResult3.Value.NetSalary);
+
+        // Bulk Move
+        var bulkMoveResult = await payrollService.MoveSalaryForEmployeeAccountBulkAsync(
+            new BulkPayrollEntrySalaryPaymentRequest(
+                PayrollEntryIds: [addResult1.Value.Id, addResult3.Value.Id],
+                DefaultPostingDate: new DateOnly(2026, 9, 30),
+                Notes: "Bulk salary move September"));
+
+        Assert.True(bulkMoveResult.IsSuccess);
+        Assert.Equal(2, bulkMoveResult.Value.Count);
+        Assert.All(bulkMoveResult.Value, e => Assert.True(e.IsSalaryMovedToEmployeeAccount));
+
+        // Check Employee 1 ledger: exactly NetSalary 18,000
+        var ob1 = await database.Context.EmployeeOpeningBalances
+            .SingleAsync(b => b.CompanyId == 1 && b.EmployeeId == 1 && b.PayrollEntryId == addResult1.Value.Id);
+        Assert.Equal(18000m, ob1.Amount);
+        Assert.NotEqual(20000m, ob1.Amount);
+
+        // Check Employee 3 ledger: exactly NetSalary 15,500
+        var ob3 = await database.Context.EmployeeOpeningBalances
+            .SingleAsync(b => b.CompanyId == 1 && b.EmployeeId == 3 && b.PayrollEntryId == addResult3.Value.Id);
+        Assert.Equal(15500m, ob3.Amount);
+        Assert.NotEqual(15000m, ob3.Amount);
+
+        // Duplicate bulk move must fail
+        var duplicateBulkResult = await payrollService.MoveSalaryForEmployeeAccountBulkAsync(
+            new BulkPayrollEntrySalaryPaymentRequest(
+                PayrollEntryIds: [addResult1.Value.Id, addResult3.Value.Id],
+                DefaultPostingDate: new DateOnly(2026, 9, 30)));
+        Assert.True(duplicateBulkResult.IsFailure);
+        Assert.Equal("PayrollEntry.AlreadyPaid", duplicateBulkResult.Error.Code);
     }
 }

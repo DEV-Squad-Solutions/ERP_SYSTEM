@@ -40,7 +40,7 @@ public sealed record PayrollDashboardResponse(
     decimal NetPayable,
     decimal TotalPaid,
     decimal TotalDeductions,
-    decimal TotalAdvances,
+    decimal TotalDebits,
     int EmployeeCount,
     IReadOnlyList<PayrollDashboardPendingEntryResponse> PendingPayrolls,
     IReadOnlyList<PayrollDashboardRecentOperationResponse> RecentOperations);

@@ -603,7 +603,7 @@ public sealed class CashboxExchangeRateCascadeTests
                 CompanyId = company.Id,
                 EmployeeId = employee.Id,
                 CashVoucherId = employeeVoucher.Id,
-                Type = EmployeeMovementType.Advance,
+                Type = EmployeeMovementType.Debit,
                 MovementDate = employeeVoucher.VoucherDate,
                 Currency = employeeVoucher.Currency,
                 Debit = employeeVoucher.Amount

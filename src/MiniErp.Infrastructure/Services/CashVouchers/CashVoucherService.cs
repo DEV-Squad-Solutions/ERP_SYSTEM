@@ -1445,7 +1445,7 @@ public sealed class CashVoucherService(
         CashDirection direction) =>
         direction == CashDirection.Receipt
             ? EmployeeMovementType.Credit
-            : EmployeeMovementType.Advance;
+            : EmployeeMovementType.Debit;
 
     private async Task<Result<VoucherPreparation>> PrepareAsync(
         CashVoucherUpdateRequest request,

@@ -1069,7 +1069,7 @@ public sealed class FinancialStatementServiceTests
                 EmployeeMovementType: request.EmployeeId.HasValue
                     ? request.Direction == CashDirection.Receipt
                         ? EmployeeMovementType.Credit
-                        : EmployeeMovementType.Advance
+                        : EmployeeMovementType.Debit
                     : null));
         if (draft.IsFailure)
         {

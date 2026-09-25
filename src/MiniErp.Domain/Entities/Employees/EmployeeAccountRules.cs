@@ -8,6 +8,9 @@ public static class EmployeeAccountRules
     public static bool IsCreditMovement(EmployeeMovementType type) =>
         type is EmployeeMovementType.Credit or EmployeeMovementType.Bonus;
 
+    public static bool IsDebitMovement(EmployeeMovementType type) =>
+        type is EmployeeMovementType.Debit or EmployeeMovementType.Deduction;
+
     // ── Debit / Credit Split ─────────────────────────────────────────────────
     public static (decimal Debit, decimal Credit) SplitAmount(
         EmployeeMovementType type,
@@ -38,13 +41,11 @@ public static class EmployeeAccountRules
     public static string GetMovementTypeName(EmployeeMovementType type) =>
         type switch
         {
-            EmployeeMovementType.Credit     => "حركة دائنة",
-            EmployeeMovementType.Debit      => "حركة مدينة",
-            EmployeeMovementType.Advance    => "سلفة نقدية",
-            EmployeeMovementType.Deduction  => "خصم مالي",
-            EmployeeMovementType.Bonus      => "مكافأة مالية",
-            EmployeeMovementType.Withdrawal => "مسحوبات نقدية",
-            _                               => "حركة حساب موظف"
+            EmployeeMovementType.Credit    => "حركة دائنة",
+            EmployeeMovementType.Debit     => "حركة مدينة",
+            EmployeeMovementType.Deduction => "خصم مالي",
+            EmployeeMovementType.Bonus     => "مكافأة مالية",
+            _                              => "حركة حساب موظف"
         };
 }
 

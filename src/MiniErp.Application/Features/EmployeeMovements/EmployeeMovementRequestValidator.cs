@@ -46,12 +46,6 @@ public sealed class EmployeeMovementRequestValidator
             .When(request => request.Currency != CurrencyCode.EGP)
             .WithMessage("سعر الصرف مطلوب ويجب أن يكون أكبر من صفر للعملات الأجنبية.");
 
-        RuleFor(request => request.CashboxId)
-            .NotNull()
-            .WithMessage("لا يمكن إنشاء حركة موظف بدون خزينة.")
-            .GreaterThan(0)
-            .WithMessage("معرف الخزينة غير صالح.");
-
         RuleFor(request => request.Notes)
             .MaximumLength(EmployeeMovementRequest.NotesMaximumLength)
             .When(request => !string.IsNullOrEmpty(request.Notes));
