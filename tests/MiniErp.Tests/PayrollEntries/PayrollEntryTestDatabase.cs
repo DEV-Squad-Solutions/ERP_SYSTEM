@@ -238,6 +238,10 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
                 DeletedByPc TEXT NULL,
                 IsDeleted INTEGER NOT NULL DEFAULT 0
             );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_EmployeeOpeningBalances_CompanyId_PayrollEntryId 
+            ON EmployeeOpeningBalances (CompanyId, PayrollEntryId) 
+            WHERE PayrollEntryId IS NOT NULL AND IsDeleted = 0;
         """);
         await SeedRequiredDataAsync(context, companyId);
 

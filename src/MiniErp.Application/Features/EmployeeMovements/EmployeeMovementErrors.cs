@@ -33,4 +33,9 @@ public static class EmployeeMovementErrors
         Error.Validation(
             "EmployeeMovements.InvalidAmount",
             "يجب أن يكون المبلغ أكبر من صفر.");
+
+    public static Error LinkedToCashVoucher() =>
+        Error.Conflict(
+            "EmployeeMovements.LinkedToCashVoucher",
+            "لا يمكن حذف حركة الموظف لأنها مرتبطة بسند صرف/قبض نقدية.");
 }

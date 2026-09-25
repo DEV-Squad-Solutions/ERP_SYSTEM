@@ -25,4 +25,8 @@ public interface IEmployeeMovementService
     Task<Result<EmployeeMovementReportResponse>> GetReportAsync(
         EmployeeMovementReportRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<Result> DeleteAsync(
+        int id,
+        CancellationToken cancellationToken = default);
 }

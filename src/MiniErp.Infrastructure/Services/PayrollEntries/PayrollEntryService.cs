@@ -349,6 +349,17 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     Error.NotFound("PayrollEntry.NotFound", "لم يتم العثور على قيد الرواتب المطلوب."));
             }
 
+            var employee = entry.Employee ?? await dbContext.Employees
+                .FirstOrDefaultAsync(e => e.Id == entry.EmployeeId && e.CompanyId == companyId, cancellationToken);
+
+            if (employee is null || employee.CompanyId != companyId)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.NotFound("Employee.NotFound", "الموظف المحدد غير موجود في الشركة الحالية."));
+            }
+            entry.Employee = employee;
+
             var guardError = ValidateForPayment(entry);
             if (guardError is not null)
             {
@@ -356,13 +367,42 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 return Result<PayrollEntryResponse>.Failure(guardError);
             }
 
+            // Check if this payroll entry or another payroll entry for the same employee + period has already been transferred
             var isAlreadyTransferred = await dbContext.EmployeeOpeningBalances
-                .AnyAsync(b => b.CompanyId == companyId && b.PayrollEntryId == id, cancellationToken);
+                .AnyAsync(b =>
+                    b.CompanyId == companyId &&
+                    b.EmployeeId == entry.EmployeeId &&
+                    b.PayrollEntryId.HasValue &&
+                    (b.PayrollEntryId == id ||
+                     (b.PayrollEntry!.StartDate == entry.StartDate && b.PayrollEntry.EndDate == entry.EndDate)),
+                    cancellationToken);
+
             if (isAlreadyTransferred)
             {
                 await transaction.RollbackAsync(cancellationToken);
                 return Result<PayrollEntryResponse>.Failure(
-                    Error.Conflict("PayrollEntry.AlreadyPaid", $"تم تحويل راتب القيد رقم {entry.Id} إلى حساب الموظف مسبقًا."));
+                    Error.Conflict(
+                        "PayrollEntry.AlreadyPaid",
+                        $"تم تحويل راتب الموظف {employee.Name} لهذه الفترة ({entry.StartDate:yyyy-MM-dd} إلى {entry.EndDate:yyyy-MM-dd}) إلى حسابه مسبقًا."));
+            }
+
+            var hasDuplicatePaidEntry = await dbContext.PayrollEntries
+                .AnyAsync(p =>
+                    p.CompanyId == companyId &&
+                    p.EmployeeId == entry.EmployeeId &&
+                    p.StartDate == entry.StartDate &&
+                    p.EndDate == entry.EndDate &&
+                    p.IsSalaryMoveToEmployeeAccount &&
+                    p.Id != entry.Id,
+                    cancellationToken);
+
+            if (hasDuplicatePaidEntry)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Conflict(
+                        "PayrollEntry.AlreadyPaid",
+                        $"تم تحويل راتب الموظف {employee.Name} لهذه الفترة ({entry.StartDate:yyyy-MM-dd} إلى {entry.EndDate:yyyy-MM-dd}) إلى حسابه مسبقًا."));
             }
 
             var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
@@ -377,7 +417,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 return Result<PayrollEntryResponse>.Failure(exchangeRateResult.Error);
             }
 
-            // Only create a financial ledger entry when there is an actual positive amount.
+            // Only NetSalary affects the Employee Account credit
             if (entry.NetSalary > 0)
             {
                 var documentNumber = await EntityIdentifierGenerator.GenerateUniqueAsync(
@@ -412,19 +452,29 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             entry.IsSalaryMoveToEmployeeAccount = true;
             entry.SalaryMovedOn = request.PostingDate;
 
-            if (entry.Employee is not null)
-            {
-                entry.Employee.UpdateLastDayOfReceivingSalary(entry.EndDate);
-            }
-            else
-            {
-                var employee = await dbContext.Employees
-                    .FirstOrDefaultAsync(e => e.Id == entry.EmployeeId && e.CompanyId == companyId, cancellationToken);
-                employee?.UpdateLastDayOfReceivingSalary(entry.EndDate);
-            }
+            // Atomically update LastDayOfReceivingSalary
+            employee.UpdateLastDayOfReceivingSalary(entry.EndDate);
 
-            await dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Conflict(
+                        "PayrollEntry.AlreadyPaid",
+                        $"تم تحويل راتب القيد رقم {entry.Id} إلى حساب الموظف مسبقًا."));
+            }
+            catch (Exception)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                throw;
+            }
 
             return Result<PayrollEntryResponse>.Success(MapToResponse(entry));
         }
@@ -482,6 +532,13 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
 
             foreach (var entry in entries)
             {
+                if (entry.Employee is null || entry.Employee.CompanyId != companyId)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.NotFound("Employee.NotFound", $"الموظف المحدد للقيد رقم {entry.Id} غير موجود في الشركة الحالية."));
+                }
+
                 var guardError = ValidateForPayment(entry);
                 if (guardError is not null)
                 {
@@ -490,16 +547,48 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 }
             }
 
+            var employeeIds = entries.Select(e => e.EmployeeId).Distinct().ToList();
             var existingTransfers = await dbContext.EmployeeOpeningBalances
-                .Where(b => b.CompanyId == companyId && b.PayrollEntryId.HasValue && entryIds.Contains(b.PayrollEntryId.Value))
+                .Where(b => b.CompanyId == companyId &&
+                            b.PayrollEntryId.HasValue &&
+                            entryIds.Contains(b.PayrollEntryId.Value))
                 .Select(b => b.PayrollEntryId!.Value)
                 .ToListAsync(cancellationToken);
+
             if (existingTransfers.Count > 0)
             {
                 await transaction.RollbackAsync(cancellationToken);
                 return Result<List<PayrollEntryResponse>>.Failure(
                     Error.Conflict("PayrollEntry.AlreadyPaid",
                         $"تم تحويل راتب بعض القيود إلى حساب الموظف مسبقًا: {string.Join(", ", existingTransfers)}"));
+            }
+
+            var existingPeriodTransfers = await dbContext.EmployeeOpeningBalances
+                .Where(b => b.CompanyId == companyId &&
+                            b.PayrollEntryId.HasValue &&
+                            employeeIds.Contains(b.EmployeeId))
+                .Select(b => new
+                {
+                    b.EmployeeId,
+                    StartDate = (DateOnly?)b.PayrollEntry!.StartDate,
+                    EndDate = (DateOnly?)b.PayrollEntry.EndDate,
+                    PayrollEntryId = b.PayrollEntryId!.Value
+                })
+                .ToListAsync(cancellationToken);
+
+            var duplicatePeriodEntry = entries.FirstOrDefault(e =>
+                existingPeriodTransfers.Any(b =>
+                    b.EmployeeId == e.EmployeeId &&
+                    b.StartDate == e.StartDate &&
+                    b.EndDate == e.EndDate &&
+                    b.PayrollEntryId != e.Id));
+
+            if (duplicatePeriodEntry is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.Conflict("PayrollEntry.AlreadyPaid",
+                        $"تم تحويل راتب الموظف {duplicatePeriodEntry.EmployeeName} للفترة ({duplicatePeriodEntry.StartDate:yyyy-MM-dd} إلى {duplicatePeriodEntry.EndDate:yyyy-MM-dd}) إلى حسابه مسبقًا."));
             }
 
             var openingBalances = new List<EmployeeOpeningBalance>(requestedItems.Count);
@@ -567,8 +656,27 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             }
 
             dbContext.EmployeeOpeningBalances.AddRange(openingBalances);
-            await dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<List<PayrollEntryResponse>>.Failure(
+                    Error.Conflict(
+                        "PayrollEntry.AlreadyPaid",
+                        "تم تحويل راتب بعض القيود إلى حساب الموظف مسبقًا."));
+            }
+            catch (Exception)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                throw;
+            }
 
             return Result<List<PayrollEntryResponse>>.Success(entries.Select(MapToResponse).ToList());
         }
