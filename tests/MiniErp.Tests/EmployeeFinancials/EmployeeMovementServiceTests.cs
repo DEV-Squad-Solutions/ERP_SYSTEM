@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Features.EmployeeMovements;
+using MiniErp.Application.Features.EmployeeOpeningBalances;
 using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Enums;
 using MiniErp.Tests.PayrollEntries;
@@ -250,5 +251,233 @@ public sealed class EmployeeMovementServiceTests
         Assert.Equal(500m, reportResult.Value.Summary.TotalCredits); // 500
         Assert.Equal(500m, reportResult.Value.Summary.TotalBonuses);
         Assert.Equal(100m, reportResult.Value.Summary.TotalDeductions);
+    }
+
+    [Fact]
+    public async Task DeleteDebit_ShouldRestoreAccountBalance()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var movementService = database.CreateMovementService();
+        var statementService = database.CreateStatementService();
+        var openingBalanceService = database.CreateOpeningBalanceService();
+
+        // Initial balance: 10,000 Credit
+        await openingBalanceService.AddAsync(new EmployeeOpeningBalanceRequest(
+            EmployeeId: 1,
+            DocumentDate: new DateOnly(2026, 8, 1),
+            Currency: CurrencyCode.EGP,
+            BalanceType: EmployeeBalanceType.Credit,
+            Amount: 10_000m,
+            Notes: "Initial balance"));
+
+        var initialBalance = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(10_000m, initialBalance.Value.BalanceAmount);
+        Assert.Equal(10_000m, initialBalance.Value.TotalCredits);
+        Assert.Equal(0m, initialBalance.Value.TotalDebits);
+
+        // Act 1: Create Debit Movement = 2,000
+        var debitResult = await movementService.AddAsync(new EmployeeMovementRequest(
+            EmployeeId: 1,
+            Type: EmployeeMovementType.Debit,
+            Amount: 2_000m,
+            Currency: CurrencyCode.EGP,
+            MovementDate: new DateOnly(2026, 8, 2),
+            Notes: "Advance"));
+        Assert.True(debitResult.IsSuccess);
+
+        // Balance after movement: 8,000
+        var afterMovementBalance = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(8_000m, afterMovementBalance.Value.BalanceAmount);
+        Assert.Equal(10_000m, afterMovementBalance.Value.TotalCredits);
+        Assert.Equal(2_000m, afterMovementBalance.Value.TotalDebits);
+
+        // Act 2: Delete Debit Movement
+        var deleteResult = await movementService.DeleteAsync(debitResult.Value.Id);
+        Assert.True(deleteResult.IsSuccess);
+
+        // Balance after deletion: restored to 10,000
+        var afterDeleteBalance = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(10_000m, afterDeleteBalance.Value.BalanceAmount);
+        Assert.Equal(10_000m, afterDeleteBalance.Value.TotalCredits);
+        Assert.Equal(0m, afterDeleteBalance.Value.TotalDebits);
+    }
+
+    [Fact]
+    public async Task DeleteCredit_ShouldRestoreAccountBalance()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var movementService = database.CreateMovementService();
+        var statementService = database.CreateStatementService();
+        var openingBalanceService = database.CreateOpeningBalanceService();
+
+        // Initial balance: 10,000 Credit
+        await openingBalanceService.AddAsync(new EmployeeOpeningBalanceRequest(
+            EmployeeId: 1,
+            DocumentDate: new DateOnly(2026, 8, 1),
+            Currency: CurrencyCode.EGP,
+            BalanceType: EmployeeBalanceType.Credit,
+            Amount: 10_000m,
+            Notes: "Initial balance"));
+
+        // Act 1: Create Credit Movement = 2,000
+        var creditResult = await movementService.AddAsync(new EmployeeMovementRequest(
+            EmployeeId: 1,
+            Type: EmployeeMovementType.Credit,
+            Amount: 2_000m,
+            Currency: CurrencyCode.EGP,
+            MovementDate: new DateOnly(2026, 8, 2),
+            Notes: "Credit payment"));
+        Assert.True(creditResult.IsSuccess);
+
+        // Balance after movement: 12,000
+        var afterMovementBalance = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(12_000m, afterMovementBalance.Value.BalanceAmount);
+        Assert.Equal(12_000m, afterMovementBalance.Value.TotalCredits);
+
+        // Act 2: Delete Credit Movement
+        var deleteResult = await movementService.DeleteAsync(creditResult.Value.Id);
+        Assert.True(deleteResult.IsSuccess);
+
+        // Balance after deletion: restored to 10,000
+        var afterDeleteBalance = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(10_000m, afterDeleteBalance.Value.BalanceAmount);
+        Assert.Equal(10_000m, afterDeleteBalance.Value.TotalCredits);
+    }
+
+    [Fact]
+    public async Task DeleteDeduction_ShouldRestoreAccountBalance()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var movementService = database.CreateMovementService();
+        var statementService = database.CreateStatementService();
+        var openingBalanceService = database.CreateOpeningBalanceService();
+
+        // Initial balance: 10,000 Credit
+        await openingBalanceService.AddAsync(new EmployeeOpeningBalanceRequest(
+            EmployeeId: 1,
+            DocumentDate: new DateOnly(2026, 8, 1),
+            Currency: CurrencyCode.EGP,
+            BalanceType: EmployeeBalanceType.Credit,
+            Amount: 10_000m,
+            Notes: "Initial balance"));
+
+        // Act 1: Create Deduction Movement = 2,000 (Debit effect)
+        var deductionResult = await movementService.AddAsync(new EmployeeMovementRequest(
+            EmployeeId: 1,
+            Type: EmployeeMovementType.Deduction,
+            Amount: 2_000m,
+            Currency: CurrencyCode.EGP,
+            MovementDate: new DateOnly(2026, 8, 2),
+            Notes: "Penalty deduction"));
+        Assert.True(deductionResult.IsSuccess);
+
+        // Balance after deduction: 8,000
+        var afterMovementBalance = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(8_000m, afterMovementBalance.Value.BalanceAmount);
+        Assert.Equal(2_000m, afterMovementBalance.Value.TotalDebits);
+
+        // Act 2: Delete Deduction Movement
+        var deleteResult = await movementService.DeleteAsync(deductionResult.Value.Id);
+        Assert.True(deleteResult.IsSuccess);
+
+        // Balance after deletion: restored to 10,000
+        var afterDeleteBalance = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(10_000m, afterDeleteBalance.Value.BalanceAmount);
+        Assert.Equal(0m, afterDeleteBalance.Value.TotalDebits);
+    }
+
+    [Fact]
+    public async Task DeleteBonus_ShouldRestoreAccountBalance()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var movementService = database.CreateMovementService();
+        var statementService = database.CreateStatementService();
+        var openingBalanceService = database.CreateOpeningBalanceService();
+
+        // Initial balance: 10,000 Credit
+        await openingBalanceService.AddAsync(new EmployeeOpeningBalanceRequest(
+            EmployeeId: 1,
+            DocumentDate: new DateOnly(2026, 8, 1),
+            Currency: CurrencyCode.EGP,
+            BalanceType: EmployeeBalanceType.Credit,
+            Amount: 10_000m,
+            Notes: "Initial balance"));
+
+        // Act 1: Create Bonus = 2,000 (Credit effect)
+        var bonusResult = await movementService.AddAsync(new EmployeeMovementRequest(
+            EmployeeId: 1,
+            Type: EmployeeMovementType.Bonus,
+            Amount: 2_000m,
+            Currency: CurrencyCode.EGP,
+            MovementDate: new DateOnly(2026, 8, 2),
+            Notes: "Performance bonus"));
+        Assert.True(bonusResult.IsSuccess);
+
+        // Balance after bonus: 12,000
+        var afterMovementBalance = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(12_000m, afterMovementBalance.Value.BalanceAmount);
+        Assert.Equal(12_000m, afterMovementBalance.Value.TotalCredits);
+
+        // Act 2: Delete Bonus
+        var deleteResult = await movementService.DeleteAsync(bonusResult.Value.Id);
+        Assert.True(deleteResult.IsSuccess);
+
+        // Balance after deletion: restored to 10,000
+        var afterDeleteBalance = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(10_000m, afterDeleteBalance.Value.BalanceAmount);
+        Assert.Equal(10_000m, afterDeleteBalance.Value.TotalCredits);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_ShouldFail_WhenMovementHasCashVoucherDependency()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var movementService = database.CreateMovementService();
+
+        // Create movement linked to a CashVoucher
+        var movement = new EmployeeMovement
+        {
+            CompanyId = 1,
+            EmployeeId = 1,
+            CashVoucherId = 42,
+            Type = EmployeeMovementType.Debit,
+            MovementDate = new DateOnly(2026, 8, 5),
+            Currency = CurrencyCode.EGP,
+            Notes = "Movement generated from voucher"
+        };
+        movement.ApplyAmounts(EmployeeMovementType.Debit, 1000m);
+        database.Context.EmployeeMovements.Add(movement);
+        await database.Context.SaveChangesAsync();
+
+        // Act: attempt to delete the movement directly
+        var result = await movementService.DeleteAsync(movement.Id);
+
+        // Assert: must fail with Conflict / LinkedToCashVoucher
+        Assert.True(result.IsFailure);
+        Assert.Equal("EmployeeMovements.LinkedToCashVoucher", result.Error.Code);
+
+        // Ensure movement still exists in DB
+        var exists = await database.Context.EmployeeMovements.AnyAsync(m => m.Id == movement.Id);
+        Assert.True(exists);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_ShouldFail_WhenMovementDoesNotExist()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var movementService = database.CreateMovementService();
+
+        // Act
+        var result = await movementService.DeleteAsync(99999);
+
+        // Assert
+        Assert.True(result.IsFailure);
+        Assert.Equal("EmployeeMovements.NotFound", result.Error.Code);
     }
 }

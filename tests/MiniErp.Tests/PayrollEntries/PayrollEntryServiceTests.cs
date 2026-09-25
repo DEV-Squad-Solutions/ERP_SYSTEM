@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.PayrollEntries;
+using MiniErp.Application.Features.EmployeeOpeningBalances;
 using MiniErp.Application.Features.Statements;
 using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Enums;
@@ -2087,5 +2088,231 @@ public sealed class PayrollEntryServiceTests
                 DefaultPostingDate: new DateOnly(2026, 9, 30)));
         Assert.True(duplicateBulkResult.IsFailure);
         Assert.Equal("PayrollEntry.AlreadyPaid", duplicateBulkResult.Error.Code);
+    }
+
+    [Fact]
+    public async Task MoveSalary_ShouldAddNetSalaryExactlyOnce_And_UpdateLastDayOfReceivingSalary()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var payrollService = database.CreatePayrollService();
+        var statementService = database.CreateStatementService();
+
+        var emp = await database.Context.Employees.FindAsync(1);
+        emp!.UpdateLastDayOfReceivingSalary(new DateOnly(2026, 8, 31));
+        await database.Context.SaveChangesAsync();
+
+        // 30 days attendance: Monthly 6000
+        for (int day = 1; day <= 30; day++)
+        {
+            database.Context.EmployeeAttendances.Add(new AttendanceEntity
+            {
+                CompanyId = 1,
+                EmployeeId = 1,
+                WorkDate = new DateOnly(2026, 9, day),
+                Status = EmployeeAttendanceStatus.Present,
+                WorkDayRatio = WorkDayRatio.FullDay
+            });
+        }
+        await database.Context.SaveChangesAsync();
+
+        // Gross = 6,000, Bonus = 500, Deduction = 200 => NetSalary = 6,300
+        var payrollResult = await payrollService.AddAsync(new PayrollEntryCreateRequest(
+            EmployeeId: 1,
+            EndDate: new DateOnly(2026, 9, 30),
+            Bonus: 500m,
+            Deduction: 200m));
+        Assert.True(payrollResult.IsSuccess);
+        Assert.Equal(6300m, payrollResult.Value.NetSalary);
+
+        // Act 1: First Move
+        var moveResult = await payrollService.MoveSalaryForEmployeeAccountAsync(
+            payrollResult.Value.Id,
+            new PayrollEntrySalaryPaymentRequest(
+                PostingDate: new DateOnly(2026, 9, 30),
+                Notes: "September salary"));
+
+        // Assert 1: Success, NetSalary used, LastDayOfReceivingSalary updated
+        Assert.True(moveResult.IsSuccess);
+        Assert.True(moveResult.Value.IsSalaryMovedToEmployeeAccount);
+
+        var updatedEmp = await database.Context.Employees.FindAsync(1);
+        Assert.Equal(new DateOnly(2026, 9, 30), updatedEmp!.LastDayOfReceivingSalary);
+
+        var balance = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(6300m, balance.Value.BalanceAmount);
+        Assert.Equal(6300m, balance.Value.TotalCredits);
+        Assert.Equal(0m, balance.Value.TotalDebits);
+
+        // Act 2: Move same Payroll Salary again -> MUST Conflict
+        var secondAttempt = await payrollService.MoveSalaryForEmployeeAccountAsync(
+            payrollResult.Value.Id,
+            new PayrollEntrySalaryPaymentRequest(
+                PostingDate: new DateOnly(2026, 9, 30)));
+
+        Assert.True(secondAttempt.IsFailure);
+        Assert.Equal("PayrollEntry.AlreadyPaid", secondAttempt.Error.Code);
+
+        // Assert: Balance NOT doubled (remains 6,300, not 12,600)
+        var balanceAfterDuplicate = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(6300m, balanceAfterDuplicate.Value.BalanceAmount);
+        Assert.Equal(6300m, balanceAfterDuplicate.Value.TotalCredits);
+
+        var openingBalancesCount = await database.Context.EmployeeOpeningBalances
+            .CountAsync(b => b.CompanyId == 1 && b.EmployeeId == 1 && b.PayrollEntryId == payrollResult.Value.Id);
+        Assert.Equal(1, openingBalancesCount);
+    }
+
+    [Fact]
+    public async Task MoveSalary_PeriodUniqueness_ShouldRejectIfSamePeriodAlreadyMoved()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var payrollService = database.CreatePayrollService();
+
+        var emp = await database.Context.Employees.FindAsync(1);
+        emp!.UpdateLastDayOfReceivingSalary(new DateOnly(2026, 8, 31));
+        await database.Context.SaveChangesAsync();
+
+        for (int day = 1; day <= 15; day++)
+        {
+            database.Context.EmployeeAttendances.Add(new AttendanceEntity
+            {
+                CompanyId = 1,
+                EmployeeId = 1,
+                WorkDate = new DateOnly(2026, 9, day),
+                Status = EmployeeAttendanceStatus.Present,
+                WorkDayRatio = WorkDayRatio.FullDay
+            });
+        }
+        await database.Context.SaveChangesAsync();
+
+        var payrollResult = await payrollService.AddAsync(new PayrollEntryCreateRequest(
+            EmployeeId: 1,
+            EndDate: new DateOnly(2026, 9, 15)));
+        Assert.True(payrollResult.IsSuccess);
+
+        // Move salary
+        var moveResult = await payrollService.MoveSalaryForEmployeeAccountAsync(
+            payrollResult.Value.Id,
+            new PayrollEntrySalaryPaymentRequest(PostingDate: new DateOnly(2026, 9, 15)));
+        Assert.True(moveResult.IsSuccess);
+
+        // Act: attempt to move salary for the same entry and period again
+        var secondPeriodAttempt = await payrollService.MoveSalaryForEmployeeAccountAsync(
+            payrollResult.Value.Id,
+            new PayrollEntrySalaryPaymentRequest(PostingDate: new DateOnly(2026, 9, 15)));
+
+        // Assert: must be rejected with Conflict
+        Assert.True(secondPeriodAttempt.IsFailure);
+        Assert.Equal("PayrollEntry.AlreadyPaid", secondPeriodAttempt.Error.Code);
+    }
+
+    [Fact]
+    public async Task MoveSalary_TwoConcurrentRequests_OnlyOneShouldSucceed()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var payrollService = database.CreatePayrollService();
+        var statementService = database.CreateStatementService();
+
+        var emp = await database.Context.Employees.FindAsync(1);
+        emp!.UpdateLastDayOfReceivingSalary(new DateOnly(2026, 8, 31));
+        await database.Context.SaveChangesAsync();
+
+        for (int day = 1; day <= 20; day++)
+        {
+            database.Context.EmployeeAttendances.Add(new AttendanceEntity
+            {
+                CompanyId = 1,
+                EmployeeId = 1,
+                WorkDate = new DateOnly(2026, 9, day),
+                Status = EmployeeAttendanceStatus.Present,
+                WorkDayRatio = WorkDayRatio.FullDay
+            });
+        }
+        await database.Context.SaveChangesAsync();
+
+        var payrollResult = await payrollService.AddAsync(new PayrollEntryCreateRequest(
+            EmployeeId: 1,
+            EndDate: new DateOnly(2026, 9, 20)));
+        Assert.True(payrollResult.IsSuccess);
+        var entryId = payrollResult.Value.Id;
+        var netSalary = payrollResult.Value.NetSalary;
+
+        // Act: launch two requests concurrently
+        var taskA = payrollService.MoveSalaryForEmployeeAccountAsync(
+            entryId,
+            new PayrollEntrySalaryPaymentRequest(PostingDate: new DateOnly(2026, 9, 20), Notes: "Request A"));
+
+        var taskB = payrollService.MoveSalaryForEmployeeAccountAsync(
+            entryId,
+            new PayrollEntrySalaryPaymentRequest(PostingDate: new DateOnly(2026, 9, 20), Notes: "Request B"));
+
+        var results = await Task.WhenAll(taskA, taskB);
+
+        // Assert: Exactly one succeeded and exactly one failed with Conflict
+        var successCount = results.Count(r => r.IsSuccess);
+        var failureCount = results.Count(r => r.IsFailure);
+
+        Assert.Equal(1, successCount);
+        Assert.Equal(1, failureCount);
+
+        var failedResult = results.Single(r => r.IsFailure);
+        Assert.Equal("PayrollEntry.AlreadyPaid", failedResult.Error.Code);
+
+        // Verify account balance: exactly NetSalary, NOT doubled
+        var balance = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(netSalary, balance.Value.BalanceAmount);
+        Assert.Equal(netSalary, balance.Value.TotalCredits);
+
+        // Verify only 1 ledger record exists
+        var openingBalancesCount = await database.Context.EmployeeOpeningBalances
+            .CountAsync(b => b.CompanyId == 1 && b.EmployeeId == 1 && b.PayrollEntryId == entryId);
+        Assert.Equal(1, openingBalancesCount);
+    }
+
+    [Fact]
+    public async Task MoveSalary_FailedMovement_ShouldNotChangeAccountOrLastDayOfReceivingSalary()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var payrollService = database.CreatePayrollService();
+        var statementService = database.CreateStatementService();
+        var openingBalanceService = database.CreateOpeningBalanceService();
+
+        var emp = await database.Context.Employees.FindAsync(1);
+        var initialLastDay = new DateOnly(2026, 8, 31);
+        emp!.UpdateLastDayOfReceivingSalary(initialLastDay);
+        await database.Context.SaveChangesAsync();
+
+        // Initial balance: 5,000 Credit
+        await openingBalanceService.AddAsync(new EmployeeOpeningBalanceRequest(
+            EmployeeId: 1,
+            DocumentDate: new DateOnly(2026, 8, 1),
+            Currency: CurrencyCode.EGP,
+            BalanceType: EmployeeBalanceType.Credit,
+            Amount: 5000m,
+            Notes: "Initial balance"));
+
+        var initialBalance = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(5000m, initialBalance.Value.BalanceAmount);
+
+        // Act: Attempt to move a non-existent payroll entry
+        var failedResult = await payrollService.MoveSalaryForEmployeeAccountAsync(
+            99999,
+            new PayrollEntrySalaryPaymentRequest(PostingDate: new DateOnly(2026, 9, 30)));
+
+        // Assert
+        Assert.True(failedResult.IsFailure);
+
+        // LastDayOfReceivingSalary must not change
+        var reloadedEmp = await database.Context.Employees.FindAsync(1);
+        Assert.Equal(initialLastDay, reloadedEmp!.LastDayOfReceivingSalary);
+
+        // Balance must remain untouched
+        var currentBalance = await statementService.GetEmployeeBalanceAsync(1);
+        Assert.Equal(5000m, currentBalance.Value.BalanceAmount);
+        Assert.Equal(5000m, currentBalance.Value.TotalCredits);
     }
 }

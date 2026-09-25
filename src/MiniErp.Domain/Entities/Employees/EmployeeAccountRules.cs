@@ -30,6 +30,20 @@ public static class EmployeeAccountRules
         decimal totalDebits) =>
         totalCredits - totalDebits;
 
+    // ── Movement Reversal ────────────────────────────────────────────────────
+    public static decimal GetReversalSignedAmount(
+        EmployeeMovementType type,
+        decimal debit,
+        decimal credit) =>
+        -SignedAmount(debit, credit);
+
+    public static (decimal ReversedDebit, decimal ReversedCredit) SplitReversalAmount(
+        EmployeeMovementType type,
+        decimal amount) =>
+        IsCreditMovement(type)
+            ? (amount, 0m)
+            : (0m, amount);
+
     // ── Display Helpers ──────────────────────────────────────────────────────
     public static string GetBalanceDescription(decimal netBalance) =>
         netBalance > 0

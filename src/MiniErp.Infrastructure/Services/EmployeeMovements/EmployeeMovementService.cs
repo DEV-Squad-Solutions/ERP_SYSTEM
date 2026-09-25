@@ -16,7 +16,8 @@ public sealed class EmployeeMovementService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
-    IExchangeRateResolver exchangeRateResolver)
+    IExchangeRateResolver exchangeRateResolver,
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     : IEmployeeMovementService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -407,5 +408,71 @@ public sealed class EmployeeMovementService(
             new EmployeeMovementReportResponse(
                 Summary: summary,
                 Items: items));
+    }
+
+    public async Task<Result> DeleteAsync(
+        int id,
+        CancellationToken cancellationToken = default)
+    {
+        if (id <= 0)
+        {
+            return Result.Failure(InvalidId());
+        }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+        var movement = await dbContext.EmployeeMovements
+            .FirstOrDefaultAsync(
+                m => m.Id == id && m.CompanyId == companyId,
+                cancellationToken);
+
+        if (movement is null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return Result.Failure(NotFound(id));
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                movement.MovementDate,
+                nameof(EmployeeMovement.MovementDate),
+                cancellationToken);
+
+            if (fiscalYearResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Result.Failure(fiscalYearResult.Errors);
+            }
+        }
+
+        // Rule 8: Do not allow deleting an EmployeeMovement if it has another financial dependency
+        if (movement.CashVoucherId.HasValue)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return Result.Failure(LinkedToCashVoucher());
+        }
+
+        // Reversal of the financial effect using EmployeeAccountRules:
+        // Credit/Bonus -> reverses credit (account balance decreases)
+        // Debit/Deduction -> reverses debit (account balance increases)
+        // Since employee balance is derived from active non-deleted rows,
+        // deleting the entity atomically removes its debit/credit from the ledger.
+        _ = EmployeeAccountRules.GetReversalSignedAmount(movement.Type, movement.Debit, movement.Credit);
+
+        dbContext.EmployeeMovements.Remove(movement);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return Result.Success();
+        }
+        catch (Exception)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
     }
 }
