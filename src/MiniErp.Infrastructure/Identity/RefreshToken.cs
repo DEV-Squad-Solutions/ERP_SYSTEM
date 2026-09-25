@@ -22,6 +22,8 @@ public sealed class RefreshToken
 
     public DateTimeOffset? RevokedAtUtc { get; set; }
 
+    public string SecurityStampSnapshot { get; set; } = string.Empty;
+
     public byte[] RowVersion { get; set; } = [];
 
 }

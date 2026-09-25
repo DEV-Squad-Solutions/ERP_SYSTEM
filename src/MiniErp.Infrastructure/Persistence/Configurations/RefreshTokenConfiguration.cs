@@ -17,6 +17,10 @@ public sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refresh
             .IsUnicode(false)
             .IsRequired();
 
+        builder.Property(token => token.SecurityStampSnapshot)
+            .HasMaxLength(256)
+            .IsRequired();
+
         builder.HasIndex(token => token.TokenHash)
             .IsUnique();
 

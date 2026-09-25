@@ -75,6 +75,10 @@ public sealed class AuthenticationService(
             user,
             companies[0].Id,
             cancellationToken);
+        if (tokenResult.IsFailure)
+        {
+            return Result<LoginResponse>.Failure(tokenResult.Error);
+        }
 
         return Result<LoginResponse>.Success(new LoginResponse(
             UserId: user.Id,
@@ -146,7 +150,12 @@ public sealed class AuthenticationService(
         if (storedToken is null ||
             storedToken.CompanyId is not int companyId ||
             storedToken.RevokedAtUtc is not null ||
-            storedToken.ExpiresAtUtc <= now)
+            storedToken.ExpiresAtUtc <= now ||
+            string.IsNullOrEmpty(storedToken.SecurityStampSnapshot) ||
+            !string.Equals(
+                storedToken.SecurityStampSnapshot,
+                storedToken.User.SecurityStamp,
+                StringComparison.Ordinal))
         {
             return InvalidRefreshToken();
         }
@@ -217,6 +226,11 @@ public sealed class AuthenticationService(
         int companyId,
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrEmpty(user.SecurityStamp))
+        {
+            return Result<TokenResponse>.Failure(InvalidUserContext());
+        }
+
         var accessToken = await CreateAccessTokenAsync(user, companyId);
         var rawRefreshToken = CreateRefreshToken();
         var now = timeProvider.GetUtcNow();
@@ -228,6 +242,7 @@ public sealed class AuthenticationService(
             CompanyId = companyId,
             TokenHash = HashRefreshToken(rawRefreshToken),
             CreatedAtUtc = now,
+            SecurityStampSnapshot = user.SecurityStamp,
             ExpiresAtUtc = now.AddDays(
                 options.RefreshToken.ExpirationDays)
         });

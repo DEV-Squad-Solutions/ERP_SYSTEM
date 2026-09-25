@@ -157,6 +157,13 @@ public sealed class ApplicationDbContext
         var isSqlite = Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite";
         builder.ApplyConfiguration(new Configurations.EmployeeConfiguration(isSqlite));
 
+        if (isSqlite)
+        {
+            builder.Entity<RefreshToken>()
+                .Property(token => token.RowVersion)
+                .HasDefaultValueSql("randomblob(8)");
+        }
+
         builder.Entity<ApplicationUser>(entity =>
         {
             entity.Property(user => user.CreatedOn)
