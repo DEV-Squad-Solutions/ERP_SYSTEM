@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Features.EmployeeMovements;
-using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Enums;
 using MiniErp.Tests.PayrollEntries;
@@ -13,32 +12,19 @@ namespace MiniErp.Tests.EmployeeFinancials;
 public sealed class EmployeeMovementServiceTests
 {
     [Fact]
-    public async Task AddAsync_BonusAndDebit_ShouldSplitDebitCreditAndCreateVouchersCorrectly()
+    public async Task AddAsync_BonusAndDeduction_ShouldSplitDebitCreditCorrectly()
     {
         // Arrange
         await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
         var service = database.CreateMovementService();
 
-        var cashbox = new Cashbox
-        {
-            CompanyId = 1,
-            Code = "CB001",
-            Name = "Main Safe",
-            Currency = CurrencyCode.EGP,
-            OpeningBalance = 1_000m,
-            IsActive = true
-        };
-        database.Context.Cashboxes.Add(cashbox);
-        await database.Context.SaveChangesAsync();
-
-        // 1. Bonus Movement (Credit -> CashDirection.Receipt)
+        // 1. Bonus Movement (Credit)
         var bonusResult = await service.AddAsync(new EmployeeMovementRequest(
             EmployeeId: 1,
             Type: EmployeeMovementType.Bonus,
             Amount: 500m,
             Currency: CurrencyCode.EGP,
             MovementDate: new DateOnly(2026, 8, 1),
-            CashboxId: cashbox.Id,
             Notes: "Bonus for outstanding work"));
 
         // Assert Bonus
@@ -46,30 +32,15 @@ public sealed class EmployeeMovementServiceTests
         Assert.Equal(0m, bonusResult.Value.Debit);
         Assert.Equal(500m, bonusResult.Value.Credit);
         Assert.Equal(EmployeeMovementType.Bonus, bonusResult.Value.Type);
-        Assert.NotNull(bonusResult.Value.CashVoucherId);
-        Assert.StartsWith("RCV-", bonusResult.Value.CashVoucherNumber!);
+        Assert.Null(bonusResult.Value.CashVoucherId);
 
-        var bonusVoucher = await database.Context.CashVouchers
-            .FirstOrDefaultAsync(v => v.Id == bonusResult.Value.CashVoucherId!.Value);
-        Assert.NotNull(bonusVoucher);
-        Assert.Equal(CashDirection.Receipt, bonusVoucher.Direction);
-        Assert.Equal(CashPartyType.Employee, bonusVoucher.PartyType);
-        Assert.Equal(1, bonusVoucher.EmployeeId);
-        Assert.Equal(500m, bonusVoucher.Amount);
-        Assert.Equal(CurrencyCode.EGP, bonusVoucher.Currency);
-        Assert.True(bonusVoucher.IsPosted);
-        Assert.Contains(
-            bonusVoucher.Id,
-            database.CashVoucherPostingService.SynchronizedVoucherIds);
-
-        // 2. Deduction Movement (Debit -> CashDirection.Payment)
+        // 2. Deduction Movement (Debit)
         var deductionResult = await service.AddAsync(new EmployeeMovementRequest(
             EmployeeId: 1,
             Type: EmployeeMovementType.Deduction,
             Amount: 200m,
             Currency: CurrencyCode.EGP,
             MovementDate: new DateOnly(2026, 8, 2),
-            CashboxId: cashbox.Id,
             Notes: "Late penalty deduction"));
 
         // Assert Deduction
@@ -77,76 +48,64 @@ public sealed class EmployeeMovementServiceTests
         Assert.Equal(200m, deductionResult.Value.Debit);
         Assert.Equal(0m, deductionResult.Value.Credit);
         Assert.Equal(EmployeeMovementType.Deduction, deductionResult.Value.Type);
-        Assert.NotNull(deductionResult.Value.CashVoucherId);
-        Assert.StartsWith("PAY-", deductionResult.Value.CashVoucherNumber!);
+        Assert.Null(deductionResult.Value.CashVoucherId);
 
-        var deductionVoucher = await database.Context.CashVouchers
-            .FirstOrDefaultAsync(v => v.Id == deductionResult.Value.CashVoucherId!.Value);
-        Assert.NotNull(deductionVoucher);
-        Assert.Equal(CashDirection.Payment, deductionVoucher.Direction);
-        Assert.Equal(CashPartyType.Employee, deductionVoucher.PartyType);
-        Assert.Equal(1, deductionVoucher.EmployeeId);
-        Assert.Equal(200m, deductionVoucher.Amount);
-        Assert.Equal(CurrencyCode.EGP, deductionVoucher.Currency);
-        Assert.True(deductionVoucher.IsPosted);
-        Assert.Contains(
-            deductionVoucher.Id,
-            database.CashVoucherPostingService.SynchronizedVoucherIds);
+        // Verify database records
+        var movements = await database.Context.EmployeeMovements
+            .Where(m => m.CompanyId == 1 && m.EmployeeId == 1)
+            .OrderBy(m => m.MovementDate)
+            .ToListAsync();
+
+        Assert.Equal(2, movements.Count);
+        Assert.Equal(500m, movements[0].Credit);
+        Assert.Equal(200m, movements[1].Debit);
     }
 
     [Fact]
-    public async Task AddAsync_Advance_ShouldCreateEmployeeMovementAndCashVoucherAtomically()
+    public async Task AddAsync_DebitAndCredit_ShouldPersistAccountMovementsAtomically()
     {
         // Arrange
         await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
         var service = database.CreateMovementService();
 
-        // Seed a Cashbox
-        var cashbox = new Cashbox
-        {
-            CompanyId = 1,
-            Code = "CB001",
-            Name = "Main Safe",
-            Currency = CurrencyCode.EGP,
-            OpeningBalance = 2_000m,
-            IsActive = true
-        };
-        database.Context.Cashboxes.Add(cashbox);
-        await database.Context.SaveChangesAsync();
-
-        // Act - Advance Movement
-        var result = await service.AddAsync(new EmployeeMovementRequest(
+        // Act - Debit Movement
+        var debitResult = await service.AddAsync(new EmployeeMovementRequest(
             EmployeeId: 1,
-            Type: EmployeeMovementType.Advance,
+            Type: EmployeeMovementType.Debit,
             Amount: 1000m,
             Currency: CurrencyCode.EGP,
             MovementDate: new DateOnly(2026, 8, 5),
-            CashboxId: cashbox.Id,
-            Notes: "Advance payment"));
+            Notes: "Debit payment"));
 
-        // Assert
-        Assert.True(result.IsSuccess);
-        Assert.Equal(1000m, result.Value.Debit);
-        Assert.Equal(0m, result.Value.Credit);
-        Assert.NotNull(result.Value.CashVoucherId);
-        Assert.False(string.IsNullOrEmpty(result.Value.CashVoucherNumber));
-        Assert.StartsWith("PAY-", result.Value.CashVoucherNumber);
+        // Assert Debit
+        Assert.True(debitResult.IsSuccess);
+        Assert.Equal(1000m, debitResult.Value.Debit);
+        Assert.Equal(0m, debitResult.Value.Credit);
+        Assert.Null(debitResult.Value.CashVoucherId);
 
-        // Verify CashVoucher in database
-        var voucher = await database.Context.CashVouchers
-            .FirstOrDefaultAsync(v => v.Id == result.Value.CashVoucherId!.Value);
+        // Act - Credit Movement
+        var creditResult = await service.AddAsync(new EmployeeMovementRequest(
+            EmployeeId: 1,
+            Type: EmployeeMovementType.Credit,
+            Amount: 750m,
+            Currency: CurrencyCode.EGP,
+            MovementDate: new DateOnly(2026, 8, 6),
+            Notes: "Credit payment"));
 
-        Assert.NotNull(voucher);
-        Assert.Equal(CashDirection.Payment, voucher.Direction);
-        Assert.Equal(CashPartyType.Employee, voucher.PartyType);
-        Assert.Equal(1, voucher.EmployeeId);
-        Assert.Equal(1000m, voucher.Amount);
-        Assert.Equal(cashbox.Id, voucher.CashboxId);
-        Assert.True(voucher.IsPosted);
+        // Assert Credit
+        Assert.True(creditResult.IsSuccess);
+        Assert.Equal(0m, creditResult.Value.Debit);
+        Assert.Equal(750m, creditResult.Value.Credit);
+        Assert.Null(creditResult.Value.CashVoucherId);
+
+        var saved = await database.Context.EmployeeMovements
+            .Where(m => m.CompanyId == 1 && m.EmployeeId == 1)
+            .ToListAsync();
+        Assert.Equal(2, saved.Count);
     }
 
     [Fact]
-    public async Task AddAsync_ShouldFail_WhenCashboxMissing()
+    public async Task AddAsync_ShouldFail_WhenEmployeeNotFound()
     {
         // Arrange
         await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
@@ -154,169 +113,33 @@ public sealed class EmployeeMovementServiceTests
 
         // Act
         var result = await service.AddAsync(new EmployeeMovementRequest(
-            EmployeeId: 1,
+            EmployeeId: 9999,
             Type: EmployeeMovementType.Bonus,
             Amount: 500m,
             Currency: CurrencyCode.EGP,
-            MovementDate: new DateOnly(2026, 8, 1),
-            CashboxId: null));
+            MovementDate: new DateOnly(2026, 8, 1)));
 
         // Assert
         Assert.True(result.IsFailure);
-        Assert.Equal("EmployeeMovements.CashboxRequired", result.Error.Code);
+        Assert.Equal("EmployeeMovements.EmployeeNotFound", result.Error.Code);
     }
 
     [Fact]
-    public async Task AddAsync_ShouldFail_WhenCashboxNotFound()
+    public async Task AddAsync_ForeignCurrency_ShouldCalculateBaseDebitAndCreditCorrectly()
     {
         // Arrange
         await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
         var service = database.CreateMovementService();
 
-        // Act
+        // Act - Foreign currency debit: 100 USD @ rate 50 = 5,000 EGP base
         var result = await service.AddAsync(new EmployeeMovementRequest(
             EmployeeId: 1,
-            Type: EmployeeMovementType.Advance,
-            Amount: 500m,
-            Currency: CurrencyCode.EGP,
-            MovementDate: new DateOnly(2026, 8, 1),
-            CashboxId: 9999));
-
-        // Assert
-        Assert.True(result.IsFailure);
-        Assert.Equal("EmployeeMovements.CashboxNotFound", result.Error.Code);
-    }
-
-    [Fact]
-    public async Task AddAsync_ShouldFail_WhenCashboxInactive()
-    {
-        // Arrange
-        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
-        var service = database.CreateMovementService();
-
-        var cashbox = new Cashbox
-        {
-            CompanyId = 1,
-            Code = "CB-INACTIVE",
-            Name = "Inactive Cashbox",
-            Currency = CurrencyCode.EGP,
-            IsActive = false
-        };
-        database.Context.Cashboxes.Add(cashbox);
-        await database.Context.SaveChangesAsync();
-
-        // Act
-        var result = await service.AddAsync(new EmployeeMovementRequest(
-            EmployeeId: 1,
-            Type: EmployeeMovementType.Bonus,
-            Amount: 300m,
-            Currency: CurrencyCode.EGP,
-            MovementDate: new DateOnly(2026, 8, 1),
-            CashboxId: cashbox.Id));
-
-        // Assert
-        Assert.True(result.IsFailure);
-        Assert.Equal("EmployeeMovements.CashboxInactive", result.Error.Code);
-    }
-
-    [Fact]
-    public async Task AddAsync_ShouldFail_WhenCashboxNotEgp()
-    {
-        // Arrange
-        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
-        var service = database.CreateMovementService();
-
-        var cashbox = new Cashbox
-        {
-            CompanyId = 1,
-            Code = "CB-USD",
-            Name = "USD Safe",
-            Currency = CurrencyCode.USD,
-            IsActive = true
-        };
-        database.Context.Cashboxes.Add(cashbox);
-        await database.Context.SaveChangesAsync();
-
-        // Act
-        var result = await service.AddAsync(new EmployeeMovementRequest(
-            EmployeeId: 1,
-            Type: EmployeeMovementType.Withdrawal,
-            Amount: 100m,
-            Currency: CurrencyCode.EGP,
-            MovementDate: new DateOnly(2026, 8, 1),
-            CashboxId: cashbox.Id));
-
-        // Assert
-        Assert.True(result.IsFailure);
-        Assert.Equal("EmployeeMovements.CashboxMustBeEgp", result.Error.Code);
-    }
-
-    [Fact]
-    public async Task AddAsync_Payment_ShouldFail_WhenInsufficientCashboxBalance()
-    {
-        // Arrange
-        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
-        var service = database.CreateMovementService();
-
-        var cashbox = new Cashbox
-        {
-            CompanyId = 1,
-            Code = "CB-LOW",
-            Name = "Low Balance Safe",
-            Currency = CurrencyCode.EGP,
-            OpeningBalance = 100m,
-            IsActive = true
-        };
-        database.Context.Cashboxes.Add(cashbox);
-        await database.Context.SaveChangesAsync();
-
-        // Act - Attempt to withdraw 500 from a cashbox with 100
-        var result = await service.AddAsync(new EmployeeMovementRequest(
-            EmployeeId: 1,
-            Type: EmployeeMovementType.Withdrawal,
-            Amount: 500m,
-            Currency: CurrencyCode.EGP,
-            MovementDate: new DateOnly(2026, 8, 1),
-            CashboxId: cashbox.Id));
-
-        // Assert
-        Assert.True(result.IsFailure);
-        Assert.Equal("CashVouchers.InsufficientBalance", result.Error.Code);
-        Assert.Equal($"Cashbox {cashbox.Id} does not have enough balance.", result.Error.Description);
-
-        // Verify nothing was created in DB
-        Assert.Empty(await database.Context.EmployeeMovements.ToListAsync());
-        Assert.Empty(await database.Context.CashVouchers.ToListAsync());
-    }
-
-    [Fact]
-    public async Task AddAsync_ForeignCurrency_ShouldCreateEgpCashVoucherWithConvertedAmount()
-    {
-        // Arrange
-        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
-        var service = database.CreateMovementService();
-
-        var cashbox = new Cashbox
-        {
-            CompanyId = 1,
-            Code = "CB-MAIN",
-            Name = "Main Safe",
-            Currency = CurrencyCode.EGP,
-            OpeningBalance = 10_000m,
-            IsActive = true
-        };
-        database.Context.Cashboxes.Add(cashbox);
-        await database.Context.SaveChangesAsync();
-
-        // Act - Foreign currency advance: 100 USD @ rate 50 = 5,000 EGP
-        var result = await service.AddAsync(new EmployeeMovementRequest(
-            EmployeeId: 1,
-            Type: EmployeeMovementType.Advance,
+            Type: EmployeeMovementType.Debit,
             Amount: 100m,
             Currency: CurrencyCode.USD,
             ExchangeRate: 50m,
             MovementDate: new DateOnly(2026, 8, 1),
-            CashboxId: cashbox.Id));
+            Notes: "USD debit"));
 
         // Assert
         Assert.True(result.IsSuccess);
@@ -324,14 +147,7 @@ public sealed class EmployeeMovementServiceTests
         Assert.Equal(50m, result.Value.ExchangeRate);
         Assert.Equal(5_000m, result.Value.BaseDebit);
         Assert.Equal(CurrencyCode.USD, result.Value.Currency);
-
-        var voucher = await database.Context.CashVouchers
-            .FirstOrDefaultAsync(v => v.Id == result.Value.CashVoucherId!.Value);
-        Assert.NotNull(voucher);
-        Assert.Equal(CurrencyCode.EGP, voucher.Currency);
-        Assert.Equal(5_000m, voucher.Amount);
-        Assert.Equal(1m, voucher.ExchangeRate);
-        Assert.Equal(CashDirection.Payment, voucher.Direction);
+        Assert.Null(result.Value.CashVoucherId);
     }
 
     [Fact]
@@ -341,18 +157,6 @@ public sealed class EmployeeMovementServiceTests
         await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
         var service = database.CreateMovementService();
 
-        var cashbox = new Cashbox
-        {
-            CompanyId = 1,
-            Code = "CB-BULK",
-            Name = "Bulk Safe",
-            Currency = CurrencyCode.EGP,
-            OpeningBalance = 1_000m,
-            IsActive = true
-        };
-        database.Context.Cashboxes.Add(cashbox);
-        await database.Context.SaveChangesAsync();
-
         var bulkRequest = new BulkEmployeeMovementRequest(
         [
             new EmployeeMovementRequest(
@@ -360,15 +164,13 @@ public sealed class EmployeeMovementServiceTests
                 Type: EmployeeMovementType.Bonus,
                 Amount: 300m,
                 Currency: CurrencyCode.EGP,
-                MovementDate: new DateOnly(2026, 8, 1),
-                CashboxId: cashbox.Id),
+                MovementDate: new DateOnly(2026, 8, 1)),
             new EmployeeMovementRequest(
                 EmployeeId: 2,
                 Type: EmployeeMovementType.Deduction,
                 Amount: 150m,
                 Currency: CurrencyCode.EGP,
-                MovementDate: new DateOnly(2026, 8, 1),
-                CashboxId: cashbox.Id)
+                MovementDate: new DateOnly(2026, 8, 1))
         ]);
 
         // Act
@@ -380,48 +182,73 @@ public sealed class EmployeeMovementServiceTests
 
         var count = await database.Context.EmployeeMovements.CountAsync(m => m.CompanyId == 1);
         Assert.Equal(2, count);
-
-        var voucherCount = await database.Context.CashVouchers.CountAsync(v => v.CompanyId == 1);
-        Assert.Equal(2, voucherCount);
-        Assert.Equal(
-            2,
-            database.CashVoucherPostingService.SynchronizedVoucherIds.Count);
     }
 
     [Fact]
-    public async Task AddAsync_PostingFailureRollsBackMovementAndVoucher()
+    public async Task GetByIdAsync_ShouldReturnCreatedMovement()
     {
+        // Arrange
         await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
-        database.CashVoucherPostingService.FailSynchronization = true;
         var service = database.CreateMovementService();
 
-        var cashbox = new Cashbox
-        {
-            CompanyId = 1,
-            Code = "CB-POST-FAIL",
-            Name = "Posting Failure Safe",
-            Currency = CurrencyCode.EGP,
-            OpeningBalance = 1_000m,
-            IsActive = true
-        };
-        database.Context.Cashboxes.Add(cashbox);
-        await database.Context.SaveChangesAsync();
-
-        var result = await service.AddAsync(new EmployeeMovementRequest(
+        var addResult = await service.AddAsync(new EmployeeMovementRequest(
             EmployeeId: 1,
             Type: EmployeeMovementType.Bonus,
-            Amount: 250m,
+            Amount: 500m,
             Currency: CurrencyCode.EGP,
-            MovementDate: new DateOnly(2026, 8, 10),
-            CashboxId: cashbox.Id));
+            MovementDate: new DateOnly(2026, 8, 1),
+            Notes: "Special recognition"));
+        Assert.True(addResult.IsSuccess);
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("Tests.CashVoucherPostingFailed", result.Error.Code);
-        Assert.Empty(await database.Context.EmployeeMovements
-            .Where(movement => movement.CompanyId == 1)
-            .ToListAsync());
-        Assert.Empty(await database.Context.CashVouchers
-            .Where(voucher => voucher.CompanyId == 1)
-            .ToListAsync());
+        // Act
+        var getResult = await service.GetByIdAsync(addResult.Value.Id);
+
+        // Assert
+        Assert.True(getResult.IsSuccess);
+        Assert.Equal(addResult.Value.Id, getResult.Value.Id);
+        Assert.Equal(500m, getResult.Value.Credit);
+        Assert.Equal(0m, getResult.Value.Debit);
+        Assert.Equal("Special recognition", getResult.Value.Notes);
+    }
+
+    [Fact]
+    public async Task GetReportAsync_ShouldCalculateDebitsAndCreditsCorrectly()
+    {
+        // Arrange
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreateMovementService();
+
+        await service.AddAsync(new EmployeeMovementRequest(
+            EmployeeId: 1,
+            Type: EmployeeMovementType.Debit,
+            Amount: 300m,
+            Currency: CurrencyCode.EGP,
+            MovementDate: new DateOnly(2026, 8, 1)));
+
+        await service.AddAsync(new EmployeeMovementRequest(
+            EmployeeId: 1,
+            Type: EmployeeMovementType.Bonus,
+            Amount: 500m,
+            Currency: CurrencyCode.EGP,
+            MovementDate: new DateOnly(2026, 8, 2)));
+
+        await service.AddAsync(new EmployeeMovementRequest(
+            EmployeeId: 1,
+            Type: EmployeeMovementType.Deduction,
+            Amount: 100m,
+            Currency: CurrencyCode.EGP,
+            MovementDate: new DateOnly(2026, 8, 3)));
+
+        // Act
+        var reportResult = await service.GetReportAsync(new EmployeeMovementReportRequest(
+            EmployeeId: 1));
+
+        // Assert
+        Assert.True(reportResult.IsSuccess);
+        Assert.Equal(3, reportResult.Value.Summary.TotalMovements);
+        Assert.Equal(400m, reportResult.Value.Summary.TotalDebits); // 300 + 100
+        Assert.Equal(500m, reportResult.Value.Summary.TotalCredits); // 500
+        Assert.Equal(500m, reportResult.Value.Summary.TotalBonuses);
+        Assert.Equal(100m, reportResult.Value.Summary.TotalDeductions);
     }
 }

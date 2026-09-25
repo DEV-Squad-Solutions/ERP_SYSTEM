@@ -47,8 +47,6 @@ public sealed record EmployeeMovementReportSummaryResponse(
     decimal TotalDebits,
     decimal TotalCredits,
     decimal NetBalance,
-    decimal TotalAdvances,
-    decimal TotalWithdrawals,
     decimal TotalBonuses,
     decimal TotalDeductions,
     int TotalMovements);

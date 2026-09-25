@@ -413,7 +413,15 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             entry.SalaryMovedOn = request.PostingDate;
 
             if (entry.Employee is not null)
+            {
                 entry.Employee.UpdateLastDayOfReceivingSalary(entry.EndDate);
+            }
+            else
+            {
+                var employee = await dbContext.Employees
+                    .FirstOrDefaultAsync(e => e.Id == entry.EmployeeId && e.CompanyId == companyId, cancellationToken);
+                employee?.UpdateLastDayOfReceivingSalary(entry.EndDate);
+            }
 
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -547,7 +555,15 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 entry.SalaryMovedOn = item.PostingDate;
 
                 if (entry.Employee is not null)
+                {
                     entry.Employee.UpdateLastDayOfReceivingSalary(entry.EndDate);
+                }
+                else
+                {
+                    var employee = await dbContext.Employees
+                        .FirstOrDefaultAsync(e => e.Id == entry.EmployeeId && e.CompanyId == companyId, cancellationToken);
+                    employee?.UpdateLastDayOfReceivingSalary(entry.EndDate);
+                }
             }
 
             dbContext.EmployeeOpeningBalances.AddRange(openingBalances);
@@ -1007,7 +1023,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 .GroupBy(_ => 1)
                 .Select(g => new
                 {
-                    TotalAdvances = g.Where(m => m.Type == EmployeeMovementType.Advance).Sum(m => m.Debit),
+                    TotalDebits = g.Where(m => m.Type == EmployeeMovementType.Debit).Sum(m => m.Debit),
                     TotalMovementDeductions = g.Where(m => m.Type == EmployeeMovementType.Deduction).Sum(m => m.Debit)
                 })
                 .FirstOrDefaultAsync(cancellationToken);
@@ -1042,13 +1058,13 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 .ThenByDescending(m => m.Id)
                 .Take(10)
                 .Select(m => new PayrollDashboardRecentOperationResponse(
-                    m.Id,
-                    m.Type.ToString(),
-                    m.Type == EmployeeMovementType.Advance ? "سلفة نقدية" :
-                    m.Type == EmployeeMovementType.Withdrawal ? "مسحوبات نقدية" :
-                    m.Type == EmployeeMovementType.Deduction ? "خصم مالي" :
-                    m.Type == EmployeeMovementType.Bonus ? "مكافأة مالية" :
-                    m.Type == EmployeeMovementType.Credit ? "حركة دائنة" : "حركة مدينة",
+                    m.CashVoucherId.HasValue ? m.CashVoucherId.Value : m.Id,
+                    m.CashVoucherId.HasValue ? "CashVoucher" : m.Type.ToString(),
+                    m.CashVoucherId.HasValue
+                        ? (m.CashVoucher != null && m.CashVoucher.Direction == CashDirection.Receipt ? "سند قبض نقدية" : "سند صرف نقدية")
+                        : (m.Type == EmployeeMovementType.Deduction ? "خصم مالي" :
+                           m.Type == EmployeeMovementType.Bonus ? "مكافأة مالية" :
+                           m.Type == EmployeeMovementType.Credit ? "حركة دائنة" : "حركة مدينة"),
                     m.EmployeeId,
                     m.Employee.Code,
                     m.Employee.Name,
@@ -1113,7 +1129,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 NetPayable:      payrollStats?.TotalNet ?? 0m,
                 TotalPaid:       payrollStats?.TotalMoved ?? 0m,
                 TotalDeductions: totalDeductions,
-                TotalAdvances:   movementStats?.TotalAdvances ?? 0m,
+                TotalDebits:     movementStats?.TotalDebits ?? 0m,
                 EmployeeCount:   totalEmployeeCount,
                 PendingPayrolls: pendingPayrolls,
                 RecentOperations: recentOperations);

@@ -3,10 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
-using MiniErp.Application.Features.CashVouchers;
 using MiniErp.Application.Features.EmployeeMovements;
 using MiniErp.Application.Features.ExchangeRates;
-using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -18,9 +16,7 @@ public sealed class EmployeeMovementService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
-    IExchangeRateResolver exchangeRateResolver,
-    TimeProvider timeProvider,
-    ICashVoucherPostingService cashVoucherPostingService)
+    IExchangeRateResolver exchangeRateResolver)
     : IEmployeeMovementService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -75,26 +71,6 @@ public sealed class EmployeeMovementService(
             .OrderByDescending(m => m.MovementDate)
             .ThenByDescending(m => m.Id);
 
-        var projectedQuery = orderedQuery.Select(m => new EmployeeMovementResponse(
-            m.Id,
-            m.CompanyId,
-            m.EmployeeId,
-            m.Employee.Code,
-            m.Employee.Name,
-            m.Type,
-            m.MovementDate,
-            m.Currency,
-            m.Type == EmployeeMovementType.Credit || m.Type == EmployeeMovementType.Bonus ? m.Credit : m.Debit,
-            m.Debit,
-            m.Credit,
-            m.ExchangeRate,
-            m.BaseDebit,
-            m.BaseCredit,
-            m.CashVoucherId,
-            m.CashVoucher != null ? m.CashVoucher.VoucherNumber : null,
-            m.Notes,
-            m.CreatedOn));
-
         return await paginationService.PaginateAsync<EmployeeMovement, EmployeeMovementResponse>(
             orderedQuery,
             pagination,
@@ -114,24 +90,24 @@ public sealed class EmployeeMovementService(
             .AsNoTracking()
             .Where(m => m.CompanyId == companyId && m.Id == id)
             .Select(m => new EmployeeMovementResponse(
-                m.Id,
-                m.CompanyId,
-                m.EmployeeId,
-                m.Employee.Code,
-                m.Employee.Name,
-                m.Type,
-                m.MovementDate,
-                m.Currency,
-                m.Type == EmployeeMovementType.Credit || m.Type == EmployeeMovementType.Bonus ? m.Credit : m.Debit,
-                m.Debit,
-                m.Credit,
-                m.ExchangeRate,
-                m.BaseDebit,
-                m.BaseCredit,
-                m.CashVoucherId,
-                m.CashVoucher != null ? m.CashVoucher.VoucherNumber : null,
-                m.Notes,
-                m.CreatedOn))
+                Id: m.Id,
+                CompanyId: m.CompanyId,
+                EmployeeId: m.EmployeeId,
+                EmployeeCode: m.Employee.Code,
+                EmployeeName: m.Employee.Name,
+                Type: m.Type,
+                MovementDate: m.MovementDate,
+                Currency: m.Currency,
+                Amount: m.Type == EmployeeMovementType.Credit || m.Type == EmployeeMovementType.Bonus ? m.Credit : m.Debit,
+                Debit: m.Debit,
+                Credit: m.Credit,
+                ExchangeRate: m.ExchangeRate,
+                BaseDebit: m.BaseDebit,
+                BaseCredit: m.BaseCredit,
+                CashVoucherId: m.CashVoucherId,
+                CashVoucherNumber: m.CashVoucher != null ? m.CashVoucher.VoucherNumber : null,
+                Notes: m.Notes,
+                CreatedOn: m.CreatedOn))
             .FirstOrDefaultAsync(cancellationToken);
 
         return response is null
@@ -143,9 +119,6 @@ public sealed class EmployeeMovementService(
         EmployeeMovementRequest request,
         CancellationToken cancellationToken = default)
     {
-        await using var transaction = await dbContext.Database
-            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-
         var employee = await dbContext.Employees
             .AsNoTracking()
             .FirstOrDefaultAsync(
@@ -175,35 +148,6 @@ public sealed class EmployeeMovementService(
             return Result<EmployeeMovementResponse>.Failure(exchangeRateResult.Error);
         }
 
-        if (!request.CashboxId.HasValue || request.CashboxId.Value <= 0)
-        {
-            return Result<EmployeeMovementResponse>.Failure(CashboxRequired());
-        }
-
-        var cashbox = await dbContext.Cashboxes
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                c => c.Id == request.CashboxId.Value && c.CompanyId == companyId,
-                cancellationToken);
-
-        if (cashbox is null)
-        {
-            return Result<EmployeeMovementResponse>.Failure(
-                CashboxNotFound(request.CashboxId.Value));
-        }
-
-        if (!cashbox.IsActive)
-        {
-            return Result<EmployeeMovementResponse>.Failure(
-                CashboxInactive(request.CashboxId.Value));
-        }
-
-        if (cashbox.Currency != CurrencyCode.EGP)
-        {
-            return Result<EmployeeMovementResponse>.Failure(
-                CashboxMustBeEgp());
-        }
-
         var movement = new EmployeeMovement
         {
             CompanyId = companyId,
@@ -216,78 +160,8 @@ public sealed class EmployeeMovementService(
         movement.ApplyAmounts(request.Type, request.Amount);
         movement.ApplyExchangeRate(exchangeRateResult.Value.Rate);
 
-        var isCredit = EmployeeAccountRules.IsCreditMovement(request.Type);
-        var direction = isCredit ? CashDirection.Receipt : CashDirection.Payment;
-        var egpAmount = isCredit ? movement.BaseCredit : movement.BaseDebit;
-        var prefix = isCredit ? "RCV" : "PAY";
-
-        if (direction == CashDirection.Payment)
-        {
-            var cashboxBalance = await dbContext.Cashboxes
-                .AsNoTracking()
-                .Where(c => c.CompanyId == companyId && c.Id == cashbox.Id)
-                .Select(c =>
-                    c.OpeningBalance +
-                    (c.Vouchers
-                        .Where(v => v.IsPosted)
-                        .Sum(v => (decimal?)(v.Direction == CashDirection.Receipt ? v.Amount : -v.Amount)) ?? 0m))
-                .SingleAsync(cancellationToken);
-
-            if (cashboxBalance - egpAmount < 0m)
-            {
-                return Result<EmployeeMovementResponse>.Failure(
-                    InsufficientCashboxBalance(cashbox.Id));
-            }
-        }
-
-        var voucherNumber = await EntityIdentifierGenerator
-            .GenerateUniqueAsync(
-                dbContext,
-                prefix: prefix,
-                companyId: companyId,
-                existingIdentifiers: dbContext.CashVouchers
-                    .IgnoreQueryFilters()
-                    .Where(v => v.CompanyId == companyId)
-                    .Select(v => v.VoucherNumber),
-                cancellationToken);
-
-        var cashVoucher = new CashVoucher
-        {
-            CompanyId = companyId,
-            VoucherNumber = voucherNumber,
-            VoucherDate = request.MovementDate,
-            Direction = direction,
-            CashboxId = cashbox.Id,
-            PartyType = CashPartyType.Employee,
-            EmployeeId = employee.Id,
-            Amount = egpAmount,
-            Currency = CurrencyCode.EGP,
-            Description = request.Notes ?? $"Employee {request.Type}",
-            IsPosted = true
-        };
-        cashVoucher.ApplyExchangeRate(
-            exchangeRateId: null,
-            exchangeRate: 1m);
-        cashVoucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
-
-        dbContext.CashVouchers.Add(cashVoucher);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        movement.CashVoucherId = cashVoucher.Id;
         dbContext.EmployeeMovements.Add(movement);
         await dbContext.SaveChangesAsync(cancellationToken);
-
-        var postingResult = await cashVoucherPostingService
-            .SynchronizeAsync(cashVoucher, cancellationToken);
-        if (postingResult.IsFailure)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            dbContext.ChangeTracker.Clear();
-            return Result<EmployeeMovementResponse>.Failure(
-                postingResult.Errors);
-        }
-
-        await transaction.CommitAsync(cancellationToken);
 
         var response = new EmployeeMovementResponse(
             Id: movement.Id,
@@ -304,8 +178,8 @@ public sealed class EmployeeMovementService(
             ExchangeRate: movement.ExchangeRate,
             BaseDebit: movement.BaseDebit,
             BaseCredit: movement.BaseCredit,
-            CashVoucherId: movement.CashVoucherId,
-            CashVoucherNumber: cashVoucher?.VoucherNumber,
+            CashVoucherId: null,
+            CashVoucherNumber: null,
             Notes: movement.Notes,
             CreatedOn: movement.CreatedOn);
 
@@ -320,14 +194,6 @@ public sealed class EmployeeMovementService(
         {
             return Result<List<EmployeeMovementResponse>>.Failure(
                 Error.Validation("EmployeeMovements.EmptyBulk", "يجب إرسال حركة موظف واحدة على الأقل."));
-        }
-
-        foreach (var item in request.Movements)
-        {
-            if (!item.CashboxId.HasValue || item.CashboxId.Value <= 0)
-            {
-                return Result<List<EmployeeMovementResponse>>.Failure(CashboxRequired());
-            }
         }
 
         var employeeIds = request.Movements.Select(m => m.EmployeeId).Distinct().ToList();
@@ -350,54 +216,10 @@ public sealed class EmployeeMovementService(
                 EmployeeInactive(inactive.Id));
         }
 
-        var cashboxIds = request.Movements
-            .Select(m => m.CashboxId!.Value)
-            .Distinct()
-            .ToList();
-
-        var cashboxes = await dbContext.Cashboxes
-            .AsNoTracking()
-            .Where(c => c.CompanyId == companyId && cashboxIds.Contains(c.Id))
-            .ToDictionaryAsync(c => c.Id, cancellationToken);
-
-        if (cashboxes.Count != cashboxIds.Count)
-        {
-            var missing = cashboxIds.Where(id => !cashboxes.ContainsKey(id)).ToList();
-            return Result<List<EmployeeMovementResponse>>.Failure(
-                Error.NotFound("Cashboxes.NotFound", $"بعض الخزائن المحددة غير موجودة: {string.Join(", ", missing)}"));
-        }
-
-        var nonActive = cashboxes.Values.FirstOrDefault(c => !c.IsActive);
-        if (nonActive is not null)
-        {
-            return Result<List<EmployeeMovementResponse>>.Failure(
-                CashboxInactive(nonActive.Id));
-        }
-
-        var nonEgp = cashboxes.Values.FirstOrDefault(c => c.Currency != CurrencyCode.EGP);
-        if (nonEgp is not null)
-        {
-            return Result<List<EmployeeMovementResponse>>.Failure(
-                CashboxMustBeEgp());
-        }
-
-        var cashboxBalances = await dbContext.Cashboxes
-            .AsNoTracking()
-            .Where(c => c.CompanyId == companyId && cashboxIds.Contains(c.Id))
-            .Select(c => new
-            {
-                c.Id,
-                Balance = c.OpeningBalance +
-                    (c.Vouchers
-                        .Where(v => v.IsPosted)
-                        .Sum(v => (decimal?)(v.Direction == CashDirection.Receipt ? v.Amount : -v.Amount)) ?? 0m)
-            })
-            .ToDictionaryAsync(c => c.Id, c => c.Balance, cancellationToken);
-
         await using var transaction = await dbContext.Database
             .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
-        var voucherList = new List<(EmployeeMovement Movement, CashVoucher Voucher, Employee Employee, EmployeeMovementRequest Request)>();
+        var movements = new List<(EmployeeMovement Movement, Employee Employee, EmployeeMovementRequest Request)>();
 
         foreach (var item in request.Movements)
         {
@@ -411,6 +233,7 @@ public sealed class EmployeeMovementService(
 
             if (exchangeRateResult.IsFailure)
             {
+                await transaction.RollbackAsync(cancellationToken);
                 return Result<List<EmployeeMovementResponse>>.Failure(exchangeRateResult.Error);
             }
 
@@ -425,88 +248,14 @@ public sealed class EmployeeMovementService(
             movement.ApplyAmounts(item.Type, item.Amount);
             movement.ApplyExchangeRate(exchangeRateResult.Value.Rate);
 
-            var cashbox = cashboxes[item.CashboxId!.Value];
-            var isCredit = EmployeeAccountRules.IsCreditMovement(item.Type);
-            var direction = isCredit ? CashDirection.Receipt : CashDirection.Payment;
-            var egpAmount = isCredit ? movement.BaseCredit : movement.BaseDebit;
-            var prefix = isCredit ? "RCV" : "PAY";
-
-            if (direction == CashDirection.Payment)
-            {
-                var currentBalance = cashboxBalances[cashbox.Id];
-                if (currentBalance - egpAmount < 0m)
-                {
-                    return Result<List<EmployeeMovementResponse>>.Failure(
-                        InsufficientCashboxBalance(cashbox.Id));
-                }
-
-                cashboxBalances[cashbox.Id] = currentBalance - egpAmount;
-            }
-            else
-            {
-                cashboxBalances[cashbox.Id] += egpAmount;
-            }
-
-            var voucherNumber = await EntityIdentifierGenerator
-                .GenerateUniqueAsync(
-                    dbContext,
-                    prefix: prefix,
-                    companyId: companyId,
-                    existingIdentifiers: dbContext.CashVouchers
-                        .IgnoreQueryFilters()
-                        .Where(v => v.CompanyId == companyId)
-                        .Select(v => v.VoucherNumber),
-                    cancellationToken);
-
-            var cashVoucher = new CashVoucher
-            {
-                CompanyId = companyId,
-                VoucherNumber = voucherNumber,
-                VoucherDate = item.MovementDate,
-                Direction = direction,
-                CashboxId = cashbox.Id,
-                PartyType = CashPartyType.Employee,
-                EmployeeId = employee.Id,
-                Amount = egpAmount,
-                Currency = CurrencyCode.EGP,
-                Description = item.Notes ?? $"Employee {item.Type}",
-                IsPosted = true
-            };
-            cashVoucher.ApplyExchangeRate(
-                exchangeRateId: null,
-                exchangeRate: 1m);
-            cashVoucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
-
-            dbContext.CashVouchers.Add(cashVoucher);
-            voucherList.Add((movement, cashVoucher, employee, item));
+            dbContext.EmployeeMovements.Add(movement);
+            movements.Add((movement, employee, item));
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-
-        foreach (var tuple in voucherList)
-        {
-            tuple.Movement.CashVoucherId = tuple.Voucher.Id;
-            dbContext.EmployeeMovements.Add(tuple.Movement);
-        }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        foreach (var tuple in voucherList)
-        {
-            var postingResult = await cashVoucherPostingService
-                .SynchronizeAsync(tuple.Voucher, cancellationToken);
-            if (postingResult.IsFailure)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                dbContext.ChangeTracker.Clear();
-                return Result<List<EmployeeMovementResponse>>.Failure(
-                    postingResult.Errors);
-            }
-        }
-
         await transaction.CommitAsync(cancellationToken);
 
-        var results = voucherList.Select(tuple => new EmployeeMovementResponse(
+        var results = movements.Select(tuple => new EmployeeMovementResponse(
             Id: tuple.Movement.Id,
             CompanyId: tuple.Movement.CompanyId,
             EmployeeId: tuple.Movement.EmployeeId,
@@ -521,8 +270,8 @@ public sealed class EmployeeMovementService(
             ExchangeRate: tuple.Movement.ExchangeRate,
             BaseDebit: tuple.Movement.BaseDebit,
             BaseCredit: tuple.Movement.BaseCredit,
-            CashVoucherId: tuple.Movement.CashVoucherId,
-            CashVoucherNumber: tuple.Voucher?.VoucherNumber,
+            CashVoucherId: null,
+            CashVoucherNumber: null,
             Notes: tuple.Movement.Notes,
             CreatedOn: tuple.Movement.CreatedOn)).ToList();
 
@@ -601,8 +350,6 @@ public sealed class EmployeeMovementService(
 
         decimal totalDebits = 0m;
         decimal totalCredits = 0m;
-        decimal totalAdvances = 0m;
-        decimal totalWithdrawals = 0m;
         decimal totalBonuses = 0m;
         decimal totalDeductions = 0m;
 
@@ -615,15 +362,7 @@ public sealed class EmployeeMovementService(
             totalDebits += m.Debit;
             totalCredits += m.Credit;
 
-            if (m.Type == EmployeeMovementType.Advance)
-            {
-                totalAdvances += m.Debit;
-            }
-            else if (m.Type == EmployeeMovementType.Withdrawal)
-            {
-                totalWithdrawals += m.Debit;
-            }
-            else if (m.Type == EmployeeMovementType.Deduction)
+            if (m.Type == EmployeeMovementType.Deduction)
             {
                 totalDeductions += m.Debit;
             }
@@ -660,8 +399,6 @@ public sealed class EmployeeMovementService(
             TotalDebits: totalDebits,
             TotalCredits: totalCredits,
             NetBalance: EmployeeAccountRules.CalculateBalance(totalCredits, totalDebits),
-            TotalAdvances: totalAdvances,
-            TotalWithdrawals: totalWithdrawals,
             TotalBonuses: totalBonuses,
             TotalDeductions: totalDeductions,
             TotalMovements: items.Count);

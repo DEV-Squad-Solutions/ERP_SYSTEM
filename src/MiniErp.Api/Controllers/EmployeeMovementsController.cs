@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
-using MiniErp.Api.Features.CashVouchers.Jobs;
 using MiniErp.Api.Features.EmployeeMovements.Jobs;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.EmployeeMovements;
@@ -69,15 +68,6 @@ public sealed class EmployeeMovementsController(
                 result.Value.Id,
                 realtime => job => job.ExecuteAsync(realtime),
                 operationId: operationId);
-
-            if (result.Value.CashVoucherId.HasValue)
-            {
-                TryEnqueueRealtime<CashVouchersRealtimeJob>(
-                    "Added",
-                    result.Value.CashVoucherId.Value,
-                    realtime => job => job.ExecuteAsync(realtime),
-                    operationId: operationId);
-            }
         }
 
         return result.IsFailure
@@ -107,14 +97,6 @@ public sealed class EmployeeMovementsController(
                     "Added",
                     movement.Id,
                     realtime => job => job.ExecuteAsync(realtime));
-
-                if (movement.CashVoucherId.HasValue)
-                {
-                    TryEnqueueRealtime<CashVouchersRealtimeJob>(
-                        "Added",
-                        movement.CashVoucherId.Value,
-                        realtime => job => job.ExecuteAsync(realtime));
-                }
             }
         }
 

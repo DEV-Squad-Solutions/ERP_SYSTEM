@@ -83,6 +83,7 @@ public enum EmployeeStatementSourceType
 {
     OpeningBalance = 1,
     SalaryTransfer = 2,
+    Payroll = 2,
     Movement = 3,
     CashVoucher = 4,
     JournalEntry = 5

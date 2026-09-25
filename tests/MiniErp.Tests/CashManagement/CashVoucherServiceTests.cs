@@ -970,7 +970,7 @@ public sealed class CashVoucherServiceTests
                 Description: "Employee cash payment",
                 Notes: null,
                 RowVersion: draft.Value.RowVersion,
-                EmployeeMovementType: EmployeeMovementType.Advance));
+                EmployeeMovementType: EmployeeMovementType.Debit));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(CashPartyType.Employee, result.Value.PartyType);
@@ -1237,7 +1237,7 @@ public sealed class CashVoucherServiceTests
                 Amount: 75m,
                 Description: "Employee advance",
                 EmployeeId: 1,
-                EmployeeMovementType: EmployeeMovementType.Advance));
+                EmployeeMovementType: EmployeeMovementType.Debit));
 
         var posted = await service.UpdateAsync(
             draft.Value.Id,
@@ -1256,7 +1256,7 @@ public sealed class CashVoucherServiceTests
                 Description: "Employee advance",
                 Notes: "Advance from cash",
                 RowVersion: draft.Value.RowVersion,
-                EmployeeMovementType: EmployeeMovementType.Advance));
+                EmployeeMovementType: EmployeeMovementType.Debit));
 
         var movements = await database.Context.EmployeeMovements
             .AsNoTracking()
@@ -1266,7 +1266,7 @@ public sealed class CashVoucherServiceTests
         Assert.True(posted.IsSuccess);
         var movement = Assert.Single(movements);
         Assert.Equal(1, movement.EmployeeId);
-        Assert.Equal(EmployeeMovementType.Advance, movement.Type);
+        Assert.Equal(EmployeeMovementType.Debit, movement.Type);
         Assert.Equal(75m, movement.Debit);
         Assert.Equal(0m, movement.Credit);
         Assert.Equal(75m, movement.BaseDebit);
@@ -1286,7 +1286,7 @@ public sealed class CashVoucherServiceTests
                 Amount: 75m,
                 Description: "Employee advance",
                 EmployeeId: 1,
-                EmployeeMovementType: EmployeeMovementType.Advance));
+                EmployeeMovementType: EmployeeMovementType.Debit));
 
         var posted = await service.UpdateAsync(
             draft.Value.Id,
@@ -1316,7 +1316,7 @@ public sealed class CashVoucherServiceTests
         var movement = await database.Context.EmployeeMovements
             .AsNoTracking()
             .SingleAsync(item => item.CashVoucherId == draft.Value.Id);
-        Assert.Equal(EmployeeMovementType.Advance, movement.Type);
+        Assert.Equal(EmployeeMovementType.Debit, movement.Type);
     }
 
     [Fact]
@@ -1350,7 +1350,7 @@ public sealed class CashVoucherServiceTests
                 Description: "Employee cash payment",
                 Notes: null,
                 RowVersion: draft.Value.RowVersion,
-                EmployeeMovementType: EmployeeMovementType.Advance));
+                EmployeeMovementType: EmployeeMovementType.Debit));
 
         var movementId = await database.Context.EmployeeMovements
             .Where(item => item.CashVoucherId == posted.Value.Id)
@@ -1422,7 +1422,7 @@ public sealed class CashVoucherServiceTests
                 Description: "Employee cash payment",
                 Notes: null,
                 RowVersion: draft.Value.RowVersion,
-                EmployeeMovementType: EmployeeMovementType.Advance));
+                EmployeeMovementType: EmployeeMovementType.Debit));
 
         await using var changeContext = database.CreateAdditionalContext();
         var changeService = database.CreateVoucherService(1, changeContext);
@@ -1467,7 +1467,7 @@ public sealed class CashVoucherServiceTests
                 Amount: 50m,
                 Description: "Employee cash payment",
                 EmployeeId: 1,
-                EmployeeMovementType: EmployeeMovementType.Advance));
+                EmployeeMovementType: EmployeeMovementType.Debit));
         var posted = await service.UpdateAsync(
             draft.Value.Id,
             new CashVoucherUpdateRequest(
@@ -1485,7 +1485,7 @@ public sealed class CashVoucherServiceTests
                 Description: "Employee cash payment",
                 Notes: null,
                 RowVersion: draft.Value.RowVersion,
-                EmployeeMovementType: EmployeeMovementType.Withdrawal));
+                EmployeeMovementType: EmployeeMovementType.Deduction));
 
         await using var deleteContext = database.CreateAdditionalContext();
         var deleteService = database.CreateVoucherService(1, deleteContext);
@@ -1583,7 +1583,7 @@ public sealed class CashVoucherServiceTests
                 Description: "Employee validation",
                 Notes: null,
                 RowVersion: draft.Value.RowVersion,
-                EmployeeMovementType: EmployeeMovementType.Advance));
+                EmployeeMovementType: EmployeeMovementType.Debit));
 
         Assert.Equal("CashVouchers.EmployeeNotFound", result.Error.Code);
     }
@@ -2339,7 +2339,7 @@ public sealed class CashVoucherServiceTests
             EmployeeMovementType: original.EmployeeId.HasValue
                 ? original.Direction == CashDirection.Receipt
                     ? EmployeeMovementType.Credit
-                    : EmployeeMovementType.Advance
+                    : EmployeeMovementType.Debit
                 : null);
 
     private static async Task<Result<CashVoucherResponse>> AddVoucherAsync(
@@ -2366,7 +2366,7 @@ public sealed class CashVoucherServiceTests
                 EmployeeMovementType: request.EmployeeId.HasValue
                     ? request.Direction == CashDirection.Receipt
                         ? EmployeeMovementType.Credit
-                        : EmployeeMovementType.Advance
+                        : EmployeeMovementType.Debit
                     : null));
         if (draft.IsFailure)
         {
@@ -2395,7 +2395,7 @@ public sealed class CashVoucherServiceTests
                 EmployeeMovementType: request.EmployeeId.HasValue
                     ? request.Direction == CashDirection.Receipt
                         ? EmployeeMovementType.Credit
-                        : EmployeeMovementType.Advance
+                        : EmployeeMovementType.Debit
                     : null));
     }
 

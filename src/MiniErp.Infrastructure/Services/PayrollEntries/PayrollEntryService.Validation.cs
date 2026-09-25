@@ -122,8 +122,17 @@ public sealed partial class PayrollEntryService
         return null;
     }
 
-    private static Error? ValidateForPayment(PayrollEntry entry) =>
-        entry.EnsureEditable();
+    private static Error? ValidateForPayment(PayrollEntry entry)
+    {
+        if (entry.IsSalaryMovedToEmployeeAccount)
+        {
+            return Error.Conflict(
+                "PayrollEntry.AlreadyPaid",
+                $"تم تحويل راتب القيد رقم {entry.Id} إلى حساب الموظف مسبقًا.");
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Guards UpdateAsync / RecalculateAsync — entry must not have been paid yet.

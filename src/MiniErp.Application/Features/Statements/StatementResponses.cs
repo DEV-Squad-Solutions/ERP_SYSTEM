@@ -271,6 +271,22 @@ public sealed record EmployeeStatementItemResponse(
 
     public int? JournalEntryLineId { get; init; }
 
+    public CurrencyCode Currency { get; init; } = CurrencyCode.EGP;
+
+    public decimal OriginalAmount { get; init; }
+
+    public decimal EgpAmount { get; init; }
+
+    public decimal RunningBalance { get; init; }
+
+    public decimal Debit => DebitAmount;
+
+    public decimal Credit => CreditAmount;
+
+    public int? CashVoucherId { get; init; }
+
+    public string? CashVoucherNumber { get; init; }
+
     public decimal ExchangeRate { get; init; }
 
     public decimal BaseDebitAmount { get; init; }

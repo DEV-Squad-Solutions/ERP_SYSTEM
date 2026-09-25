@@ -9,7 +9,6 @@ public sealed record EmployeeMovementRequest(
     CurrencyCode Currency = CurrencyCode.EGP,
     decimal? ExchangeRate = null,
     DateOnly MovementDate = default,
-    int? CashboxId = null,
     string? Notes = null)
 {
     public const int NotesMaximumLength = 1_000;

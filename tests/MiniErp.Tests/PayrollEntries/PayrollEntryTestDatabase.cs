@@ -343,6 +343,11 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
         return scope.ServiceProvider.GetRequiredService<IFinancialStatementService>();
     }
 
+    public ICashVoucherService CreateCashVoucherService()
+    {
+        return scope.ServiceProvider.GetRequiredService<ICashVoucherService>();
+    }
+
     public async ValueTask DisposeAsync()
     {
         await scope.DisposeAsync();
