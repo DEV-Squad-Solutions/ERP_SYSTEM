@@ -617,6 +617,118 @@ public sealed class AutomaticPostingServiceTests
     }
 
     [Fact]
+    public async Task MixedPurchasePosting_SplitsInventoryAndServiceAmounts()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Invoices
+                (Id, CompanyId, BusinessPartnerId, InvoiceNumber,
+                 InvoiceDate, InvoiceType, Total, ExchangeRate,
+                 BaseSubtotal, BaseDiscountAmount, BaseTotal, Notes)
+            VALUES
+                (64, 1, 11, 'PINV-0064', '2026-08-31', 2,
+                 135, 1, 150, 15, 135, 'Mixed purchase');
+
+            INSERT INTO InvoiceLines
+                (Id, CompanyId, InvoiceId, ItemId, BaseTotal)
+            VALUES
+                (6401, 1, 64, 1, 100),
+                (6402, 1, 64, NULL, 50);
+
+            INSERT INTO ItemMovements
+                (Id, CompanyId, StoreId, ItemId, MovementType,
+                 ReferenceId, TotalCost)
+            VALUES (6403, 1, 1, 1, 3, 64, 100);
+            """);
+
+        var companyContext = new TestCurrentCompanyContext(1);
+        var postingService = new InvoicePostingService(
+            database.Context,
+            companyContext,
+            new AccountMappingResolver(database.Context, companyContext),
+            new AutomaticPostingService(
+                database.Context,
+                companyContext,
+                TimeProvider.System,
+                NullLogger<AutomaticPostingService>.Instance));
+
+        var result = await postingService.SynchronizeAsync(64);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var entry = await database.Context.JournalEntries
+            .AsNoTracking()
+            .Include(value => value.Lines)
+            .SingleAsync();
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 8 && line.Debit == 90m);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 6 && line.Debit == 45m);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 12 && line.Credit == 135m);
+        Assert.Equal(135m, entry.Lines.Sum(line => line.Debit));
+        Assert.Equal(135m, entry.Lines.Sum(line => line.Credit));
+    }
+
+    [Fact]
+    public async Task MixedSalesPosting_SplitsRevenueAndKeepsInventoryCostItemOnly()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Invoices
+                (Id, CompanyId, BusinessPartnerId, InvoiceNumber,
+                 InvoiceDate, InvoiceType, Total, ExchangeRate,
+                 BaseSubtotal, BaseDiscountAmount, BaseTotal, Notes)
+            VALUES
+                (65, 1, 11, 'SINV-0065', '2026-08-31', 1,
+                 150, 1, 150, 0, 150, 'Mixed sale');
+
+            INSERT INTO InvoiceLines
+                (Id, CompanyId, InvoiceId, ItemId, BaseTotal)
+            VALUES
+                (6501, 1, 65, 1, 100),
+                (6502, 1, 65, NULL, 50);
+
+            INSERT INTO ItemMovements
+                (Id, CompanyId, StoreId, ItemId, MovementType,
+                 ReferenceId, TotalCost)
+            VALUES (6503, 1, 1, 1, 1, 65, 60);
+            """);
+
+        var companyContext = new TestCurrentCompanyContext(1);
+        var postingService = new InvoicePostingService(
+            database.Context,
+            companyContext,
+            new AccountMappingResolver(database.Context, companyContext),
+            new AutomaticPostingService(
+                database.Context,
+                companyContext,
+                TimeProvider.System,
+                NullLogger<AutomaticPostingService>.Instance));
+
+        var result = await postingService.SynchronizeAsync(65);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var entry = await database.Context.JournalEntries
+            .AsNoTracking()
+            .Include(value => value.Lines)
+            .SingleAsync();
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 7 && line.Credit == 100m);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 5 && line.Credit == 50m);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 9 && line.Debit == 60m);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 8 && line.Credit == 60m);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 3 && line.Debit == 150m);
+        Assert.Equal(210m, entry.Lines.Sum(line => line.Debit));
+        Assert.Equal(210m, entry.Lines.Sum(line => line.Credit));
+    }
+
+    [Fact]
     public async Task ItemPurchaseReturnPosting_UsesCarryingCostAndBooksLoss()
     {
         await using var database = await TestDatabase.CreateAsync();
@@ -663,6 +775,62 @@ public sealed class AutomaticPostingServiceTests
             line.AccountId == 6 && line.Debit == 10m);
         Assert.Equal(50m, entry.Lines.Sum(line => line.Debit));
         Assert.Equal(50m, entry.Lines.Sum(line => line.Credit));
+    }
+
+    [Fact]
+    public async Task MixedPurchaseReturnPosting_SeparatesServiceFromItemCostDifference()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Invoices
+                (Id, CompanyId, BusinessPartnerId, InvoiceNumber,
+                 InvoiceDate, InvoiceType, Total, ExchangeRate,
+                 BaseSubtotal, BaseDiscountAmount, BaseTotal, Notes)
+            VALUES
+                (66, 1, 11, 'PRET-0066', '2026-08-31', 4,
+                 150, 1, 150, 0, 150, 'Mixed purchase return');
+
+            INSERT INTO InvoiceLines
+                (Id, CompanyId, InvoiceId, ItemId, BaseTotal)
+            VALUES
+                (6601, 1, 66, 1, 100),
+                (6602, 1, 66, NULL, 50);
+
+            INSERT INTO ItemMovements
+                (Id, CompanyId, StoreId, ItemId, MovementType,
+                 ReferenceId, TotalCost)
+            VALUES (6603, 1, 1, 1, 4, 66, 90);
+            """);
+
+        var companyContext = new TestCurrentCompanyContext(1);
+        var postingService = new InvoicePostingService(
+            database.Context,
+            companyContext,
+            new AccountMappingResolver(database.Context, companyContext),
+            new AutomaticPostingService(
+                database.Context,
+                companyContext,
+                TimeProvider.System,
+                NullLogger<AutomaticPostingService>.Instance));
+
+        var result = await postingService.SynchronizeAsync(66);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var entry = await database.Context.JournalEntries
+            .AsNoTracking()
+            .Include(value => value.Lines)
+            .SingleAsync();
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 12 && line.Debit == 150m);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 8 && line.Credit == 90m);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 5 && line.Credit == 10m);
+        Assert.Contains(entry.Lines, line =>
+            line.AccountId == 6 && line.Credit == 50m);
+        Assert.Equal(150m, entry.Lines.Sum(line => line.Debit));
+        Assert.Equal(150m, entry.Lines.Sum(line => line.Credit));
     }
 
     [Fact]
@@ -1340,8 +1508,19 @@ public sealed class AutomaticPostingServiceTests
                     Currency INTEGER NOT NULL DEFAULT 1,
                     Total TEXT NOT NULL,
                     ExchangeRate TEXT NOT NULL,
+                    BaseSubtotal TEXT NOT NULL DEFAULT 0,
+                    BaseDiscountAmount TEXT NOT NULL DEFAULT 0,
                     BaseTotal TEXT NOT NULL,
                     Notes TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE InvoiceLines (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    InvoiceId INTEGER NOT NULL,
+                    ItemId INTEGER NULL,
+                    BaseTotal TEXT NOT NULL DEFAULT 0,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 
@@ -1564,7 +1743,11 @@ public sealed class AutomaticPostingServiceTests
                     (1, 1, 16, NULL, 6),
                     (1, 1, 17, NULL, 11),
                     (1, 1, 18, NULL, 14),
-                    (1, 1, 19, NULL, 9);
+                    (1, 1, 19, NULL, 9),
+                    (1, 1, 20, NULL, 5),
+                    (1, 1, 21, NULL, 5),
+                    (1, 1, 22, NULL, 6),
+                    (1, 1, 23, NULL, 6);
 
                 INSERT INTO CashboxTransfers
                     (Id, CompanyId, TransferNumber, TransferDate,

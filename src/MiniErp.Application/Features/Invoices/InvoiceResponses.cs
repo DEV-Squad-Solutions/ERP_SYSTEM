@@ -21,6 +21,8 @@ public sealed record InvoiceLineResponse(
     decimal BaseTotal,
     string? Notes)
 {
+    public InvoiceLineType LineType { get; init; }
+
     public int? SourceInvoiceLineId { get; init; }
 
     public ReturnPriceMode? ReturnPriceMode { get; init; }

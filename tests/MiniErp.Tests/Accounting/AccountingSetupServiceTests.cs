@@ -55,10 +55,10 @@ public sealed class AccountingSetupServiceTests
 
         var counts = await database.GetDefaultSetupCountsAsync();
 
-        Assert.Equal(24, counts.Accounts);
-        Assert.Equal(27, counts.AccountMappings);
+        Assert.Equal(26, counts.Accounts);
+        Assert.Equal(31, counts.AccountMappings);
         Assert.Equal(35, counts.StatementLines);
-        Assert.Equal(35, counts.StatementMappings);
+        Assert.Equal(39, counts.StatementMappings);
         Assert.Equal(1, counts.FiscalYears);
         var cashbox = await database.GetDefaultCashboxAsync();
         Assert.NotNull(cashbox);
@@ -116,6 +116,48 @@ public sealed class AccountingSetupServiceTests
             "2300",
             await database.GetMappingAccountCodeAsync(
                 AccountingMappingType.DriverControl));
+        var serviceRevenue = await database.GetAccountByCodeAsync("4150");
+        Assert.NotNull(serviceRevenue);
+        Assert.Equal("إيرادات الخدمات", serviceRevenue.Name);
+        Assert.Equal(AccountType.Revenue, serviceRevenue.AccountType);
+        Assert.Equal(NormalBalance.Credit, serviceRevenue.NormalBalance);
+        Assert.True(serviceRevenue.IsPosting);
+        Assert.True(serviceRevenue.IsActive);
+        Assert.Equal("4000", serviceRevenue.ParentAccount!.Code);
+
+        var serviceExpense = await database.GetAccountByCodeAsync("5250");
+        Assert.NotNull(serviceExpense);
+        Assert.Equal("مصروفات الخدمات", serviceExpense.Name);
+        Assert.Equal(AccountType.Expense, serviceExpense.AccountType);
+        Assert.Equal(NormalBalance.Debit, serviceExpense.NormalBalance);
+        Assert.True(serviceExpense.IsPosting);
+        Assert.True(serviceExpense.IsActive);
+        Assert.Equal("5000", serviceExpense.ParentAccount!.Code);
+
+        Assert.Equal(
+            "4150",
+            await database.GetMappingAccountCodeAsync(
+                AccountingMappingType.ServiceSales));
+        Assert.Equal(
+            "4150",
+            await database.GetMappingAccountCodeAsync(
+                AccountingMappingType.ServiceSalesReturn));
+        Assert.Equal(
+            "5250",
+            await database.GetMappingAccountCodeAsync(
+                AccountingMappingType.ServicePurchase));
+        Assert.Equal(
+            "5250",
+            await database.GetMappingAccountCodeAsync(
+                AccountingMappingType.ServicePurchaseReturn));
+        Assert.True(await database.HasDefaultAccountClassificationAsync(
+            accountCode: "4150",
+            statementType: FinancialStatementType.IncomeStatement,
+            lineCode: "IS-110"));
+        Assert.True(await database.HasDefaultAccountClassificationAsync(
+            accountCode: "5250",
+            statementType: FinancialStatementType.IncomeStatement,
+            lineCode: "IS-220"));
         Assert.True(await database.HasDefaultAccountClassificationAsync(
             accountCode: "2300",
             statementType: FinancialStatementType.FinancialPosition,
@@ -142,9 +184,29 @@ public sealed class AccountingSetupServiceTests
 
         var counts = await database.GetFiscalYearSetupCountsAsync(3);
 
-        Assert.Equal(29, counts.AccountMappings);
+        Assert.Equal(33, counts.AccountMappings);
         Assert.Equal(35, counts.StatementLines);
-        Assert.Equal(35, counts.StatementMappings);
+        Assert.Equal(39, counts.StatementMappings);
+        Assert.Equal(
+            "4150",
+            await database.GetMappingAccountCodeAsync(
+                mappingType: AccountingMappingType.ServiceSales,
+                fiscalYearId: 3));
+        Assert.Equal(
+            "5250",
+            await database.GetMappingAccountCodeAsync(
+                mappingType: AccountingMappingType.ServicePurchase,
+                fiscalYearId: 3));
+        Assert.True(await database.HasDefaultAccountClassificationAsync(
+            fiscalYearId: 3,
+            accountCode: "4150",
+            statementType: FinancialStatementType.IncomeStatement,
+            lineCode: "IS-110"));
+        Assert.True(await database.HasDefaultAccountClassificationAsync(
+            fiscalYearId: 3,
+            accountCode: "5250",
+            statementType: FinancialStatementType.CashFlow,
+            lineCode: "CF-130"));
     }
 
     [Fact]
@@ -857,6 +919,14 @@ public sealed class AccountingSetupServiceTests
                 .OrderBy(movementType => movementType.Id)
                 .ToListAsync();
 
+        public Task<Account?> GetAccountByCodeAsync(string code) =>
+            Context.Accounts
+                .AsNoTracking()
+                .Include(account => account.ParentAccount)
+                .SingleOrDefaultAsync(account =>
+                    account.CompanyId == 1 &&
+                    account.Code == code);
+
         public async Task SoftDeleteDefaultCashSetupAsync()
         {
             await Context.Database.ExecuteSqlRawAsync(
@@ -944,20 +1014,22 @@ public sealed class AccountingSetupServiceTests
         public Task<bool> HasDefaultAccountClassificationAsync(
             string accountCode,
             FinancialStatementType statementType,
-            string lineCode) =>
+            string lineCode,
+            int fiscalYearId = 1) =>
             Context.AccountStatementMappings.AnyAsync(mapping =>
                 mapping.CompanyId == 1 &&
-                mapping.FiscalYearId == 1 &&
+                mapping.FiscalYearId == fiscalYearId &&
                 mapping.StatementType == statementType &&
                 mapping.Account.Code == accountCode &&
                 mapping.FinancialStatementLine.Code == lineCode);
 
         public Task<string> GetMappingAccountCodeAsync(
-            AccountingMappingType mappingType) =>
+            AccountingMappingType mappingType,
+            int fiscalYearId = 1) =>
             Context.AccountMappings
                 .Where(mapping =>
                     mapping.CompanyId == 1 &&
-                    mapping.FiscalYearId == 1 &&
+                    mapping.FiscalYearId == fiscalYearId &&
                     mapping.MappingType == mappingType &&
                     mapping.SourceId == null)
                 .Select(mapping => mapping.Account.Code)

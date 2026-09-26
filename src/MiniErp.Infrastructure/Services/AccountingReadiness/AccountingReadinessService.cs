@@ -955,6 +955,8 @@ public sealed class AccountingReadinessService(
                 invoice.InvoiceNumber,
                 invoice.InvoiceDate,
                 invoice.InvoiceType,
+                invoice.BaseSubtotal,
+                invoice.BaseDiscountAmount,
                 invoice.BaseTotal,
                 IsItemInvoice = dbContext.ItemMovements.Any(movement =>
                     movement.CompanyId == companyId &&
@@ -963,6 +965,20 @@ public sealed class AccountingReadinessService(
                      movement.MovementType == ItemMovementType.SalesReturn ||
                      movement.MovementType == ItemMovementType.Purchase ||
                      movement.MovementType == ItemMovementType.PurchaseReturn)),
+                HasItemLines = dbContext.InvoiceLines.Any(line =>
+                    line.CompanyId == companyId &&
+                    line.InvoiceId == invoice.Id &&
+                    line.ItemId.HasValue),
+                HasServiceLines = dbContext.InvoiceLines.Any(line =>
+                    line.CompanyId == companyId &&
+                    line.InvoiceId == invoice.Id &&
+                    !line.ItemId.HasValue),
+                ItemSubtotal = dbContext.InvoiceLines
+                    .Where(line =>
+                        line.CompanyId == companyId &&
+                        line.InvoiceId == invoice.Id &&
+                        line.ItemId.HasValue)
+                    .Sum(line => (decimal?)line.BaseTotal) ?? 0m,
                 HasCost = dbContext.ItemMovements.Any(movement =>
                     movement.CompanyId == companyId &&
                     movement.ReferenceId == invoice.Id &&
@@ -1004,18 +1020,55 @@ public sealed class AccountingReadinessService(
                     AccountingMappingType.PurchaseReturn,
                     AccountingMappingType.SupplierControl)
             };
-            if (invoice.IsItemInvoice &&
-                invoice.InvoiceType is InvoiceType.Purchase or InvoiceType.PurchaseReturn)
+            var hasItemLines = invoice.HasItemLines || invoice.IsItemInvoice;
+            var hasServiceLines = invoice.HasServiceLines;
+            if (hasItemLines)
             {
-                invoiceMapping = AccountingMappingType.Inventory;
+                if (invoice.InvoiceType is InvoiceType.Purchase or
+                    InvoiceType.PurchaseReturn)
+                {
+                    invoiceMapping = AccountingMappingType.Inventory;
+                }
+
+                requirements.Add(MappingRequirement.For(
+                    invoiceMapping,
+                    null,
+                    JournalEntrySourceType.Invoice,
+                    invoice.Id,
+                    invoice.InvoiceNumber,
+                    invoice.InvoiceDate));
             }
-            requirements.Add(MappingRequirement.For(
-                invoiceMapping,
-                null,
-                JournalEntrySourceType.Invoice,
-                invoice.Id,
-                invoice.InvoiceNumber,
-                invoice.InvoiceDate));
+
+            if (hasServiceLines)
+            {
+                var serviceMapping = invoice.InvoiceType switch
+                {
+                    InvoiceType.Sales => AccountingMappingType.ServiceSales,
+                    InvoiceType.SalesReturn =>
+                        AccountingMappingType.ServiceSalesReturn,
+                    InvoiceType.Purchase => AccountingMappingType.ServicePurchase,
+                    _ => AccountingMappingType.ServicePurchaseReturn
+                };
+                requirements.Add(MappingRequirement.For(
+                    serviceMapping,
+                    null,
+                    JournalEntrySourceType.Invoice,
+                    invoice.Id,
+                    invoice.InvoiceNumber,
+                    invoice.InvoiceDate));
+            }
+
+            if (!hasItemLines && !hasServiceLines)
+            {
+                requirements.Add(MappingRequirement.For(
+                    invoiceMapping,
+                    null,
+                    JournalEntrySourceType.Invoice,
+                    invoice.Id,
+                    invoice.InvoiceNumber,
+                    invoice.InvoiceDate));
+            }
+
             requirements.Add(MappingRequirement.For(
                 controlMapping,
                 null,
@@ -1045,7 +1098,13 @@ public sealed class AccountingReadinessService(
                 invoice.InvoiceType == InvoiceType.PurchaseReturn &&
                 !invoice.HasPendingPurchaseReturnCost)
             {
-                var difference = invoice.BaseTotal -
+                var itemAmount = AllocateNetAmount(
+                    invoice.ItemSubtotal,
+                    invoice.BaseSubtotal > 0m
+                        ? invoice.BaseSubtotal
+                        : invoice.ItemSubtotal,
+                    invoice.BaseDiscountAmount);
+                var difference = itemAmount -
                     invoice.PurchaseReturnCarryingCost;
                 if (difference != 0m)
                 {
@@ -1344,6 +1403,19 @@ public sealed class AccountingReadinessService(
                 JournalEntrySourceType.StockAdjustment,
             _ => null
         };
+
+    private static decimal AllocateNetAmount(
+        decimal lineSubtotal,
+        decimal invoiceSubtotal,
+        decimal invoiceDiscount) =>
+        lineSubtotal <= 0m
+            ? 0m
+            : invoiceSubtotal <= 0m
+                ? lineSubtotal
+                : InventoryCostRules.RoundValue(
+                    lineSubtotal -
+                    InventoryCostRules.RoundValue(
+                        invoiceDiscount * lineSubtotal / invoiceSubtotal));
 
     private static void RecordReadinessCheck(string result) =>
         ReadinessChecks.Add(

@@ -817,7 +817,8 @@ public sealed class InventoryCostingService(
             .Select(invoice => new
             {
                 invoice.BaseTotal,
-                invoice.BaseSubtotal
+                invoice.BaseSubtotal,
+                invoice.BaseDiscountAmount
             })
             .SingleOrDefaultAsync(cancellationToken);
         if (invoice is null)
@@ -830,7 +831,8 @@ public sealed class InventoryCostingService(
             .Where(line =>
                 line.CompanyId == companyId &&
                 line.InvoiceId == movement.ReferenceId &&
-                !line.IsDeleted)
+                !line.IsDeleted &&
+                line.ItemId.HasValue)
             .OrderBy(line => line.Id)
             .Select(line => new
             {
@@ -850,7 +852,12 @@ public sealed class InventoryCostingService(
         var totalSubtotal = invoice.BaseSubtotal > 0m
             ? invoice.BaseSubtotal
             : linesSubtotal;
-        var targetTotal = InventoryCostRules.RoundValue(invoice.BaseTotal);
+        var itemDiscount = totalSubtotal <= 0m
+            ? 0m
+            : InventoryCostRules.RoundValue(
+                invoice.BaseDiscountAmount * linesSubtotal / totalSubtotal);
+        var targetTotal = InventoryCostRules.RoundValue(
+            linesSubtotal - itemDiscount);
         var allocated = 0m;
         var itemTotal = 0m;
         for (var index = 0; index < lines.Count; index++)
@@ -858,10 +865,10 @@ public sealed class InventoryCostingService(
             var line = lines[index];
             var amount = index == lines.Count - 1
                 ? targetTotal - allocated
-                : totalSubtotal <= 0m
+                : linesSubtotal <= 0m
                     ? 0m
                     : InventoryCostRules.RoundValue(
-                        targetTotal * line.BaseTotal / totalSubtotal);
+                        targetTotal * line.BaseTotal / linesSubtotal);
             allocated = InventoryCostRules.RoundValue(allocated + amount);
             if (line.ItemId == movement.ItemId)
             {
