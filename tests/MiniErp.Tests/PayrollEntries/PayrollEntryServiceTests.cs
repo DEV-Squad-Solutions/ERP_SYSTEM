@@ -4,6 +4,7 @@ using MiniErp.Application.Features.PayrollEntries;
 using MiniErp.Application.Features.EmployeeOpeningBalances;
 using MiniErp.Application.Features.Statements;
 using MiniErp.Domain.Entities.Employees;
+using MiniErp.Domain.Entities.Payroll;
 using MiniErp.Domain.Enums;
 using System;
 using System.Collections.Generic;
@@ -16,6 +17,108 @@ namespace MiniErp.Tests.PayrollEntries;
 
 public sealed class PayrollEntryServiceTests
 {
+    [Fact]
+    public async Task MoveSalary_ClosedPostingDate_PreservesPayrollAndEmployeeLedger()
+    {
+        var closedDate = new DateOnly(2026, 9, 30);
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(
+            companyId: 1,
+            fiscalYearPeriodGuard: new ClosedDateFiscalYearPeriodGuard(
+                closedDate));
+        var entry = await SeedPayableEntryAsync(
+            database,
+            employeeId: 1,
+            startDate: new DateOnly(2026, 9, 1),
+            endDate: new DateOnly(2026, 9, 30),
+            netSalary: 6_000m);
+        var originalLastSalaryDate = await database.Context.Employees
+            .Where(employee => employee.Id == entry.EmployeeId)
+            .Select(employee => employee.LastDayOfReceivingSalary)
+            .SingleAsync();
+
+        var result = await database.CreatePayrollService()
+            .MoveSalaryForEmployeeAccountAsync(
+                entry.Id,
+                new PayrollEntrySalaryPaymentRequest(
+                    PostingDate: closedDate,
+                    Notes: "must not persist"));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.Closed", result.Error.Code);
+        database.Context.ChangeTracker.Clear();
+        var persisted = await database.Context.PayrollEntries
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == entry.Id);
+        Assert.False(persisted.IsSalaryMoveToEmployeeAccount);
+        Assert.Null(persisted.SalaryMovedOn);
+        Assert.Empty(await database.Context.EmployeeOpeningBalances
+            .AsNoTracking()
+            .Where(balance => balance.PayrollEntryId == entry.Id)
+            .ToListAsync());
+        Assert.Equal(
+            originalLastSalaryDate,
+            await database.Context.Employees
+                .AsNoTracking()
+                .Where(employee => employee.Id == entry.EmployeeId)
+                .Select(employee => employee.LastDayOfReceivingSalary)
+                .SingleAsync());
+    }
+
+    [Fact]
+    public async Task MoveSalaryBulk_OneClosedPostingDate_RejectsWholeBatch()
+    {
+        var closedDate = new DateOnly(2026, 9, 30);
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(
+            companyId: 1,
+            fiscalYearPeriodGuard: new ClosedDateFiscalYearPeriodGuard(
+                closedDate));
+        var first = await SeedPayableEntryAsync(
+            database,
+            employeeId: 1,
+            startDate: new DateOnly(2026, 9, 1),
+            endDate: new DateOnly(2026, 9, 30),
+            netSalary: 6_000m);
+        var second = await SeedPayableEntryAsync(
+            database,
+            employeeId: 3,
+            startDate: new DateOnly(2026, 9, 1),
+            endDate: new DateOnly(2026, 9, 30),
+            netSalary: 9_000m);
+
+        var result = await database.CreatePayrollService()
+            .MoveSalaryForEmployeeAccountBulkAsync(
+                new BulkPayrollEntrySalaryPaymentRequest(
+                    Entries:
+                    [
+                        new IndividualPayrollEntrySalaryPaymentRequest(
+                            PayrollEntryId: first.Id,
+                            PostingDate: new DateOnly(2026, 10, 1)),
+                        new IndividualPayrollEntrySalaryPaymentRequest(
+                            PayrollEntryId: second.Id,
+                            PostingDate: closedDate)
+                    ]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.Closed", result.Error.Code);
+        database.Context.ChangeTracker.Clear();
+        var persisted = await database.Context.PayrollEntries
+            .AsNoTracking()
+            .Where(entry => entry.Id == first.Id || entry.Id == second.Id)
+            .ToListAsync();
+        Assert.Equal(2, persisted.Count);
+        Assert.All(persisted, entry =>
+        {
+            Assert.False(entry.IsSalaryMoveToEmployeeAccount);
+            Assert.Null(entry.SalaryMovedOn);
+        });
+        Assert.Empty(await database.Context.EmployeeOpeningBalances
+            .AsNoTracking()
+            .Where(balance =>
+                balance.PayrollEntryId == first.Id ||
+                balance.PayrollEntryId == second.Id)
+            .ToListAsync());
+    }
+
     [Fact]
     public async Task AddAsync_ShouldCreatePayrollEntry_ForSingleEmployee()
     {
@@ -63,6 +166,36 @@ public sealed class PayrollEntryServiceTests
         Assert.Equal(2050m, result.Value.NetSalary);
         Assert.False(result.Value.IsSalaryMoveToEmployeeAccount);
         Assert.Equal(10, result.Value.AttendanceSummary.PresentDays);
+    }
+
+    private static async Task<PayrollEntry> SeedPayableEntryAsync(
+        PayrollEntryTestDatabase database,
+        int employeeId,
+        DateOnly startDate,
+        DateOnly endDate,
+        decimal netSalary)
+    {
+        var employee = await database.Context.Employees
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == employeeId);
+        var entry = new PayrollEntry
+        {
+            CompanyId = employee.CompanyId,
+            EmployeeId = employee.Id,
+            EmployeeCode = employee.Code,
+            EmployeeName = employee.Name,
+            EmployeeType = employee.Type,
+            StartDate = startDate,
+            EndDate = endDate,
+            GrossSalary = netSalary,
+            CalculatedSalary = netSalary,
+            NetSalary = netSalary,
+            IsSalaryMoveToEmployeeAccount = false,
+            SalaryMovedOn = null
+        };
+        database.Context.PayrollEntries.Add(entry);
+        await database.Context.SaveChangesAsync();
+        return entry;
     }
 
     [Fact]

@@ -18,7 +18,8 @@ public sealed class StockTransferService(
     ICurrentCompanyContext currentCompanyContext,
     IInventoryStockService inventoryStockService,
     IInventoryCostingService inventoryCostingService,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     : IStockTransferService, IScopedService
 {
     private static readonly ItemMovementType[] TransferMovementTypes =
@@ -97,6 +98,19 @@ public sealed class StockTransferService(
         if (shapeError is not null)
         {
             return Result<StockTransferResponse>.Failure(shapeError);
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.TransferDate,
+                nameof(StockTransferRequest.TransferDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<StockTransferResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
         }
 
         await using var transaction = await dbContext.Database
@@ -215,6 +229,29 @@ public sealed class StockTransferService(
         if (transfer is null)
         {
             return Result<StockTransferResponse>.Failure(NotFound(id));
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                transfer.TransferDate,
+                nameof(StockTransferRequest.TransferDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<StockTransferResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+
+            fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.TransferDate,
+                nameof(StockTransferUpdateRequest.TransferDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<StockTransferResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
         }
 
         var preparation = await PrepareAsync(
@@ -344,6 +381,18 @@ public sealed class StockTransferService(
         if (transfer is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                transfer.TransferDate,
+                nameof(StockTransferRequest.TransferDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result.Failure(fiscalYearResult.Errors);
+            }
         }
 
         var movements = await LoadMovementsAsync(

@@ -2,10 +2,12 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using MiniErp.Application.Common.Abstractions;
+using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.CashVouchers;
 using MiniErp.Application.Features.EmployeeMovements;
 using MiniErp.Application.Features.EmployeeOpeningBalances;
 using MiniErp.Application.Features.ExchangeRates;
+using MiniErp.Application.Features.FiscalYears;
 using MiniErp.Application.Features.PayrollEntries;
 using MiniErp.Application.Features.ProfitabilityReports;
 using MiniErp.Application.Features.Statements;
@@ -50,7 +52,9 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
         Context = context;
     }
 
-    public static async Task<PayrollEntryTestDatabase> CreateAsync(int companyId)
+    public static async Task<PayrollEntryTestDatabase> CreateAsync(
+        int companyId,
+        IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     {
         var connection = new SqliteConnection("DataSource=:memory:;Foreign Keys=False");
         await connection.OpenAsync();
@@ -77,6 +81,10 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
         services.AddScoped<IPayrollEntryService, PayrollEntryService>();
         services.AddScoped<IFinancialStatementService, FinancialStatementService>();
         services.AddSingleton<ICurrentCompanyContext>(new TestCurrentCompanyContext(companyId));
+        if (fiscalYearPeriodGuard is not null)
+        {
+            services.AddSingleton(fiscalYearPeriodGuard);
+        }
 
         var serviceProvider = services.BuildServiceProvider();
         var scope = serviceProvider.CreateAsyncScope();
@@ -361,4 +369,21 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
     }
 
     private sealed record TestCurrentCompanyContext(int CompanyId) : ICurrentCompanyContext;
+}
+
+internal sealed class ClosedDateFiscalYearPeriodGuard(
+    params DateOnly[] closedDates) : IFiscalYearPeriodGuard
+{
+    private readonly HashSet<DateOnly> closedDates = [.. closedDates];
+
+    public Task<Result> EnsureOpenAsync(
+        DateOnly date,
+        string fieldName,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(closedDates.Contains(date)
+            ? Result.Failure(FiscalYearErrors.Closed(
+                date,
+                fiscalYearName: "Closed test year",
+                fieldName: fieldName))
+            : Result.Success());
 }

@@ -13,6 +13,61 @@ namespace MiniErp.Tests.EmployeeFinancials;
 public sealed class EmployeeMovementServiceTests
 {
     [Fact]
+    public async Task AddAsync_ClosedMovementDate_IsRejectedWithoutLedgerWrite()
+    {
+        var closedDate = new DateOnly(2026, 8, 1);
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(
+            companyId: 1,
+            fiscalYearPeriodGuard: new ClosedDateFiscalYearPeriodGuard(
+                closedDate));
+        var service = database.CreateMovementService();
+
+        var result = await service.AddAsync(new EmployeeMovementRequest(
+            EmployeeId: 1,
+            Type: EmployeeMovementType.Bonus,
+            Amount: 500m,
+            Currency: CurrencyCode.EGP,
+            MovementDate: closedDate,
+            Notes: "must not persist"));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.Closed", result.Error.Code);
+        Assert.Empty(await database.Context.EmployeeMovements.ToListAsync());
+    }
+
+    [Fact]
+    public async Task AddBulkAsync_OneClosedDate_RejectsWholeBatchBeforeAnyWrite()
+    {
+        var closedDate = new DateOnly(2026, 8, 2);
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(
+            companyId: 1,
+            fiscalYearPeriodGuard: new ClosedDateFiscalYearPeriodGuard(
+                closedDate));
+        var service = database.CreateMovementService();
+
+        var result = await service.AddBulkAsync(
+            new BulkEmployeeMovementRequest(
+            [
+                new EmployeeMovementRequest(
+                    EmployeeId: 1,
+                    Type: EmployeeMovementType.Bonus,
+                    Amount: 300m,
+                    Currency: CurrencyCode.EGP,
+                    MovementDate: new DateOnly(2026, 8, 1)),
+                new EmployeeMovementRequest(
+                    EmployeeId: 2,
+                    Type: EmployeeMovementType.Deduction,
+                    Amount: 150m,
+                    Currency: CurrencyCode.EGP,
+                    MovementDate: closedDate)
+            ]));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.Closed", result.Error.Code);
+        Assert.Empty(await database.Context.EmployeeMovements.ToListAsync());
+    }
+
+    [Fact]
     public async Task AddAsync_BonusAndDeduction_ShouldSplitDebitCreditCorrectly()
     {
         // Arrange

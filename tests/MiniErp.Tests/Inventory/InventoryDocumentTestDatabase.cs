@@ -68,7 +68,9 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
             TimeProvider.System);
     }
 
-    public StockTransferService CreateStockTransferService(int companyId = 1)
+    public StockTransferService CreateStockTransferService(
+        int companyId = 1,
+        IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     {
         var currentCompany = new TestCurrentCompanyContext(companyId);
         return new StockTransferService(
@@ -80,7 +82,8 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
                 Context,
                 currentCompany,
                 TimeProvider.System),
-            TimeProvider.System);
+            TimeProvider.System,
+            fiscalYearPeriodGuard);
     }
 
     public InventoryCostReportService CreateInventoryCostReportService(

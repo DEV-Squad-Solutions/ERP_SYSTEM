@@ -120,6 +120,19 @@ public sealed class EmployeeMovementService(
         EmployeeMovementRequest request,
         CancellationToken cancellationToken = default)
     {
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.MovementDate,
+                nameof(EmployeeMovementRequest.MovementDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<EmployeeMovementResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+        }
+
         var employee = await dbContext.Employees
             .AsNoTracking()
             .FirstOrDefaultAsync(
@@ -195,6 +208,23 @@ public sealed class EmployeeMovementService(
         {
             return Result<List<EmployeeMovementResponse>>.Failure(
                 Error.Validation("EmployeeMovements.EmptyBulk", "يجب إرسال حركة موظف واحدة على الأقل."));
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            foreach (var movement in request.Movements)
+            {
+                var fiscalYearResult = await fiscalYearPeriodGuard
+                    .EnsureOpenAsync(
+                        movement.MovementDate,
+                        nameof(EmployeeMovementRequest.MovementDate),
+                        cancellationToken);
+                if (fiscalYearResult.IsFailure)
+                {
+                    return Result<List<EmployeeMovementResponse>>.Failure(
+                        fiscalYearResult.Errors);
+                }
+            }
         }
 
         var employeeIds = request.Movements.Select(m => m.EmployeeId).Distinct().ToList();

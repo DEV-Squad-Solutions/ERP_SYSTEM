@@ -1,5 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
+using MiniErp.Application.Common.Results;
+using MiniErp.Application.Features.FiscalYears;
 using MiniErp.Application.Features.StockAdjustments;
 using MiniErp.Application.Features.StockTransfers;
 using MiniErp.Domain.Enums;
@@ -13,6 +16,125 @@ public sealed class StockTransferServiceTests
     {
         MappingConfiguration.Register(
             typeof(InfrastructureAssemblyMarker).Assembly);
+    }
+
+    [Fact]
+    public async Task Add_ClosedTransferDate_IsRejectedBeforeAnyWrite()
+    {
+        await using var database = await InventoryDocumentTestDatabase.CreateAsync();
+        var closedDate = new DateOnly(2026, 7, 2);
+        var service = database.CreateStockTransferService(
+            fiscalYearPeriodGuard: new ClosedDateGuard(closedDate));
+
+        var result = await service.AddAsync(Request(quantity: 1m));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.Closed", result.Error.Code);
+        Assert.Empty(await database.Context.StockTransfers.ToListAsync());
+        Assert.Empty(await database.Context.ItemMovements
+            .Where(movement =>
+                movement.MovementType == ItemMovementType.TransferOut ||
+                movement.MovementType == ItemMovementType.TransferIn)
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Update_ClosedOriginalDate_CannotBeMovedIntoOpenPeriod()
+    {
+        await using var database = await InventoryDocumentTestDatabase.CreateAsync();
+        await AddSourceCostAsync(database, quantity: 10m, unitCost: 20m);
+        var created = (await database.CreateStockTransferService()
+            .AddAsync(Request(quantity: 2m))).Value;
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreateStockTransferService(
+            fiscalYearPeriodGuard: new ClosedDateGuard(created.TransferDate));
+
+        var result = await service.UpdateAsync(
+            created.Id,
+            new StockTransferUpdateRequest(
+                TransferDate: new DateOnly(2026, 7, 3),
+                Notes: "must not persist",
+                Lines: [new StockTransferLineRequest(
+                    ItemId: 1,
+                    Quantity: 3m,
+                    Notes: null)],
+                RowVersion: created.RowVersion));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.Closed", result.Error.Code);
+        var persisted = await database.Context.StockTransfers
+            .AsNoTracking()
+            .Include(transfer => transfer.Lines)
+            .SingleAsync(transfer => transfer.Id == created.Id);
+        Assert.Equal(created.TransferDate, persisted.TransferDate);
+        Assert.Equal(2m, Assert.Single(persisted.Lines).Quantity);
+        Assert.Null(persisted.Notes);
+    }
+
+    [Fact]
+    public async Task Update_ClosedRequestedDate_PreservesDocumentAndMovements()
+    {
+        await using var database = await InventoryDocumentTestDatabase.CreateAsync();
+        await AddSourceCostAsync(database, quantity: 10m, unitCost: 20m);
+        var created = (await database.CreateStockTransferService()
+            .AddAsync(Request(quantity: 2m))).Value;
+        var closedDate = new DateOnly(2026, 7, 3);
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreateStockTransferService(
+            fiscalYearPeriodGuard: new ClosedDateGuard(closedDate));
+
+        var result = await service.UpdateAsync(
+            created.Id,
+            new StockTransferUpdateRequest(
+                TransferDate: closedDate,
+                Notes: "must not persist",
+                Lines: [new StockTransferLineRequest(
+                    ItemId: 1,
+                    Quantity: 3m,
+                    Notes: null)],
+                RowVersion: created.RowVersion));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.Closed", result.Error.Code);
+        var persistedMovements = await database.Context.ItemMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.ReferenceId == created.Id &&
+                (movement.MovementType == ItemMovementType.TransferOut ||
+                 movement.MovementType == ItemMovementType.TransferIn))
+            .ToListAsync();
+        Assert.Equal(2, persistedMovements.Count);
+        Assert.All(persistedMovements, movement =>
+        {
+            Assert.Equal(created.TransferDate, movement.MovementDate);
+            Assert.Equal(2m, movement.QuantityIn + movement.QuantityOut);
+        });
+    }
+
+    [Fact]
+    public async Task Delete_ClosedTransferDate_PreservesDocumentAndPairedMovements()
+    {
+        await using var database = await InventoryDocumentTestDatabase.CreateAsync();
+        await AddSourceCostAsync(database, quantity: 10m, unitCost: 20m);
+        var created = (await database.CreateStockTransferService()
+            .AddAsync(Request(quantity: 2m))).Value;
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreateStockTransferService(
+            fiscalYearPeriodGuard: new ClosedDateGuard(created.TransferDate));
+
+        var result = await service.DeleteAsync(created.Id);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.Closed", result.Error.Code);
+        Assert.True(await database.Context.StockTransfers
+            .AsNoTracking()
+            .AnyAsync(transfer => transfer.Id == created.Id));
+        Assert.Equal(2, await database.Context.ItemMovements
+            .AsNoTracking()
+            .CountAsync(movement =>
+                movement.ReferenceId == created.Id &&
+                (movement.MovementType == ItemMovementType.TransferOut ||
+                 movement.MovementType == ItemMovementType.TransferIn)));
     }
 
     [Fact]
@@ -309,5 +431,20 @@ public sealed class StockTransferServiceTests
                     }
                 ]));
         Assert.True(result.IsSuccess, result.Error.Description);
+    }
+
+    private sealed class ClosedDateGuard(
+        DateOnly closedDate) : IFiscalYearPeriodGuard
+    {
+        public Task<Result> EnsureOpenAsync(
+            DateOnly date,
+            string fieldName,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(date == closedDate
+                ? Result.Failure(FiscalYearErrors.Closed(
+                    date,
+                    fiscalYearName: "Closed test year",
+                    fieldName: fieldName))
+                : Result.Success());
     }
 }
