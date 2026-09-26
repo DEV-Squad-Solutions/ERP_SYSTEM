@@ -555,6 +555,12 @@ public sealed class AccountingReadinessService(
                      .ThenBy(source => source.Key.SourceType)
                      .ThenBy(source => source.Key.SourceId))
         {
+            if (IsImmutableRevaluation(source.Key.SourceType) &&
+                existingKeySet.Contains(source.Key))
+            {
+                continue;
+            }
+
             var postingResult = await SynchronizeAsync(
                 source,
                 cancellationToken);
@@ -659,6 +665,13 @@ public sealed class AccountingReadinessService(
                 return await driverTripPostingService.SynchronizeAsync(
                     source.Key.SourceId,
                     cancellationToken);
+
+            case JournalEntrySourceType.CashboxRevaluation:
+            case JournalEntrySourceType.MonetaryAccountRevaluation:
+                return Result.Failure(
+                    ImmutableRevaluationJournalMissing(
+                        source.Key.SourceType.ToString(),
+                        source.SourceNumber));
 
             default:
                 return Result.Success();
@@ -833,10 +846,45 @@ public sealed class AccountingReadinessService(
                 trip.TripDate))
             .ToListAsync(cancellationToken));
 
+        sources.AddRange(await dbContext.CashboxRevaluations
+            .AsNoTracking()
+            .Where(revaluation =>
+                revaluation.CompanyId == companyId &&
+                revaluation.DeltaBaseAmount != 0m &&
+                revaluation.RevaluationDate >= startDate &&
+                revaluation.RevaluationDate <= endDate)
+            .Select(revaluation => new SourceDescriptor(
+                new SourceKey(
+                    JournalEntrySourceType.CashboxRevaluation,
+                    revaluation.Id),
+                revaluation.Cashbox.Code,
+                revaluation.RevaluationDate))
+            .ToListAsync(cancellationToken));
+
+        sources.AddRange(await dbContext.MonetaryAccountRevaluations
+            .AsNoTracking()
+            .Where(revaluation =>
+                revaluation.CompanyId == companyId &&
+                revaluation.DeltaBaseAmount != 0m &&
+                revaluation.RevaluationDate >= startDate &&
+                revaluation.RevaluationDate <= endDate)
+            .Select(revaluation => new SourceDescriptor(
+                new SourceKey(
+                    JournalEntrySourceType.MonetaryAccountRevaluation,
+                    revaluation.Id),
+                revaluation.Account.Code,
+                revaluation.RevaluationDate))
+            .ToListAsync(cancellationToken));
+
         return sources
             .DistinctBy(source => source.Key)
             .ToList();
     }
+
+    private static bool IsImmutableRevaluation(
+        JournalEntrySourceType sourceType) =>
+        sourceType is JournalEntrySourceType.CashboxRevaluation or
+            JournalEntrySourceType.MonetaryAccountRevaluation;
 
     private Task<List<MissingOpeningLine>> LoadMissingOpeningLinesAsync(
         DateOnly startDate,

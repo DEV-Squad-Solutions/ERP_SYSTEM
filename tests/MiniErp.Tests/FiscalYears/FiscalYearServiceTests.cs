@@ -177,6 +177,7 @@ public sealed class FiscalYearServiceTests
         Assert.True((await service.CloseAsync(first.Value.Id)).IsSuccess);
         database.ClearTracking();
         Assert.True((await service.ReopenAsync(first.Value.Id)).IsSuccess);
+        Assert.Empty(await database.LoadClosingTransfersAsync(first.Value.Id));
         await database.ChangeClosingAssetBalanceAsync(120m);
         database.ClearTracking();
         Assert.True((await service.CloseAsync(first.Value.Id)).IsSuccess);
@@ -191,6 +192,47 @@ public sealed class FiscalYearServiceTests
             first.Value.Id);
         Assert.Equal(JournalPartyType.Customer, partyLine.PartyType);
         Assert.Equal(99, partyLine.PartyId);
+    }
+
+    [Fact]
+    public async Task Reopen_BlocksWhenLaterYearIsClosedAndPreservesTransfer()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(
+            companyId: 1,
+            accountingReadinessService: new ReadyReadinessService());
+        var first = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+        var next = await service.AddAsync(
+            new FiscalYearRequest(
+                "2027",
+                new DateOnly(2027, 1, 1),
+                new DateOnly(2027, 12, 31),
+                IsCurrent: true));
+        await database.SeedClosingLedgerAsync(
+            first.Value.Id,
+            next.Value.Id);
+        database.ClearTracking();
+
+        Assert.True((await service.CloseAsync(first.Value.Id)).IsSuccess);
+        database.ClearTracking();
+        Assert.True((await service.CloseAsync(next.Value.Id)).IsSuccess);
+        database.ClearTracking();
+
+        var reopen = await service.ReopenAsync(first.Value.Id);
+
+        Assert.True(reopen.IsFailure);
+        Assert.Equal("FiscalYears.LaterFiscalYearClosed", reopen.Error.Code);
+        Assert.Equal(
+            FiscalYearStatus.Closed,
+            (await service.GetByIdAsync(first.Value.Id)).Value.Status);
+        Assert.Equal(
+            FiscalYearStatus.Closed,
+            (await service.GetByIdAsync(next.Value.Id)).Value.Status);
+        Assert.Single(await database.LoadClosingTransfersAsync(first.Value.Id));
     }
 
     [Fact]

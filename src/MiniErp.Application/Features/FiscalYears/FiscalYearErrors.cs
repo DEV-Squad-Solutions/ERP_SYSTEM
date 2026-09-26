@@ -76,6 +76,11 @@ public static class FiscalYearErrors
             "FiscalYears.NextFiscalYearClosed",
             $"السنة المالية التالية '{fiscalYearName}' مغلقة، ولا يمكن ترحيل الأرصدة الافتتاحية إليها.");
 
+    public static Error LaterFiscalYearClosed(string fiscalYearName) =>
+        Error.Conflict(
+            "FiscalYears.LaterFiscalYearClosed",
+            $"لا يمكن إعادة فتح السنة المالية لوجود سنة لاحقة مغلقة وهي '{fiscalYearName}'. أعد فتح السنوات اللاحقة أولًا.");
+
     public static Error CurrentCannotBeDeleted() =>
         Error.Conflict(
             "FiscalYears.CurrentCannotBeDeleted",

@@ -346,6 +346,11 @@ public sealed class FiscalYearService(
             return Result<FiscalYearResponse>.Failure(InvalidId());
         }
 
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
         var fiscalYear = await dbContext.FiscalYears
             .FirstOrDefaultAsync(
                 entity =>
@@ -393,8 +398,6 @@ public sealed class FiscalYearService(
                 return Result<FiscalYearResponse>.Failure(errors);
             }
 
-            await using var transaction = await dbContext.Database
-                .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             var transfer = await TransferClosingBalancesAsync(
                 fiscalYear,
                 cancellationToken);
@@ -414,12 +417,40 @@ public sealed class FiscalYearService(
             return Result<FiscalYearResponse>.Success(closedResponse);
         }
 
+        var laterClosedYear = await dbContext.FiscalYears
+            .AsNoTracking()
+            .Where(year =>
+                year.CompanyId == companyId &&
+                year.StartDate > fiscalYear.EndDate &&
+                year.Status == FiscalYearStatus.Closed)
+            .OrderBy(year => year.StartDate)
+            .Select(year => year.Name)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (laterClosedYear is not null)
+        {
+            return Result<FiscalYearResponse>.Failure(
+                LaterFiscalYearClosed(laterClosedYear));
+        }
+
+        var existingTransfer = await dbContext.JournalEntries
+            .Include(entry => entry.Lines)
+            .SingleOrDefaultAsync(entry =>
+                entry.CompanyId == companyId &&
+                entry.EntryType == JournalEntryType.Opening &&
+                entry.SourceType == JournalEntrySourceType.FiscalYearClosing &&
+                entry.SourceId == fiscalYear.Id,
+                cancellationToken);
+        if (existingTransfer is not null)
+        {
+            dbContext.JournalEntryLines.RemoveRange(existingTransfer.Lines);
+            dbContext.JournalEntries.Remove(existingTransfer);
+        }
+
         fiscalYear.Status = status;
-        fiscalYear.ClosedOn = status == FiscalYearStatus.Closed
-            ? timeProvider.GetUtcNow().UtcDateTime
-            : null;
+        fiscalYear.ClosedOn = null;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         var response = await ProjectResponseQuery(id)
             .FirstAsync(cancellationToken);
