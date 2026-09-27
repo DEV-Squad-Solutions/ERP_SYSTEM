@@ -56,7 +56,6 @@ public sealed class CashMovementTypesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<CashMovementTypeResponse>(
         StatusCodes.Status201Created)]
@@ -83,7 +82,6 @@ public sealed class CashMovementTypesController(
                 result.Value);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}")]
     [ProducesResponseType<CashMovementTypeResponse>(
         StatusCodes.Status200OK)]
@@ -108,7 +106,6 @@ public sealed class CashMovementTypesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

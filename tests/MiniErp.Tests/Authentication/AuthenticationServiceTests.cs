@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using MiniErp.Application.Common.Authentication;
 using MiniErp.Application.Features.Authentication;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Identity;
@@ -15,6 +17,97 @@ namespace MiniErp.Tests.Authentication;
 
 public sealed class AuthenticationServiceTests
 {
+    [Fact]
+    public async Task SwitchCompany_RotatesSessionIntoAssignedCompany()
+    {
+        await using var database =
+            await AuthenticationServiceTestDatabase.CreateAsync();
+        var loginResult = await database.Service.LoginAsync(
+            new LoginRequest(
+                UserName: AuthenticationServiceTestDatabase.UserName,
+                Password: AuthenticationServiceTestDatabase.Password));
+        Assert.True(loginResult.IsSuccess);
+        Assert.NotNull(loginResult.Value.RefreshToken);
+        await database.AddCompanyAsync(companyId: 2, grantAccess: true);
+
+        var switchResult = await database.Service.SwitchCompanyAsync(
+            AuthenticationServiceTestDatabase.UserId,
+            currentCompanyId: 1,
+            new SwitchCompanyRequest(
+                CompanyId: 2,
+                RefreshToken: loginResult.Value.RefreshToken!));
+
+        Assert.True(switchResult.IsSuccess);
+        var accessToken = new JwtSecurityTokenHandler()
+            .ReadJwtToken(switchResult.Value.AccessToken);
+        Assert.Equal(
+            "2",
+            accessToken.Claims.Single(claim =>
+                claim.Type == CustomClaimTypes.CompanyId).Value);
+
+        var storedTokens = await database.Context.RefreshTokens
+            .AsNoTracking()
+            .ToListAsync();
+        Assert.Equal(2, storedTokens.Count);
+        Assert.NotNull(storedTokens.Single(token => token.CompanyId == 1)
+            .RevokedAtUtc);
+        Assert.Null(storedTokens.Single(token => token.CompanyId == 2)
+            .RevokedAtUtc);
+
+        var reusedToken = await database.Service.RefreshAsync(
+            new RefreshTokenRequest(loginResult.Value.RefreshToken!));
+        Assert.True(reusedToken.IsFailure);
+        Assert.Equal(
+            "Authentication.InvalidRefreshToken",
+            reusedToken.Error.Code);
+    }
+
+    [Fact]
+    public async Task SwitchCompany_UnassignedCompanyIsRejectedWithoutRevokingSession()
+    {
+        await using var database =
+            await AuthenticationServiceTestDatabase.CreateAsync();
+        var loginResult = await database.Service.LoginAsync(
+            new LoginRequest(
+                UserName: AuthenticationServiceTestDatabase.UserName,
+                Password: AuthenticationServiceTestDatabase.Password));
+        Assert.True(loginResult.IsSuccess);
+        Assert.NotNull(loginResult.Value.RefreshToken);
+        await database.AddCompanyAsync(companyId: 2, grantAccess: false);
+
+        var switchResult = await database.Service.SwitchCompanyAsync(
+            AuthenticationServiceTestDatabase.UserId,
+            currentCompanyId: 1,
+            new SwitchCompanyRequest(
+                CompanyId: 2,
+                RefreshToken: loginResult.Value.RefreshToken!));
+
+        Assert.True(switchResult.IsFailure);
+        Assert.Equal(
+            "Authentication.CompanyAccessDenied",
+            switchResult.Error.Code);
+        Assert.Null((await database.Context.RefreshTokens
+            .AsNoTracking()
+            .SingleAsync()).RevokedAtUtc);
+    }
+
+    [Fact]
+    public async Task GetCompanies_ReturnsOnlyAuthenticatedUsersAssignments()
+    {
+        await using var database =
+            await AuthenticationServiceTestDatabase.CreateAsync();
+        await database.AddCompanyAsync(companyId: 2, grantAccess: true);
+        await database.AddCompanyAsync(companyId: 3, grantAccess: false);
+
+        var result = await database.Service.GetCompaniesAsync(
+            AuthenticationServiceTestDatabase.UserId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(
+            [1, 2],
+            result.Value.Select(company => company.Id).Order());
+    }
+
     [Fact]
     public async Task Refresh_WithCurrentSecurityStamp_Succeeds()
     {
@@ -260,6 +353,37 @@ public sealed class AuthenticationServiceTests
             await Scope.DisposeAsync();
             await ServiceProvider.DisposeAsync();
             await Connection.DisposeAsync();
+        }
+
+        public async Task AddCompanyAsync(
+            int companyId,
+            bool grantAccess)
+        {
+            var companyName = $"Company {companyId}";
+            var commercialRegister = $"CR-{companyId}";
+            var taxNumber = $"TAX-{companyId}";
+            await Context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO Companies (
+                    Id, Name, Address, CommercialRegister, TaxNumber,
+                    ManagerName, RowVersion, CreatedById, CreatedOn,
+                    CreatedByPc, IsDeleted)
+                VALUES (
+                    {companyId}, {companyName}, 'Address',
+                    {commercialRegister}, {taxNumber}, 'Manager',
+                    X'01', 'test', '2026-01-01', 'test', 0);
+                """);
+
+            if (grantAccess)
+            {
+                Context.UserCompanies.Add(new UserCompany
+                {
+                    UserId = UserId,
+                    CompanyId = companyId
+                });
+                await Context.SaveChangesAsync();
+            }
+
+            Context.ChangeTracker.Clear();
         }
 
         private static IConfiguration CreateConfiguration() =>

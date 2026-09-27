@@ -15,6 +15,10 @@ public sealed class InventoryCountFilterRequestValidator
             .GreaterThan(0)
             .When(request => request.StoreId.HasValue);
 
+        RuleFor(request => request.FiscalYearId)
+            .GreaterThan(0)
+            .When(request => request.FiscalYearId.HasValue);
+
         RuleFor(request => request)
             .Must(request =>
                 !request.FromDate.HasValue ||

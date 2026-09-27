@@ -1347,7 +1347,8 @@ public static class DevelopmentDataSeeder
                     $"Seed draft for Company {companyId}")
             .Select(line => new InventoryCostingKey(
                 line.StockOpeningBalance.StoreId,
-                line.ItemId))
+                line.ItemId,
+                line.StockOpeningBalance.FiscalYearId))
             .ToListAsync(cancellationToken);
         var invoiceKeys = await dbContext.InvoiceLines
             .AsNoTracking()
@@ -1358,7 +1359,8 @@ public static class DevelopmentDataSeeder
                 line.Invoice.ExportInvoiceCode.StartsWith("SEED-"))
             .Select(line => new InventoryCostingKey(
                 line.Invoice.StoreId,
-                line.ItemId!.Value))
+                line.ItemId!.Value,
+                line.Invoice.FiscalYearId))
             .ToListAsync(cancellationToken);
         var keys = openingBalanceKeys
             .Concat(invoiceKeys)

@@ -13,7 +13,9 @@ namespace MiniErp.Infrastructure.Services.EmployeeAttendance;
 public  sealed partial class EmployeeAttendanceService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     : IEmployeeAttendanceService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -30,9 +32,22 @@ public  sealed partial class EmployeeAttendanceService(
             return Result<PagedResponse<EmployeeAttendanceResponse>>.Failure(validationError);
         }
 
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            filters.FiscalYearId,
+            filters.WorkDateFrom,
+            filters.WorkDateTo,
+            cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<PagedResponse<EmployeeAttendanceResponse>>.Failure(
+                fiscalYear.Errors);
+        }
+
         var query = dbContext.EmployeeAttendances
             .AsNoTracking()
-            .Where(a => a.CompanyId == companyId);
+            .Where(a =>
+                a.CompanyId == companyId &&
+                a.FiscalYearId == fiscalYear.Value.FiscalYearId);
 
         if (filters.EmployeeId.HasValue)
         {
@@ -83,6 +98,7 @@ public  sealed partial class EmployeeAttendanceService(
 
     public async Task<Result<EmployeeAttendanceResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -93,11 +109,24 @@ public  sealed partial class EmployeeAttendanceService(
                     "معرف سجل الحضور غير صالح."));
         }
 
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<EmployeeAttendanceResponse>.Failure(
+                fiscalYear.Errors);
+        }
+
         var attendance = await dbContext.EmployeeAttendances
             .AsNoTracking()
             .Include(a => a.Employee)
             .FirstOrDefaultAsync(
-                employeeAttendance => employeeAttendance.Id == id && employeeAttendance.CompanyId == companyId,
+                employeeAttendance =>
+                    employeeAttendance.Id == id &&
+                    employeeAttendance.CompanyId == companyId &&
+                    employeeAttendance.FiscalYearId ==
+                        fiscalYear.Value.FiscalYearId,
                 cancellationToken);
 
         if (attendance is null)
@@ -112,6 +141,7 @@ public  sealed partial class EmployeeAttendanceService(
             new EmployeeAttendanceResponse(
                 Id: attendance.Id,
                 CompanyId: attendance.CompanyId,
+                FiscalYearId: attendance.FiscalYearId,
                 EmployeeId: attendance.EmployeeId,
                 EmployeeName: attendance.Employee.Name,
                 Status: attendance.Status,
@@ -134,6 +164,16 @@ public  sealed partial class EmployeeAttendanceService(
         if (validationError != null)
         {
             return Result<EmployeeAttendanceResponse>.Failure(validationError);
+        }
+
+        var periodResult = await EnsureOpenDatesAsync(
+            [request.WorkDate],
+            nameof(EmployeeAttendanceRequest.WorkDate),
+            cancellationToken);
+        if (periodResult.IsFailure)
+        {
+            return Result<EmployeeAttendanceResponse>.Failure(
+                periodResult.Errors);
         }
 
         var employee = await dbContext.Employees
@@ -178,6 +218,7 @@ public  sealed partial class EmployeeAttendanceService(
             new EmployeeAttendanceResponse(
                 Id: attendance.Id,
                 CompanyId: attendance.CompanyId,
+                FiscalYearId: attendance.FiscalYearId,
                 EmployeeId: attendance.EmployeeId,
                 EmployeeName: employee.Name,
                 Status: attendance.Status,
@@ -213,6 +254,27 @@ public  sealed partial class EmployeeAttendanceService(
                 Error.NotFound(
                     "EmployeeAttendance.NotFound",
                     "لم يتم العثور على سجل الحضور المطلوب."));
+        }
+
+        var periodResult = await EnsureOpenDatesAsync(
+            [attendance.WorkDate, request.WorkDate],
+            nameof(EmployeeAttendanceUpdateRequest.WorkDate),
+            cancellationToken);
+        if (periodResult.IsFailure)
+        {
+            return Result<EmployeeAttendanceResponse>.Failure(
+                periodResult.Errors);
+        }
+
+        var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
+            attendance.FiscalYearId,
+            request.WorkDate,
+            request.WorkDate,
+            cancellationToken);
+        if (fiscalYearScope.IsFailure)
+        {
+            return Result<EmployeeAttendanceResponse>.Failure(
+                fiscalYearScope.Errors);
         }
 
         var employeeName = attendance.Employee.Name;
@@ -277,6 +339,7 @@ public  sealed partial class EmployeeAttendanceService(
             new EmployeeAttendanceResponse(
                 Id: attendance.Id,
                 CompanyId: attendance.CompanyId,
+                FiscalYearId: attendance.FiscalYearId,
                 EmployeeId: attendance.EmployeeId,
                 EmployeeName: employeeName,
                 Status: attendance.Status,
@@ -306,6 +369,15 @@ public  sealed partial class EmployeeAttendanceService(
                     "لم يتم العثور على سجل الحضور المطلوب."));
         }
 
+        var periodResult = await EnsureOpenDatesAsync(
+            [attendance.WorkDate],
+            nameof(EmployeeAttendanceRequest.WorkDate),
+            cancellationToken);
+        if (periodResult.IsFailure)
+        {
+            return periodResult;
+        }
+
         dbContext.EmployeeAttendances.Remove(attendance);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -316,6 +388,16 @@ public  sealed partial class EmployeeAttendanceService(
         BulkEmployeeAttendanceRequest request,
         CancellationToken cancellationToken = default)
     {
+        var periodResult = await EnsureOpenDatesAsync(
+            request.Attendances.Select(attendance => attendance.WorkDate),
+            nameof(IndividualAttendanceRecordRequest.WorkDate),
+            cancellationToken);
+        if (periodResult.IsFailure)
+        {
+            return Result<List<EmployeeAttendanceResponse>>.Failure(
+                periodResult.Errors);
+        }
+
         var employeeIds = request.Attendances
             .Select(a => a.EmployeeId)
             .Distinct()
@@ -418,6 +500,7 @@ public  sealed partial class EmployeeAttendanceService(
         var responses = processedEntities.Select(x => new EmployeeAttendanceResponse(
             x.Entity.Id,
             x.Entity.CompanyId,
+            x.Entity.FiscalYearId,
             x.Entity.EmployeeId,
             employeeMap.GetValueOrDefault(x.EmployeeId) ?? string.Empty,
             x.Entity.Status,
@@ -487,6 +570,33 @@ public  sealed partial class EmployeeAttendanceService(
                 Error.NotFound("EmployeeAttendance.NotFound", $"بعض سجلات الحضور المحددة غير موجودة: {string.Join(", ", missingIds)}"));
         }
 
+        var periodResult = await EnsureOpenDatesAsync(
+            existingAttendances.Select(attendance => attendance.WorkDate)
+                .Concat(request.Attendances.Select(attendance =>
+                    attendance.WorkDate)),
+            nameof(IndividualAttendanceRecordUpdateRequest.WorkDate),
+            cancellationToken);
+        if (periodResult.IsFailure)
+        {
+            return Result<List<EmployeeAttendanceResponse>>.Failure(
+                periodResult.Errors);
+        }
+
+        foreach (var item in request.Attendances)
+        {
+            var existingAttendance = existingMap[item.Id];
+            var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
+                existingAttendance.FiscalYearId,
+                item.WorkDate,
+                item.WorkDate,
+                cancellationToken);
+            if (fiscalYearScope.IsFailure)
+            {
+                return Result<List<EmployeeAttendanceResponse>>.Failure(
+                    fiscalYearScope.Errors);
+            }
+        }
+
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
         foreach (var item in request.Attendances)
@@ -524,6 +634,7 @@ public  sealed partial class EmployeeAttendanceService(
         var responses = existingAttendances.Select(a => new EmployeeAttendanceResponse(
             a.Id,
             a.CompanyId,
+            a.FiscalYearId,
             a.EmployeeId,
             employees.GetValueOrDefault(a.EmployeeId)?.Name ?? a.Employee?.Name ?? string.Empty,
             a.Status,
@@ -565,8 +676,42 @@ public  sealed partial class EmployeeAttendanceService(
                 Error.NotFound("EmployeeAttendance.NotFound", $"بعض سجلات الحضور المحددة غير موجودة: {string.Join(", ", missingIds)}"));
         }
 
+        var periodResult = await EnsureOpenDatesAsync(
+            attendances.Select(attendance => attendance.WorkDate),
+            nameof(EmployeeAttendanceRequest.WorkDate),
+            cancellationToken);
+        if (periodResult.IsFailure)
+        {
+            return periodResult;
+        }
+
         dbContext.EmployeeAttendances.RemoveRange(attendances);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Result.Success();
+    }
+
+    private async Task<Result> EnsureOpenDatesAsync(
+        IEnumerable<DateOnly> dates,
+        string fieldName,
+        CancellationToken cancellationToken)
+    {
+        if (fiscalYearPeriodGuard is null)
+        {
+            return Result.Success();
+        }
+
+        foreach (var date in dates.Distinct())
+        {
+            var result = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                date,
+                fieldName,
+                cancellationToken);
+            if (result.IsFailure)
+            {
+                return result;
+            }
+        }
 
         return Result.Success();
     }
@@ -583,9 +728,21 @@ public  sealed partial class EmployeeAttendanceService(
                     "تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية."));
         }
 
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            request.FiscalYearId,
+            request.StartDate,
+            request.EndDate,
+            cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<EmployeeAttendanceReportResponse>.Failure(
+                fiscalYear.Errors);
+        }
+
         var query = dbContext.EmployeeAttendances
             .AsNoTracking()
             .Where(a => a.CompanyId == companyId &&
+                        a.FiscalYearId == fiscalYear.Value.FiscalYearId &&
                         a.WorkDate >= request.StartDate &&
                         a.WorkDate <= request.EndDate);
 

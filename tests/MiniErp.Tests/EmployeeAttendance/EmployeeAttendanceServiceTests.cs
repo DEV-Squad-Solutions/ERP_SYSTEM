@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.EmployeeAttendance;
 using MiniErp.Domain.Enums;
 using System;
@@ -11,6 +12,91 @@ namespace MiniErp.Tests.EmployeeAttendance;
 
 public sealed class EmployeeAttendanceServiceTests
 {
+    [Fact]
+    public async Task Queries_DefaultToCurrentFiscalYearAndRejectCrossYearUpdate()
+    {
+        await using var database = await EmployeeAttendanceTestDatabase
+            .CreateAsync(companyId: 1);
+        await database.ConfigureSeparateFiscalYearsAsync();
+        var service = database.CreateService();
+
+        var currentCreated = await service.AddAsync(
+            new EmployeeAttendanceRequest(
+                EmployeeId: 1,
+                Status: EmployeeAttendanceStatus.Present,
+                WorkDate: new DateOnly(2025, 6, 1),
+                CheckIn: new TimeOnly(9, 0),
+                CheckOut: new TimeOnly(17, 0)));
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears
+            SET IsCurrent = 2
+            WHERE CompanyId = 1 AND IsCurrent = 1;
+            UPDATE FiscalYears SET IsCurrent = 1 WHERE Id = 100;
+            UPDATE FiscalYears SET IsCurrent = 0 WHERE IsCurrent = 2;
+            """);
+        var nextCreated = await service.AddAsync(
+            new EmployeeAttendanceRequest(
+                EmployeeId: 1,
+                Status: EmployeeAttendanceStatus.Present,
+                WorkDate: new DateOnly(2026, 6, 1),
+                CheckIn: new TimeOnly(9, 0),
+                CheckOut: new TimeOnly(17, 0)));
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears
+            SET IsCurrent = 2
+            WHERE CompanyId = 1 AND IsCurrent = 1;
+            UPDATE FiscalYears SET IsCurrent = 1 WHERE Id = 1;
+            UPDATE FiscalYears SET IsCurrent = 0 WHERE IsCurrent = 2;
+            """);
+
+        Assert.True(currentCreated.IsSuccess);
+        Assert.Equal(1, currentCreated.Value.FiscalYearId);
+        Assert.True(nextCreated.IsSuccess);
+        Assert.Equal(100, nextCreated.Value.FiscalYearId);
+
+        var currentList = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 });
+        var nextList = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new EmployeeAttendanceFilterRequest(FiscalYearId: 100));
+        var currentReport = await service.GetReportAsync(
+            new EmployeeAttendanceReportRequest(
+                StartDate: new DateOnly(2025, 1, 1),
+                EndDate: new DateOnly(2025, 12, 31)));
+        var nextReport = await service.GetReportAsync(
+            new EmployeeAttendanceReportRequest(
+                StartDate: new DateOnly(2026, 1, 1),
+                EndDate: new DateOnly(2026, 12, 31),
+                FiscalYearId: 100));
+        var hiddenNextYear = await service.GetByIdAsync(nextCreated.Value.Id);
+        var explicitNextYear = await service.GetByIdAsync(
+            nextCreated.Value.Id,
+            fiscalYearId: 100);
+        var crossYearUpdate = await service.UpdateAsync(
+            currentCreated.Value.Id,
+            new EmployeeAttendanceUpdateRequest(
+                EmployeeId: 1,
+                Status: EmployeeAttendanceStatus.Present,
+                WorkDate: new DateOnly(2026, 6, 2),
+                CheckIn: new TimeOnly(9, 0),
+                CheckOut: new TimeOnly(17, 0),
+                WorkDayRatio: WorkDayRatio.FullDay));
+
+        Assert.Equal(currentCreated.Value.Id, Assert.Single(currentList.Value.Items).Id);
+        Assert.Equal(nextCreated.Value.Id, Assert.Single(nextList.Value.Items).Id);
+        Assert.Equal(1, currentReport.Value.TotalPresentDays);
+        Assert.Equal(1, nextReport.Value.TotalPresentDays);
+        Assert.True(hiddenNextYear.IsFailure);
+        Assert.Equal("EmployeeAttendance.NotFound", hiddenNextYear.Error.Code);
+        Assert.True(explicitNextYear.IsSuccess);
+        Assert.True(crossYearUpdate.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            crossYearUpdate.Error.Code);
+    }
+
     [Fact]
     public async Task AddBulkAsync_ShouldCreateNewAttendances_WhenTheyDoNotExist()
     {
@@ -59,6 +145,31 @@ public sealed class EmployeeAttendanceServiceTests
         // Verify Database
         var dbRecords = await database.Context.EmployeeAttendances.ToListAsync();
         Assert.Equal(2, dbRecords.Count);
+    }
+
+    [Fact]
+    public async Task AddBulkAsync_ShouldRejectDateOutsideFiscalYears()
+    {
+        await using var database = await EmployeeAttendanceTestDatabase
+            .CreateAsync(companyId: 1);
+        var service = database.CreateService();
+        var request = new BulkEmployeeAttendanceRequest(
+        [
+            new IndividualAttendanceRecordRequest(
+                EmployeeId: 1,
+                Status: EmployeeAttendanceStatus.Present,
+                WorkDate: new DateOnly(8, 9, 24),
+                CheckIn: new TimeOnly(9, 0),
+                CheckOut: new TimeOnly(17, 0))
+        ]);
+
+        var result = await service.AddBulkAsync(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            result.Error.Code);
+        Assert.Empty(await database.Context.EmployeeAttendances.ToListAsync());
     }
 
     [Fact]

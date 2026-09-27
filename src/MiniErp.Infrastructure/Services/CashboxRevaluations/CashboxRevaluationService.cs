@@ -17,6 +17,7 @@ namespace MiniErp.Infrastructure.Services.CashboxRevaluations;
 public sealed class CashboxRevaluationService(
     ApplicationDbContext dbContext,
     ICurrentCompanyContext currentCompanyContext,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
     IAccountMappingResolver accountMappingResolver,
     IAutomaticPostingService automaticPostingService,
     TimeProvider timeProvider) : ICashboxRevaluationService
@@ -62,33 +63,36 @@ public sealed class CashboxRevaluationService(
                 BeforeOpeningBalance(request.RevaluationDate));
         }
 
-        if (await dbContext.CashboxRevaluations.AnyAsync(row =>
-                row.CompanyId == companyId && row.CashboxId == request.CashboxId &&
-                row.RevaluationDate == request.RevaluationDate && !row.IsDeleted, cancellationToken))
-        {
-            return Result<CashboxRevaluationResponse>.Failure(Duplicate(request.CashboxId, request.RevaluationDate));
-        }
-
-        if (await dbContext.CashboxRevaluations.AnyAsync(row =>
-                row.CompanyId == companyId && row.CashboxId == request.CashboxId &&
-                row.RevaluationDate > request.RevaluationDate && !row.IsDeleted, cancellationToken))
-        {
-            return Result<CashboxRevaluationResponse>.Failure(Backdated(request.RevaluationDate));
-        }
-
         var fiscalYear = await dbContext.FiscalYears
             .AsNoTracking()
             .Where(year => year.CompanyId == companyId && year.StartDate <= request.RevaluationDate && year.EndDate >= request.RevaluationDate)
-            .Select(year => new { year.Id, year.Status })
+            .Select(year => new { year.Id, year.Name, year.Status })
             .SingleOrDefaultAsync(cancellationToken);
         if (fiscalYear is null || fiscalYear.Status != FiscalYearStatus.Open)
         {
             return Result<CashboxRevaluationResponse>.Failure(FiscalYearClosed());
         }
 
+        if (await dbContext.CashboxRevaluations.AnyAsync(row =>
+                row.CompanyId == companyId && row.FiscalYearId == fiscalYear.Id &&
+                row.CashboxId == request.CashboxId &&
+                row.RevaluationDate == request.RevaluationDate && !row.IsDeleted, cancellationToken))
+        {
+            return Result<CashboxRevaluationResponse>.Failure(Duplicate(request.CashboxId, request.RevaluationDate));
+        }
+
+        if (await dbContext.CashboxRevaluations.AnyAsync(row =>
+                row.CompanyId == companyId && row.FiscalYearId == fiscalYear.Id &&
+                row.CashboxId == request.CashboxId &&
+                row.RevaluationDate > request.RevaluationDate && !row.IsDeleted, cancellationToken))
+        {
+            return Result<CashboxRevaluationResponse>.Failure(Backdated(request.RevaluationDate));
+        }
+
         var lines = await dbContext.JournalEntryLines
             .AsNoTracking()
             .Where(line => line.CompanyId == companyId &&
+                line.JournalEntry.FiscalYearId == fiscalYear.Id &&
                 line.PartyType == JournalPartyType.Cashbox && line.PartyId == request.CashboxId &&
                 !line.IsDeleted && !line.JournalEntry.IsDeleted &&
                 line.JournalEntry.Status == JournalEntryStatus.Posted &&
@@ -141,6 +145,7 @@ public sealed class CashboxRevaluationService(
         var row = new CashboxRevaluation
         {
             CompanyId = companyId,
+            FiscalYearId = fiscalYear.Id,
             CashboxId = request.CashboxId,
             RevaluationDate = request.RevaluationDate,
             ClosingRate = ExchangeRateRules.RoundRate(request.ClosingRate),
@@ -205,6 +210,7 @@ public sealed class CashboxRevaluationService(
         await transaction.CommitAsync(cancellationToken);
         return Result<CashboxRevaluationResponse>.Success(ToResponse(
             row,
+            fiscalYear.Name,
             cashbox.Name,
             cashbox.Currency,
             journalEntryId,
@@ -215,11 +221,24 @@ public sealed class CashboxRevaluationService(
         int? cashboxId = null,
         DateOnly? fromDate = null,
         DateOnly? toDate = null,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId,
+            fromDate,
+            toDate,
+            cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<IReadOnlyList<CashboxRevaluationResponse>>.Failure(
+                fiscalYear.Errors);
+        }
+
         var rows = await dbContext.CashboxRevaluations
             .AsNoTracking()
             .Where(row => row.CompanyId == companyId && !row.IsDeleted &&
+                row.FiscalYearId == fiscalYear.Value.FiscalYearId &&
                 (!cashboxId.HasValue || row.CashboxId == cashboxId.Value) &&
                 (!fromDate.HasValue || row.RevaluationDate >= fromDate.Value) &&
                 (!toDate.HasValue || row.RevaluationDate <= toDate.Value))
@@ -227,6 +246,8 @@ public sealed class CashboxRevaluationService(
             .ThenByDescending(row => row.Id)
             .Select(row => new CashboxRevaluationResponse(
                 Id: row.Id,
+                FiscalYearId: row.FiscalYearId,
+                FiscalYearName: row.FiscalYear.Name,
                 CashboxId: row.CashboxId,
                 CashboxName: row.Cashbox.Name,
                 Currency: row.Cashbox.Currency,
@@ -244,12 +265,15 @@ public sealed class CashboxRevaluationService(
 
     private static CashboxRevaluationResponse ToResponse(
         CashboxRevaluation row,
+        string fiscalYearName,
         string cashboxName,
         CurrencyCode currency,
         int? journalEntryId,
         string? journalEntryNumber) =>
         new(
             Id: row.Id,
+            FiscalYearId: row.FiscalYearId,
+            FiscalYearName: fiscalYearName,
             CashboxId: row.CashboxId,
             CashboxName: cashboxName,
             Currency: currency,

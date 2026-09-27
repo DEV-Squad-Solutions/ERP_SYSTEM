@@ -2,6 +2,7 @@ using MiniErp.Application.Features.InventoryCostReports;
 using MiniErp.Application.Features.StockAdjustments;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 
 namespace MiniErp.Tests.Inventory;
 
@@ -136,6 +137,96 @@ public sealed class InventoryCostReportServiceTests
         Assert.True(result.IsSuccess, result.Error.Description);
         Assert.Equal(3m, result.Value.Summary.PendingCostQuantity);
         Assert.Equal(1, result.Value.Summary.PendingMovementCount);
+    }
+
+    [Fact]
+    public async Task ReportDefaultsToCurrentYearAndUsesCarriedOpeningMovement()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears
+            SET Name = '2025', StartDate = '2025-01-01',
+                EndDate = '2025-12-31', IsCurrent = 0
+            WHERE Id = 1;
+
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent, RowVersion, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                100, 1, '2026', '2026-01-01', '2026-12-31', 1,
+                1, randomblob(8), 'test', '2026-01-01', 'test', 0);
+
+            UPDATE ItemMovements
+            SET MovementDate = '2025-12-31', FiscalYearId = 1
+            WHERE Id = 1;
+
+            INSERT INTO ItemMovements (
+                CompanyId, FiscalYearId, StoreId, ItemId, ItemUnitId,
+                MovementType, ReferenceId, ReferenceNumber, MovementDate,
+                QuantityIn, QuantityOut, CostStatus, PendingCostQuantity,
+                UnitCost, TotalCost, QuantityAfter, AverageCostAfter,
+                InventoryValueAfter, Description, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES
+                (1, 100, 1, 1, 1, 5, 100, 'OPEN-2026', '2026-01-01',
+                 10, 0, 1, 0, 10, 100, 10, 10, 100,
+                 'Carried opening balance', 'test', '2026-01-01', 'test', 0),
+                (1, 100, 1, 1, 1, 6, 101, 'CURRENT-YEAR-IN',
+                 '2026-01-02', 5, 0, 1, 0, 20, 100, 15, 10, 150,
+                 NULL, 'test', '2026-01-02', 'test', 0);
+            """);
+        database.Context.ChangeTracker.Clear();
+
+        var service = database.CreateInventoryCostReportService();
+        var current = await service.GetAsync(
+            new() { PageNumber = 1, PageSize = 20 },
+            new InventoryCostReportFilterRequest(
+                StoreId: 1,
+                ItemId: 1,
+                FromDate: new DateOnly(2026, 1, 2)));
+        var previous = await service.GetAsync(
+            new() { PageNumber = 1, PageSize = 20 },
+            new InventoryCostReportFilterRequest(
+                StoreId: 1,
+                ItemId: 1,
+                FiscalYearId: 1));
+
+        Assert.True(current.IsSuccess, current.Error.Description);
+        var currentMovement = Assert.Single(current.Value.Items);
+        Assert.Equal(100, current.Value.FiscalYearId);
+        Assert.Equal("2026", current.Value.FiscalYearName);
+        Assert.Equal(
+            ItemMovementType.AdjustmentIncrease,
+            currentMovement.MovementType);
+        Assert.Equal(new DateOnly(2026, 1, 2), currentMovement.MovementDate);
+        Assert.Equal(10m, current.Value.Summary.OpeningQuantity);
+        Assert.Equal(15m, current.Value.Summary.ClosingQuantity);
+        Assert.True(previous.IsSuccess, previous.Error.Description);
+        Assert.Equal(1, previous.Value.FiscalYearId);
+        Assert.Equal("2025", previous.Value.FiscalYearName);
+        Assert.Equal("OPEN-1", Assert.Single(previous.Value.Items).ReferenceNumber);
+    }
+
+    [Fact]
+    public async Task ReportRejectsDatesOutsideSelectedFiscalYear()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        await database.ConfigureSeparateFiscalYearsAsync();
+
+        var result = await database.CreateInventoryCostReportService().GetAsync(
+            new() { PageNumber = 1, PageSize = 20 },
+            new InventoryCostReportFilterRequest(
+                StoreId: 1,
+                ItemId: 1,
+                FromDate: new DateOnly(2026, 1, 1),
+                FiscalYearId: 1));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.QueryDateOutsideRange", result.Error.Code);
     }
 
     private static async Task AddAdjustmentAsync(

@@ -12,6 +12,8 @@ public sealed record MonetaryAccountRevaluationRequest(
 
 public sealed record MonetaryAccountRevaluationResponse(
     int Id,
+    int FiscalYearId,
+    string FiscalYearName,
     int AccountId,
     string AccountCode,
     string AccountName,
@@ -30,6 +32,8 @@ public sealed record MonetaryAccountRevaluationResponse(
     string JournalEntryNumber);
 
 public sealed record MonetaryAccountRevaluationOption(
+    int FiscalYearId,
+    string FiscalYearName,
     int AccountId,
     string AccountCode,
     string AccountName,

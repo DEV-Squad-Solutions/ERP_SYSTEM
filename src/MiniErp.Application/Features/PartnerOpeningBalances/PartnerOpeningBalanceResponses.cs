@@ -5,6 +5,8 @@ namespace MiniErp.Application.Features.PartnerOpeningBalances;
 public sealed record PartnerOpeningBalanceResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
+    string FiscalYearName,
     int BusinessPartnerId,
     string BusinessPartnerName,
     string DocumentNumber,

@@ -542,6 +542,7 @@ public sealed class CompanyServiceTests
 
             await CreateSchemaAsync(context);
             await SeedAsync(context);
+            await TestFiscalYearSchema.EnsureAsync(context);
 
             return new CompanyTestDatabase(connection, context, connectionString);
         }

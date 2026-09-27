@@ -5,6 +5,8 @@ namespace MiniErp.Application.Features.EmployeeOpeningBalances;
 public sealed record EmployeeOpeningBalanceResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
+    string FiscalYearName,
     int EmployeeId,
     string EmployeeName,
     string EmployeeCode,

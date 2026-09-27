@@ -11,6 +11,10 @@ public sealed class StockOpeningBalance : AuditableEntity
 
     public Company Company { get; set; } = null!;
 
+    public int FiscalYearId { get; set; }
+
+    public MiniErp.Domain.Entities.Accounting.FiscalYear FiscalYear { get; set; } = null!;
+
     public int StoreId { get; set; }
 
     public Store Store { get; set; } = null!;

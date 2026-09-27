@@ -33,6 +33,10 @@ public sealed record CashVoucherResponse(
     string? Notes,
     byte[] RowVersion)
 {
+    public int FiscalYearId { get; init; }
+
+    public string FiscalYearName { get; init; } = string.Empty;
+
     public bool IsDraft { get; init; }
 
     /// <summary>
@@ -41,6 +45,12 @@ public sealed record CashVoucherResponse(
     /// persisted as CashVoucher records.
     /// </summary>
     public bool IsOpeningBalance { get; init; }
+
+    /// <summary>
+    /// Current cashbox balance in the voucher/cashbox currency. Draft vouchers
+    /// are excluded because they have no financial effect.
+    /// </summary>
+    public decimal? CashboxBalance { get; init; }
 
     public int? InvoiceId { get; init; }
 

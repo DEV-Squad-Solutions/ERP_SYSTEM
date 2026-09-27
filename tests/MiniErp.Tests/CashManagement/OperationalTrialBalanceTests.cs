@@ -11,6 +11,81 @@ public sealed class OperationalTrialBalanceTests
     private static readonly DateOnly ToDate = new(2026, 6, 30);
 
     [Fact]
+    public async Task ReportUsesSelectedYearClosingEntryAsOpeningOnly()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears SET IsCurrent = 0 WHERE Id = 1;
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                3, 1, '2027', '2027-01-01', '2027-12-31', 1, 1,
+                'test', '2027-01-01', 'test', 0);
+            """);
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 7101,
+            entryNumber: "OB-2027",
+            entryDate: new DateOnly(2027, 1, 1),
+            entryType: JournalEntryType.Opening,
+            sourceType: JournalEntrySourceType.FiscalYearClosing,
+            sourceId: 1,
+            sourceNumber: "2026",
+            lines:
+            [
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 100,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 1,
+                    Debit: 1100m,
+                    Credit: 0m,
+                    Currency: CurrencyCode.EGP,
+                    ExchangeRate: 1m,
+                    TransactionDebit: 1100m,
+                    TransactionCredit: 0m)
+            ],
+            fiscalYearId: 3);
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 7102,
+            entryNumber: "JV-2027",
+            entryDate: new DateOnly(2027, 2, 1),
+            entryType: JournalEntryType.Manual,
+            sourceType: null,
+            sourceId: null,
+            sourceNumber: null,
+            lines:
+            [
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 100,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 1,
+                    Debit: 25m,
+                    Credit: 0m,
+                    Currency: CurrencyCode.EGP,
+                    ExchangeRate: 1m,
+                    TransactionDebit: 25m,
+                    TransactionCredit: 0m)
+            ],
+            fiscalYearId: 3);
+
+        var result = await database.CreateStatementService(1)
+            .GetOperationalTrialBalanceAsync(
+                new OperationalTrialBalanceFilterRequest(
+                    FromDate: new DateOnly(2027, 1, 1),
+                    ToDate: new DateOnly(2027, 12, 31),
+                    Category: OperationalTrialBalanceCategory.Cashbox,
+                    FiscalYearId: 3));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        var cashbox = Assert.Single(result.Value.Items);
+        Assert.Equal(1100m, cashbox.OpeningDebit);
+        Assert.Equal(25m, cashbox.PeriodDebit);
+        Assert.Equal(1125m, cashbox.ClosingDebit);
+    }
+
+    [Fact]
     public async Task DetailedReportCalculatesEverySourceInBaseCurrency()
     {
         await using var database =

@@ -21,7 +21,8 @@ public interface IInventoryCostingService : IScopedService
 
 public sealed record InventoryCostingKey(
     int StoreId,
-    int ItemId);
+    int ItemId,
+    int? FiscalYearId = null);
 
 public sealed record InventoryCostSnapshot(
     decimal Quantity,

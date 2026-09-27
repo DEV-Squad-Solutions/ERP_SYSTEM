@@ -25,6 +25,8 @@ public sealed record StockTransferLineResponse(
 public sealed record StockTransferResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
+    string FiscalYearName,
     string DocumentNumber,
     DateOnly TransferDate,
     int SourceStoreId,
@@ -39,6 +41,8 @@ public sealed record StockTransferResponse(
 public sealed record StockTransferListResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
+    string FiscalYearName,
     string DocumentNumber,
     DateOnly TransferDate,
     int SourceStoreId,

@@ -22,7 +22,7 @@ public sealed class ExchangeRatesSwaggerDocumentation : IOperationFilter
                 "Get exchange rates",
                 SwaggerOperationDescription.Create(
                     "Returns the selected company's dated exchange rates, ordered by date, currency, and ID.",
-                    "Pagination plus optional `currency`, `dateFrom`, `dateTo`, `source`, and `search` filters. Search is trimmed and matches currency codes or notes.",
+                    "Pagination plus optional `fiscalYearId`, `currency`, `dateFrom`, `dateTo`, `source`, and `search` filters. Search is trimmed and matches currency codes or notes.",
                     "Search cannot exceed 500 characters after trimming. Each rate means base-currency units per one unit of the foreign currency.",
                     "Only the current tenant's active rates are returned.")),
             nameof(ExchangeRatesController.GetById) => (
@@ -35,7 +35,7 @@ public sealed class ExchangeRatesSwaggerDocumentation : IOperationFilter
             nameof(ExchangeRatesController.Resolve) => (
                 "Resolve a document exchange rate",
                 SwaggerOperationDescription.Create(
-                    "Returns rate 1 for the base currency; otherwise resolves the latest active rate dated on or before the requested date.",
+                    "Returns rate 1 for the base currency; otherwise resolves the latest active rate in the fiscal year covering the requested date, dated on or before that date.",
                     "`currency` and document `date`.",
                     "Future rates are never used.",
                     "A missing historical rate returns 400 (`ExchangeRates.Missing`).")),

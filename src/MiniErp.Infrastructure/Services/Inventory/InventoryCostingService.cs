@@ -46,12 +46,25 @@ public sealed class InventoryCostingService(
     {
         var keyComparer = Comparer<InventoryCostingKey>.Create((left, right) =>
         {
+            var fiscalYearComparison = Nullable.Compare(
+                left.FiscalYearId,
+                right.FiscalYearId);
+            if (fiscalYearComparison != 0)
+            {
+                return fiscalYearComparison;
+            }
+
             var storeComparison = left.StoreId.CompareTo(right.StoreId);
             return storeComparison != 0
                 ? storeComparison
                 : left.ItemId.CompareTo(right.ItemId);
         });
-        var pendingKeys = new SortedSet<InventoryCostingKey>(keys, keyComparer);
+        var normalizedKeys = await ResolveFiscalYearKeysAsync(
+            keys,
+            cancellationToken);
+        var pendingKeys = new SortedSet<InventoryCostingKey>(
+            normalizedKeys,
+            keyComparer);
         var recalculatedKeys = new HashSet<InventoryCostingKey>();
         var processedTransferFingerprints =
             new Dictionary<InventoryCostingKey, string>();
@@ -140,6 +153,44 @@ public sealed class InventoryCostingService(
         return null;
     }
 
+    private async Task<IReadOnlyCollection<InventoryCostingKey>>
+        ResolveFiscalYearKeysAsync(
+            IReadOnlyCollection<InventoryCostingKey> keys,
+            CancellationToken cancellationToken)
+    {
+        if (keys.All(key => key.FiscalYearId.HasValue))
+        {
+            return keys;
+        }
+
+        var currentFiscalYearId = await dbContext.FiscalYears
+            .AsNoTracking()
+            .Where(year =>
+                year.CompanyId == companyId &&
+                year.IsCurrent)
+            .Select(year => (int?)year.Id)
+            .SingleOrDefaultAsync(cancellationToken) ?? 0;
+
+        return keys
+            .Select(key => key.FiscalYearId.HasValue
+                ? key
+                : key with { FiscalYearId = currentFiscalYearId })
+            .Distinct()
+            .ToArray();
+    }
+
+    private Task<int?> ResolveFiscalYearIdAsync(
+        DateOnly date,
+        CancellationToken cancellationToken) =>
+        dbContext.FiscalYears
+            .AsNoTracking()
+            .Where(year =>
+                year.CompanyId == companyId &&
+                date >= year.StartDate &&
+                date <= year.EndDate)
+            .Select(year => (int?)year.Id)
+            .SingleOrDefaultAsync(cancellationToken);
+
     private async Task<TransferSynchronizationResult>
         SynchronizeTransferInboundCostsAsync(
             InventoryCostingKey sourceKey,
@@ -148,6 +199,7 @@ public sealed class InventoryCostingService(
         var outboundMovements = await dbContext.ItemMovements
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == sourceKey.FiscalYearId &&
                 movement.StoreId == sourceKey.StoreId &&
                 movement.ItemId == sourceKey.ItemId &&
                 movement.MovementType == ItemMovementType.TransferOut)
@@ -164,6 +216,7 @@ public sealed class InventoryCostingService(
         var inboundMovements = await dbContext.ItemMovements
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == sourceKey.FiscalYearId &&
                 movement.ItemId == sourceKey.ItemId &&
                 movement.MovementType == ItemMovementType.TransferIn &&
                 referenceIds.Contains(movement.ReferenceId))
@@ -188,7 +241,8 @@ public sealed class InventoryCostingService(
                     inbound.SetTransferUnitCost(0m);
                     dependentKeys.Add(new InventoryCostingKey(
                         inbound.StoreId,
-                        inbound.ItemId));
+                        inbound.ItemId,
+                        inbound.FiscalYearId));
                 }
 
                 continue;
@@ -203,7 +257,8 @@ public sealed class InventoryCostingService(
             inbound.SetTransferUnitCost(outbound.UnitCost.Value);
             dependentKeys.Add(new InventoryCostingKey(
                 inbound.StoreId,
-                inbound.ItemId));
+                inbound.ItemId,
+                inbound.FiscalYearId));
         }
 
         return new TransferSynchronizationResult(null, dependentKeys);
@@ -214,15 +269,22 @@ public sealed class InventoryCostingService(
             IReadOnlyCollection<InventoryCostingKey> initialKeys,
             CancellationToken cancellationToken)
     {
+        var fiscalYearIds = initialKeys
+            .Where(key => key.FiscalYearId.HasValue)
+            .Select(key => key.FiscalYearId!.Value)
+            .Distinct()
+            .ToArray();
         var transferRows = await dbContext.ItemMovements
             .AsNoTracking()
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                fiscalYearIds.Contains(movement.FiscalYearId) &&
                 (movement.MovementType == ItemMovementType.TransferIn ||
                  movement.MovementType == ItemMovementType.TransferOut))
             .Select(movement => new
             {
                 movement.ReferenceId,
+                movement.FiscalYearId,
                 movement.StoreId,
                 movement.ItemId,
                 movement.MovementType
@@ -230,10 +292,13 @@ public sealed class InventoryCostingService(
             .ToListAsync(cancellationToken);
         var adjacency = new Dictionary<InventoryCostingKey, HashSet<InventoryCostingKey>>();
         foreach (var group in transferRows.GroupBy(row =>
-                     (row.ReferenceId, row.ItemId)))
+                     (row.FiscalYearId, row.ReferenceId, row.ItemId)))
         {
             var groupKeys = group
-                .Select(row => new InventoryCostingKey(row.StoreId, row.ItemId))
+                .Select(row => new InventoryCostingKey(
+                    row.StoreId,
+                    row.ItemId,
+                    row.FiscalYearId))
                 .Distinct()
                 .ToArray();
             foreach (var groupKey in groupKeys)
@@ -280,6 +345,7 @@ public sealed class InventoryCostingService(
         var movements = await dbContext.ItemMovements
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == key.FiscalYearId &&
                 movement.StoreId == key.StoreId &&
                 movement.ItemId == key.ItemId &&
                 movement.MovementType == ItemMovementType.TransferIn)
@@ -315,10 +381,21 @@ public sealed class InventoryCostingService(
             return new Dictionary<int, InventoryCostSnapshot>();
         }
 
+        var fiscalYearId = await ResolveFiscalYearIdAsync(
+            asOfDate,
+            cancellationToken);
+        if (!fiscalYearId.HasValue)
+        {
+            return distinctItemIds.ToDictionary(
+                itemId => itemId,
+                itemId => new InventoryCostSnapshot(0m, 0m, 0m));
+        }
+
         var snapshots = await dbContext.ItemMovements
             .AsNoTracking()
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYearId.Value &&
                 movement.StoreId == storeId &&
                 distinctItemIds.Contains(movement.ItemId) &&
                 movement.MovementDate <= asOfDate)
@@ -417,6 +494,7 @@ public sealed class InventoryCostingService(
         var movements = await dbContext.ItemMovements
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == key.FiscalYearId &&
                 movement.StoreId == key.StoreId &&
                 movement.ItemId == key.ItemId)
             .OrderBy(movement => movement.MovementDate)
@@ -440,7 +518,11 @@ public sealed class InventoryCostingService(
             .Where(allocation =>
                 allocation.CompanyId == companyId &&
                 allocation.StoreId == key.StoreId &&
-                allocation.ItemId == key.ItemId)
+                allocation.ItemId == key.ItemId &&
+                allocation.OutboundMovement.FiscalYearId ==
+                    key.FiscalYearId &&
+                allocation.InboundMovement.FiscalYearId ==
+                    key.FiscalYearId)
             .ToListAsync(cancellationToken);
         dbContext.InventoryCostAllocations.RemoveRange(allocations);
 

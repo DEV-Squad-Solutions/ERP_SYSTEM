@@ -53,10 +53,12 @@ public sealed class EmployeeAttendancesController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(
         int id,
+        [FromQuery] int? fiscalYearId,
         CancellationToken cancellationToken)
     {
         var result = await employeeAttendanceService.GetByIdAsync(
             id,
+            fiscalYearId,
             cancellationToken);
         return this.ToActionResult(result);
     }
@@ -78,7 +80,11 @@ public sealed class EmployeeAttendancesController(
             ? this.ToProblem(result.Errors)
             : CreatedAtAction(
                 nameof(GetById),
-                new { id = result.Value.Id },
+                new
+                {
+                    id = result.Value.Id,
+                    fiscalYearId = result.Value.FiscalYearId
+                },
                 result.Value);
     }
 

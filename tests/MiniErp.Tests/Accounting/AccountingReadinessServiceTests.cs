@@ -93,6 +93,57 @@ public sealed class AccountingReadinessServiceTests
     }
 
     [Fact]
+    public async Task Readiness_IgnoresMovementOwnedByAnotherFiscalYear()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent, RowVersion, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                2, 1, '2025', '2025-01-01', '2025-12-31', 1, 0,
+                randomblob(8), 'test', '2025-01-01', 'test', 0);
+
+            INSERT INTO Stores (
+                Id, CompanyId, Code, Name, IsContainerStore, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (1, 1, 'MAIN', 'Main Store', 0, 1,
+                    'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO ItemUnits (
+                Id, CompanyId, Name, IsActive, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (1, 1, 'Piece', 1, 'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO Items (
+                Id, CompanyId, ItemUnitId, Code, Name, IsActive,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (1, 1, 1, 'ITEM-1', 'Item One', 1,
+                    'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO ItemMovements (
+                CompanyId, FiscalYearId, StoreId, ItemId,
+                MovementType, ReferenceId, ReferenceNumber,
+                MovementDate, QuantityIn, QuantityOut, CostStatus,
+                PendingCostQuantity, UnitCost, TotalCost,
+                QuantityAfter, AverageCostAfter, InventoryValueAfter,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                1, 2, 1, 1, 5, 1, 'OLD-MOVEMENT',
+                '2026-03-01', 1, 0, 3, 1, NULL, 0,
+                1, 0, 0, 'test', '2026-03-01', 'test', 0);
+            """);
+
+        var result = await database.Service.GetAsync(1);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value.IsReady);
+        Assert.Equal(0, result.Value.PendingInventoryCosts);
+    }
+
+    [Fact]
     public async Task Readiness_RecognizesImmutableRevaluationJournalsAsSources()
     {
         await using var database = await TestDatabase.CreateAsync();
@@ -178,9 +229,9 @@ public sealed class AccountingReadinessServiceTests
                     'test', '2026-01-01', 'test', 0);
 
             INSERT INTO StockOpeningBalances (
-                Id, CompanyId, StoreId, DocumentNumber, DocumentDate,
+                Id, CompanyId, FiscalYearId, StoreId, DocumentNumber, DocumentDate,
                 RowVersion, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
-            VALUES (1, 1, 1, 'OPEN-1', '2026-01-01', randomblob(8),
+            VALUES (1, 1, 1, 1, 'OPEN-1', '2026-01-01', randomblob(8),
                     'test', '2026-01-01', 'test', 0);
 
             INSERT INTO StockOpeningBalanceLines (
@@ -258,22 +309,22 @@ public sealed class AccountingReadinessServiceTests
                     'test', '2026-01-01', 'test', 0);
 
                 INSERT INTO CashboxRevaluations (
-                    Id, CompanyId, CashboxId, RevaluationDate, ClosingRate,
+                    Id, CompanyId, FiscalYearId, CashboxId, RevaluationDate, ClosingRate,
                     ForeignAmount, CarryingBaseAmount, TargetBaseAmount,
                     DeltaBaseAmount, JournalEntryId,
                     CreatedById, CreatedOn, CreatedByPc, IsDeleted)
                 VALUES (
-                    1, 1, 1, '2026-12-31', 51, 10, 500, 510, 10, NULL,
+                    1, 1, 1, 1, '2026-12-31', 51, 10, 500, 510, 10, NULL,
                     'test', '2026-12-31', 'test', 0);
 
                 INSERT INTO MonetaryAccountRevaluations (
-                    Id, CompanyId, AccountId, Currency, PartyType, PartyId,
+                    Id, CompanyId, FiscalYearId, AccountId, Currency, PartyType, PartyId,
                     RevaluationDate, ClosingRate, ForeignAmount,
                     CarryingBaseAmount, TargetBaseAmount, DeltaBaseAmount,
                     JournalEntryId, CreatedById, CreatedOn, CreatedByPc,
                     IsDeleted)
                 VALUES (
-                    1, 1, 1, 2, NULL, NULL, '2026-12-31', 51, 4,
+                    1, 1, 1, 1, 2, NULL, NULL, '2026-12-31', 51, 4,
                     200, 204, 4, NULL, 'test', '2026-12-31', 'test', 0);
                 """);
 

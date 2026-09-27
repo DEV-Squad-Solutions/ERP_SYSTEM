@@ -12,8 +12,7 @@ namespace MiniErp.Infrastructure.Services.Inventory;
 public sealed class InventoryStockReportService(
     ApplicationDbContext dbContext,
     ICurrentCompanyContext currentCompanyContext,
-    IInventoryStockService inventoryStockService,
-    IInventoryCostingService inventoryCostingService)
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver)
     : IInventoryStockReportService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -34,6 +33,25 @@ public sealed class InventoryStockReportService(
         {
             return Result<InventoryStockReportResponse>.Failure(filterError);
         }
+
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            toDate: filters.AsOfDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<InventoryStockReportResponse>.Failure(
+                fiscalYear.Errors);
+        }
+
+        var fiscalYearScope = fiscalYear.Value;
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var asOfDate = filters.AsOfDate ??
+            (today < fiscalYearScope.StartDate
+                ? fiscalYearScope.StartDate
+                : today > fiscalYearScope.EndDate
+                    ? fiscalYearScope.EndDate
+                    : today);
 
         var store = await dbContext.Stores
             .AsNoTracking()
@@ -61,8 +79,6 @@ public sealed class InventoryStockReportService(
             .Where(settings => settings.CompanyId == companyId)
             .Select(settings => settings.BaseCurrency)
             .SingleOrDefaultAsync(cancellationToken);
-
-        var asOfDate = filters.AsOfDate ?? DateOnly.MaxValue;
 
         var itemQuery = dbContext.Items
             .AsNoTracking()
@@ -107,31 +123,109 @@ public sealed class InventoryStockReportService(
         if (items.Count == 0)
         {
             return Result<InventoryStockReportResponse>.Success(
-                BuildEmptyResponse(store, asOfDate, baseCurrency, pagination));
+                BuildEmptyResponse(
+                    fiscalYearScope,
+                    store,
+                    asOfDate,
+                    baseCurrency,
+                    pagination));
         }
 
         var itemIds = items.Select(item => item.Id).ToArray();
-        var balances = await inventoryStockService.GetBalancesAsync(
-            store.Id,
-            itemIds,
-            asOfDate,
-            cancellationToken: cancellationToken);
-        var costSnapshots = await inventoryCostingService.GetSnapshotsAsync(
-            store.Id,
-            itemIds,
-            asOfDate,
-            cancellationToken);
+        var movementRows = await dbContext.ItemMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYearScope.FiscalYearId &&
+                movement.StoreId == store.Id &&
+                itemIds.Contains(movement.ItemId) &&
+                movement.MovementDate <= asOfDate)
+            .Select(movement => new
+            {
+                movement.Id,
+                movement.ItemId,
+                movement.MovementDate,
+                movement.CreatedOn,
+                movement.QuantityIn,
+                movement.QuantityOut,
+                movement.AverageCostAfter
+            })
+            .ToListAsync(cancellationToken);
+
+        var stockByItem = movementRows
+            .GroupBy(movement => movement.ItemId)
+            .ToDictionary(
+                group => group.Key,
+                group => new StockSnapshot(
+                    Balance: group.Sum(movement =>
+                        movement.QuantityIn - movement.QuantityOut),
+                    AverageCost: group
+                        .OrderByDescending(movement => movement.MovementDate)
+                        .ThenByDescending(movement => movement.CreatedOn)
+                        .ThenByDescending(movement => movement.Id)
+                        .Select(movement => movement.AverageCostAfter)
+                        .First()));
+
+        // Old imported opening documents may not have generated item
+        // movements. Include only such documents from the selected year.
+        var legacyOpeningRows = await dbContext.StockOpeningBalanceLines
+            .AsNoTracking()
+            .Where(line =>
+                line.CompanyId == companyId &&
+                line.StockOpeningBalance.CompanyId == companyId &&
+                line.StockOpeningBalance.FiscalYearId ==
+                    fiscalYearScope.FiscalYearId &&
+                line.StockOpeningBalance.StoreId == store.Id &&
+                line.StockOpeningBalance.DocumentDate <= asOfDate &&
+                itemIds.Contains(line.ItemId) &&
+                !dbContext.ItemMovements.Any(movement =>
+                    movement.CompanyId == companyId &&
+                    movement.FiscalYearId == fiscalYearScope.FiscalYearId &&
+                    movement.StoreId == store.Id &&
+                    movement.ItemId == line.ItemId &&
+                    movement.MovementType == ItemMovementType.OpeningBalance &&
+                    movement.ReferenceId == line.StockOpeningBalanceId))
+            .Select(line => new
+            {
+                line.ItemId,
+                line.Quantity,
+                line.Price
+            })
+            .ToListAsync(cancellationToken);
+
+        var legacyRows = legacyOpeningRows
+            .GroupBy(line => line.ItemId)
+            .Select(group => new
+            {
+                ItemId = group.Key,
+                Balance = group.Sum(line => line.Quantity),
+                InventoryValue = group.Sum(line => line.Quantity * line.Price)
+            });
+
+        foreach (var legacy in legacyRows)
+        {
+            var current = stockByItem.GetValueOrDefault(legacy.ItemId);
+            var currentValue = current is null
+                ? 0m
+                : current.Balance * current.AverageCost;
+            var balance = (current?.Balance ?? 0m) + legacy.Balance;
+            stockByItem[legacy.ItemId] = new StockSnapshot(
+                Balance: balance,
+                AverageCost: balance == 0m
+                    ? 0m
+                    : (currentValue + legacy.InventoryValue) / balance);
+        }
 
         var reportItems = items
             .Select(item =>
             {
-                var balance = balances.GetValueOrDefault(item.Id);
-                var cost = costSnapshots[item.Id];
+                var stock = stockByItem.GetValueOrDefault(item.Id) ??
+                    StockSnapshot.Empty;
                 return new ReportRow(
                     item,
-                    balance,
-                    cost.AverageCost,
-                    cost.InventoryValue);
+                    stock.Balance,
+                    stock.AverageCost,
+                    stock.Balance * stock.AverageCost);
             })
             .Where(row =>
                 !filters.HasStock.HasValue ||
@@ -168,12 +262,12 @@ public sealed class InventoryStockReportService(
 
         return Result<InventoryStockReportResponse>.Success(
             new InventoryStockReportResponse(
+                FiscalYearId: fiscalYearScope.FiscalYearId,
+                FiscalYearName: fiscalYearScope.FiscalYearName,
                 StoreId: store.Id,
                 StoreCode: store.Code,
                 StoreName: store.Name,
-                AsOfDate: asOfDate == DateOnly.MaxValue
-                    ? DateOnly.FromDateTime(DateTime.UtcNow)
-                    : asOfDate,
+                AsOfDate: asOfDate,
                 BaseCurrency: baseCurrency,
                 Items: pageItems,
                 PageNumber: pagination.PageNumber,
@@ -216,17 +310,18 @@ public sealed class InventoryStockReportService(
     }
 
     private static InventoryStockReportResponse BuildEmptyResponse(
+        FiscalYearQueryScope fiscalYear,
         StoreProjection store,
         DateOnly asOfDate,
         CurrencyCode baseCurrency,
         PaginationRequest pagination) =>
         new(
+            FiscalYearId: fiscalYear.FiscalYearId,
+            FiscalYearName: fiscalYear.FiscalYearName,
             StoreId: store.Id,
             StoreCode: store.Code,
             StoreName: store.Name,
-            AsOfDate: asOfDate == DateOnly.MaxValue
-                ? DateOnly.FromDateTime(DateTime.UtcNow)
-                : asOfDate,
+            AsOfDate: asOfDate,
             BaseCurrency: baseCurrency,
             Items: Array.Empty<InventoryStockReportItemResponse>(),
             PageNumber: pagination.PageNumber,
@@ -256,4 +351,11 @@ public sealed class InventoryStockReportService(
         decimal Balance,
         decimal AverageCost,
         decimal InventoryValue);
+
+    private sealed record StockSnapshot(
+        decimal Balance,
+        decimal AverageCost)
+    {
+        public static StockSnapshot Empty { get; } = new(0m, 0m);
+    }
 }

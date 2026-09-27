@@ -10,6 +10,9 @@ public sealed class CashboxTransferMappingRegister : IRegister
     {
         config.ForType<CashboxTransfer, CashboxTransferListResponse>()
             .Map(
+                response => response.FiscalYearName,
+                transfer => transfer.FiscalYear.Name)
+            .Map(
                 response => response.SourceCashboxName,
                 transfer => transfer.SourceCashbox.Name)
             .Map(

@@ -12,6 +12,7 @@ public interface IStockAdjustmentService
 
     Task<Result<StockAdjustmentResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<StockAdjustmentResponse>> AddAsync(

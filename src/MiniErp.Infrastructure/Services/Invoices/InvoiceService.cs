@@ -171,7 +171,8 @@ public sealed partial class InvoiceService(
 
         var responseResult = await invoiceQueryService.GetByIdAsync(
             invoice.Id,
-            cancellationToken);
+            fiscalYearId: invoice.FiscalYearId,
+            cancellationToken: cancellationToken);
         if (responseResult.IsFailure)
         {
             await transaction.RollbackAsync(cancellationToken);
@@ -442,7 +443,8 @@ public sealed partial class InvoiceService(
 
         var responseResult = await invoiceQueryService.GetByIdAsync(
             id,
-            cancellationToken);
+            fiscalYearId: invoice.FiscalYearId,
+            cancellationToken: cancellationToken);
         if (responseResult.IsFailure)
         {
             await transaction.RollbackAsync(cancellationToken);

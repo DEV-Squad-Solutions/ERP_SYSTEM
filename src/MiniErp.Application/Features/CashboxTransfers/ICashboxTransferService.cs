@@ -12,6 +12,7 @@ public interface ICashboxTransferService
 
     Task<Result<CashboxTransferResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<CashboxTransferResponse>> AddAsync(

@@ -19,6 +19,8 @@ public sealed class StockOpeningBalanceService(
     ICurrentCompanyContext currentCompanyContext,
     IInventoryCostingService inventoryCostingService,
     IInventoryStockService inventoryStockService,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
+    IFiscalYearPeriodGuard fiscalYearPeriodGuard,
     IInventoryPostingService? inventoryPostingService = null)
     : IStockOpeningBalanceService, IScopedService
 {
@@ -30,9 +32,24 @@ public sealed class StockOpeningBalanceService(
         CancellationToken cancellationToken = default)
     {
         filters ??= new StockOpeningBalanceFilterRequest();
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.FromDate,
+            toDate: filters.ToDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<PagedResponse<StockOpeningBalanceListResponse>>
+                .Failure(fiscalYear.Errors);
+        }
+
         var query = dbContext.StockOpeningBalances
             .AsNoTracking()
-            .Where(balance => balance.CompanyId == companyId)
+            .Where(balance =>
+                balance.CompanyId == companyId &&
+                balance.FiscalYearId == fiscalYear.Value.FiscalYearId);
+
+        var orderedQuery = query
             .Where(balance =>
                 string.IsNullOrWhiteSpace(filters.DocumentNumber) ||
                 balance.DocumentNumber.Contains(filters.DocumentNumber.Trim()))
@@ -51,7 +68,7 @@ public sealed class StockOpeningBalanceService(
         var pageResult = await paginationService.PaginateAsync<
             StockOpeningBalance,
             StockOpeningBalanceListResponse>(
-                query,
+                orderedQuery,
                 pagination,
                 cancellationToken);
         if (pageResult.IsFailure)
@@ -70,6 +87,7 @@ public sealed class StockOpeningBalanceService(
 
     public async Task<Result<StockOpeningBalanceResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -77,7 +95,18 @@ public sealed class StockOpeningBalanceService(
             return Result<StockOpeningBalanceResponse>.Failure(InvalidId());
         }
 
-        var response = await ProjectResponseQuery(id)
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<StockOpeningBalanceResponse>.Failure(
+                fiscalYear.Errors);
+        }
+
+        var response = await ProjectResponseQuery(
+                id,
+                fiscalYear.Value.FiscalYearId)
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
         if (response is not null)
@@ -96,6 +125,15 @@ public sealed class StockOpeningBalanceService(
         StockOpeningBalanceRequest request,
         CancellationToken cancellationToken = default)
     {
+        var period = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            request.DocumentDate,
+            nameof(StockOpeningBalanceRequest.DocumentDate),
+            cancellationToken);
+        if (period.IsFailure)
+        {
+            return Result<StockOpeningBalanceResponse>.Failure(period.Errors);
+        }
+
         await using var transaction = await dbContext.Database
             .BeginTransactionAsync(
                 IsolationLevel.Serializable,
@@ -218,6 +256,36 @@ public sealed class StockOpeningBalanceService(
             return Result<StockOpeningBalanceResponse>.Failure(Concurrency());
         }
 
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: openingBalance.FiscalYearId,
+            fromDate: request.DocumentDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<StockOpeningBalanceResponse>.Failure(
+                fiscalYear.Errors);
+        }
+
+        var currentPeriod = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            openingBalance.DocumentDate,
+            nameof(StockOpeningBalanceRequest.DocumentDate),
+            cancellationToken);
+        if (currentPeriod.IsFailure)
+        {
+            return Result<StockOpeningBalanceResponse>.Failure(
+                currentPeriod.Errors);
+        }
+
+        var requestedPeriod = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            request.DocumentDate,
+            nameof(StockOpeningBalanceUpdateRequest.DocumentDate),
+            cancellationToken);
+        if (requestedPeriod.IsFailure)
+        {
+            return Result<StockOpeningBalanceResponse>.Failure(
+                requestedPeriod.Errors);
+        }
+
         var oldMovements = await LoadMovementsAsync(id, cancellationToken);
         var oldCostingKeys = GetCostingKeys(oldMovements);
         await inventoryCostingService.LockAsync(
@@ -338,6 +406,24 @@ public sealed class StockOpeningBalanceService(
             return Result.Failure(NotFound(id));
         }
 
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: openingBalance.FiscalYearId,
+            fromDate: openingBalance.DocumentDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result.Failure(fiscalYear.Errors);
+        }
+
+        var period = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            openingBalance.DocumentDate,
+            nameof(StockOpeningBalanceRequest.DocumentDate),
+            cancellationToken);
+        if (period.IsFailure)
+        {
+            return Result.Failure(period.Errors);
+        }
+
         var movements = await LoadMovementsAsync(id, cancellationToken);
         var costingKeys = GetCostingKeys(movements);
         await inventoryCostingService.LockAsync(
@@ -399,11 +485,15 @@ public sealed class StockOpeningBalanceService(
         return Result.Success();
     }
 
-    private IQueryable<StockOpeningBalanceResponse> ProjectResponseQuery(int id) =>
+    private IQueryable<StockOpeningBalanceResponse> ProjectResponseQuery(
+        int id,
+        int? fiscalYearId = null) =>
         dbContext.StockOpeningBalances
             .Where(balance =>
                 balance.CompanyId == companyId &&
-                balance.Id == id)
+                balance.Id == id &&
+                (!fiscalYearId.HasValue ||
+                 balance.FiscalYearId == fiscalYearId.Value))
             .ProjectToType<StockOpeningBalanceResponse>();
 
     private async Task<IReadOnlyList<StockOpeningBalanceListResponse>>
@@ -649,7 +739,8 @@ public sealed class StockOpeningBalanceService(
             .Where(line => !line.IsDeleted)
             .Select(line => new InventoryCostingKey(
                 openingBalance.StoreId,
-                line.ItemId))
+                line.ItemId,
+                openingBalance.FiscalYearId))
             .Distinct()
             .ToArray();
 
@@ -683,7 +774,8 @@ public sealed class StockOpeningBalanceService(
         movements
             .Select(movement => new InventoryCostingKey(
                 movement.StoreId,
-                movement.ItemId))
+                movement.ItemId,
+                movement.FiscalYearId))
             .Distinct()
             .ToArray();
 

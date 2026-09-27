@@ -25,6 +25,7 @@ public sealed class CashVoucherService(
     IExchangeRateResolver exchangeRateResolver,
     TimeProvider timeProvider,
     ICashVoucherPostingService cashVoucherPostingService,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
     IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     : ICashVoucherService, IScopedService
 {
@@ -45,6 +46,18 @@ public sealed class CashVoucherService(
         }
 
         filters ??= new CashVoucherFilterRequest();
+        var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.FromDate,
+            toDate: filters.ToDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYearResult.IsFailure)
+        {
+            return Result<PagedResponse<CashVoucherResponse>>.Failure(
+                fiscalYearResult.Errors);
+        }
+
+        var fiscalYear = fiscalYearResult.Value;
         var search = filters.Search?.Trim();
         var voucherNumber = filters.VoucherNumber?.Trim();
         var accountIds = new HashSet<int>();
@@ -96,7 +109,9 @@ public sealed class CashVoucherService(
 
         var query = dbContext.CashVouchers
             .AsNoTracking()
-            .Where(voucher => voucher.CompanyId == companyId)
+            .Where(voucher =>
+                voucher.CompanyId == companyId &&
+                voucher.FiscalYearId == fiscalYear.FiscalYearId)
             .Where(voucher =>
                 string.IsNullOrEmpty(search) ||
                 voucher.VoucherNumber.Contains(search) ||
@@ -217,7 +232,9 @@ public sealed class CashVoucherService(
             .Where(cashbox =>
                 canIncludeOpeningBalances &&
                 cashbox.CompanyId == companyId &&
-                cashbox.OpeningBalance != 0m)
+                cashbox.OpeningBalance != 0m &&
+                cashbox.OpeningBalanceDate >= fiscalYear.StartDate &&
+                cashbox.OpeningBalanceDate <= fiscalYear.EndDate)
             .Where(cashbox =>
                 !filters.CashboxId.HasValue ||
                 cashbox.Id == filters.CashboxId.Value)
@@ -289,7 +306,17 @@ public sealed class CashVoucherService(
                     Amount = cashbox.OpeningBalance,
                     Currency = cashbox.Currency,
                     ExchangeRate = cashbox.OpeningExchangeRate,
-                    BaseOpeningBalance = cashbox.BaseOpeningBalance
+                    BaseOpeningBalance = cashbox.BaseOpeningBalance,
+                    CashboxBalance = cashbox.OpeningBalance +
+                        cashbox.Vouchers
+                            .Where(voucher =>
+                                voucher.IsPosted &&
+                                voucher.FiscalYearId ==
+                                    fiscalYear.FiscalYearId)
+                            .Sum(voucher =>
+                                voucher.Direction == CashDirection.Receipt
+                                    ? voucher.Amount
+                                    : -voucher.Amount)
                 })
                 .ToListAsync(cancellationToken))
                 .Select(row => new OpeningBalanceRow(
@@ -301,12 +328,18 @@ public sealed class CashVoucherService(
                     Amount: row.Amount,
                     Currency: row.Currency,
                     ExchangeRate: row.ExchangeRate,
-                    BaseOpeningBalance: row.BaseOpeningBalance))
+                    BaseOpeningBalance: row.BaseOpeningBalance,
+                    CashboxBalance: row.CashboxBalance))
                 .ToList();
 
         var mergedRows = realRows
             .Concat(openingRows.Select(row =>
-                CreateOpeningBalanceResponse(row, companyId, baseCurrency)))
+                CreateOpeningBalanceResponse(
+                    row,
+                    companyId,
+                    baseCurrency,
+                    fiscalYear.FiscalYearId,
+                    fiscalYear.FiscalYearName)))
             .OrderByDescending(row => row.VoucherDate)
             .ThenByDescending(row => row.Id)
             .Skip(offset >= int.MaxValue ? int.MaxValue : (int)offset)
@@ -352,10 +385,24 @@ public sealed class CashVoucherService(
             return Result<CashVoucherHandoverReportResponse>.Failure(errors);
         }
 
+        var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.FromDate,
+            toDate: filters.ToDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYearResult.IsFailure)
+        {
+            return Result<CashVoucherHandoverReportResponse>.Failure(
+                fiscalYearResult.Errors);
+        }
+
+        var fiscalYear = fiscalYearResult.Value;
+
         var query = dbContext.CashVouchers
             .AsNoTracking()
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
+                voucher.FiscalYearId == fiscalYear.FiscalYearId &&
                 !voucher.IsPosted &&
                 voucher.CashboxId.HasValue &&
                 !voucher.InvoiceId.HasValue &&
@@ -374,6 +421,7 @@ public sealed class CashVoucherService(
                  cashbox.Id == filters.CashboxId.Value) &&
                 cashbox.Vouchers.Any(voucher =>
                     voucher.CompanyId == companyId &&
+                    voucher.FiscalYearId == fiscalYear.FiscalYearId &&
                     !voucher.IsPosted &&
                     voucher.CashboxId.HasValue &&
                     !voucher.InvoiceId.HasValue &&
@@ -383,10 +431,33 @@ public sealed class CashVoucherService(
                 CashboxId = cashbox.Id,
                 CashboxName = cashbox.Name,
                 cashbox.Currency,
-                CurrentBalance = cashbox.OpeningBalance +
+                InitialOpeningBalance =
+                    cashbox.OpeningBalanceDate >= fiscalYear.StartDate &&
+                    cashbox.OpeningBalanceDate <= fiscalYear.EndDate
+                        ? cashbox.OpeningBalance
+                        : 0m,
+                CarriedOpeningBalance = dbContext.JournalEntryLines
+                    .Where(line =>
+                        line.CompanyId == companyId &&
+                        line.JournalEntry.FiscalYearId ==
+                            fiscalYear.FiscalYearId &&
+                        line.JournalEntry.EntryType ==
+                            JournalEntryType.Opening &&
+                        line.JournalEntry.SourceType ==
+                            JournalEntrySourceType.FiscalYearClosing &&
+                        line.JournalEntry.Status ==
+                            JournalEntryStatus.Posted &&
+                        line.PartyType == JournalPartyType.Cashbox &&
+                        line.PartyId == cashbox.Id)
+                    .Select(line => (decimal?)
+                        (line.TransactionDebit - line.TransactionCredit))
+                    .Sum() ?? 0m,
+                PostedMovement =
                     (cashbox.Vouchers
                         .Where(voucher =>
                             voucher.CompanyId == companyId &&
+                            voucher.FiscalYearId ==
+                                fiscalYear.FiscalYearId &&
                             voucher.IsPosted)
                         .Select(voucher => (decimal?)
                             (voucher.Direction == CashDirection.Receipt
@@ -396,6 +467,7 @@ public sealed class CashVoucherService(
                 DraftReceipt = cashbox.Vouchers
                     .Where(voucher =>
                         voucher.CompanyId == companyId &&
+                        voucher.FiscalYearId == fiscalYear.FiscalYearId &&
                         !voucher.IsPosted &&
                         voucher.CashboxId.HasValue &&
                         !voucher.InvoiceId.HasValue &&
@@ -406,6 +478,7 @@ public sealed class CashVoucherService(
                 DraftPayment = cashbox.Vouchers
                     .Where(voucher =>
                         voucher.CompanyId == companyId &&
+                        voucher.FiscalYearId == fiscalYear.FiscalYearId &&
                         !voucher.IsPosted &&
                         voucher.CashboxId.HasValue &&
                         !voucher.InvoiceId.HasValue &&
@@ -423,10 +496,12 @@ public sealed class CashVoucherService(
                 CashboxId: row.CashboxId,
                 CashboxName: row.CashboxName,
                 Currency: row.Currency,
-                CurrentBalance: row.CurrentBalance,
+                CurrentBalance: row.InitialOpeningBalance +
+                    row.CarriedOpeningBalance + row.PostedMovement,
                 DraftReceipt: row.DraftReceipt,
                 DraftPayment: row.DraftPayment,
-                ExpectedBalance: row.CurrentBalance +
+                ExpectedBalance: row.InitialOpeningBalance +
+                    row.CarriedOpeningBalance + row.PostedMovement +
                     row.DraftReceipt - row.DraftPayment))
             .ToList();
 
@@ -543,11 +618,16 @@ public sealed class CashVoucherService(
                 TotalCount: totalCount,
                 TotalPages: totalPages,
                 Summaries: summaries,
-                CashboxBalances: cashboxBalances));
+                CashboxBalances: cashboxBalances)
+            {
+                FiscalYearId = fiscalYear.FiscalYearId,
+                FiscalYearName = fiscalYear.FiscalYearName
+            });
     }
 
     public async Task<Result<CashVoucherResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -555,7 +635,17 @@ public sealed class CashVoucherService(
             return Result<CashVoucherResponse>.Failure(InvalidId());
         }
 
-        var response = await ProjectResponseQuery(id)
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<CashVoucherResponse>.Failure(fiscalYear.Errors);
+        }
+
+        var response = await ProjectResponseQuery(
+                id,
+                fiscalYear.Value.FiscalYearId)
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -868,6 +958,16 @@ public sealed class CashVoucherService(
             return Result<CashVoucherResponse>.Failure(Concurrency());
         }
 
+        var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: voucher.FiscalYearId,
+            fromDate: request.VoucherDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYearScope.IsFailure)
+        {
+            return Result<CashVoucherResponse>.Failure(
+                fiscalYearScope.Errors);
+        }
+
         if (fiscalYearPeriodGuard is not null)
         {
             var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
@@ -992,6 +1092,15 @@ public sealed class CashVoucherService(
         if (voucher is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: voucher.FiscalYearId,
+            fromDate: voucher.VoucherDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYearScope.IsFailure)
+        {
+            return Result.Failure(fiscalYearScope.Errors);
         }
 
         if (fiscalYearPeriodGuard is not null)
@@ -1168,6 +1277,16 @@ public sealed class CashVoucherService(
         }
 
         var request = ToUpdateRequest(item.Voucher!, item.RowVersion);
+        var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: voucher.FiscalYearId,
+            fromDate: request.VoucherDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYearScope.IsFailure)
+        {
+            return Result<CashVoucherBulkItemResponse>.Failure(
+                fiscalYearScope.Errors);
+        }
+
         if (fiscalYearPeriodGuard is not null)
         {
             var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
@@ -1289,6 +1408,16 @@ public sealed class CashVoucherService(
         if (!voucher.RowVersion.SequenceEqual(item.RowVersion!))
         {
             return Result<CashVoucherBulkItemResponse>.Failure(Concurrency());
+        }
+
+        var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: voucher.FiscalYearId,
+            fromDate: voucher.VoucherDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYearScope.IsFailure)
+        {
+            return Result<CashVoucherBulkItemResponse>.Failure(
+                fiscalYearScope.Errors);
         }
 
         if (fiscalYearPeriodGuard is not null)
@@ -1906,7 +2035,9 @@ public sealed class CashVoucherService(
     private static CashVoucherResponse CreateOpeningBalanceResponse(
         OpeningBalanceRow row,
         int companyId,
-        CurrencyCode baseCurrency)
+        CurrencyCode baseCurrency,
+        int fiscalYearId,
+        string fiscalYearName)
     {
         var amount = Math.Abs(row.Amount);
         var exchangeRate = row.Currency == baseCurrency
@@ -1951,8 +2082,11 @@ public sealed class CashVoucherService(
             Notes: null,
             RowVersion: [])
         {
+            FiscalYearId = fiscalYearId,
+            FiscalYearName = fiscalYearName,
             IsDraft = false,
-            IsOpeningBalance = true
+            IsOpeningBalance = true,
+            CashboxBalance = row.CashboxBalance
         };
     }
 
@@ -1965,13 +2099,18 @@ public sealed class CashVoucherService(
         decimal Amount,
         CurrencyCode Currency,
         decimal ExchangeRate,
-        decimal BaseOpeningBalance);
+        decimal BaseOpeningBalance,
+        decimal CashboxBalance);
 
-    private IQueryable<CashVoucherResponse> ProjectResponseQuery(int id) =>
+    private IQueryable<CashVoucherResponse> ProjectResponseQuery(
+        int id,
+        int? fiscalYearId = null) =>
         dbContext.CashVouchers
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
-                voucher.Id == id)
+                voucher.Id == id &&
+                (!fiscalYearId.HasValue ||
+                 voucher.FiscalYearId == fiscalYearId.Value))
             .ProjectToType<CashVoucherResponse>();
 
     private async Task ApplyPreparationAsync(

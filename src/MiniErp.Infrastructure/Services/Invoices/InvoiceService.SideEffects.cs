@@ -509,7 +509,8 @@ public sealed partial class InvoiceService
             .Where(line => !line.IsDeleted && line.ItemId.HasValue)
             .Select(line => new InventoryCostingKey(
                 invoice.StoreId,
-                line.ItemId!.Value))
+                line.ItemId!.Value,
+                invoice.FiscalYearId))
             .Distinct()
             .ToArray();
 
@@ -518,7 +519,8 @@ public sealed partial class InvoiceService
         movements
             .Select(movement => new InventoryCostingKey(
                 movement.StoreId,
-                movement.ItemId))
+                movement.ItemId,
+                movement.FiscalYearId))
             .Distinct()
             .ToArray();
 

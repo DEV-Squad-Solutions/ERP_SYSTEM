@@ -18,6 +18,7 @@ public sealed class PartnerOpeningBalanceService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
     IExchangeRateResolver exchangeRateResolver,
     IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
     IOpeningBalancePostingService? openingBalancePostingService = null)
@@ -31,9 +32,22 @@ public sealed class PartnerOpeningBalanceService(
         CancellationToken cancellationToken = default)
     {
         filters ??= new PartnerOpeningBalanceFilterRequest();
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.FromDate,
+            toDate: filters.ToDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<PagedResponse<PartnerOpeningBalanceResponse>>.Failure(
+                fiscalYear.Errors);
+        }
+
         var query = dbContext.PartnerOpeningBalances
             .AsNoTracking()
-            .Where(balance => balance.CompanyId == companyId)
+            .Where(balance =>
+                balance.CompanyId == companyId &&
+                balance.FiscalYearId == fiscalYear.Value.FiscalYearId)
             .Where(balance =>
                 string.IsNullOrWhiteSpace(filters.DocumentNumber) ||
                 balance.DocumentNumber.Contains(filters.DocumentNumber.Trim()))
@@ -65,6 +79,7 @@ public sealed class PartnerOpeningBalanceService(
 
     public async Task<Result<PartnerOpeningBalanceResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -72,7 +87,18 @@ public sealed class PartnerOpeningBalanceService(
             return Result<PartnerOpeningBalanceResponse>.Failure(InvalidId());
         }
 
-        var response = await ProjectResponseQuery(id)
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<PartnerOpeningBalanceResponse>.Failure(
+                fiscalYear.Errors);
+        }
+
+        var response = await ProjectResponseQuery(
+                id,
+                fiscalYear.Value.FiscalYearId)
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -200,6 +226,16 @@ public sealed class PartnerOpeningBalanceService(
         if (!openingBalance.RowVersion.SequenceEqual(request.RowVersion))
         {
             return Result<PartnerOpeningBalanceResponse>.Failure(Concurrency());
+        }
+
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: openingBalance.FiscalYearId,
+            fromDate: request.DocumentDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<PartnerOpeningBalanceResponse>.Failure(
+                fiscalYear.Errors);
         }
 
         if (fiscalYearPeriodGuard is not null)
@@ -360,11 +396,15 @@ public sealed class PartnerOpeningBalanceService(
         return Result.Success();
     }
 
-    private IQueryable<PartnerOpeningBalanceResponse> ProjectResponseQuery(int id) =>
+    private IQueryable<PartnerOpeningBalanceResponse> ProjectResponseQuery(
+        int id,
+        int? fiscalYearId = null) =>
         dbContext.PartnerOpeningBalances
             .Where(balance =>
                 balance.CompanyId == companyId &&
-                balance.Id == id)
+                balance.Id == id &&
+                (!fiscalYearId.HasValue ||
+                 balance.FiscalYearId == fiscalYearId.Value))
             .ProjectToType<PartnerOpeningBalanceResponse>();
 
     private async Task<Error?> ValidateBusinessPartnerAsync(

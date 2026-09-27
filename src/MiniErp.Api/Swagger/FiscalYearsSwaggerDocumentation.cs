@@ -46,6 +46,13 @@ public sealed class FiscalYearsSwaggerDocumentation : IOperationFilter
                     "معرّف موجب في المسار `id`.",
                     "يجب أن يكون `id` أكبر من صفر.",
                     "السجل غير الموجود أو المحذوف أو التابع لشركة أخرى يرجع 404.")),
+            nameof(FiscalYearsController.SetCurrent) => (
+                "تغيير السنة المالية الحالية",
+                SwaggerOperationDescription.Create(
+                    "للمسؤول فقط. يجعل السنة المحددة هي سياق العمل الحالي للشركة لتُستخدم فورًا في الحركات والتقارير التي تعتمد السنة الحالية.",
+                    "معرّف السنة في المسار `id`.",
+                    "يجب أن يكون `id` أكبر من صفر وأن تكون السنة تابعة للشركة الموجودة في رمز الوصول.",
+                    "يمكن اختيار سنة مفتوحة أو مغلقة للمراجعة؛ قواعد منع التعديل داخل السنة المغلقة تظل مطبقة. لا تتأثر الشركات الأخرى.")),
             nameof(FiscalYearsController.Create) => (
                 "إضافة سنة مالية",
                 SwaggerOperationDescription.Create(
@@ -63,7 +70,7 @@ public sealed class FiscalYearsSwaggerDocumentation : IOperationFilter
             nameof(FiscalYearsController.Close) => (
                 "إغلاق سنة مالية",
                 SwaggerOperationDescription.Create(
-                    "للمسؤول فقط. يجري فحص AccountingReadiness أولًا، ثم يغلق السنة المالية ويمنع تعديلها أو حذفها حتى تتم إعادة فتحها. عند وجود سنة لاحقة مفتوحة تُرحّل أرصدة المركز المالي إليها في قيد Opening مصدره FiscalYearClosing مرة واحدة.",
+                    "للمسؤول فقط. يجري فحص AccountingReadiness أولًا، ثم يغلق السنة المالية ويمنع تعديلها أو حذفها حتى تتم إعادة فتحها. إذا لم توجد سنة لاحقة ينشئها النظام ويجهز إعداداتها تلقائيًا، ثم يرحّل أرصدة المركز المالي إليها في قيد Opening مصدره FiscalYearClosing مرة واحدة.",
                     "معرّف السنة في المسار `id`.",
                     "يجب أن يكون `id` أكبر من صفر وأن يكون السجل تابعًا للشركة الحالية، وألا توجد مصادر بلا قيود أو قيود غير متوازنة أو روابط/تكاليف/فروقات معلقة.",
                     "إغلاق سنة مغلقة بالفعل يرجع 409 بالرمز `FiscalYears.AlreadyClosed`. عدم الجاهزية يرجع `FiscalYears.ClosingNotReady` مع أخطاء `FiscalYears.ClosingIssue`. إذا كانت السنة التالية مغلقة يرجع `FiscalYears.NextFiscalYearClosed`، وإذا تعذر حساب مقابل الأرصدة يرجع `FiscalYears.OpeningBalanceAccountMissing`. السنة النهائية بلا سنة لاحقة تُغلق دون قيد افتتاحي.")),

@@ -8,6 +8,10 @@ public sealed class InvoiceItemPricingFilterRequestValidator
 {
     public InvoiceItemPricingFilterRequestValidator()
     {
+        RuleFor(request => request.FiscalYearId)
+            .GreaterThan(0)
+            .When(request => request.FiscalYearId.HasValue);
+
         RuleFor(request => request.Search)
             .MaximumLength(200);
 

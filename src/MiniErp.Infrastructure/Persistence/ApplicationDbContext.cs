@@ -17,7 +17,7 @@ using MiniErp.Infrastructure.Identity;
 
 namespace MiniErp.Infrastructure.Persistence;
 
-public sealed class ApplicationDbContext
+public sealed partial class ApplicationDbContext
     : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>
 {
     public ApplicationDbContext(
@@ -153,6 +153,8 @@ public sealed class ApplicationDbContext
         base.OnModelCreating(builder);
 
         builder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
+
+        ConfigureTransactionFiscalYears(builder);
 
         var isSqlite = Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite";
         builder.ApplyConfiguration(new Configurations.EmployeeConfiguration(isSqlite));

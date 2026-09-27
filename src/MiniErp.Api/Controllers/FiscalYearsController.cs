@@ -62,6 +62,28 @@ public sealed class FiscalYearsController(IFiscalYearService fiscalYearService)
     }
 
     [Authorize(Roles = "Admin")]
+    [HttpPost("{id:int}/set-current")]
+    [ProducesResponseType<FiscalYearResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SetCurrent(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        var result = await fiscalYearService.SetCurrentAsync(
+            id,
+            cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<FiscalYearsRealtimeJob>(
+                "CurrentChanged",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
+
+        return this.ToActionResult(result);
+    }
+
+    [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<FiscalYearResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]

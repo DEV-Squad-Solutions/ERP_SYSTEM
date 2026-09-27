@@ -24,18 +24,29 @@ public sealed class FiscalYearPeriodGuard(
             .AsNoTracking()
             .Where(year =>
                 year.CompanyId == companyId &&
-                year.StartDate <= date &&
-                year.EndDate >= date)
+                year.IsCurrent)
             .Select(year => new
             {
                 year.Name,
+                year.StartDate,
+                year.EndDate,
                 year.Status
             })
-            .FirstOrDefaultAsync(cancellationToken);
+            .SingleOrDefaultAsync(cancellationToken);
 
         if (fiscalYear is null)
         {
             return Result.Failure(DateNotCovered(date, fieldName));
+        }
+
+        if (date < fiscalYear.StartDate || date > fiscalYear.EndDate)
+        {
+            return Result.Failure(QueryDateOutsideRange(
+                date: date,
+                fieldName: fieldName,
+                fiscalYearName: fiscalYear.Name,
+                startDate: fiscalYear.StartDate,
+                endDate: fiscalYear.EndDate));
         }
 
         return fiscalYear.Status == FiscalYearStatus.Open

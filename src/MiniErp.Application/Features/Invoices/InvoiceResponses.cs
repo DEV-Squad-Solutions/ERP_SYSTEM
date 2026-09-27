@@ -109,6 +109,8 @@ public sealed record InvoiceListResponse(
     int ContainerLineCount,
     byte[] RowVersion)
 {
+    public int FiscalYearId { get; init; }
+
     public string? PartnerInvoiceNo { get; init; }
 
     public int? ItemsCategoryId { get; init; }
@@ -143,7 +145,8 @@ public sealed record InvoiceSummaryResponse(
     decimal DiscountAmount,
     decimal Total,
     decimal PaidAmount,
-    decimal RemainingAmount);
+    decimal RemainingAmount,
+    decimal TotalQuantity);
 
 public sealed record InvoiceItemBalanceResponse(
     int StoreId,
@@ -231,6 +234,8 @@ public sealed record InvoiceResponse(
     IReadOnlyList<InvoiceLineResponse> Lines,
     IReadOnlyList<InvoiceContainerLineResponse> ContainerLines)
 {
+    public int FiscalYearId { get; init; }
+
     public string? PartnerInvoiceNo { get; init; }
 
     public int? ItemsCategoryId { get; init; }

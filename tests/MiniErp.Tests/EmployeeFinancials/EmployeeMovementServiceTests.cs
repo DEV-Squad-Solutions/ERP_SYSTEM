@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.EmployeeMovements;
 using MiniErp.Application.Features.EmployeeOpeningBalances;
 using MiniErp.Domain.Entities.Employees;
@@ -12,6 +13,76 @@ namespace MiniErp.Tests.EmployeeFinancials;
 
 public sealed class EmployeeMovementServiceTests
 {
+    [Fact]
+    public async Task Queries_DefaultToCurrentFiscalYearAndAllowExplicitHistoricalYear()
+    {
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(
+            companyId: 1);
+        await database.ConfigureSeparateFiscalYearsAsync();
+        var service = database.CreateMovementService();
+
+        var currentCreated = await service.AddAsync(
+            new EmployeeMovementRequest(
+                EmployeeId: 1,
+                Type: EmployeeMovementType.Bonus,
+                Amount: 100m,
+                Currency: CurrencyCode.EGP,
+                MovementDate: new DateOnly(2025, 6, 1),
+                Notes: "2025 movement"));
+        var nextCreated = await service.AddAsync(
+            new EmployeeMovementRequest(
+                EmployeeId: 1,
+                Type: EmployeeMovementType.Bonus,
+                Amount: 200m,
+                Currency: CurrencyCode.EGP,
+                MovementDate: new DateOnly(2026, 6, 1),
+                Notes: "2026 movement"));
+
+        Assert.True(currentCreated.IsSuccess);
+        Assert.Equal(1, currentCreated.Value.FiscalYearId);
+        Assert.Equal("2025", currentCreated.Value.FiscalYearName);
+        Assert.True(nextCreated.IsSuccess);
+        Assert.Equal(100, nextCreated.Value.FiscalYearId);
+        Assert.Equal("2026", nextCreated.Value.FiscalYearName);
+
+        var currentList = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 });
+        var nextList = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new EmployeeMovementFilterRequest(FiscalYearId: 100));
+        var currentReport = await service.GetReportAsync(
+            new EmployeeMovementReportRequest(EmployeeId: 1));
+        var nextReport = await service.GetReportAsync(
+            new EmployeeMovementReportRequest(
+                EmployeeId: 1,
+                FiscalYearId: 100));
+        var hiddenNextYear = await service.GetByIdAsync(nextCreated.Value.Id);
+        var explicitNextYear = await service.GetByIdAsync(
+            nextCreated.Value.Id,
+            fiscalYearId: 100);
+        var invalidCurrentYearRange = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new EmployeeMovementFilterRequest(
+                FromDate: new DateOnly(2026, 1, 1)));
+
+        var currentItem = Assert.Single(currentList.Value.Items);
+        Assert.Equal(currentCreated.Value.Id, currentItem.Id);
+        Assert.Equal(1, currentItem.FiscalYearId);
+        var nextItem = Assert.Single(nextList.Value.Items);
+        Assert.Equal(nextCreated.Value.Id, nextItem.Id);
+        Assert.Equal(100, nextItem.FiscalYearId);
+        Assert.Equal(100m, currentReport.Value.Summary.TotalCredits);
+        Assert.Equal(200m, nextReport.Value.Summary.TotalCredits);
+        Assert.True(hiddenNextYear.IsFailure);
+        Assert.Equal("EmployeeMovements.NotFound", hiddenNextYear.Error.Code);
+        Assert.True(explicitNextYear.IsSuccess);
+        Assert.Equal(nextCreated.Value.Id, explicitNextYear.Value.Id);
+        Assert.True(invalidCurrentYearRange.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            invalidCurrentYearRange.Error.Code);
+    }
+
     [Fact]
     public async Task AddAsync_ClosedMovementDate_IsRejectedWithoutLedgerWrite()
     {

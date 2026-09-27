@@ -15,6 +15,8 @@ public sealed class ExchangeRateMappingRegister : IRegister
                     : rate.Company.Settings.BaseCurrency)
             .Map(response => response.Id, rate => rate.Id)
             .Map(response => response.CompanyId, rate => rate.CompanyId)
+            .Map(response => response.FiscalYearId, rate => rate.FiscalYearId)
+            .Map(response => response.FiscalYearName, rate => rate.FiscalYear.Name)
             .Map(response => response.Currency, rate => rate.Currency)
             .Map(response => response.RateDate, rate => rate.RateDate)
             .Map(response => response.Rate, rate => rate.Rate)

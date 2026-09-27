@@ -29,16 +29,26 @@ public sealed class InventoryStockService(
             return new Dictionary<int, decimal>();
         }
 
+        var fiscalYear = await ResolveFiscalYearAsync(
+            asOfDate,
+            cancellationToken);
+        if (fiscalYear is null)
+        {
+            return distinctItemIds.ToDictionary(itemId => itemId, _ => 0m);
+        }
+
         var legacyOpeningBalances = await dbContext.StockOpeningBalanceLines
             .AsNoTracking()
             .Where(line =>
                 line.CompanyId == companyId &&
                 distinctItemIds.Contains(line.ItemId) &&
                 line.StockOpeningBalance.CompanyId == companyId &&
+                line.StockOpeningBalance.FiscalYearId == fiscalYear.Id &&
                 line.StockOpeningBalance.StoreId == storeId &&
                 line.StockOpeningBalance.DocumentDate <= asOfDate &&
                 !dbContext.ItemMovements.Any(movement =>
                     movement.CompanyId == companyId &&
+                    movement.FiscalYearId == fiscalYear.Id &&
                     movement.StoreId == storeId &&
                     movement.ItemId == line.ItemId &&
                     movement.MovementType ==
@@ -60,6 +70,7 @@ public sealed class InventoryStockService(
             .AsNoTracking()
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYear.Id &&
                 movement.StoreId == storeId &&
                 distinctItemIds.Contains(movement.ItemId) &&
                 movement.MovementDate <= asOfDate);
@@ -135,6 +146,14 @@ public sealed class InventoryStockService(
         Error? proposedOutboundError,
         CancellationToken cancellationToken)
     {
+        var fiscalYear = await ResolveFiscalYearAsync(
+            proposal.MovementDate,
+            cancellationToken);
+        if (fiscalYear is null)
+        {
+            return null;
+        }
+
         var requestedByItem = proposal.Lines
             .GroupBy(line => line.ItemId)
             .ToDictionary(
@@ -184,6 +203,7 @@ public sealed class InventoryStockService(
             .AsNoTracking()
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYear.Id &&
                 storeIds.Contains(movement.StoreId) &&
                 itemIds.Contains(movement.ItemId));
 
@@ -246,10 +266,12 @@ public sealed class InventoryStockService(
             .Where(line =>
                 line.CompanyId == companyId &&
                 line.StockOpeningBalance.CompanyId == companyId &&
+                line.StockOpeningBalance.FiscalYearId == fiscalYear.Id &&
                 storeIds.Contains(line.StockOpeningBalance.StoreId) &&
                 itemIds.Contains(line.ItemId) &&
                 !dbContext.ItemMovements.Any(movement =>
                     movement.CompanyId == companyId &&
+                    movement.FiscalYearId == fiscalYear.Id &&
                     movement.StoreId ==
                         line.StockOpeningBalance.StoreId &&
                     movement.ItemId == line.ItemId &&
@@ -398,6 +420,14 @@ public sealed class InventoryStockService(
         InventoryStockProposal proposal,
         CancellationToken cancellationToken)
     {
+        var fiscalYear = await ResolveFiscalYearAsync(
+            proposal.MovementDate,
+            cancellationToken);
+        if (fiscalYear is null)
+        {
+            return null;
+        }
+
         var requestedByItem = proposal.Lines
             .GroupBy(line => line.ItemId)
             .ToDictionary(
@@ -449,7 +479,7 @@ public sealed class InventoryStockService(
             var balances = await GetBalancesAsync(
                 storeId,
                 storeItemIds,
-                DateOnly.MaxValue,
+                fiscalYear.EndDate,
                 proposal.ReplacedMovement,
                 cancellationToken);
 
@@ -509,6 +539,21 @@ public sealed class InventoryStockService(
             StockBalanceCheckMode.None;
         return balanceCheckMode.Value;
     }
+
+    private Task<FiscalYearScope?> ResolveFiscalYearAsync(
+        DateOnly date,
+        CancellationToken cancellationToken) =>
+        dbContext.FiscalYears
+            .AsNoTracking()
+            .Where(year =>
+                year.CompanyId == companyId &&
+                date >= year.StartDate &&
+                date <= year.EndDate)
+            .Select(year => new FiscalYearScope(
+                year.Id,
+                year.StartDate,
+                year.EndDate))
+            .SingleOrDefaultAsync(cancellationToken);
 
     public async Task<bool> HasStockChangesSinceAsync(
         int storeId,
@@ -619,4 +664,9 @@ public sealed class InventoryStockService(
         decimal QuantityIn,
         decimal QuantityOut,
         bool IsProposed);
+
+    private sealed record FiscalYearScope(
+        int Id,
+        DateOnly StartDate,
+        DateOnly EndDate);
 }

@@ -35,6 +35,13 @@ public sealed class InventoryCostPostingSynchronizer(
             .Select(key => key.ItemId)
             .Distinct()
             .ToArray();
+        var fiscalYearIds = distinctKeys
+            .Where(key => key.FiscalYearId.HasValue)
+            .Select(key => key.FiscalYearId!.Value)
+            .Distinct()
+            .ToArray();
+        var hasUnscopedKeys = distinctKeys.Any(key =>
+            !key.FiscalYearId.HasValue);
         var keySet = distinctKeys.ToHashSet();
 
         var movementSources = await dbContext.ItemMovements
@@ -42,19 +49,27 @@ public sealed class InventoryCostPostingSynchronizer(
             .Where(movement =>
                 movement.CompanyId == companyId &&
                 storeIds.Contains(movement.StoreId) &&
-                itemIds.Contains(movement.ItemId))
+                itemIds.Contains(movement.ItemId) &&
+                (hasUnscopedKeys ||
+                 fiscalYearIds.Contains(movement.FiscalYearId)))
             .Select(movement => new
             {
                 movement.StoreId,
                 movement.ItemId,
+                movement.FiscalYearId,
                 movement.MovementType,
                 movement.ReferenceId
             })
             .ToListAsync(cancellationToken);
         var affectedSources = movementSources
-            .Where(source => keySet.Contains(new InventoryCostingKey(
-                source.StoreId,
-                source.ItemId)))
+            .Where(source =>
+                keySet.Contains(new InventoryCostingKey(
+                    source.StoreId,
+                    source.ItemId,
+                    source.FiscalYearId)) ||
+                keySet.Contains(new InventoryCostingKey(
+                    source.StoreId,
+                    source.ItemId)))
             .ToArray();
 
         var invoiceIds = affectedSources

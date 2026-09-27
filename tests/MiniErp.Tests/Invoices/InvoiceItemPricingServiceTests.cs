@@ -94,6 +94,61 @@ public sealed class InvoiceItemPricingServiceTests
     }
 
     [Fact]
+    public async Task ReportDefaultsToCurrentFiscalYearAndSupportsHistoricalYear()
+    {
+        await using var database = await PricingTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears
+            SET Name = 'Current', StartDate = '2026-01-01',
+                EndDate = '2026-12-31', IsCurrent = 1
+            WHERE Id = 1;
+
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent, RowVersion, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                3, 1, 'Previous', '2025-01-01', '2025-12-31', 2,
+                0, randomblob(8), 'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO Invoices (
+                Id, CompanyId, InvoiceNumber, InvoiceDate, InvoiceType,
+                BusinessPartnerId, StoreId, Currency, IsDeleted,
+                FiscalYearId)
+            VALUES (
+                3, 1, 'INV-2025', '2025-08-01', 1,
+                1, 1, 1, 0, 3);
+
+            INSERT INTO InvoiceLines (
+                Id, CompanyId, InvoiceId, ItemId, ItemUnitId, Quantity,
+                Price, BaseUnitPrice, IsDeleted)
+            VALUES (4, 1, 3, 1, 1, 7, 25, 25, 0);
+
+            INSERT INTO ItemMovements (
+                Id, CompanyId, ReferenceId, ItemId, MovementType,
+                CostStatus, UnitCost, AverageCostAfter, IsDeleted,
+                FiscalYearId)
+            VALUES (3, 1, 3, 1, 1, 1, 9, 10, 0, 3);
+            """);
+        var service = database.CreateService(companyId: 1);
+
+        var current = await service.GetAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new InvoiceItemPricingFilterRequest());
+        var historical = await service.GetAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new InvoiceItemPricingFilterRequest(FiscalYearId: 3));
+
+        Assert.True(current.IsSuccess, current.Error.Description);
+        Assert.Equal("INV-001", Assert.Single(current.Value.Items).InvoiceNumber);
+        Assert.True(historical.IsSuccess, historical.Error.Description);
+        var historicalRow = Assert.Single(historical.Value.Items);
+        Assert.Equal("INV-2025", historicalRow.InvoiceNumber);
+        Assert.Equal(9m, historicalRow.AverageCost);
+    }
+
+    [Fact]
     public async Task ItemExpensesApplyToEveryInvoiceLineForTheSameItem()
     {
         await using var database = await PricingTestDatabase.CreateAsync();
@@ -165,6 +220,12 @@ public sealed class InvoiceItemPricingServiceTests
             var context = new ApplicationDbContext(options);
 
             await CreateSchemaAndSeedAsync(context);
+            await TestFiscalYearSchema.EnsureAsync(context);
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE Invoices SET FiscalYearId = 2 WHERE CompanyId = 2;
+                UPDATE ItemMovements SET FiscalYearId = 2 WHERE CompanyId = 2;
+                """);
             return new PricingTestDatabase(connection, context);
         }
 

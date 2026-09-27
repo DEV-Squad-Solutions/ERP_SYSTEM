@@ -29,6 +29,9 @@ public sealed class StockOpeningBalanceMappingRegister : IRegister
                 line => line.ItemUnit == null ? null : line.ItemUnit.Name);
 
         config.ForType<StockOpeningBalance, StockOpeningBalanceListResponse>()
+            .Map(
+                response => response.FiscalYearName,
+                balance => balance.FiscalYear.Name)
             .Map(response => response.StoreName, balance => balance.Store.Name)
             .Map(response => response.LineCount, balance => balance.Lines.Count())
             .Map(
@@ -36,6 +39,9 @@ public sealed class StockOpeningBalanceMappingRegister : IRegister
                 balance => balance.Lines.OrderBy(line => line.Id));
 
         config.ForType<StockOpeningBalance, StockOpeningBalanceResponse>()
+            .Map(
+                response => response.FiscalYearName,
+                balance => balance.FiscalYear.Name)
             .Map(response => response.StoreName, balance => balance.Store.Name)
             .Map(
                 response => response.Lines,

@@ -382,6 +382,7 @@ public sealed class DriverServiceTests
 
             await CreateSchemaAsync(context);
             await SeedAsync(context);
+            await TestFiscalYearSchema.EnsureAsync(context);
 
             return new DriverTestDatabase(
                 connection,

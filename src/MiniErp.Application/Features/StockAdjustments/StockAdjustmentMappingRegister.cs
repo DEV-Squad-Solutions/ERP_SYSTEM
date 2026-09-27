@@ -33,6 +33,9 @@ public sealed class StockAdjustmentMappingRegister : IRegister
             .Map(response => response.ItemUnitName, line => line.ItemUnit.Name);
 
         config.ForType<StockAdjustment, StockAdjustmentListResponse>()
+            .Map(
+                response => response.FiscalYearName,
+                item => item.FiscalYear.Name)
             .Map(response => response.StoreName, item => item.Store.Name)
             .Map(response => response.LineCount, item => item.Lines.Count())
             .Map(
@@ -43,6 +46,9 @@ public sealed class StockAdjustmentMappingRegister : IRegister
                     .ThenBy(line => line.Id));
 
         config.ForType<StockAdjustment, StockAdjustmentResponse>()
+            .Map(
+                response => response.FiscalYearName,
+                item => item.FiscalYear.Name)
             .Map(response => response.StoreName, item => item.Store.Name)
             .Map(
                 response => response.Lines,

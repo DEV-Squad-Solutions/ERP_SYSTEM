@@ -13,6 +13,10 @@ public sealed class InvoicePayment : AuditableEntity
 
     public Company Company { get; set; } = null!;
 
+    public int FiscalYearId { get; set; }
+
+    public MiniErp.Domain.Entities.Accounting.FiscalYear FiscalYear { get; set; } = null!;
+
     public int InvoiceId { get; set; }
 
     public Invoice Invoice { get; set; } = null!;

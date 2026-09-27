@@ -590,6 +590,71 @@ public sealed class InventoryCostingServiceTests
             inboundCost - outboundCost);
     }
 
+    [Fact]
+    public async Task Recalculation_UsesCarriedOpeningWithoutReplayingPriorYear()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        await database.ConfigureSeparateFiscalYearsAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE ItemMovements
+            SET FiscalYearId = 1,
+                MovementDate = '2025-01-01',
+                QuantityIn = 10,
+                QuantityOut = 0,
+                UnitCost = 10,
+                TotalCost = 100,
+                QuantityAfter = 10,
+                AverageCostAfter = 10,
+                InventoryValueAfter = 100
+            WHERE Id = 1;
+            """);
+        var carryResult = await database
+            .CreateInventoryCarryForwardService()
+            .CarryForwardAsync(
+                sourceFiscalYearId: 1,
+                targetFiscalYearId: 100,
+                targetStartDate: new DateOnly(2026, 1, 1),
+                sourceFiscalYearName: "2025");
+        Assert.True(carryResult.IsSuccess);
+
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears SET IsCurrent = 2
+            WHERE CompanyId = 1 AND IsCurrent = 1;
+            UPDATE FiscalYears SET IsCurrent = 1 WHERE Id = 100;
+            UPDATE FiscalYears SET IsCurrent = 0 WHERE IsCurrent = 2;
+            """);
+
+        var adjustment = await AddAsync(
+            database,
+            "COST-FY-2026",
+            StockAdjustmentDirection.Increase,
+            itemId: 1,
+            quantity: 5m,
+            unitCost: 20m,
+            date: new DateOnly(2026, 1, 2));
+
+        var movement = await MovementAsync(database, adjustment.Id);
+        Assert.Equal(100, movement.FiscalYearId);
+        Assert.Equal(15m, movement.QuantityAfter);
+        Assert.Equal(200m, movement.InventoryValueAfter);
+        Assert.Equal(13.33333333m, movement.AverageCostAfter);
+
+        var costing = database.CreateInventoryCostingService();
+        var oldSnapshot = await costing.GetSnapshotsAsync(
+            storeId: 1,
+            itemIds: [1],
+            asOfDate: new DateOnly(2025, 12, 31));
+        var newSnapshot = await costing.GetSnapshotsAsync(
+            storeId: 1,
+            itemIds: [1],
+            asOfDate: new DateOnly(2026, 12, 31));
+        Assert.Equal(10m, oldSnapshot[1].Quantity);
+        Assert.Equal(15m, newSnapshot[1].Quantity);
+    }
+
     private static async Task<StockAdjustmentResponse> AddAsync(
         InventoryDocumentTestDatabase database,
         string documentNumber,

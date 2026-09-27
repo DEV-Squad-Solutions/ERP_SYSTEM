@@ -17,6 +17,7 @@ public sealed class EmployeeMovementService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     IExchangeRateResolver exchangeRateResolver,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
     IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     : IEmployeeMovementService, IScopedService
 {
@@ -29,9 +30,22 @@ public sealed class EmployeeMovementService(
     {
         filters ??= new EmployeeMovementFilterRequest();
 
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            filters.FiscalYearId,
+            filters.FromDate,
+            filters.ToDate,
+            cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<PagedResponse<EmployeeMovementResponse>>.Failure(
+                fiscalYear.Errors);
+        }
+
         var query = dbContext.EmployeeMovements
             .AsNoTracking()
-            .Where(movement => movement.CompanyId == companyId);
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYear.Value.FiscalYearId);
 
         if (filters.EmployeeId.HasValue)
         {
@@ -80,6 +94,7 @@ public sealed class EmployeeMovementService(
 
     public async Task<Result<EmployeeMovementResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -87,28 +102,19 @@ public sealed class EmployeeMovementService(
             return Result<EmployeeMovementResponse>.Failure(InvalidId());
         }
 
-        var response = await dbContext.EmployeeMovements
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<EmployeeMovementResponse>.Failure(
+                fiscalYear.Errors);
+        }
+
+        var response = await ProjectResponseQuery(
+                id: id,
+                fiscalYearId: fiscalYear.Value.FiscalYearId)
             .AsNoTracking()
-            .Where(m => m.CompanyId == companyId && m.Id == id)
-            .Select(m => new EmployeeMovementResponse(
-                Id: m.Id,
-                CompanyId: m.CompanyId,
-                EmployeeId: m.EmployeeId,
-                EmployeeCode: m.Employee.Code,
-                EmployeeName: m.Employee.Name,
-                Type: m.Type,
-                MovementDate: m.MovementDate,
-                Currency: m.Currency,
-                Amount: m.Type == EmployeeMovementType.Credit || m.Type == EmployeeMovementType.Bonus ? m.Credit : m.Debit,
-                Debit: m.Debit,
-                Credit: m.Credit,
-                ExchangeRate: m.ExchangeRate,
-                BaseDebit: m.BaseDebit,
-                BaseCredit: m.BaseCredit,
-                CashVoucherId: m.CashVoucherId,
-                CashVoucherNumber: m.CashVoucher != null ? m.CashVoucher.VoucherNumber : null,
-                Notes: m.Notes,
-                CreatedOn: m.CreatedOn))
             .FirstOrDefaultAsync(cancellationToken);
 
         return response is null
@@ -177,25 +183,9 @@ public sealed class EmployeeMovementService(
         dbContext.EmployeeMovements.Add(movement);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var response = new EmployeeMovementResponse(
-            Id: movement.Id,
-            CompanyId: movement.CompanyId,
-            EmployeeId: movement.EmployeeId,
-            EmployeeCode: employee.Code,
-            EmployeeName: employee.Name,
-            Type: movement.Type,
-            MovementDate: movement.MovementDate,
-            Currency: movement.Currency,
-            Amount: request.Amount,
-            Debit: movement.Debit,
-            Credit: movement.Credit,
-            ExchangeRate: movement.ExchangeRate,
-            BaseDebit: movement.BaseDebit,
-            BaseCredit: movement.BaseCredit,
-            CashVoucherId: null,
-            CashVoucherNumber: null,
-            Notes: movement.Notes,
-            CreatedOn: movement.CreatedOn);
+        var response = await ProjectResponseQuery(id: movement.Id)
+            .AsNoTracking()
+            .SingleAsync(cancellationToken);
 
         return Result<EmployeeMovementResponse>.Success(response);
     }
@@ -286,25 +276,15 @@ public sealed class EmployeeMovementService(
         await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        var results = movements.Select(tuple => new EmployeeMovementResponse(
-            Id: tuple.Movement.Id,
-            CompanyId: tuple.Movement.CompanyId,
-            EmployeeId: tuple.Movement.EmployeeId,
-            EmployeeCode: tuple.Employee.Code,
-            EmployeeName: tuple.Employee.Name,
-            Type: tuple.Movement.Type,
-            MovementDate: tuple.Movement.MovementDate,
-            Currency: tuple.Movement.Currency,
-            Amount: tuple.Request.Amount,
-            Debit: tuple.Movement.Debit,
-            Credit: tuple.Movement.Credit,
-            ExchangeRate: tuple.Movement.ExchangeRate,
-            BaseDebit: tuple.Movement.BaseDebit,
-            BaseCredit: tuple.Movement.BaseCredit,
-            CashVoucherId: null,
-            CashVoucherNumber: null,
-            Notes: tuple.Movement.Notes,
-            CreatedOn: tuple.Movement.CreatedOn)).ToList();
+        var movementIds = movements
+            .Select(tuple => tuple.Movement.Id)
+            .ToArray();
+        var responsesById = await ProjectResponseQuery(ids: movementIds)
+            .AsNoTracking()
+            .ToDictionaryAsync(row => row.Id, cancellationToken);
+        var results = movementIds
+            .Select(id => responsesById[id])
+            .ToList();
 
         return Result<List<EmployeeMovementResponse>>.Success(results);
     }
@@ -313,9 +293,22 @@ public sealed class EmployeeMovementService(
         EmployeeMovementReportRequest request,
         CancellationToken cancellationToken = default)
     {
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            request.FiscalYearId,
+            request.FromDate,
+            request.ToDate,
+            cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<EmployeeMovementReportResponse>.Failure(
+                fiscalYear.Errors);
+        }
+
         var query = dbContext.EmployeeMovements
             .AsNoTracking()
-            .Where(m => m.CompanyId == companyId);
+            .Where(m =>
+                m.CompanyId == companyId &&
+                m.FiscalYearId == fiscalYear.Value.FiscalYearId);
 
         if (request.EmployeeId.HasValue)
         {
@@ -504,5 +497,58 @@ public sealed class EmployeeMovementService(
             await transaction.RollbackAsync(cancellationToken);
             throw;
         }
+    }
+
+    private IQueryable<EmployeeMovementResponse> ProjectResponseQuery(
+        int? id = null,
+        int? fiscalYearId = null,
+        int[]? ids = null)
+    {
+        var query = dbContext.EmployeeMovements
+            .Where(movement => movement.CompanyId == companyId);
+
+        if (id.HasValue)
+        {
+            query = query.Where(movement => movement.Id == id.Value);
+        }
+
+        if (fiscalYearId.HasValue)
+        {
+            query = query.Where(movement =>
+                movement.FiscalYearId == fiscalYearId.Value);
+        }
+
+        if (ids is not null)
+        {
+            query = query.Where(movement => ids.Contains(movement.Id));
+        }
+
+        return query
+            .Select(movement => new EmployeeMovementResponse(
+                Id: movement.Id,
+                CompanyId: movement.CompanyId,
+                FiscalYearId: movement.FiscalYearId,
+                FiscalYearName: movement.FiscalYear.Name,
+                EmployeeId: movement.EmployeeId,
+                EmployeeCode: movement.Employee.Code,
+                EmployeeName: movement.Employee.Name,
+                Type: movement.Type,
+                MovementDate: movement.MovementDate,
+                Currency: movement.Currency,
+                Amount: movement.Type == EmployeeMovementType.Credit ||
+                    movement.Type == EmployeeMovementType.Bonus
+                        ? movement.Credit
+                        : movement.Debit,
+                Debit: movement.Debit,
+                Credit: movement.Credit,
+                ExchangeRate: movement.ExchangeRate,
+                BaseDebit: movement.BaseDebit,
+                BaseCredit: movement.BaseCredit,
+                CashVoucherId: movement.CashVoucherId,
+                CashVoucherNumber: movement.CashVoucher != null
+                    ? movement.CashVoucher.VoucherNumber
+                    : null,
+                Notes: movement.Notes,
+                CreatedOn: movement.CreatedOn));
     }
 }

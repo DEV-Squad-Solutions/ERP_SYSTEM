@@ -6,6 +6,7 @@ using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.FiscalYears;
 using MiniErp.Application.Features.AccountingReadiness;
+using MiniErp.Application.Features.Companies;
 using MiniErp.Application.Common.Results;
 using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Enums;
@@ -41,6 +42,41 @@ public sealed class FiscalYearServiceTests
         Assert.Equal("2026", result.Value.Name);
         Assert.Equal(FiscalYearStatus.Open, result.Value.Status);
         Assert.True(result.Value.IsCurrent);
+    }
+
+    [Fact]
+    public async Task Add_CarriesLatestExchangeRatesToFirstDayOfNewYear()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+
+        var previous = await service.AddAsync(
+            new FiscalYearRequest(
+                "2025",
+                new DateOnly(2025, 1, 1),
+                new DateOnly(2025, 12, 31)));
+        await database.SeedExchangeRateAsync(
+            previous.Value.Id,
+            new DateOnly(2025, 12, 31),
+            50m);
+
+        var next = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31),
+                IsCurrent: true));
+
+        var carried = await database.Context.ExchangeRates
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .SingleAsync(rate =>
+                rate.CompanyId == 1 &&
+                rate.Currency == CurrencyCode.USD &&
+                rate.FiscalYearId == next.Value.Id);
+
+        Assert.Equal(new DateOnly(2026, 1, 1), carried.RateDate);
+        Assert.Equal(50m, carried.Rate);
     }
 
     [Fact]
@@ -101,6 +137,49 @@ public sealed class FiscalYearServiceTests
     }
 
     [Fact]
+    public async Task SetCurrent_SwitchesCompanyContextAndAllowsHistoricalClosedYear()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var companyOne = database.CreateService(companyId: 1);
+        var companyTwo = database.CreateService(companyId: 2);
+        var historical = await companyOne.AddAsync(
+            new FiscalYearRequest(
+                "2025",
+                new DateOnly(2025, 1, 1),
+                new DateOnly(2025, 12, 31)));
+        var current = await companyOne.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31),
+                IsCurrent: true));
+        Assert.True(historical.IsSuccess);
+        Assert.True(current.IsSuccess);
+        await database.Context.FiscalYears
+            .Where(year => year.Id == historical.Value.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(
+                year => year.Status,
+                FiscalYearStatus.Closed));
+        database.ClearTracking();
+
+        var switched = await companyOne.SetCurrentAsync(historical.Value.Id);
+
+        Assert.True(switched.IsSuccess);
+        Assert.True(switched.Value.IsCurrent);
+        Assert.Equal(FiscalYearStatus.Closed, switched.Value.Status);
+        Assert.False((await companyOne.GetByIdAsync(current.Value.Id))
+            .Value.IsCurrent);
+        Assert.Equal(
+            historical.Value.Id,
+            (await companyOne.GetCurrentAsync()).Value.Id);
+
+        var crossCompany = await companyTwo.SetCurrentAsync(
+            historical.Value.Id);
+        Assert.True(crossCompany.IsFailure);
+        Assert.Equal("FiscalYears.NotFound", crossCompany.Error.Code);
+    }
+
+    [Fact]
     public async Task Update_UsesRowVersionAndClosedYearCannotBeModified()
     {
         await using var database = await FiscalYearTestDatabase.CreateAsync();
@@ -110,6 +189,12 @@ public sealed class FiscalYearServiceTests
                 "2026",
                 new DateOnly(2026, 1, 1),
                 new DateOnly(2026, 12, 31)));
+        var next = await service.AddAsync(
+            new FiscalYearRequest(
+                "2027",
+                new DateOnly(2027, 1, 1),
+                new DateOnly(2027, 12, 31),
+                IsCurrent: false));
 
         var closed = await service.CloseAsync(added.Value.Id);
         var update = await service.UpdateAsync(
@@ -141,6 +226,12 @@ public sealed class FiscalYearServiceTests
                 "2026",
                 new DateOnly(2026, 1, 1),
                 new DateOnly(2026, 12, 31)));
+        await service.AddAsync(
+            new FiscalYearRequest(
+                "2027",
+                new DateOnly(2027, 1, 1),
+                new DateOnly(2027, 12, 31),
+                IsCurrent: false));
 
         var close = await service.CloseAsync(added.Value.Id);
 
@@ -175,6 +266,7 @@ public sealed class FiscalYearServiceTests
         database.ClearTracking();
 
         Assert.True((await service.CloseAsync(first.Value.Id)).IsSuccess);
+        Assert.Equal(2, (await service.GetSelectAsync()).Value.Count);
         database.ClearTracking();
         Assert.True((await service.ReopenAsync(first.Value.Id)).IsSuccess);
         Assert.Empty(await database.LoadClosingTransfersAsync(first.Value.Id));
@@ -192,6 +284,48 @@ public sealed class FiscalYearServiceTests
             first.Value.Id);
         Assert.Equal(JournalPartyType.Customer, partyLine.PartyType);
         Assert.Equal(99, partyLine.PartyId);
+        Assert.Equal(CurrencyCode.USD, partyLine.Currency);
+        Assert.Equal(50m, partyLine.TransactionDebit);
+        Assert.Equal(0m, partyLine.TransactionCredit);
+        Assert.Equal(2.4m, partyLine.ExchangeRate);
+    }
+
+    [Fact]
+    public async Task Close_CarriesDriverBalanceAsNextYearOpening()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(
+            companyId: 1,
+            accountingReadinessService: new ReadyReadinessService());
+        var first = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+        var next = await service.AddAsync(
+            new FiscalYearRequest(
+                "2027",
+                new DateOnly(2027, 1, 1),
+                new DateOnly(2027, 12, 31),
+                IsCurrent: true));
+        await database.SeedClosingLedgerAsync(
+            first.Value.Id,
+            next.Value.Id,
+            partyType: JournalPartyType.Driver,
+            partyId: 7);
+        database.ClearTracking();
+
+        var close = await service.CloseAsync(first.Value.Id);
+
+        Assert.True(close.IsSuccess);
+        var partyLine = await database.LoadClosingPartyLineAsync(first.Value.Id);
+        Assert.Equal(JournalPartyType.Driver, partyLine.PartyType);
+        Assert.Equal(7, partyLine.PartyId);
+        Assert.Equal(100m, partyLine.Debit);
+        Assert.Equal(0m, partyLine.Credit);
+        Assert.Equal(CurrencyCode.USD, partyLine.Currency);
+        Assert.Equal(50m, partyLine.TransactionDebit);
+        Assert.Equal(0m, partyLine.TransactionCredit);
     }
 
     [Fact]
@@ -212,6 +346,12 @@ public sealed class FiscalYearServiceTests
                 new DateOnly(2027, 1, 1),
                 new DateOnly(2027, 12, 31),
                 IsCurrent: true));
+        await service.AddAsync(
+            new FiscalYearRequest(
+                "2028",
+                new DateOnly(2028, 1, 1),
+                new DateOnly(2028, 12, 31),
+                IsCurrent: false));
         await database.SeedClosingLedgerAsync(
             first.Value.Id,
             next.Value.Id);
@@ -236,7 +376,71 @@ public sealed class FiscalYearServiceTests
     }
 
     [Fact]
-    public async Task Reopen_ReturnsOpenYearAndDeleteBlocksCurrentYear()
+    public async Task Close_CreatesAndPromotesNextFiscalYearWhenMissing()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var setup = new CapturingAccountingSetupService();
+        var inventoryCarry = new CapturingInventoryCarryForwardService();
+        var service = database.CreateService(
+            companyId: 1,
+            defaultAccountingSetupService: setup,
+            inventoryCarryForwardService: inventoryCarry);
+        var current = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+
+        var result = await service.CloseAsync(current.Value.Id);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(FiscalYearStatus.Closed, result.Value.Status);
+        Assert.False(result.Value.IsCurrent);
+        var next = (await service.GetCurrentAsync()).Value;
+        Assert.Equal("2027", next.Name);
+        Assert.Equal(new DateOnly(2027, 1, 1), next.StartDate);
+        Assert.Equal(new DateOnly(2027, 12, 31), next.EndDate);
+        Assert.Equal(FiscalYearStatus.Open, next.Status);
+        Assert.Contains((1, next.Id), setup.EnsuredFiscalYears);
+        Assert.Equal(
+            [(current.Value.Id, next.Id, next.StartDate, current.Value.Name)],
+            inventoryCarry.Calls);
+    }
+
+    [Fact]
+    public async Task Close_CreatesImmediateNextYearWhenALaterYearExists()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var setup = new CapturingAccountingSetupService();
+        var service = database.CreateService(
+            companyId: 1,
+            defaultAccountingSetupService: setup);
+        var current = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+        var later = await service.AddAsync(
+            new FiscalYearRequest(
+                "2028",
+                new DateOnly(2028, 1, 1),
+                new DateOnly(2028, 12, 31),
+                IsCurrent: false));
+
+        var result = await service.CloseAsync(current.Value.Id);
+
+        Assert.True(result.IsSuccess);
+        var next = (await service.GetCurrentAsync()).Value;
+        Assert.Equal("2027", next.Name);
+        Assert.Equal(new DateOnly(2027, 1, 1), next.StartDate);
+        Assert.Equal(new DateOnly(2027, 12, 31), next.EndDate);
+        Assert.NotEqual(later.Value.Id, next.Id);
+        Assert.Equal(3, (await service.GetSelectAsync()).Value.Count);
+        Assert.Contains((1, next.Id), setup.EnsuredFiscalYears);
+    }
+
+    [Fact]
+    public async Task Close_PromotesNextYearAndReopenKeepsItCurrent()
     {
         await using var database = await FiscalYearTestDatabase.CreateAsync();
         var service = database.CreateService(companyId: 1);
@@ -245,20 +449,24 @@ public sealed class FiscalYearServiceTests
                 "2026",
                 new DateOnly(2026, 1, 1),
                 new DateOnly(2026, 12, 31)));
+        var next = await service.AddAsync(
+            new FiscalYearRequest(
+                "2027",
+                new DateOnly(2027, 1, 1),
+                new DateOnly(2027, 12, 31),
+                IsCurrent: false));
 
         var closed = await service.CloseAsync(added.Value.Id);
         database.ClearTracking();
         var reopened = await service.ReopenAsync(added.Value.Id);
-        var delete = await service.DeleteAsync(added.Value.Id);
 
         Assert.True(closed.IsSuccess);
+        Assert.False(closed.Value.IsCurrent);
+        Assert.Equal(next.Value.Id, (await service.GetCurrentAsync()).Value.Id);
         Assert.True(reopened.IsSuccess);
         Assert.Equal(FiscalYearStatus.Open, reopened.Value.Status);
         Assert.Null(reopened.Value.ClosedOn);
-        Assert.True(delete.IsFailure);
-        Assert.Equal(
-            "FiscalYears.CurrentCannotBeDeleted",
-            delete.Error.Code);
+        Assert.False(reopened.Value.IsCurrent);
     }
 
     [Fact]
@@ -317,11 +525,22 @@ public sealed class FiscalYearServiceTests
                 "2026",
                 new DateOnly(2026, 1, 1),
                 new DateOnly(2026, 12, 31)));
+        await service.AddAsync(
+            new FiscalYearRequest(
+                "2027",
+                new DateOnly(2027, 1, 1),
+                new DateOnly(2027, 12, 31),
+                IsCurrent: false));
         var open = await guard.EnsureOpenAsync(
             new DateOnly(2026, 6, 1),
             "InvoiceDate");
+        var otherOpenYear = await guard.EnsureOpenAsync(
+            new DateOnly(2027, 6, 1),
+            "InvoiceDate");
 
         await service.CloseAsync(added.Value.Id);
+        database.Context.ChangeTracker.Clear();
+        var selectedClosed = await service.SetCurrentAsync(added.Value.Id);
         var closed = await guard.EnsureOpenAsync(
             new DateOnly(2026, 6, 1),
             "InvoiceDate");
@@ -330,6 +549,12 @@ public sealed class FiscalYearServiceTests
         Assert.Equal("FiscalYears.DateNotCovered", uncovered.Error.Code);
         Assert.True(added.IsSuccess);
         Assert.True(open.IsSuccess);
+        Assert.True(otherOpenYear.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            otherOpenYear.Error.Code);
+        Assert.Equal("InvoiceDate", otherOpenYear.Error.FieldName);
+        Assert.True(selectedClosed.IsSuccess);
         Assert.True(closed.IsFailure);
         Assert.Equal("FiscalYears.Closed", closed.Error.Code);
         Assert.Equal("InvoiceDate", closed.Error.FieldName);
@@ -372,6 +597,158 @@ public sealed class FiscalYearServiceTests
             int fiscalYearId,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task QueryScopeResolver_UsesCurrentYearWhenIdIsOmitted()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var first = await service.AddAsync(
+            new FiscalYearRequest(
+                Name: "2025",
+                StartDate: new DateOnly(2025, 1, 1),
+                EndDate: new DateOnly(2025, 12, 31)));
+        var current = await service.AddAsync(
+            new FiscalYearRequest(
+                Name: "2026",
+                StartDate: new DateOnly(2026, 1, 1),
+                EndDate: new DateOnly(2026, 12, 31),
+                IsCurrent: true));
+        var resolver = database.CreateQueryScopeResolver(companyId: 1);
+
+        var result = await resolver.ResolveAsync(fiscalYearId: null);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(current.Value.Id, result.Value.FiscalYearId);
+        Assert.Equal("2026", result.Value.FiscalYearName);
+        Assert.Equal(new DateOnly(2026, 1, 1), result.Value.StartDate);
+        Assert.Equal(new DateOnly(2026, 12, 31), result.Value.EndDate);
+        Assert.Equal(FiscalYearStatus.Open, result.Value.Status);
+        Assert.True(result.Value.IsCurrent);
+        Assert.NotEqual(first.Value.Id, result.Value.FiscalYearId);
+    }
+
+    [Fact]
+    public async Task QueryScopeResolver_AllowsExplicitHistoricalYear()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var historical = await service.AddAsync(
+            new FiscalYearRequest(
+                Name: "2025",
+                StartDate: new DateOnly(2025, 1, 1),
+                EndDate: new DateOnly(2025, 12, 31)));
+        await service.AddAsync(
+            new FiscalYearRequest(
+                Name: "2026",
+                StartDate: new DateOnly(2026, 1, 1),
+                EndDate: new DateOnly(2026, 12, 31),
+                IsCurrent: true));
+        var resolver = database.CreateQueryScopeResolver(companyId: 1);
+
+        var result = await resolver.ResolveAsync(
+            fiscalYearId: historical.Value.Id,
+            fromDate: new DateOnly(2025, 2, 1),
+            toDate: new DateOnly(2025, 11, 30));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(historical.Value.Id, result.Value.FiscalYearId);
+        Assert.Equal("2025", result.Value.FiscalYearName);
+        Assert.False(result.Value.IsCurrent);
+    }
+
+    [Fact]
+    public async Task QueryScopeResolver_RejectsForeignCompanyYear()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var otherCompanyService = database.CreateService(companyId: 2);
+        var foreignYear = await otherCompanyService.AddAsync(
+            new FiscalYearRequest(
+                Name: "2026",
+                StartDate: new DateOnly(2026, 1, 1),
+                EndDate: new DateOnly(2026, 12, 31)));
+        var resolver = database.CreateQueryScopeResolver(companyId: 1);
+
+        var result = await resolver.ResolveAsync(foreignYear.Value.Id);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.NotFound", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task QueryScopeResolver_RejectsDatesOutsideSelectedYear()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var year = await service.AddAsync(
+            new FiscalYearRequest(
+                Name: "2025",
+                StartDate: new DateOnly(2025, 1, 1),
+                EndDate: new DateOnly(2025, 12, 31)));
+        var resolver = database.CreateQueryScopeResolver(companyId: 1);
+
+        var result = await resolver.ResolveAsync(
+            fiscalYearId: year.Value.Id,
+            fromDate: new DateOnly(2026, 1, 1));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            result.Error.Code);
+        Assert.Equal("FromDate", result.Error.FieldName);
+    }
+
+    private sealed class CapturingAccountingSetupService
+        : IDefaultAccountingSetupService
+    {
+        public List<(int CompanyId, int FiscalYearId)> EnsuredFiscalYears { get; } = [];
+
+        public Task InitializeCompanyAsync(
+            int companyId,
+            DateOnly effectiveDate,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task EnsureFiscalYearAsync(
+            int companyId,
+            int fiscalYearId,
+            CancellationToken cancellationToken = default)
+        {
+            EnsuredFiscalYears.Add((companyId, fiscalYearId));
+            return Task.CompletedTask;
+        }
+
+        public Task EnsureCashboxAsync(
+            int companyId,
+            int cashboxId,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task EnsureCashMovementTypeAsync(
+            int companyId,
+            int cashMovementTypeId,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class CapturingInventoryCarryForwardService
+        : IFiscalYearInventoryCarryForwardService
+    {
+        public List<(int SourceId, int TargetId, DateOnly TargetStartDate,
+            string SourceName)> Calls { get; } = [];
+
+        public Task<Result> CarryForwardAsync(
+            int sourceFiscalYearId,
+            int targetFiscalYearId,
+            DateOnly targetStartDate,
+            string sourceFiscalYearName,
+            CancellationToken cancellationToken = default)
+        {
+            Calls.Add((
+                sourceFiscalYearId,
+                targetFiscalYearId,
+                targetStartDate,
+                sourceFiscalYearName));
+            return Task.FromResult(Result.Success());
+        }
     }
 
     private sealed class ReadyReadinessService : IAccountingReadinessService
@@ -417,7 +794,7 @@ public sealed class FiscalYearServiceTests
 
         private SqliteConnection Connection { get; }
 
-        private ApplicationDbContext Context { get; }
+        public ApplicationDbContext Context { get; }
 
         public static async Task<FiscalYearTestDatabase> CreateAsync()
         {
@@ -440,24 +817,52 @@ public sealed class FiscalYearServiceTests
 
         public FiscalYearService CreateService(
             int companyId,
-            IAccountingReadinessService? accountingReadinessService = null) =>
+            IAccountingReadinessService? accountingReadinessService = null,
+            IDefaultAccountingSetupService? defaultAccountingSetupService = null,
+            IFiscalYearInventoryCarryForwardService?
+                inventoryCarryForwardService = null) =>
             new(
                 Context,
                 new PaginationService(),
                 new TestCurrentCompanyContext(companyId),
                 TimeProvider.System,
-                accountingReadinessService);
+                accountingReadinessService,
+                defaultAccountingSetupService,
+                inventoryCarryForwardService);
 
         public IFiscalYearPeriodGuard CreateGuard(int companyId) =>
             new FiscalYearPeriodGuard(
                 Context,
                 new TestCurrentCompanyContext(companyId));
 
+        public IFiscalYearQueryScopeResolver CreateQueryScopeResolver(
+            int companyId) =>
+            new FiscalYearQueryScopeResolver(
+                Context,
+                new TestCurrentCompanyContext(companyId));
+
         public void ClearTracking() => Context.ChangeTracker.Clear();
+
+        public Task SeedExchangeRateAsync(
+            int fiscalYearId,
+            DateOnly rateDate,
+            decimal rate) =>
+            Context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO ExchangeRates (
+                    CompanyId, FiscalYearId, Currency, RateDate, Rate,
+                    Source, LastModifiedAt, RowVersion, CreatedById,
+                    CreatedOn, CreatedByPc, IsDeleted)
+                VALUES (
+                    1, {fiscalYearId}, {(int)CurrencyCode.USD}, {rateDate}, {rate},
+                    1, {rateDate.ToDateTime(TimeOnly.MinValue)}, randomblob(8),
+                    '', {rateDate.ToDateTime(TimeOnly.MinValue)}, '', 0);
+                """);
 
         public Task SeedClosingLedgerAsync(
             int fiscalYearId,
-            int nextFiscalYearId) =>
+            int nextFiscalYearId,
+            JournalPartyType partyType = JournalPartyType.Customer,
+            int partyId = 99) =>
             Context.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO Accounts (
                     Id, CompanyId, Code, Name, AccountType, NormalBalance,
@@ -490,13 +895,14 @@ public sealed class FiscalYearServiceTests
 
                 INSERT INTO JournalEntryLines (
                     Id, CompanyId, JournalEntryId, AccountId, PartyType,
-                    PartyId, Debit, Credit, CreatedById, CreatedOn,
-                    CreatedByPc, IsDeleted)
+                    PartyId, Debit, Credit, Currency, ExchangeRate,
+                    TransactionDebit, TransactionCredit, CreatedById,
+                    CreatedOn, CreatedByPc, IsDeleted)
                 VALUES
-                    (501, 1, 50, 10, 1, 99, 100, 0, '',
-                     '2026-12-31', '', 0),
-                    (502, 1, 50, 20, NULL, NULL, 0, 100, '',
-                     '2026-12-31', '', 0);
+                    (501, 1, 50, 10, {(int)partyType}, {partyId}, 100, 0, 2, 2, 50, 0,
+                     '', '2026-12-31', '', 0),
+                    (502, 1, 50, 20, NULL, NULL, 0, 100, 1, 1, 0, 100,
+                     '', '2026-12-31', '', 0);
                 """);
 
         public Task ChangeClosingAssetBalanceAsync(decimal amount) =>
@@ -548,6 +954,30 @@ public sealed class FiscalYearServiceTests
                 CREATE TABLE CompanySettings (
                     CompanyId INTEGER PRIMARY KEY,
                     BaseCurrency INTEGER NOT NULL DEFAULT 1
+                );
+
+                CREATE TABLE ExchangeRates (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL,
+                    Currency INTEGER NOT NULL,
+                    RateDate TEXT NOT NULL,
+                    Rate NUMERIC NOT NULL,
+                    Source INTEGER NOT NULL,
+                    Provider TEXT NULL,
+                    Notes TEXT NULL,
+                    LastModifiedAt TEXT NOT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE FiscalYears (

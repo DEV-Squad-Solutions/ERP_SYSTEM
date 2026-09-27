@@ -521,6 +521,7 @@ public sealed class InventoryMasterDeletionTests
 
             await CreateSchemaAsync(context);
             await SeedAsync(context);
+            await TestFiscalYearSchema.EnsureAsync(context);
 
             return new InventoryDeletionDatabase(connection, context);
         }

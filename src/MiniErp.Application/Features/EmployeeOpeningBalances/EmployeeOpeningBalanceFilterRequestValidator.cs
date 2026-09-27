@@ -27,6 +27,11 @@ public sealed class EmployeeOpeningBalanceFilterRequestValidator
             .When(filter => filter.BalanceType.HasValue)
             .WithMessage("نوع الرصيد المحدد غير صالح.");
 
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue)
+            .WithMessage("معرف السنة المالية غير صالح.");
+
         RuleFor(filter => filter)
             .Must(filter =>
                 !filter.FromDate.HasValue ||

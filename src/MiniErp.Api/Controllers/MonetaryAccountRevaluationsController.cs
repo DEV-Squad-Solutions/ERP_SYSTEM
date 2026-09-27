@@ -14,9 +14,11 @@ public sealed class MonetaryAccountRevaluationsController(
 {
     [HttpGet("options")]
     [ProducesResponseType<IReadOnlyList<MonetaryAccountRevaluationOption>>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetOptions(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetOptions(
+        [FromQuery] int? fiscalYearId,
+        CancellationToken cancellationToken)
     {
-        var result = await service.GetOptionsAsync(cancellationToken);
+        var result = await service.GetOptionsAsync(fiscalYearId, cancellationToken);
         return this.ToActionResult(result);
     }
 
@@ -28,13 +30,20 @@ public sealed class MonetaryAccountRevaluationsController(
         [FromQuery] int? partyId,
         [FromQuery] DateOnly? fromDate,
         [FromQuery] DateOnly? toDate,
+        [FromQuery] int? fiscalYearId,
         CancellationToken cancellationToken)
     {
-        var result = await service.GetAsync(accountId, partyType, partyId, fromDate, toDate, cancellationToken);
+        var result = await service.GetAsync(
+            accountId,
+            partyType,
+            partyId,
+            fromDate,
+            toDate,
+            fiscalYearId,
+            cancellationToken);
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<MonetaryAccountRevaluationResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> Create(

@@ -72,10 +72,24 @@ public sealed class ExchangeRateResolver(
                     IsBaseCurrency: false));
         }
 
+        var fiscalYearId = await dbContext.FiscalYears
+            .AsNoTracking()
+            .Where(year =>
+                year.CompanyId == companyId &&
+                year.StartDate <= date &&
+                year.EndDate >= date)
+            .Select(year => (int?)year.Id)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (!fiscalYearId.HasValue)
+        {
+            return Result<ResolvedExchangeRate>.Failure(Missing(currency, date));
+        }
+
         var rate = await dbContext.ExchangeRates
             .AsNoTracking()
             .Where(entity =>
                 entity.CompanyId == companyId &&
+                entity.FiscalYearId == fiscalYearId.Value &&
                 entity.Currency == currency &&
                 entity.RateDate <= date)
             .OrderByDescending(entity => entity.RateDate)

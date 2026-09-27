@@ -35,10 +35,12 @@ public sealed class ExchangeRatesController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(
         int id,
+        [FromQuery] int? fiscalYearId,
         CancellationToken cancellationToken)
     {
         var result = await exchangeRateService.GetByIdAsync(
             id,
+            fiscalYearId,
             cancellationToken);
         return this.ToActionResult(result);
     }
@@ -50,11 +52,13 @@ public sealed class ExchangeRatesController(
     public async Task<IActionResult> Resolve(
         [FromQuery] CurrencyCode currency,
         [FromQuery] DateOnly date,
+        [FromQuery] int? fiscalYearId,
         CancellationToken cancellationToken)
     {
         var result = await exchangeRateService.ResolveAsync(
             currency,
             date,
+            fiscalYearId,
             cancellationToken);
         return this.ToActionResult(result);
     }
@@ -128,7 +132,11 @@ public sealed class ExchangeRatesController(
             ? this.ToProblem(result.Errors)
             : CreatedAtAction(
                 nameof(GetById),
-                new { id = result.Value.Id },
+                new
+                {
+                    id = result.Value.Id,
+                    fiscalYearId = result.Value.FiscalYearId
+                },
                 result.Value);
     }
 

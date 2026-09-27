@@ -17,6 +17,8 @@ public sealed class InventoryCountService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
+    IFiscalYearPeriodGuard fiscalYearPeriodGuard,
     IInventoryStockService inventoryStockService,
     IInventoryCostingService inventoryCostingService,
     TimeProvider timeProvider,
@@ -39,10 +41,23 @@ public sealed class InventoryCountService(
                 filterError);
         }
 
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.FromDate,
+            toDate: filters.ToDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<PagedResponse<InventoryCountListResponse>>.Failure(
+                fiscalYear.Errors);
+        }
+
         var documentNumber = filters.DocumentNumber?.Trim();
         var query = dbContext.InventoryCounts
             .AsNoTracking()
-            .Where(count => count.CompanyId == companyId)
+            .Where(count =>
+                count.CompanyId == companyId &&
+                count.FiscalYearId == fiscalYear.Value.FiscalYearId)
             .Where(count =>
                 string.IsNullOrEmpty(documentNumber) ||
                 count.DocumentNumber.Contains(documentNumber))
@@ -72,6 +87,7 @@ public sealed class InventoryCountService(
 
     public async Task<Result<InventoryCountResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -79,7 +95,17 @@ public sealed class InventoryCountService(
             return Result<InventoryCountResponse>.Failure(InvalidId());
         }
 
-        var response = await ProjectResponseQuery(id)
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<InventoryCountResponse>.Failure(fiscalYear.Errors);
+        }
+
+        var response = await ProjectResponseQuery(
+                id,
+                fiscalYear.Value.FiscalYearId)
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -92,6 +118,15 @@ public sealed class InventoryCountService(
         InventoryCountRequest request,
         CancellationToken cancellationToken = default)
     {
+        var period = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            request.CountDate,
+            nameof(InventoryCountRequest.CountDate),
+            cancellationToken);
+        if (period.IsFailure)
+        {
+            return Result<InventoryCountResponse>.Failure(period.Errors);
+        }
+
         var requested = request.Adapt<InventoryCount>();
 
         await using var transaction = await dbContext.Database
@@ -208,6 +243,15 @@ public sealed class InventoryCountService(
             return Result<InventoryCountResponse>.Failure(Concurrency());
         }
 
+        var period = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            count.CountDate,
+            nameof(InventoryCountRequest.CountDate),
+            cancellationToken);
+        if (period.IsFailure)
+        {
+            return Result<InventoryCountResponse>.Failure(period.Errors);
+        }
+
         var lineError = ValidateReplacementLines(count, request.Lines);
         if (lineError is not null)
         {
@@ -286,6 +330,15 @@ public sealed class InventoryCountService(
             return Result<InventoryCountResponse>.Failure(Concurrency());
         }
 
+        var period = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            count.CountDate,
+            nameof(InventoryCountRequest.CountDate),
+            cancellationToken);
+        if (period.IsFailure)
+        {
+            return Result<InventoryCountResponse>.Failure(period.Errors);
+        }
+
         var missingPhysicalItemIds = count.Lines
             .Where(line => !line.PhysicalQuantity.HasValue)
             .Select(line => line.ItemId)
@@ -331,7 +384,8 @@ public sealed class InventoryCountService(
                     line.PhysicalQuantity!.Value != line.SystemQuantity)
                 .Select(line => new InventoryCostingKey(
                     count.StoreId,
-                    line.ItemId))
+                    line.ItemId,
+                    count.FiscalYearId))
                 .Distinct()
                 .ToArray(),
             cancellationToken);
@@ -463,7 +517,8 @@ public sealed class InventoryCountService(
                 .SelectMany(adjustment => adjustment!.Lines.Select(line =>
                     new InventoryCostingKey(
                         adjustment.StoreId,
-                        line.ItemId)))
+                        line.ItemId,
+                        adjustment.FiscalYearId)))
                 .Distinct()
                 .ToArray();
             var costingError = await inventoryCostingService.RecalculateAsync(
@@ -546,6 +601,15 @@ public sealed class InventoryCountService(
             return Result.Failure(Concurrency());
         }
 
+        var period = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            count.CountDate,
+            nameof(InventoryCountRequest.CountDate),
+            cancellationToken);
+        if (period.IsFailure)
+        {
+            return Result.Failure(period.Errors);
+        }
+
         if (count.ReconciledAt.HasValue ||
             await dbContext.StockAdjustments.AnyAsync(
                 adjustment =>
@@ -577,11 +641,15 @@ public sealed class InventoryCountService(
         return Result.Success();
     }
 
-    private IQueryable<InventoryCountResponse> ProjectResponseQuery(int id) =>
+    private IQueryable<InventoryCountResponse> ProjectResponseQuery(
+        int id,
+        int? fiscalYearId = null) =>
         dbContext.InventoryCounts
             .Where(count =>
                 count.CompanyId == companyId &&
-                count.Id == id)
+                count.Id == id &&
+                (!fiscalYearId.HasValue ||
+                 count.FiscalYearId == fiscalYearId.Value))
             .ProjectToType<InventoryCountResponse>();
 
     private Task<InventoryCount?> LoadForWriteAsync(

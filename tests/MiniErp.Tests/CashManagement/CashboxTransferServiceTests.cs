@@ -33,6 +33,8 @@ public sealed class CashboxTransferServiceTests
         Assert.Equal(CurrencyCode.EGP, result.Value.Currency);
         Assert.Equal(1m, result.Value.ExchangeRate);
         Assert.Equal(200m, result.Value.BaseAmount);
+        Assert.Equal(1, result.Value.FiscalYearId);
+        Assert.Equal("2026", result.Value.FiscalYearName);
 
         var vouchers = await database.Context.CashVouchers
             .AsNoTracking()
@@ -79,11 +81,99 @@ public sealed class CashboxTransferServiceTests
         Assert.Equal(200m, listItem.Amount);
         Assert.Equal("Main Cashbox", listItem.SourceCashboxName);
         Assert.Equal("Second Cashbox", listItem.DestinationCashboxName);
+        Assert.Equal(1, listItem.FiscalYearId);
+        Assert.Equal("2026", listItem.FiscalYearName);
 
         var otherCompany = await database
             .CreateCashboxTransferService(companyId: 2)
             .GetByIdAsync(result.Value.Id);
         Assert.Equal("CashboxTransfers.NotFound", otherCompany.Error.Code);
+    }
+
+    [Fact]
+    public async Task TransferListUsesSelectedFiscalYearAndValidatesDates()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var oldTransfer = await database.CreateCashboxTransferService(1)
+            .AddAsync(CreateRequest(amount: 50m));
+        Assert.True(oldTransfer.IsSuccess, oldTransfer.Error.Description);
+        await database.ConfigureSeparateFiscalYearsAsync();
+        await database.Context.CashboxTransfers
+            .Where(transfer => transfer.Id == oldTransfer.Value.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(
+                transfer => transfer.TransferDate,
+                new DateOnly(2025, 8, 8)));
+        await database.Context.CashVouchers
+            .Where(voucher =>
+                voucher.CashboxTransferId == oldTransfer.Value.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(
+                voucher => voucher.VoucherDate,
+                new DateOnly(2025, 8, 8)));
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreateCashboxTransferService(1);
+        var currentTransfer = await service.AddAsync(
+            CreateRequest(amount: 75m));
+        Assert.True(
+            currentTransfer.IsSuccess,
+            currentTransfer.Error.Description);
+
+        var current = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashboxTransferFilterRequest(
+                Search: currentTransfer.Value.TransferNumber));
+        var historical = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashboxTransferFilterRequest(
+                Search: oldTransfer.Value.TransferNumber,
+                FiscalYearId: 1));
+        var invalidRange = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashboxTransferFilterRequest(
+                FromDate: new DateOnly(2026, 1, 1),
+                FiscalYearId: 1));
+        var hiddenHistoricalDetail = await service.GetByIdAsync(
+            oldTransfer.Value.Id);
+        var historicalDetail = await service.GetByIdAsync(
+            oldTransfer.Value.Id,
+            fiscalYearId: 1);
+        var currentDetail = await service.GetByIdAsync(
+            currentTransfer.Value.Id);
+
+        var currentRow = Assert.Single(current.Value.Items);
+        Assert.Equal(100, currentRow.FiscalYearId);
+        Assert.Equal("2026", currentRow.FiscalYearName);
+        var historicalRow = Assert.Single(historical.Value.Items);
+        Assert.Equal(1, historicalRow.FiscalYearId);
+        Assert.Equal("2025", historicalRow.FiscalYearName);
+        Assert.True(invalidRange.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            invalidRange.Error.Code);
+        Assert.True(hiddenHistoricalDetail.IsFailure);
+        Assert.Equal(
+            "CashboxTransfers.NotFound",
+            hiddenHistoricalDetail.Error.Code);
+        Assert.True(historicalDetail.IsSuccess);
+        Assert.Equal(1, historicalDetail.Value.FiscalYearId);
+        Assert.True(currentDetail.IsSuccess);
+        Assert.Equal(100, currentDetail.Value.FiscalYearId);
+
+        var crossYearUpdate = await service.UpdateAsync(
+            oldTransfer.Value.Id,
+            new CashboxTransferUpdateRequest(
+                TransferDate: new DateOnly(2026, 8, 8),
+                SourceCashboxId: historicalDetail.Value.SourceCashboxId,
+                DestinationCashboxId:
+                    historicalDetail.Value.DestinationCashboxId,
+                Amount: historicalDetail.Value.Amount,
+                Description: historicalDetail.Value.Description,
+                Notes: historicalDetail.Value.Notes,
+                RowVersion: historicalDetail.Value.RowVersion));
+        Assert.True(crossYearUpdate.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            crossYearUpdate.Error.Code);
     }
 
     [Theory]

@@ -17,6 +17,7 @@ using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
 using MiniErp.Infrastructure.Services.Cashboxes;
 using MiniErp.Infrastructure.Services.ExchangeRates;
+using MiniErp.Infrastructure.Services.FiscalYears;
 using MiniErp.Infrastructure.Services.Pagination;
 
 namespace MiniErp.Tests.CashManagement;
@@ -387,6 +388,7 @@ public sealed class CashboxExchangeRateCascadeTests
             };
             context.Companies.Add(company);
             await context.SaveChangesAsync();
+            await TestFiscalYearSchema.EnsureAsync(context);
             context.CompanySettings.Add(new CompanySettings
             {
                 CompanyId = company.Id,
@@ -672,7 +674,13 @@ public sealed class CashboxExchangeRateCascadeTests
                 new ExchangeRateResolver(
                     Context,
                     companyContext,
-                    TimeProvider.System));
+                    TimeProvider.System),
+                new FiscalYearQueryScopeResolver(
+                    Context,
+                    companyContext),
+                new FiscalYearPeriodGuard(
+                    Context,
+                    companyContext));
         }
 
         public async ValueTask DisposeAsync()

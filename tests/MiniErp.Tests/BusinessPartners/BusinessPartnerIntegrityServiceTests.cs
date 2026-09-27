@@ -197,6 +197,7 @@ public sealed class BusinessPartnerIntegrityServiceTests
 
             await CreateSchemaAsync(context);
             await SeedAsync(context);
+            await TestFiscalYearSchema.EnsureAsync(context);
 
             return new BusinessPartnerIntegrityTestDatabase(
                 connection,

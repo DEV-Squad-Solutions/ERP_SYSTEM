@@ -12,6 +12,7 @@ public interface IEmployeeMovementService
 
     Task<Result<EmployeeMovementResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<EmployeeMovementResponse>> AddAsync(

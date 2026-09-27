@@ -1,4 +1,6 @@
 using MiniErp.Application.Common.Models;
+using MiniErp.Application.Common.Abstractions;
+using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.CashVouchers;
 using MiniErp.Application.Features.EmployeeMovements;
 using MiniErp.Application.Features.EmployeeOpeningBalances;
@@ -476,7 +478,7 @@ public sealed class EmployeeFinancialStatementTests
         var statementService = database.CreateStatementService();
 
         // 1. Payment CashVoucher (advance/payout to employee -> Debit)
-        var paymentResult = await cashVoucherService.AddAsync(new CashVoucherRequest(
+        var paymentResult = await AddPostedVoucherAsync(cashVoucherService, new CashVoucherRequest(
             VoucherDate: new DateOnly(2026, 9, 5),
             Direction: CashDirection.Payment,
             CashboxId: 1,
@@ -489,7 +491,7 @@ public sealed class EmployeeFinancialStatementTests
         Assert.True(paymentResult.IsSuccess);
 
         // 2. Receipt CashVoucher (repayment from employee -> Credit)
-        var receiptResult = await cashVoucherService.AddAsync(new CashVoucherRequest(
+        var receiptResult = await AddPostedVoucherAsync(cashVoucherService, new CashVoucherRequest(
             VoucherDate: new DateOnly(2026, 9, 15),
             Direction: CashDirection.Receipt,
             CashboxId: 1,
@@ -571,7 +573,7 @@ public sealed class EmployeeFinancialStatementTests
         Assert.True(companyPayment.IsSuccess);
 
         // 2. Cashbox payment for Employee 2
-        var emp2Payment = await cashVoucherService.AddAsync(new CashVoucherRequest(
+        var emp2Payment = await AddPostedVoucherAsync(cashVoucherService, new CashVoucherRequest(
             VoucherDate: new DateOnly(2026, 9, 2),
             Direction: CashDirection.Payment,
             CashboxId: 1,
@@ -648,7 +650,7 @@ public sealed class EmployeeFinancialStatementTests
         Assert.True(moveResult.IsSuccess);
 
         // 3. Cash Voucher payment (-500 debit)
-        var voucherResult = await cashVoucherService.AddAsync(new CashVoucherRequest(
+        var voucherResult = await AddPostedVoucherAsync(cashVoucherService, new CashVoucherRequest(
             VoucherDate: new DateOnly(2026, 9, 12),
             Direction: CashDirection.Payment,
             CashboxId: 1,
@@ -737,5 +739,133 @@ public sealed class EmployeeFinancialStatementTests
         Assert.True(statementResult1.IsSuccess);
         Assert.Empty(statementResult1.Value.Items);
         Assert.Equal(0m, statementResult1.Value.Summary.ClosingBalanceAmount);
+    }
+
+    [Fact]
+    public async Task EmployeeStatement_DefaultsToCurrentYearAndUsesCarriedOpeningBalance()
+    {
+        await using var database =
+            await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        await EnsureFinancialLedgerSchemaAsync(database.Context);
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent,
+                RowVersion, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                3, 1, '2025', '2025-01-01', '2025-12-31', 2, 0,
+                randomblob(8), 'test', '2025-01-01', 'test', 0);
+            """);
+        await database.Context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            INSERT INTO JournalEntries (
+                Id, CompanyId, FiscalYearId, EntryNumber, EntryDate,
+                Description, EntryType, SourceType, SourceId,
+                SourceNumber, Status, PostedOn, IsDeleted)
+            VALUES (
+                9001, 1, 1, 'OPEN-2026', '2026-01-01',
+                'Carried employee balance', {(int)JournalEntryType.Opening},
+                {(int)JournalEntrySourceType.FiscalYearClosing}, 3,
+                'OPEN-2026', {(int)JournalEntryStatus.Posted},
+                '2026-01-01T00:00:00Z', 0);
+
+            INSERT INTO JournalEntryLines (
+                CompanyId, JournalEntryId, AccountId, PartyType, PartyId,
+                Description, Debit, Credit, Currency, ExchangeRate,
+                TransactionDebit, TransactionCredit, IsDeleted)
+            VALUES (
+                1, 9001, 1, {(int)JournalPartyType.Employee}, 1,
+                'Carried employee balance', 0, 700, 1, 1, 0, 700, 0);
+            """);
+        var currentMovement = new EmployeeMovement
+        {
+            CompanyId = 1,
+            FiscalYearId = 1,
+            EmployeeId = 1,
+            Type = EmployeeMovementType.Credit,
+            MovementDate = new DateOnly(2026, 2, 1),
+            Currency = CurrencyCode.EGP,
+            Notes = "Current year movement"
+        };
+        currentMovement.ApplyAmounts(EmployeeMovementType.Credit, 100m);
+        currentMovement.ApplyExchangeRate(1m);
+        var oldMovement = new EmployeeMovement
+        {
+            CompanyId = 1,
+            FiscalYearId = 3,
+            EmployeeId = 1,
+            Type = EmployeeMovementType.Debit,
+            MovementDate = new DateOnly(2025, 12, 1),
+            Currency = CurrencyCode.EGP,
+            Notes = "Old year movement"
+        };
+        oldMovement.ApplyAmounts(EmployeeMovementType.Debit, 50m);
+        oldMovement.ApplyExchangeRate(1m);
+        database.Context.EmployeeMovements.AddRange(
+            currentMovement,
+            oldMovement);
+        await database.Context.SaveChangesAsync();
+        var statements = database.CreateStatementService();
+
+        var current = await statements.GetEmployeeStatementAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new EmployeeStatementFilterRequest(EmployeeId: 1));
+        var historical = await statements.GetEmployeeStatementAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new EmployeeStatementFilterRequest(
+                EmployeeId: 1,
+                FiscalYearId: 3));
+        var balance = await statements.GetEmployeeBalanceAsync(1);
+        var summary = await statements.GetEmployeeAccountSummaryAsync(1);
+
+        Assert.True(current.IsSuccess);
+        Assert.Equal(700m, current.Value.Summary.OpeningBalanceAmount);
+        Assert.Equal(800m, current.Value.Summary.ClosingBalanceAmount);
+        Assert.Equal(
+            "Current year movement",
+            Assert.Single(current.Value.Items).Description);
+        Assert.True(historical.IsSuccess);
+        Assert.Equal(
+            "Old year movement",
+            Assert.Single(historical.Value.Items).Description);
+        Assert.True(balance.IsSuccess);
+        Assert.Equal(800m, balance.Value.BalanceAmount);
+        Assert.True(summary.IsSuccess);
+        Assert.Equal(700m, summary.Value.OpeningBalance);
+        Assert.Equal(800m, summary.Value.CurrentBalance);
+    }
+
+    private static async Task<Result<CashVoucherResponse>> AddPostedVoucherAsync(
+        ICashVoucherService service,
+        CashVoucherRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var draft = await service.AddAsync(request, cancellationToken);
+        if (draft.IsFailure)
+        {
+            return draft;
+        }
+
+        return await service.UpdateAsync(
+            draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: request.VoucherDate,
+                Direction: request.Direction,
+                CashboxId: request.CashboxId,
+                CashMovementTypeId: request.CashMovementTypeId,
+                EmployeeId: request.EmployeeId,
+                BusinessPartnerId: request.BusinessPartnerId,
+                DriverId: request.DriverId,
+                DriverTripId: request.DriverTripId,
+                ExternalPartyName: request.ExternalPartyName,
+                Amount: request.Amount,
+                ReferenceNumber: request.ReferenceNumber,
+                Description: request.Description,
+                Notes: request.Notes,
+                RowVersion: draft.Value.RowVersion,
+                ExchangeRate: request.ExchangeRate,
+                AccountId: request.AccountId,
+                EmployeeMovementType: request.EmployeeMovementType),
+            cancellationToken);
     }
 }

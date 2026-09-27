@@ -8,6 +8,7 @@ using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Services.EmployeeAttendance;
+using MiniErp.Infrastructure.Services.FiscalYears;
 using MiniErp.Infrastructure.Services.Pagination;
 using System;
 using System.Collections.Generic;
@@ -46,6 +47,9 @@ internal sealed class EmployeeAttendanceTestDatabase : IAsyncDisposable
             options.UseSqlite(connection));
 
         services.AddScoped<IPaginationService, PaginationService>();
+        services.AddScoped<IFiscalYearPeriodGuard, FiscalYearPeriodGuard>();
+        services.AddScoped<IFiscalYearQueryScopeResolver,
+            FiscalYearQueryScopeResolver>();
         services.AddScoped<IEmployeeAttendanceService, EmployeeAttendanceService>();
         services.AddSingleton<ICurrentCompanyContext>(new TestCurrentCompanyContext(companyId));
 
@@ -56,6 +60,7 @@ internal sealed class EmployeeAttendanceTestDatabase : IAsyncDisposable
         await context.Database.EnsureCreatedAsync();
         await context.Database.ExecuteSqlRawAsync("DROP TABLE IF EXISTS Companies; CREATE TABLE Companies (Id INTEGER PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL, Address TEXT NOT NULL, CommercialRegister TEXT NOT NULL, TaxNumber TEXT NOT NULL, ManagerName TEXT NOT NULL, RowVersion BLOB NOT NULL DEFAULT (X'0102030405060708'), CreatedById TEXT NOT NULL DEFAULT '', CreatedOn TEXT NOT NULL DEFAULT '2026-01-01', CreatedByPc TEXT NOT NULL DEFAULT '', UpdatedById TEXT NULL, UpdatedOn TEXT NULL, UpdatedByPc TEXT NULL, DeletedById TEXT NULL, DeletedOn TEXT NULL, DeletedByPc TEXT NULL, IsDeleted INTEGER NOT NULL DEFAULT 0);");
         await SeedDataAsync(context, companyId);
+        await TestFiscalYearSchema.EnsureAsync(context);
 
         return new EmployeeAttendanceTestDatabase(connection, serviceProvider, scope, context);
     }
@@ -111,6 +116,23 @@ internal sealed class EmployeeAttendanceTestDatabase : IAsyncDisposable
     {
         return scope.ServiceProvider.GetRequiredService<IEmployeeAttendanceService>();
     }
+
+    public Task ConfigureSeparateFiscalYearsAsync() =>
+        Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears
+            SET Name = '2025', StartDate = '2025-01-01',
+                EndDate = '2025-12-31'
+            WHERE Id = 1;
+
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent, RowVersion, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                100, 1, '2026', '2026-01-01', '2026-12-31', 1,
+                0, randomblob(8), 'test', '2026-01-01', 'test', 0);
+            """);
 
     public async ValueTask DisposeAsync()
     {

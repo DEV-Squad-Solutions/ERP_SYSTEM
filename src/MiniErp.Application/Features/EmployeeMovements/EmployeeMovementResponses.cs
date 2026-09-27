@@ -5,6 +5,8 @@ namespace MiniErp.Application.Features.EmployeeMovements;
 public sealed record EmployeeMovementResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
+    string FiscalYearName,
     int EmployeeId,
     string EmployeeCode,
     string EmployeeName,

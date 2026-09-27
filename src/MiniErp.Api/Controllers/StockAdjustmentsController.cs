@@ -34,15 +34,16 @@ public sealed class StockAdjustmentsController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(
         int id,
+        [FromQuery] int? fiscalYearId,
         CancellationToken cancellationToken)
     {
         var result = await stockAdjustmentService.GetByIdAsync(
             id,
+            fiscalYearId,
             cancellationToken);
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<StockAdjustmentResponse>(
         StatusCodes.Status201Created)]
@@ -68,11 +69,15 @@ public sealed class StockAdjustmentsController(
             ? this.ToProblem(result.Errors)
             : CreatedAtAction(
                 nameof(GetById),
-                new { id = result.Value.Id },
+                new
+                {
+                    id = result.Value.Id,
+                    fiscalYearId = result.Value.FiscalYearId
+                },
                 result.Value);
     }
 
-    [Authorize(Roles = "Admin")]
+
     [HttpPut("{id:int}")]
     [ProducesResponseType<StockAdjustmentResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -96,7 +101,6 @@ public sealed class StockAdjustmentsController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

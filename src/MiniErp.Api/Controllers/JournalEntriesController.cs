@@ -34,15 +34,16 @@ public sealed class JournalEntriesController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(
         int id,
+        [FromQuery] int? fiscalYearId,
         CancellationToken cancellationToken)
     {
         var result = await journalEntryService.GetByIdAsync(
             id,
+            fiscalYearId,
             cancellationToken);
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<JournalEntryResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
@@ -65,11 +66,14 @@ public sealed class JournalEntriesController(
             ? this.ToProblem(result.Errors)
             : CreatedAtAction(
                 nameof(GetById),
-                new { id = result.Value.Id },
+                new
+                {
+                    id = result.Value.Id,
+                    fiscalYearId = result.Value.FiscalYearId
+                },
                 result.Value);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}")]
     [ProducesResponseType<JournalEntryResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -94,7 +98,6 @@ public sealed class JournalEntriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

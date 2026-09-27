@@ -17,6 +17,7 @@ public interface ICashVoucherService
 
     Task<Result<CashVoucherResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<CashVoucherPartySelectResponse>> GetPartySelectAsync(

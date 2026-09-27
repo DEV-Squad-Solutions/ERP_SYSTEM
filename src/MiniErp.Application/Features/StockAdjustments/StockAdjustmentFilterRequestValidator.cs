@@ -7,6 +7,10 @@ public sealed class StockAdjustmentFilterRequestValidator
 {
     public StockAdjustmentFilterRequestValidator()
     {
+        RuleFor(request => request.FiscalYearId)
+            .GreaterThan(0)
+            .When(request => request.FiscalYearId.HasValue);
+
         RuleFor(request => request.DocumentNumber)
             .MaximumLength(
                 StockAdjustmentFilterRequest.DocumentNumberMaximumLength);

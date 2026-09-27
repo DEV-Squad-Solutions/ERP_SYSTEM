@@ -63,7 +63,7 @@ public class DatabaseRecoveryService(
     {
         var applyMigrations = configuration.GetValue(
             "Database:ApplyMigrationsOnStartup",
-            true);
+            false);
         return initializer.InitializeAsync(
             applyMigrations: applyMigrations,
             seedEnabled: configuration.GetValue("Seed:Enabled", false),

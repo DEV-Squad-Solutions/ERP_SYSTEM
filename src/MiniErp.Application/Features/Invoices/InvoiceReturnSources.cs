@@ -14,7 +14,8 @@ public sealed record InvoiceReturnSourceFilterRequest(
     InvoiceReturnType ReturnType,
     DateOnly AsOfDate,
     string? Search = null,
-    int? CurrentReturnInvoiceId = null);
+    int? CurrentReturnInvoiceId = null,
+    int? FiscalYearId = null);
 
 public sealed record InvoiceReturnSourceLineResponse(
     int SourceInvoiceLineId,

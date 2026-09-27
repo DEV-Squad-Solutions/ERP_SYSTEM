@@ -542,14 +542,14 @@ public sealed class FinancialStatementReportTests
             """
             PRAGMA foreign_keys = OFF;
             INSERT INTO ItemMovements (
-                Id, CompanyId, StoreId, ItemId, ItemUnitId, MovementType,
+                Id, CompanyId, FiscalYearId, StoreId, ItemId, ItemUnitId, MovementType,
                 ReferenceId, ReferenceNumber, MovementDate, QuantityIn,
                 QuantityOut, CostStatus, PendingCostQuantity, UnitCost,
                 TotalCost, QuantityAfter, AverageCostAfter,
                 InventoryValueAfter, Description, CreatedById, CreatedOn,
                 CreatedByPc, IsDeleted)
             VALUES (
-                1, 1, 1, 1, NULL, 1, 999, 'PENDING-001', '2026-08-01',
+                1, 1, 1, 1, 1, NULL, 1, 999, 'PENDING-001', '2026-08-01',
                 0, 1, 3, 1, NULL, 0, 0, 0, 0, NULL,
                 'test', '2026-08-01', 'test', 0);
             PRAGMA foreign_keys = ON;

@@ -19,6 +19,73 @@ public sealed class StockTransferServiceTests
     }
 
     [Fact]
+    public async Task GetAllDefaultsToCurrentFiscalYear()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        await database.ConfigureSeparateFiscalYearsAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO StockTransfers (
+                CompanyId, FiscalYearId, DocumentNumber, TransferDate,
+                SourceStoreId, DestinationStoreId, Notes, LastModifiedAt,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 'STF-2025', '2025-06-01', 1, 4, NULL,
+                 '2025-06-01', 'test', '2025-06-01', 'test', 0),
+                (1, 100, 'STF-2026', '2026-06-01', 1, 4, NULL,
+                 '2026-06-01', 'test', '2026-06-01', 'test', 0);
+            """);
+        var service = database.CreateStockTransferService();
+
+        var currentYear = await service.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new StockTransferFilterRequest());
+        var nextYear = await service.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new StockTransferFilterRequest(FiscalYearId: 100));
+        var invalidDate = await service.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new StockTransferFilterRequest(
+                FiscalYearId: 1,
+                FromDate: new DateOnly(2026, 1, 1)));
+
+        Assert.True(currentYear.IsSuccess);
+        var currentItem = Assert.Single(currentYear.Value.Items);
+        Assert.Equal("STF-2025", currentItem.DocumentNumber);
+        Assert.Equal(1, currentItem.FiscalYearId);
+        Assert.Equal("2025", currentItem.FiscalYearName);
+
+        Assert.True(nextYear.IsSuccess);
+        var nextItem = Assert.Single(nextYear.Value.Items);
+        Assert.Equal("STF-2026", nextItem.DocumentNumber);
+        Assert.Equal(100, nextItem.FiscalYearId);
+        Assert.Equal("2026", nextItem.FiscalYearName);
+        Assert.Equal(
+            "StockTransfers.NotFound",
+            (await service.GetByIdAsync(nextItem.Id)).Error.Code);
+        Assert.Equal(
+            100,
+            (await service.GetByIdAsync(nextItem.Id, fiscalYearId: 100))
+                .Value.FiscalYearId);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            invalidDate.Error.Code);
+    }
+
+    [Fact]
     public async Task Add_ClosedTransferDate_IsRejectedBeforeAnyWrite()
     {
         await using var database = await InventoryDocumentTestDatabase.CreateAsync();

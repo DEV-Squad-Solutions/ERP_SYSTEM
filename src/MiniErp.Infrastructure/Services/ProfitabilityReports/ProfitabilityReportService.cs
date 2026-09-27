@@ -36,7 +36,7 @@ public sealed class ProfitabilityReportService(
         var report = await LoadReportDataAsync(
             filters,
             invoiceId: null,
-            alignReturnsToSourceInvoice: true,
+            alignReturnsToSourceInvoice: false,
             cancellationToken);
         var linkedReturns = report.Lines
             .Where(line =>
@@ -165,6 +165,9 @@ public sealed class ProfitabilityReportService(
             .AsNoTracking()
             .Where(line =>
                 line.CompanyId == companyId &&
+                (filters.FiscalYearId.HasValue
+                    ? line.Invoice.FiscalYearId == filters.FiscalYearId.Value
+                    : line.Invoice.FiscalYear.IsCurrent) &&
                 line.ItemId.HasValue &&
                 line.Invoice.ContentType == InvoiceContentType.Items &&
                 (line.Invoice.InvoiceType == InvoiceType.Sales ||
@@ -306,6 +309,9 @@ public sealed class ProfitabilityReportService(
             .AsNoTracking()
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                (filters.FiscalYearId.HasValue
+                    ? movement.FiscalYearId == filters.FiscalYearId.Value
+                    : movement.FiscalYear.IsCurrent) &&
                 (movement.MovementType == ItemMovementType.Sales ||
                  movement.MovementType == ItemMovementType.SalesReturn));
         var projections = await (
@@ -824,6 +830,13 @@ public sealed class ProfitabilityReportService(
             return InvalidFilter(
                 nameof(filters.BusinessPartnerId),
                 "رقم العميل غير صحيح.");
+        }
+
+        if (filters.FiscalYearId is <= 0)
+        {
+            return InvalidFilter(
+                nameof(filters.FiscalYearId),
+                "رقم السنة المالية غير صحيح.");
         }
 
         if (filters.StoreId is <= 0)

@@ -20,6 +20,10 @@ public interface IFiscalYearService
         int id,
         CancellationToken cancellationToken = default);
 
+    Task<Result<FiscalYearResponse>> SetCurrentAsync(
+        int id,
+        CancellationToken cancellationToken = default);
+
     Task<Result<FiscalYearResponse>> AddAsync(
         FiscalYearRequest request,
         CancellationToken cancellationToken = default);

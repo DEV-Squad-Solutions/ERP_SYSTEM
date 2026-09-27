@@ -15,6 +15,8 @@ using MiniErp.Infrastructure.Services.JournalEntries;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.Statements;
 using MiniErp.Infrastructure.Services.CashboxRevaluations;
+using MiniErp.Infrastructure.Services.FiscalYears;
+using MiniErp.Infrastructure.Services.MonetaryAccountRevaluations;
 using MiniErp.Domain.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using MiniErp.Tests.TestDoubles;
@@ -39,6 +41,31 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
 
     public ApplicationDbContext Context { get; }
 
+    public Task ConfigureSeparateFiscalYearsAsync() =>
+        Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears
+            SET Name = '2025', StartDate = '2025-01-01',
+                EndDate = '2025-12-31', Status = 2, IsCurrent = 0
+            WHERE Id = 1;
+
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent, RowVersion, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                100, 1, '2026', '2026-01-01', '2026-12-31', 1,
+                1, randomblob(8), 'test', '2026-01-01', 'test', 0);
+
+            UPDATE DriverTrips
+            SET FiscalYearId = 1, TripDate = '2025-07-20'
+            WHERE Id = 1;
+
+            UPDATE DriverTrips
+            SET FiscalYearId = 100, TripDate = '2026-07-21'
+            WHERE Id = 2;
+            """);
+
     public static async Task<CashManagementTestDatabase> CreateAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -55,6 +82,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
 
         await CreateSchemaAsync(context);
         await SeedAsync(context);
+        await TestFiscalYearSchema.EnsureAsync(context);
         context.ChangeTracker.Clear();
 
         return new CashManagementTestDatabase(
@@ -85,25 +113,45 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
 
     public CashboxTransferService CreateCashboxTransferService(
         int companyId,
-        ApplicationDbContext? context = null) =>
-        new(
-            context ?? Context,
+        ApplicationDbContext? context = null)
+    {
+        var serviceContext = context ?? Context;
+        var companyContext = new TestCurrentCompanyContext(companyId);
+        return new CashboxTransferService(
+            serviceContext,
             new PaginationService(),
-            new TestCurrentCompanyContext(companyId),
+            companyContext,
             new MiniErp.Tests.TestExchangeRateResolver(),
-            TimeProvider.System);
+            TimeProvider.System,
+            new FiscalYearQueryScopeResolver(
+                serviceContext,
+                companyContext),
+            new FiscalYearPeriodGuard(
+                serviceContext,
+                companyContext));
+    }
 
     public CashVoucherService CreateVoucherService(
         int companyId,
         ApplicationDbContext? context = null,
-        ICashVoucherPostingService? postingService = null) =>
-        new(
-            context ?? Context,
+        ICashVoucherPostingService? postingService = null)
+    {
+        var serviceContext = context ?? Context;
+        var companyContext = new TestCurrentCompanyContext(companyId);
+        return new CashVoucherService(
+            serviceContext,
             new PaginationService(),
-            new TestCurrentCompanyContext(companyId),
+            companyContext,
             new MiniErp.Tests.TestExchangeRateResolver(),
             TimeProvider.System,
-            postingService ?? new NoOpCashVoucherPostingService());
+            postingService ?? new NoOpCashVoucherPostingService(),
+            new FiscalYearQueryScopeResolver(
+                serviceContext,
+                companyContext),
+            new FiscalYearPeriodGuard(
+                serviceContext,
+                companyContext));
+    }
 
     public CashVoucherService CreatePostingVoucherService(
         int companyId,
@@ -131,16 +179,32 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             companyContext,
             new MiniErp.Tests.TestExchangeRateResolver(),
             TimeProvider.System,
-            postingService);
+            postingService,
+            new FiscalYearQueryScopeResolver(
+                serviceContext,
+                companyContext),
+            new FiscalYearPeriodGuard(
+                serviceContext,
+                companyContext));
     }
 
     public DriverTripService CreateDriverTripService(
         int companyId,
-        ApplicationDbContext? context = null) =>
-        new(
-            context ?? Context,
+        ApplicationDbContext? context = null)
+    {
+        var serviceContext = context ?? Context;
+        var companyContext = new TestCurrentCompanyContext(companyId);
+        return new DriverTripService(
+            serviceContext,
             new PaginationService(),
-            new TestCurrentCompanyContext(companyId));
+            companyContext,
+            new FiscalYearQueryScopeResolver(
+                serviceContext,
+                companyContext),
+            new FiscalYearPeriodGuard(
+                serviceContext,
+                companyContext));
+    }
 
     public FinancialStatementService CreateStatementService(
         int companyId,
@@ -164,6 +228,28 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
         return new CashboxRevaluationService(
             serviceContext,
             companyContext,
+            new FiscalYearQueryScopeResolver(serviceContext, companyContext),
+            resolver,
+            posting,
+            TimeProvider.System);
+    }
+
+    public MonetaryAccountRevaluationService CreateMonetaryAccountRevaluationService(
+        int companyId,
+        ApplicationDbContext? context = null)
+    {
+        var serviceContext = context ?? Context;
+        var companyContext = new TestCurrentCompanyContext(companyId);
+        var resolver = new AccountMappingResolver(serviceContext, companyContext);
+        var posting = new AutomaticPostingService(
+            serviceContext,
+            companyContext,
+            TimeProvider.System,
+            NullLogger<AutomaticPostingService>.Instance);
+        return new MonetaryAccountRevaluationService(
+            serviceContext,
+            companyContext,
+            new FiscalYearQueryScopeResolver(serviceContext, companyContext),
             resolver,
             posting,
             TimeProvider.System);
@@ -181,7 +267,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
         JournalEntryStatus status = JournalEntryStatus.Posted,
         int? reversalOfEntryId = null,
         bool isDeleted = false,
-        int companyId = 1)
+        int companyId = 1,
+        int fiscalYearId = 1)
     {
         var entryDateText = entryDate.ToString("yyyy-MM-dd");
         var timestamp = entryDate.ToDateTime(TimeOnly.MinValue)
@@ -194,7 +281,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 Status, PostedOn, ReversalOfEntryId, CreatedById, CreatedOn,
                 CreatedByPc, IsDeleted)
             VALUES (
-                {journalEntryId}, {companyId}, 1, {entryNumber}, {entryDateText},
+                {journalEntryId}, {companyId}, {fiscalYearId}, {entryNumber}, {entryDateText},
                 {entryNumber}, {(int)entryType},
                 {(int?)sourceType}, {sourceId}, {sourceNumber},
                 {(int)status}, {timestamp}, {reversalOfEntryId}, 'test',
@@ -414,6 +501,37 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             );
             CREATE UNIQUE INDEX IX_CashboxRevaluations_Company_Cashbox_Date
             ON CashboxRevaluations (CompanyId, CashboxId, RevaluationDate)
+            WHERE IsDeleted = 0;
+
+            CREATE TABLE MonetaryAccountRevaluations (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CompanyId INTEGER NOT NULL,
+                AccountId INTEGER NOT NULL,
+                Currency INTEGER NOT NULL,
+                PartyType INTEGER NULL,
+                PartyId INTEGER NULL,
+                RevaluationDate TEXT NOT NULL,
+                ClosingRate NUMERIC NOT NULL,
+                ForeignAmount NUMERIC NOT NULL,
+                CarryingBaseAmount NUMERIC NOT NULL,
+                TargetBaseAmount NUMERIC NOT NULL,
+                DeltaBaseAmount NUMERIC NOT NULL,
+                JournalEntryId INTEGER NULL,
+                CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL,
+                CreatedByPc TEXT NOT NULL,
+                UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL,
+                UpdatedByPc TEXT NULL,
+                DeletedById TEXT NULL,
+                DeletedOn TEXT NULL,
+                DeletedByPc TEXT NULL,
+                IsDeleted INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE UNIQUE INDEX UX_MonetaryAccountRevaluations_Target_Date
+            ON MonetaryAccountRevaluations (
+                CompanyId, AccountId, Currency, PartyType, PartyId,
+                RevaluationDate)
             WHERE IsDeleted = 0;
 
             CREATE TABLE BusinessPartners (

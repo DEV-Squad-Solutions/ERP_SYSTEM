@@ -30,6 +30,22 @@ public static class FiscalYearErrors
             "FiscalYears.DateRangeInvalid",
             "يجب أن يكون تاريخ بداية السنة المالية قبل تاريخ نهايتها.");
 
+    public static Error QueryDateRangeInvalid() =>
+        Error.Validation(
+            "FiscalYears.QueryDateRangeInvalid",
+            "يجب أن يكون تاريخ نهاية البحث مساويًا لتاريخ البداية أو بعده.");
+
+    public static Error QueryDateOutsideRange(
+        DateOnly date,
+        string fieldName,
+        string fiscalYearName,
+        DateOnly startDate,
+        DateOnly endDate) =>
+        Error.Validation(
+            "FiscalYears.QueryDateOutsideRange",
+            $"التاريخ {date:yyyy-MM-dd} خارج السنة المالية '{fiscalYearName}' من {startDate:yyyy-MM-dd} إلى {endDate:yyyy-MM-dd}.",
+            fieldName);
+
     public static Error DateRangeOverlaps() =>
         Error.Conflict(
             "FiscalYears.DateRangeOverlaps",

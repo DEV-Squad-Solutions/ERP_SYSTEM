@@ -15,7 +15,8 @@ namespace MiniErp.Infrastructure.Services.JournalEntries;
 public sealed class JournalEntryService(
     ApplicationDbContext dbContext,
     ICurrentCompanyContext currentCompanyContext,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver)
     : IJournalEntryService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -33,17 +34,29 @@ public sealed class JournalEntryService(
         }
 
         filters ??= new JournalEntryFilterRequest();
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.FromDate,
+            toDate: filters.ToDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<PagedResponse<JournalEntryResponse>>.Failure(
+                fiscalYear.Errors);
+        }
+
         var search = filters.Search?.Trim();
         var query = dbContext.JournalEntries
             .AsNoTracking()
-            .Where(entry => entry.CompanyId == companyId)
+            .Where(entry =>
+                entry.CompanyId == companyId &&
+                entry.FiscalYearId == fiscalYear.Value.FiscalYearId);
+
+        query = query
             .Where(entry =>
                 string.IsNullOrEmpty(search) ||
                 entry.EntryNumber.Contains(search) ||
                 entry.Description.Contains(search))
-            .Where(entry =>
-                !filters.FiscalYearId.HasValue ||
-                entry.FiscalYearId == filters.FiscalYearId.Value)
             .Where(entry =>
                 !filters.EntryType.HasValue ||
                 entry.EntryType == filters.EntryType.Value)
@@ -89,6 +102,7 @@ public sealed class JournalEntryService(
 
     public async Task<Result<JournalEntryResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -96,7 +110,18 @@ public sealed class JournalEntryService(
             return Result<JournalEntryResponse>.Failure(InvalidId());
         }
 
-        var response = (await LoadResponsesAsync([id], cancellationToken))
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<JournalEntryResponse>.Failure(fiscalYear.Errors);
+        }
+
+        var response = (await LoadResponsesAsync(
+                [id],
+                cancellationToken,
+                fiscalYear.Value.FiscalYearId))
             .SingleOrDefault();
         return response is null
             ? Result<JournalEntryResponse>.Failure(NotFound(id))
@@ -273,6 +298,12 @@ public sealed class JournalEntryService(
             entry.ReversalOfEntryId.HasValue)
         {
             return Result<JournalEntryResponse>.Failure(ReversedReadOnly());
+        }
+
+        if (entry.FiscalYearId != request.FiscalYearId)
+        {
+            return Result<JournalEntryResponse>.Failure(
+                FiscalYearCannotBeChanged());
         }
 
         var affectedCashboxIds = entry.Lines
@@ -735,7 +766,8 @@ public sealed class JournalEntryService(
 
     private async Task<IReadOnlyList<JournalEntryResponse>> LoadResponsesAsync(
         IReadOnlyCollection<int> ids,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? fiscalYearId = null)
     {
         if (ids.Count == 0)
         {
@@ -750,7 +782,9 @@ public sealed class JournalEntryService(
                 .ThenInclude(line => line.Account)
             .Where(entry =>
                 entry.CompanyId == companyId &&
-                ids.Contains(entry.Id))
+                ids.Contains(entry.Id) &&
+                (!fiscalYearId.HasValue ||
+                 entry.FiscalYearId == fiscalYearId.Value))
             .ToListAsync(cancellationToken);
 
         var baseCurrency = await GetBaseCurrencyAsync(cancellationToken);

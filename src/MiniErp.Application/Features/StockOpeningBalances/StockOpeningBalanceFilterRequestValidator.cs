@@ -7,6 +7,9 @@ public sealed class StockOpeningBalanceFilterRequestValidator
 {
     public StockOpeningBalanceFilterRequestValidator()
     {
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue);
         RuleFor(filter => filter.DocumentNumber).MaximumLength(50);
         RuleFor(filter => filter.StoreId)
             .GreaterThan(0)

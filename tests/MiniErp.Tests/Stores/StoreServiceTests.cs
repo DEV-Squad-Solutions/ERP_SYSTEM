@@ -325,6 +325,7 @@ public sealed class StoreServiceTests
 
             await CreateSchemaAsync(context);
             await SeedAsync(context);
+            await TestFiscalYearSchema.EnsureAsync(context);
 
             return new StoreTestDatabase(connection, context);
         }

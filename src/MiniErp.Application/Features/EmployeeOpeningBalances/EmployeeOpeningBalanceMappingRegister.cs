@@ -30,6 +30,9 @@ public sealed class EmployeeOpeningBalanceMappingRegister : IRegister
 
         config.ForType<EmployeeOpeningBalance, EmployeeOpeningBalanceResponse>()
             .Map(
+                response => response.FiscalYearName,
+                balance => balance.FiscalYear.Name)
+            .Map(
                 response => response.BaseCurrency,
                 balance => balance.Company.Settings == null
                     ? Domain.Enums.CurrencyCode.EGP

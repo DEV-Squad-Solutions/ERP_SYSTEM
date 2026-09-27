@@ -129,6 +129,7 @@ public sealed class AccountingReadinessService(
 
         var fiscalYear = fiscalYearResult.Value;
         var sources = await LoadSourcesAsync(
+            fiscalYear.Id,
             fiscalYear.StartDate,
             fiscalYear.EndDate,
             cancellationToken);
@@ -254,6 +255,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYear.Id &&
                 movement.MovementDate >= fiscalYear.StartDate &&
                 movement.MovementDate <= fiscalYear.EndDate &&
                 (movement.CostStatus == InventoryCostStatus.Pending ||
@@ -282,6 +284,7 @@ public sealed class AccountingReadinessService(
         }
 
         var missingOpeningLines = await LoadMissingOpeningLinesAsync(
+            fiscalYear.Id,
             fiscalYear.StartDate,
             fiscalYear.EndDate,
             cancellationToken);
@@ -302,6 +305,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(count =>
                 count.CompanyId == companyId &&
+                count.FiscalYearId == fiscalYear.Id &&
                 count.CountDate >= fiscalYear.StartDate &&
                 count.CountDate <= fiscalYear.EndDate &&
                 !count.ReconciledAt.HasValue &&
@@ -339,6 +343,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .CountAsync(entry =>
                 entry.CompanyId == companyId &&
+                entry.FiscalYearId == fiscalYear.Id &&
                 entry.EndDate >= fiscalYear.StartDate &&
                 entry.EndDate <= fiscalYear.EndDate,
                 cancellationToken);
@@ -482,6 +487,7 @@ public sealed class AccountingReadinessService(
         }
 
         var missingOpeningLines = await LoadMissingOpeningLinesAsync(
+            fiscalYear.Id,
             fiscalYear.StartDate,
             fiscalYear.EndDate,
             cancellationToken);
@@ -508,6 +514,7 @@ public sealed class AccountingReadinessService(
         }
 
         var sources = await LoadSourcesAsync(
+            fiscalYear.Id,
             fiscalYear.StartDate,
             fiscalYear.EndDate,
             cancellationToken);
@@ -531,11 +538,13 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYear.Id &&
                 movement.MovementDate >= fiscalYear.StartDate &&
                 movement.MovementDate <= fiscalYear.EndDate)
             .Select(movement => new InventoryCostingKey(
                 movement.StoreId,
-                movement.ItemId))
+                movement.ItemId,
+                movement.FiscalYearId))
             .Distinct()
             .ToArrayAsync(cancellationToken);
         var costingError = await inventoryCostingService.RecalculateAsync(
@@ -684,6 +693,7 @@ public sealed class AccountingReadinessService(
             : Result.Success();
 
     private async Task<List<SourceDescriptor>> LoadSourcesAsync(
+        int fiscalYearId,
         DateOnly startDate,
         DateOnly endDate,
         CancellationToken cancellationToken)
@@ -694,18 +704,21 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(invoice =>
                 invoice.CompanyId == companyId &&
+                invoice.FiscalYearId == fiscalYearId &&
                 invoice.InvoiceDate >= startDate &&
                 invoice.InvoiceDate <= endDate &&
                 (invoice.Total != 0m ||
                  invoice.BaseTotal != 0m ||
                  dbContext.ItemMovements.Any(movement =>
                      movement.CompanyId == companyId &&
+                     movement.FiscalYearId == fiscalYearId &&
                      movement.ReferenceId == invoice.Id &&
                      movement.TotalCost > 0m &&
                      (movement.MovementType == ItemMovementType.Sales ||
                       movement.MovementType == ItemMovementType.SalesReturn)) ||
                  dbContext.InvoicePayments.Any(payment =>
                      payment.CompanyId == companyId &&
+                     payment.FiscalYearId == fiscalYearId &&
                      payment.InvoiceId == invoice.Id &&
                      (payment.AppliedBaseAmount != 0m ||
                       payment.CashboxBaseAmount != 0m))))
@@ -719,6 +732,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
+                voucher.FiscalYearId == fiscalYearId &&
                 voucher.IsPosted &&
                 !voucher.InvoiceId.HasValue &&
                 !voucher.CashboxTransferId.HasValue &&
@@ -734,6 +748,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(transfer =>
                 transfer.CompanyId == companyId &&
+                transfer.FiscalYearId == fiscalYearId &&
                 transfer.TransferDate >= startDate &&
                 transfer.TransferDate <= endDate)
             .Select(transfer => new SourceDescriptor(
@@ -748,10 +763,12 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(adjustment =>
                 adjustment.CompanyId == companyId &&
+                adjustment.FiscalYearId == fiscalYearId &&
                 adjustment.DocumentDate >= startDate &&
                 adjustment.DocumentDate <= endDate &&
                 dbContext.ItemMovements.Any(movement =>
                     movement.CompanyId == companyId &&
+                    movement.FiscalYearId == fiscalYearId &&
                     movement.ReferenceId == adjustment.Id &&
                     (movement.MovementType ==
                         ItemMovementType.AdjustmentIncrease ||
@@ -770,10 +787,12 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(balance =>
                 balance.CompanyId == companyId &&
+                balance.FiscalYearId == fiscalYearId &&
                 balance.DocumentDate >= startDate &&
                 balance.DocumentDate <= endDate &&
                 dbContext.ItemMovements.Any(movement =>
                     movement.CompanyId == companyId &&
+                    movement.FiscalYearId == fiscalYearId &&
                     movement.ReferenceId == balance.Id &&
                     movement.MovementType ==
                         ItemMovementType.OpeningBalance &&
@@ -790,6 +809,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(balance =>
                 balance.CompanyId == companyId &&
+                balance.FiscalYearId == fiscalYearId &&
                 balance.BaseAmount != 0m &&
                 balance.DocumentDate >= startDate &&
                 balance.DocumentDate <= endDate)
@@ -805,6 +825,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(balance =>
                 balance.CompanyId == companyId &&
+                balance.FiscalYearId == fiscalYearId &&
                 !balance.PayrollEntryId.HasValue &&
                 balance.BaseAmount != 0m &&
                 balance.DocumentDate >= startDate &&
@@ -836,6 +857,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(trip =>
                 trip.CompanyId == companyId &&
+                trip.FiscalYearId == fiscalYearId &&
                 trip.Cost.HasValue &&
                 trip.Cost.Value > 0m &&
                 trip.TripDate >= startDate &&
@@ -850,6 +872,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(revaluation =>
                 revaluation.CompanyId == companyId &&
+                revaluation.FiscalYearId == fiscalYearId &&
                 revaluation.DeltaBaseAmount != 0m &&
                 revaluation.RevaluationDate >= startDate &&
                 revaluation.RevaluationDate <= endDate)
@@ -865,6 +888,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(revaluation =>
                 revaluation.CompanyId == companyId &&
+                revaluation.FiscalYearId == fiscalYearId &&
                 revaluation.DeltaBaseAmount != 0m &&
                 revaluation.RevaluationDate >= startDate &&
                 revaluation.RevaluationDate <= endDate)
@@ -887,6 +911,7 @@ public sealed class AccountingReadinessService(
             JournalEntrySourceType.MonetaryAccountRevaluation;
 
     private Task<List<MissingOpeningLine>> LoadMissingOpeningLinesAsync(
+        int fiscalYearId,
         DateOnly startDate,
         DateOnly endDate,
         CancellationToken cancellationToken) =>
@@ -895,10 +920,12 @@ public sealed class AccountingReadinessService(
             .Where(line =>
                 line.CompanyId == companyId &&
                 line.StockOpeningBalance.CompanyId == companyId &&
+                line.StockOpeningBalance.FiscalYearId == fiscalYearId &&
                 line.StockOpeningBalance.DocumentDate >= startDate &&
                 line.StockOpeningBalance.DocumentDate <= endDate &&
                 !dbContext.ItemMovements.Any(movement =>
                     movement.CompanyId == companyId &&
+                    movement.FiscalYearId == fiscalYearId &&
                     movement.StoreId == line.StockOpeningBalance.StoreId &&
                     movement.ItemId == line.ItemId &&
                     movement.MovementType == ItemMovementType.OpeningBalance &&
@@ -922,6 +949,7 @@ public sealed class AccountingReadinessService(
         CancellationToken cancellationToken)
     {
         var requirements = await LoadMappingRequirementsAsync(
+            fiscalYearId,
             startDate,
             endDate,
             cancellationToken);
@@ -973,6 +1001,7 @@ public sealed class AccountingReadinessService(
     }
 
     private async Task<List<MappingRequirement>> LoadMappingRequirementsAsync(
+        int fiscalYearId,
         DateOnly startDate,
         DateOnly endDate,
         CancellationToken cancellationToken)
@@ -982,18 +1011,21 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(invoice =>
                 invoice.CompanyId == companyId &&
+                invoice.FiscalYearId == fiscalYearId &&
                 invoice.InvoiceDate >= startDate &&
                 invoice.InvoiceDate <= endDate &&
                 (invoice.Total != 0m ||
                  invoice.BaseTotal != 0m ||
                  dbContext.ItemMovements.Any(movement =>
                      movement.CompanyId == companyId &&
+                     movement.FiscalYearId == fiscalYearId &&
                      movement.ReferenceId == invoice.Id &&
                      movement.TotalCost > 0m &&
                      (movement.MovementType == ItemMovementType.Sales ||
                       movement.MovementType == ItemMovementType.SalesReturn)) ||
                  dbContext.InvoicePayments.Any(payment =>
                      payment.CompanyId == companyId &&
+                     payment.FiscalYearId == fiscalYearId &&
                      payment.InvoiceId == invoice.Id &&
                      (payment.AppliedBaseAmount != 0m ||
                       payment.CashboxBaseAmount != 0m))))
@@ -1008,6 +1040,7 @@ public sealed class AccountingReadinessService(
                 invoice.BaseTotal,
                 IsItemInvoice = dbContext.ItemMovements.Any(movement =>
                     movement.CompanyId == companyId &&
+                    movement.FiscalYearId == fiscalYearId &&
                     movement.ReferenceId == invoice.Id &&
                     (movement.MovementType == ItemMovementType.Sales ||
                      movement.MovementType == ItemMovementType.SalesReturn ||
@@ -1029,6 +1062,7 @@ public sealed class AccountingReadinessService(
                     .Sum(line => (decimal?)line.BaseTotal) ?? 0m,
                 HasCost = dbContext.ItemMovements.Any(movement =>
                     movement.CompanyId == companyId &&
+                    movement.FiscalYearId == fiscalYearId &&
                     movement.ReferenceId == invoice.Id &&
                     movement.TotalCost > 0m &&
                     (movement.MovementType == ItemMovementType.Sales ||
@@ -1036,12 +1070,14 @@ public sealed class AccountingReadinessService(
                 PurchaseReturnCarryingCost = dbContext.ItemMovements
                     .Where(movement =>
                         movement.CompanyId == companyId &&
+                        movement.FiscalYearId == fiscalYearId &&
                         movement.ReferenceId == invoice.Id &&
                         movement.MovementType == ItemMovementType.PurchaseReturn)
                     .Sum(movement => (decimal?)movement.TotalCost) ?? 0m,
                 HasPendingPurchaseReturnCost = dbContext.ItemMovements.Any(
                     movement =>
                         movement.CompanyId == companyId &&
+                        movement.FiscalYearId == fiscalYearId &&
                         movement.ReferenceId == invoice.Id &&
                         movement.MovementType ==
                             ItemMovementType.PurchaseReturn &&
@@ -1173,6 +1209,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
+                voucher.FiscalYearId == fiscalYearId &&
                 voucher.IsPosted &&
                 !voucher.InvoiceId.HasValue &&
                 !voucher.CashboxTransferId.HasValue &&
@@ -1233,6 +1270,7 @@ public sealed class AccountingReadinessService(
             .AsNoTracking()
             .Where(transfer =>
                 transfer.CompanyId == companyId &&
+                transfer.FiscalYearId == fiscalYearId &&
                 transfer.TransferDate >= startDate &&
                 transfer.TransferDate <= endDate)
             .Select(transfer => new
@@ -1256,6 +1294,7 @@ public sealed class AccountingReadinessService(
 
         await AddSimpleRequirementsAsync(
             requirements,
+            fiscalYearId,
             startDate,
             endDate,
             cancellationToken);
@@ -1264,6 +1303,7 @@ public sealed class AccountingReadinessService(
 
     private async Task AddSimpleRequirementsAsync(
         List<MappingRequirement> requirements,
+        int fiscalYearId,
         DateOnly startDate,
         DateOnly endDate,
         CancellationToken cancellationToken)
@@ -1271,6 +1311,7 @@ public sealed class AccountingReadinessService(
         var hasStockAdjustments = await dbContext.StockAdjustments.AnyAsync(
             adjustment =>
                 adjustment.CompanyId == companyId &&
+                adjustment.FiscalYearId == fiscalYearId &&
                 adjustment.DocumentDate >= startDate &&
                 adjustment.DocumentDate <= endDate,
             cancellationToken);
@@ -1290,18 +1331,21 @@ public sealed class AccountingReadinessService(
         var hasStockOpenings = await dbContext.StockOpeningBalances.AnyAsync(
             balance =>
                 balance.CompanyId == companyId &&
+                balance.FiscalYearId == fiscalYearId &&
                 balance.DocumentDate >= startDate &&
                 balance.DocumentDate <= endDate,
             cancellationToken);
         var hasOtherOpenings = await dbContext.PartnerOpeningBalances.AnyAsync(
                 balance =>
                     balance.CompanyId == companyId &&
+                    balance.FiscalYearId == fiscalYearId &&
                     balance.DocumentDate >= startDate &&
                     balance.DocumentDate <= endDate,
                 cancellationToken) ||
             await dbContext.EmployeeOpeningBalances.AnyAsync(
                 balance =>
                     balance.CompanyId == companyId &&
+                    balance.FiscalYearId == fiscalYearId &&
                     !balance.PayrollEntryId.HasValue &&
                     balance.DocumentDate >= startDate &&
                     balance.DocumentDate <= endDate,
@@ -1330,6 +1374,7 @@ public sealed class AccountingReadinessService(
         var hasPartnerOpenings = await dbContext.PartnerOpeningBalances.AnyAsync(
             balance =>
                 balance.CompanyId == companyId &&
+                balance.FiscalYearId == fiscalYearId &&
                 balance.DocumentDate >= startDate &&
                 balance.DocumentDate <= endDate,
             cancellationToken);
@@ -1347,6 +1392,7 @@ public sealed class AccountingReadinessService(
             .AnyAsync(
                 balance =>
                     balance.CompanyId == companyId &&
+                    balance.FiscalYearId == fiscalYearId &&
                     !balance.PayrollEntryId.HasValue &&
                     balance.DocumentDate >= startDate &&
                     balance.DocumentDate <= endDate,
@@ -1378,6 +1424,7 @@ public sealed class AccountingReadinessService(
         var hasTrips = await dbContext.DriverTrips.AnyAsync(
             trip =>
                 trip.CompanyId == companyId &&
+                trip.FiscalYearId == fiscalYearId &&
                 trip.Cost.HasValue &&
                 trip.Cost.Value > 0m &&
                 trip.TripDate >= startDate &&

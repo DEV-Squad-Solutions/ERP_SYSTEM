@@ -27,6 +27,19 @@ public sealed partial class FinancialStatementService(
             return Result<CashboxStatementResponse>.Failure(paginationError);
         }
 
+        var fiscalYear = await ResolveFiscalYearAsync(
+            filters.FiscalYearId,
+            filters.FromDate,
+            filters.ToDate,
+            cancellationToken);
+        if (fiscalYear is null)
+        {
+            return Result<CashboxStatementResponse>.Failure(
+                FiscalYearNotFound(filters.FiscalYearId));
+        }
+        var fromDate = filters.FromDate ?? fiscalYear.StartDate;
+        var toDate = filters.ToDate ?? fiscalYear.EndDate;
+
         var cashbox = await dbContext.Cashboxes
             .AsNoTracking()
             .Where(entity =>
@@ -50,7 +63,10 @@ public sealed partial class FinancialStatementService(
                 CashboxNotFound(filters.CashboxId));
         }
 
-        var allRows = CreateCashboxRows(cashbox.Id, cashbox.Currency);
+        var allRows = CreateCashboxRows(
+            cashbox.Id,
+            cashbox.Currency,
+            fiscalYear.Id);
         var openingJournal = await allRows
             .Where(row => row.IsOpening)
             .GroupBy(_ => 1)
@@ -65,15 +81,15 @@ public sealed partial class FinancialStatementService(
         var baseOpeningBalance = openingJournal?.BaseAmount ?? 0m;
         var nonOpeningRows = allRows.Where(row => !row.IsOpening);
 
-        if (filters.FromDate.HasValue)
+        if (fromDate > fiscalYear.StartDate)
         {
             openingBalance += await nonOpeningRows
-                .Where(row => row.Date < filters.FromDate.Value)
+                .Where(row => row.Date < fromDate)
                 .SumAsync(
                     row => (decimal?)(row.ReceiptAmount - row.PaymentAmount),
                     cancellationToken) ?? 0m;
             baseOpeningBalance += await nonOpeningRows
-                .Where(row => row.Date < filters.FromDate.Value)
+                .Where(row => row.Date < fromDate)
                 .SumAsync(
                     row => (decimal?)(row.BaseReceiptAmount -
                         row.BasePaymentAmount),
@@ -83,12 +99,8 @@ public sealed partial class FinancialStatementService(
         var search = filters.Search?.Trim();
         var voucherNumber = filters.VoucherNumber?.Trim();
         var query = nonOpeningRows
-            .Where(row =>
-                !filters.FromDate.HasValue ||
-                row.Date >= filters.FromDate.Value)
-            .Where(row =>
-                !filters.ToDate.HasValue ||
-                row.Date <= filters.ToDate.Value)
+            .Where(row => row.Date >= fromDate)
+            .Where(row => row.Date <= toDate)
             .Where(row =>
                 !filters.Direction.HasValue ||
                 (filters.Direction == CashDirection.Receipt
@@ -186,11 +198,11 @@ public sealed partial class FinancialStatementService(
         {
             items.Add(new CashboxStatementItemResponse(
                 CashVoucherId: null,
-                Date: filters.FromDate ?? cashbox.OpeningBalanceDate,
+                Date: fromDate,
                 VoucherNumber: "OPENING-BALANCE",
                 MovementName: "رصيد افتتاحي",
-                Description: filters.FromDate.HasValue
-                    ? $"رصيد افتتاحي للفترة قبل {filters.FromDate.Value:yyyy-MM-dd}"
+                Description: fromDate > fiscalYear.StartDate
+                    ? $"رصيد افتتاحي للفترة قبل {fromDate:yyyy-MM-dd}"
                     : "الرصيد الافتتاحي",
                 PartyName: null,
                 ReceiptAmount: 0m,
@@ -282,6 +294,19 @@ public sealed partial class FinancialStatementService(
             return Result<PartnerStatementResponse>.Failure(paginationError);
         }
 
+        var fiscalYear = await ResolveFiscalYearAsync(
+            filters.FiscalYearId,
+            filters.FromDate,
+            filters.ToDate,
+            cancellationToken);
+        if (fiscalYear is null)
+        {
+            return Result<PartnerStatementResponse>.Failure(
+                FiscalYearNotFound(filters.FiscalYearId));
+        }
+        var fromDate = filters.FromDate ?? fiscalYear.StartDate;
+        var toDate = filters.ToDate ?? fiscalYear.EndDate;
+
         var partner = await dbContext.BusinessPartners
             .AsNoTracking()
             .Where(entity =>
@@ -303,26 +328,31 @@ public sealed partial class FinancialStatementService(
                 PartnerNotFound(filters.BusinessPartnerId));
         }
 
-        var allRows = CreatePartnerRows(partner.Id);
-        var openingBalance = filters.FromDate.HasValue
-            ? await allRows
-                .Where(row => row.Date < filters.FromDate.Value)
+        var allRows = CreatePartnerRows(partner.Id, fiscalYear.Id);
+        var openingRows = allRows.Where(row => row.IsOpening);
+        var nonOpeningRows = allRows.Where(row => !row.IsOpening);
+        var openingBalance = await openingRows
                 .SumAsync(row => (decimal?)(row.Debit - row.Credit),
-                    cancellationToken) ?? 0m
-            : 0m;
-        var baseOpeningBalance = filters.FromDate.HasValue
-            ? await allRows
-                .Where(row => row.Date < filters.FromDate.Value)
+                    cancellationToken) ?? 0m;
+        var baseOpeningBalance = await openingRows
                 .SumAsync(row => (decimal?)(row.BaseDebit - row.BaseCredit),
-                    cancellationToken) ?? 0m
-            : 0m;
+                    cancellationToken) ?? 0m;
+        if (fromDate > fiscalYear.StartDate)
+        {
+            openingBalance += await nonOpeningRows
+                .Where(row => row.Date < fromDate)
+                .SumAsync(row => (decimal?)(row.Debit - row.Credit),
+                    cancellationToken) ?? 0m;
+            baseOpeningBalance += await nonOpeningRows
+                .Where(row => row.Date < fromDate)
+                .SumAsync(row => (decimal?)(row.BaseDebit - row.BaseCredit),
+                    cancellationToken) ?? 0m;
+        }
 
         var search = filters.Search?.Trim();
-        var query = allRows
-            .Where(row => !filters.FromDate.HasValue ||
-                row.Date >= filters.FromDate.Value)
-            .Where(row => !filters.ToDate.HasValue ||
-                row.Date <= filters.ToDate.Value)
+        var query = nonOpeningRows
+            .Where(row => row.Date >= fromDate)
+            .Where(row => row.Date <= toDate)
             .Where(row => !filters.SourceType.HasValue ||
                 row.SourceType == filters.SourceType.Value)
             .Where(row => !filters.MovementType.HasValue ||
@@ -445,6 +475,19 @@ public sealed partial class FinancialStatementService(
             return Result<DriverStatementResponse>.Failure(paginationError);
         }
 
+        var fiscalYear = await ResolveFiscalYearAsync(
+            filters.FiscalYearId,
+            filters.FromDate,
+            filters.ToDate,
+            cancellationToken);
+        if (fiscalYear is null)
+        {
+            return Result<DriverStatementResponse>.Failure(
+                FiscalYearNotFound(filters.FiscalYearId));
+        }
+        var fromDate = filters.FromDate ?? fiscalYear.StartDate;
+        var toDate = filters.ToDate ?? fiscalYear.EndDate;
+
         var driver = await dbContext.Drivers
             .AsNoTracking()
             .Where(entity =>
@@ -465,20 +508,24 @@ public sealed partial class FinancialStatementService(
                 DriverNotFound(filters.DriverId));
         }
 
-        var allRows = CreateDriverRows(driver.Id);
-        var openingBalance = filters.FromDate.HasValue
-            ? await allRows
-                .Where(row => row.Date < filters.FromDate.Value)
+        var allRows = CreateDriverRows(driver.Id, fiscalYear.Id);
+        var openingRows = allRows.Where(row => row.IsOpening);
+        var nonOpeningRows = allRows.Where(row => !row.IsOpening);
+        var openingBalance = await openingRows
+            .SumAsync(row => (decimal?)(row.Debit - row.Credit),
+                cancellationToken) ?? 0m;
+        if (fromDate > fiscalYear.StartDate)
+        {
+            openingBalance += await nonOpeningRows
+                .Where(row => row.Date < fromDate)
                 .SumAsync(row => (decimal?)(row.Debit - row.Credit),
-                    cancellationToken) ?? 0m
-            : 0m;
+                    cancellationToken) ?? 0m;
+        }
         var search = filters.Search?.Trim();
         var invoiceNumber = filters.InvoiceNumber?.Trim();
-        var query = allRows
-            .Where(row => !filters.FromDate.HasValue ||
-                row.Date >= filters.FromDate.Value)
-            .Where(row => !filters.ToDate.HasValue ||
-                row.Date <= filters.ToDate.Value)
+        var query = nonOpeningRows
+            .Where(row => row.Date >= fromDate)
+            .Where(row => row.Date <= toDate)
             .Where(row => !filters.Direction.HasValue ||
                 row.Direction == filters.Direction.Value)
             .Where(row => !filters.CashMovementTypeId.HasValue ||
@@ -609,7 +656,8 @@ public sealed partial class FinancialStatementService(
 
     private IQueryable<CashboxStatementRaw> CreateCashboxRows(
         int cashboxId,
-        CurrencyCode cashboxCurrency)
+        CurrencyCode cashboxCurrency,
+        int fiscalYearId)
     {
         var vouchers = dbContext.CashVouchers
             .AsNoTracking()
@@ -621,7 +669,8 @@ public sealed partial class FinancialStatementService(
         return
             from line in PostedLedgerLines()
             where line.PartyType == JournalPartyType.Cashbox &&
-                  line.PartyId == cashboxId
+                  line.PartyId == cashboxId &&
+                  line.JournalEntry.FiscalYearId == fiscalYearId
             join voucher in vouchers
                 on new
                 {
@@ -657,7 +706,9 @@ public sealed partial class FinancialStatementService(
                 CashVoucherId = voucher == null ? null : (int?)voucher.Id,
                 SourceType = line.JournalEntry.SourceType,
                 IsOpening = line.JournalEntry.SourceType ==
-                    JournalEntrySourceType.CashboxOpeningBalance,
+                    JournalEntrySourceType.CashboxOpeningBalance ||
+                    line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.FiscalYearClosing,
                 Date = line.JournalEntry.EntryDate,
                 CreatedOn = line.JournalEntry.PostedOn,
                 DocumentNumber = voucher != null
@@ -742,7 +793,9 @@ public sealed partial class FinancialStatementService(
             };
     }
 
-    private IQueryable<PartnerStatementRaw> CreatePartnerRows(int partnerId)
+    private IQueryable<PartnerStatementRaw> CreatePartnerRows(
+        int partnerId,
+        int fiscalYearId)
     {
         var invoices = dbContext.Invoices
             .AsNoTracking()
@@ -755,7 +808,8 @@ public sealed partial class FinancialStatementService(
             from line in PostedLedgerLines()
             where (line.PartyType == JournalPartyType.Customer ||
                    line.PartyType == JournalPartyType.Supplier) &&
-                  line.PartyId == partnerId
+                  line.PartyId == partnerId &&
+                  line.JournalEntry.FiscalYearId == fiscalYearId
             join invoice in invoices
                 on new
                 {
@@ -788,6 +842,8 @@ public sealed partial class FinancialStatementService(
             {
                 JournalEntryLineId = line.Id,
                 JournalEntryId = line.JournalEntryId,
+                IsOpening = line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.FiscalYearClosing,
                 SourceId = line.Id,
                 SourceType = line.JournalEntry.SourceType ==
                     JournalEntrySourceType.PartnerOpeningBalance
@@ -845,7 +901,9 @@ public sealed partial class FinancialStatementService(
             };
     }
 
-    private IQueryable<DriverStatementRaw> CreateDriverRows(int driverId)
+    private IQueryable<DriverStatementRaw> CreateDriverRows(
+        int driverId,
+        int fiscalYearId)
     {
         var vouchers = dbContext.CashVouchers
             .AsNoTracking()
@@ -857,7 +915,8 @@ public sealed partial class FinancialStatementService(
         return
             from line in PostedLedgerLines()
             where line.PartyType == JournalPartyType.Driver &&
-                  line.PartyId == driverId
+                  line.PartyId == driverId &&
+                  line.JournalEntry.FiscalYearId == fiscalYearId
             join voucher in vouchers
                 on new
                 {
@@ -890,6 +949,8 @@ public sealed partial class FinancialStatementService(
             {
                 JournalEntryLineId = line.Id,
                 JournalEntryId = line.JournalEntryId,
+                IsOpening = line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.FiscalYearClosing,
                 SourceType = line.JournalEntry.SourceType ==
                     JournalEntrySourceType.CashVoucher
                         ? DriverStatementSourceType.CashVoucher
@@ -1066,6 +1127,7 @@ public sealed partial class FinancialStatementService(
     {
         public int JournalEntryLineId { get; init; }
         public int JournalEntryId { get; init; }
+        public bool IsOpening { get; init; }
         public int SourceId { get; init; }
         public PartnerStatementSourceType SourceType { get; init; }
         public JournalEntryType EntryType { get; init; }
@@ -1088,6 +1150,7 @@ public sealed partial class FinancialStatementService(
     {
         public int JournalEntryLineId { get; init; }
         public int JournalEntryId { get; init; }
+        public bool IsOpening { get; init; }
         public DriverStatementSourceType SourceType { get; init; }
         public DateOnly Date { get; init; }
         public DateTime CreatedOn { get; init; }

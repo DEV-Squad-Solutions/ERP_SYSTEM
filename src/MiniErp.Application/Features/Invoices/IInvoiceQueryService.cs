@@ -12,6 +12,7 @@ public interface IInvoiceQueryService
 
     Task<Result<InvoiceResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<InvoiceItemBalanceResponse>> GetItemBalanceAsync(

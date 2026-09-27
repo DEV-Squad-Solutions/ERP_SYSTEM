@@ -24,6 +24,7 @@ public sealed record StockTransferUpdateRequest(
     byte[]? RowVersion);
 
 public sealed record StockTransferFilterRequest(
+    int? FiscalYearId = null,
     string? Search = null,
     int? SourceStoreId = null,
     int? DestinationStoreId = null,

@@ -13,6 +13,7 @@ using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
 using MiniErp.Infrastructure.Services.ExchangeRates;
+using MiniErp.Infrastructure.Services.FiscalYears;
 using MiniErp.Infrastructure.Services.Pagination;
 
 namespace MiniErp.Tests.ExchangeRates;
@@ -66,6 +67,97 @@ public sealed class ExchangeRateServiceTests
     }
 
     [Fact]
+    public async Task GetAll_WithoutFiscalYearFilter_ReturnsOnlyCurrentFiscalYear()
+    {
+        await using var database = await ExchangeRateTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears
+            SET Name = '2025', StartDate = '2025-01-01', EndDate = '2025-12-31'
+            WHERE Id = 1;
+
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent, RowVersion, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                100, 1, '2026', '2026-01-01', '2026-12-31', 1,
+                0, randomblob(8), 'test', '2026-01-01', 'test', 0);
+
+            UPDATE ExchangeRates
+            SET FiscalYearId = 100
+            WHERE CompanyId = 1;
+
+            INSERT INTO ExchangeRates (
+                CompanyId, FiscalYearId, Currency, RateDate, Rate, Source,
+                Notes, LastModifiedAt, CreatedById, CreatedOn, CreatedByPc,
+                IsDeleted)
+            VALUES (
+                1, 1, 4, '2025-12-31', 60, 1,
+                'Current fiscal year', '2025-12-31', 'test',
+                '2025-12-31', 'test', 0);
+            """);
+        var service = database.CreateService(1);
+
+        var currentYearResult = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 });
+        var explicitNextYearResult = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new ExchangeRateFilterRequest(FiscalYearId: 100));
+
+        Assert.True(currentYearResult.IsSuccess);
+        var currentRate = Assert.Single(currentYearResult.Value.Items);
+        Assert.Equal(1, currentRate.FiscalYearId);
+        Assert.Equal(new DateOnly(2025, 12, 31), currentRate.RateDate);
+
+        Assert.True(explicitNextYearResult.IsSuccess);
+        Assert.Equal(2, explicitNextYearResult.Value.Items.Count);
+        Assert.All(explicitNextYearResult.Value.Items, rate =>
+            Assert.Equal(100, rate.FiscalYearId));
+
+        var nextYearRateId = explicitNextYearResult.Value.Items[0].Id;
+        var hiddenNextYearRate = await service.GetByIdAsync(nextYearRateId);
+        var explicitNextYearRate = await service.GetByIdAsync(
+            nextYearRateId,
+            fiscalYearId: 100);
+        var currentYearRate = await service.GetByIdAsync(currentRate.Id);
+
+        Assert.True(hiddenNextYearRate.IsFailure);
+        Assert.Equal("ExchangeRates.NotFound", hiddenNextYearRate.Error.Code);
+        Assert.True(explicitNextYearRate.IsSuccess);
+        Assert.Equal(100, explicitNextYearRate.Value.FiscalYearId);
+        Assert.True(currentYearRate.IsSuccess);
+        Assert.Equal(1, currentYearRate.Value.FiscalYearId);
+
+        var crossYearAdd = await service.AddAsync(
+            new ExchangeRateRequest(
+                Currency: CurrencyCode.SAR,
+                RateDate: new DateOnly(2026, 6, 1),
+                Rate: 13m));
+        var nextRate = explicitNextYearRate.Value;
+        var crossYearUpdate = await service.UpdateAsync(
+            nextRate.Id,
+            new ExchangeRateUpdateRequest(
+                Currency: nextRate.Currency,
+                RateDate: nextRate.RateDate,
+                Rate: nextRate.Rate + 1m,
+                Source: ExchangeRateSource.Manual,
+                Notes: nextRate.Notes,
+                RowVersion: nextRate.RowVersion));
+        var crossYearDelete = await service.DeleteAsync(nextRate.Id);
+
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            crossYearAdd.Error.Code);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            crossYearUpdate.Error.Code);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            crossYearDelete.Error.Code);
+    }
+
+    [Fact]
     public async Task GetAll_ReturnsNewestRateDateFirst_WithDescendingIdTieBreak()
     {
         await using var database = await ExchangeRateTestDatabase.CreateAsync();
@@ -107,6 +199,44 @@ public sealed class ExchangeRateServiceTests
         Assert.Equal(50m, result.Value.Rate);
         Assert.Equal(ExchangeRateSource.Manual, result.Value.Source);
         Assert.False(result.Value.IsBaseCurrency);
+
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears
+            SET IsCurrent = 2,
+                Name = '2025', StartDate = '2025-01-01', EndDate = '2025-12-31'
+            WHERE Id = 1;
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent, RowVersion, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                100, 1, '2026', '2026-01-01', '2026-12-31', 1,
+                1, randomblob(8), 'test', '2026-01-01', 'test', 0);
+            UPDATE FiscalYears SET IsCurrent = 0 WHERE Id = 1;
+            UPDATE ExchangeRates SET FiscalYearId = 100 WHERE CompanyId = 1;
+            INSERT INTO ExchangeRates (
+                CompanyId, FiscalYearId, Currency, RateDate, Rate, Source,
+                Notes, LastModifiedAt, CreatedById, CreatedOn, CreatedByPc,
+                IsDeleted)
+            VALUES (
+                1, 1, 4, '2025-01-01', 49, 1, 'Historical',
+                '2025-01-01', 'test', '2025-01-01', 'test', 0);
+            """);
+
+        var hiddenHistoricalResolve = await service.ResolveAsync(
+            CurrencyCode.USD,
+            new DateOnly(2025, 1, 3));
+        var selectedHistoricalResolve = await service.ResolveAsync(
+            CurrencyCode.USD,
+            new DateOnly(2025, 1, 3),
+            fiscalYearId: 1);
+
+        Assert.True(hiddenHistoricalResolve.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            hiddenHistoricalResolve.Error.Code);
+        Assert.True(selectedHistoricalResolve.IsFailure);
     }
 
     [Fact]
@@ -382,6 +512,8 @@ public sealed class ExchangeRateServiceTests
                     """);
             }
 
+            await TestFiscalYearSchema.EnsureAsync(context);
+
             return new ExchangeRateTestDatabase(connection, context, isolationInterceptor);
         }
 
@@ -395,7 +527,13 @@ public sealed class ExchangeRateServiceTests
                 new PaginationService(),
                 companyContext,
                 TimeProvider.System,
-                resolver);
+                resolver,
+                new FiscalYearQueryScopeResolver(
+                    Context,
+                    companyContext),
+                new FiscalYearPeriodGuard(
+                    Context,
+                    companyContext));
         }
 
         public ExchangeRateResolver CreateResolver(int companyId) =>

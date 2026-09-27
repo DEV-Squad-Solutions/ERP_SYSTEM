@@ -28,6 +28,9 @@ public sealed class ExchangeRateConfiguration
         builder.Property(rate => rate.CompanyId)
             .IsRequired();
 
+        builder.Property(rate => rate.FiscalYearId)
+            .IsRequired();
+
         builder.HasAlternateKey(rate => new
         {
             rate.CompanyId,
@@ -69,6 +72,7 @@ public sealed class ExchangeRateConfiguration
         builder.HasIndex(rate => new
         {
             rate.CompanyId,
+            rate.FiscalYearId,
             rate.Currency,
             rate.RateDate
         })
@@ -78,6 +82,7 @@ public sealed class ExchangeRateConfiguration
         builder.HasIndex(rate => new
         {
             rate.CompanyId,
+            rate.FiscalYearId,
             rate.Currency,
             rate.RateDate,
             rate.Id
@@ -86,6 +91,16 @@ public sealed class ExchangeRateConfiguration
         builder.HasOne(rate => rate.Company)
             .WithMany()
             .HasForeignKey(rate => rate.CompanyId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(rate => rate.FiscalYear)
+            .WithMany()
+            .HasForeignKey(rate => new { rate.CompanyId, rate.FiscalYearId })
+            .HasPrincipalKey(fiscalYear => new
+            {
+                fiscalYear.CompanyId,
+                fiscalYear.Id
+            })
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasQueryFilter(rate =>

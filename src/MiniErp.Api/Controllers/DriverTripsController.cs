@@ -29,7 +29,6 @@ public sealed class DriverTripsController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPut("bulk-costs")]
     [ProducesResponseType<DriverTripBulkCostUpdateResponse>(
         StatusCodes.Status200OK)]

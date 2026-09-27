@@ -1357,6 +1357,7 @@ public sealed class AutomaticPostingServiceTests
                 .Options;
             var context = new ApplicationDbContext(options);
             await CreateSchemaAsync(context);
+            await TestFiscalYearSchema.EnsureAsync(context);
             return new TestDatabase(connection, context);
         }
 

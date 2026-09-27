@@ -53,8 +53,6 @@ public sealed class DashboardService(
         var today = DateOnly.FromDateTime(
             timeProvider.GetUtcNow().UtcDateTime);
         var fiscalYear = await ResolveFiscalYearAsync(
-            filters,
-            today,
             cancellationToken);
         if (fiscalYear is null)
         {
@@ -63,7 +61,9 @@ public sealed class DashboardService(
 
         var fromDate = filters.FromDate ?? fiscalYear.StartDate;
         var toDate = filters.ToDate ?? fiscalYear.EndDate;
-        if (toDate < fromDate ||
+        if (fromDate < fiscalYear.StartDate ||
+            toDate > fiscalYear.EndDate ||
+            toDate < fromDate ||
             toDate.DayNumber - fromDate.DayNumber > 365)
         {
             return Result<DashboardResponse>.Failure(InvalidDateRange());
@@ -79,6 +79,7 @@ public sealed class DashboardService(
             .AsNoTracking()
             .Where(invoice =>
                 invoice.CompanyId == companyId &&
+                invoice.FiscalYearId == fiscalYear.Id &&
                 invoice.InvoiceDate >= fromDate &&
                 invoice.InvoiceDate <= toDate)
             .GroupBy(invoice => new
@@ -138,7 +139,8 @@ public sealed class DashboardService(
                 new ProfitabilityReportFilterRequest(
                     IncludeReturns: true,
                     FromDate: fromDate,
-                    ToDate: toDate),
+                    ToDate: toDate,
+                    FiscalYearId: fiscalYear.Id),
                 cancellationToken);
         if (profitabilityResult.IsFailure)
         {
@@ -146,12 +148,18 @@ public sealed class DashboardService(
                 profitabilityResult.Errors);
         }
 
-        var inventory = await BuildInventorySummaryAsync(cancellationToken);
+        var inventory = await BuildInventorySummaryAsync(
+            fiscalYear.Id,
+            toDate,
+            cancellationToken);
         var counts = await BuildEntityCountsAsync(
             invoiceActivity.Sum(row => row.InvoiceCount),
             cancellationToken);
         var invoiceStatus = BuildInvoiceStatus(invoiceActivity);
-        var cashBalances = await BuildCashBalancesAsync(cancellationToken);
+        var cashBalances = await BuildCashBalancesAsync(
+            fiscalYear.Id,
+            toDate,
+            cancellationToken);
 
         var readinessResult = await accountingReadinessService.GetAsync(
             fiscalYear.Id,
@@ -185,6 +193,7 @@ public sealed class DashboardService(
             invoiceStatus,
             inventory,
             accounting,
+            fiscalYear.Id,
             cancellationToken);
 
         return Result<DashboardResponse>.Success(
@@ -207,58 +216,19 @@ public sealed class DashboardService(
     }
 
     private async Task<FiscalYearProjection?> ResolveFiscalYearAsync(
-        DashboardFilterRequest filters,
-        DateOnly today,
         CancellationToken cancellationToken)
     {
-        var query = dbContext.FiscalYears
+        return await dbContext.FiscalYears
             .AsNoTracking()
-            .Where(fiscalYear => fiscalYear.CompanyId == companyId);
-
-        if (!filters.FromDate.HasValue && !filters.ToDate.HasValue)
-        {
-            var preferred = await query
-                .Where(fiscalYear =>
-                    fiscalYear.IsCurrent ||
-                    (fiscalYear.StartDate <= today &&
-                     fiscalYear.EndDate >= today))
-                .OrderByDescending(fiscalYear => fiscalYear.IsCurrent)
-                .ThenByDescending(fiscalYear => fiscalYear.StartDate)
-                .Select(fiscalYear => new FiscalYearProjection(
-                    fiscalYear.Id,
-                    fiscalYear.Name,
-                    fiscalYear.StartDate,
-                    fiscalYear.EndDate))
-                .FirstOrDefaultAsync(cancellationToken);
-            if (preferred is not null)
-            {
-                return preferred;
-            }
-
-            return await query
-                .OrderByDescending(fiscalYear => fiscalYear.StartDate)
-                .Select(fiscalYear => new FiscalYearProjection(
-                    fiscalYear.Id,
-                    fiscalYear.Name,
-                    fiscalYear.StartDate,
-                    fiscalYear.EndDate))
-                .FirstOrDefaultAsync(cancellationToken);
-        }
-
-        var firstDate = filters.FromDate ?? filters.ToDate!.Value;
-        var lastDate = filters.ToDate ?? filters.FromDate!.Value;
-        return await query
             .Where(fiscalYear =>
-                fiscalYear.StartDate <= firstDate &&
-                fiscalYear.EndDate >= lastDate)
-            .OrderByDescending(fiscalYear => fiscalYear.IsCurrent)
-            .ThenByDescending(fiscalYear => fiscalYear.StartDate)
+                fiscalYear.CompanyId == companyId &&
+                fiscalYear.IsCurrent)
             .Select(fiscalYear => new FiscalYearProjection(
-                fiscalYear.Id,
-                fiscalYear.Name,
-                fiscalYear.StartDate,
-                fiscalYear.EndDate))
-            .FirstOrDefaultAsync(cancellationToken);
+                Id: fiscalYear.Id,
+                Name: fiscalYear.Name,
+                StartDate: fiscalYear.StartDate,
+                EndDate: fiscalYear.EndDate))
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
     private static DashboardMoneySummary BuildMoneySummary(
@@ -285,6 +255,8 @@ public sealed class DashboardService(
     }
 
     private async Task<DashboardInventorySummary> BuildInventorySummaryAsync(
+        int fiscalYearId,
+        DateOnly toDate,
         CancellationToken cancellationToken)
     {
         var activeItemCount = await dbContext.Items
@@ -293,25 +265,34 @@ public sealed class DashboardService(
                 item.CompanyId == companyId &&
                 item.IsActive,
                 cancellationToken);
-        var currentInventoryValue = await dbContext.ItemStoreBalances
+        var latestMovements = dbContext.ItemMovements
             .AsNoTracking()
-            .Where(balance => balance.CompanyId == companyId)
-            .SumAsync(
-                balance => (decimal?)balance.InventoryValue,
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.MovementDate <= toDate &&
+                !dbContext.ItemMovements.Any(later =>
+                    later.CompanyId == companyId &&
+                    later.StoreId == movement.StoreId &&
+                    later.ItemId == movement.ItemId &&
+                    later.MovementDate <= toDate &&
+                    (later.MovementDate > movement.MovementDate ||
+                     later.MovementDate == movement.MovementDate &&
+                     later.Id > movement.Id)));
+        var currentInventoryValue = await latestMovements
+            .SumAsync(movement => (decimal?)movement.InventoryValueAfter,
                 cancellationToken) ?? 0m;
-        var itemsWithStockCount = await dbContext.ItemStoreBalances
-            .AsNoTracking()
-            .Where(balance =>
-                balance.CompanyId == companyId &&
-                balance.Item.IsActive &&
-                balance.Quantity > 0m)
-            .Select(balance => balance.ItemId)
+        var itemsWithStockCount = await latestMovements
+            .Where(movement =>
+                movement.Item.IsActive &&
+                movement.QuantityAfter > 0m)
+            .Select(movement => movement.ItemId)
             .Distinct()
             .CountAsync(cancellationToken);
         var pendingCostMovementCount = await dbContext.ItemMovements
             .AsNoTracking()
             .CountAsync(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYearId &&
                 movement.PendingCostQuantity > 0m,
                 cancellationToken);
 
@@ -375,12 +356,17 @@ public sealed class DashboardService(
     }
 
     private async Task<IReadOnlyList<DashboardCashBalance>>
-        BuildCashBalancesAsync(CancellationToken cancellationToken)
+        BuildCashBalancesAsync(
+            int fiscalYearId,
+            DateOnly toDate,
+            CancellationToken cancellationToken)
     {
         var cashboxTotals = PostedJournalLedgerLines
             .Create(dbContext, companyId)
             .Where(line => line.PartyType == JournalPartyType.Cashbox &&
-                line.PartyId.HasValue)
+                line.PartyId.HasValue &&
+                line.JournalEntry.FiscalYearId == fiscalYearId &&
+                line.JournalEntry.EntryDate <= toDate)
             .GroupBy(line => line.PartyId!.Value)
             .Select(group => new
             {
@@ -454,6 +440,7 @@ public sealed class DashboardService(
         DashboardInvoiceStatusSummary invoiceStatus,
         DashboardInventorySummary inventory,
         DashboardAccountingSummary accounting,
+        int fiscalYearId,
         CancellationToken cancellationToken)
     {
         var alerts = new List<DashboardAlert>();
@@ -479,6 +466,7 @@ public sealed class DashboardService(
             .AsNoTracking()
             .CountAsync(voucher =>
                 voucher.CompanyId == companyId &&
+                voucher.FiscalYearId == fiscalYearId &&
                 !voucher.IsPosted,
                 cancellationToken);
         if (draftVoucherCount > 0)

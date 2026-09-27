@@ -20,6 +20,7 @@ using MiniErp.Infrastructure.Services.CashVouchers;
 using MiniErp.Infrastructure.Services.EmployeeMovements;
 using MiniErp.Infrastructure.Services.EmployeeOpeningBalances;
 using MiniErp.Infrastructure.Services.ExchangeRates;
+using MiniErp.Infrastructure.Services.FiscalYears;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.PayrollEntries;
 using MiniErp.Infrastructure.Services.Statements;
@@ -72,6 +73,8 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<IPaginationService, PaginationService>();
         services.AddScoped<IExchangeRateResolver, ExchangeRateResolver>();
+        services.AddScoped<IFiscalYearQueryScopeResolver,
+            FiscalYearQueryScopeResolver>();
         services.AddScoped<ICashVoucherService, CashVoucherService>();
         services.AddScoped<NoOpCashVoucherPostingService>();
         services.AddScoped<ICashVoucherPostingService>(serviceProvider =>
@@ -252,6 +255,7 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
             WHERE PayrollEntryId IS NOT NULL AND IsDeleted = 0;
         """);
         await SeedRequiredDataAsync(context, companyId);
+        await TestFiscalYearSchema.EnsureAsync(context);
 
         return new PayrollEntryTestDatabase(
             connection,
@@ -344,6 +348,23 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
     {
         return scope.ServiceProvider.GetRequiredService<IEmployeeOpeningBalanceService>();
     }
+
+    public Task ConfigureSeparateFiscalYearsAsync() =>
+        Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears
+            SET Name = '2025', StartDate = '2025-01-01',
+                EndDate = '2025-12-31'
+            WHERE Id = 1;
+
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent, RowVersion, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                100, 1, '2026', '2026-01-01', '2026-12-31', 1,
+                0, randomblob(8), 'test', '2026-01-01', 'test', 0);
+            """);
 
     public IEmployeeMovementService CreateMovementService()
     {

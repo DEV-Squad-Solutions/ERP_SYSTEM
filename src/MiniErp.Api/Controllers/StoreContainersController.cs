@@ -71,7 +71,6 @@ public sealed class StoreContainersController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPut("upsert")]
     [ProducesResponseType<IReadOnlyList<StoreContainerResponse>>(
         StatusCodes.Status200OK)]

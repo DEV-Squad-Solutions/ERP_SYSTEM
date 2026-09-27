@@ -5,6 +5,7 @@ namespace MiniErp.Application.Features.EmployeeAttendance;
 public sealed record EmployeeAttendanceResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
     int EmployeeId,
     string EmployeeName,
     EmployeeAttendanceStatus Status,
@@ -21,7 +22,8 @@ public sealed record EmployeeAttendanceResponse(
 public sealed record EmployeeAttendanceReportRequest(
     DateOnly StartDate,
     DateOnly EndDate,
-    int? EmployeeId = null);
+    int? EmployeeId = null,
+    int? FiscalYearId = null);
 
 public sealed record EmployeeAttendanceReportLine(
     int EmployeeId,

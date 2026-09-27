@@ -19,6 +19,7 @@ public sealed class CashboxTransferService(
     ICurrentCompanyContext currentCompanyContext,
     IExchangeRateResolver exchangeRateResolver,
     TimeProvider timeProvider,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
     IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
     ICashboxTransferPostingService? cashboxTransferPostingService = null)
     : ICashboxTransferService, IScopedService
@@ -37,10 +38,23 @@ public sealed class CashboxTransferService(
                 filterError);
         }
 
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.FromDate,
+            toDate: filters.ToDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<PagedResponse<CashboxTransferListResponse>>.Failure(
+                fiscalYear.Errors);
+        }
+
         var search = filters.Search?.Trim();
         var query = dbContext.CashboxTransfers
             .AsNoTracking()
-            .Where(transfer => transfer.CompanyId == companyId)
+            .Where(transfer =>
+                transfer.CompanyId == companyId &&
+                transfer.FiscalYearId == fiscalYear.Value.FiscalYearId)
             .Where(transfer =>
                 string.IsNullOrEmpty(search) ||
                 transfer.TransferNumber.Contains(search) ||
@@ -60,20 +74,22 @@ public sealed class CashboxTransferService(
                 transfer.TransferDate >= filters.FromDate.Value)
             .Where(transfer =>
                 !filters.ToDate.HasValue ||
-                transfer.TransferDate <= filters.ToDate.Value)
+                transfer.TransferDate <= filters.ToDate.Value);
+        var orderedQuery = query
             .OrderByDescending(transfer => transfer.TransferDate)
             .ThenByDescending(transfer => transfer.Id);
 
         return await paginationService.PaginateAsync<
             CashboxTransfer,
             CashboxTransferListResponse>(
-                query,
+                orderedQuery,
                 pagination,
                 cancellationToken);
     }
 
     public async Task<Result<CashboxTransferResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -81,7 +97,18 @@ public sealed class CashboxTransferService(
             return Result<CashboxTransferResponse>.Failure(InvalidId());
         }
 
-        var response = await BuildResponseAsync(id, cancellationToken);
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<CashboxTransferResponse>.Failure(fiscalYear.Errors);
+        }
+
+        var response = await BuildResponseAsync(
+            id,
+            cancellationToken,
+            fiscalYear.Value.FiscalYearId);
         return response is null
             ? Result<CashboxTransferResponse>.Failure(NotFound(id))
             : Result<CashboxTransferResponse>.Success(response);
@@ -287,6 +314,16 @@ public sealed class CashboxTransferService(
             return Result<CashboxTransferResponse>.Failure(Concurrency());
         }
 
+        var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: transfer.FiscalYearId,
+            fromDate: request.TransferDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYearScope.IsFailure)
+        {
+            return Result<CashboxTransferResponse>.Failure(
+                fiscalYearScope.Errors);
+        }
+
         if (fiscalYearPeriodGuard is not null)
         {
             var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
@@ -438,6 +475,15 @@ public sealed class CashboxTransferService(
         if (transfer is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: transfer.FiscalYearId,
+            fromDate: transfer.TransferDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYearScope.IsFailure)
+        {
+            return Result.Failure(fiscalYearScope.Errors);
         }
 
         if (fiscalYearPeriodGuard is not null)
@@ -948,19 +994,24 @@ public sealed class CashboxTransferService(
 
     private async Task<CashboxTransferResponse?> BuildResponseAsync(
         int id,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? fiscalYearId = null)
     {
         var transfer = await dbContext.CashboxTransfers
             .AsNoTracking()
             .Where(entity =>
                 entity.CompanyId == companyId &&
-                entity.Id == id)
+                entity.Id == id &&
+                (!fiscalYearId.HasValue ||
+                 entity.FiscalYearId == fiscalYearId.Value))
             .Select(entity => new
             {
                 entity.Id,
                 entity.CompanyId,
                 entity.TransferNumber,
                 entity.TransferDate,
+                entity.FiscalYearId,
+                FiscalYearName = entity.FiscalYear.Name,
                 entity.SourceCashboxId,
                 SourceCashboxName = entity.SourceCashbox.Name,
                 entity.DestinationCashboxId,
@@ -984,7 +1035,8 @@ public sealed class CashboxTransferService(
             .AsNoTracking()
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
-                voucher.CashboxTransferId == id)
+                voucher.CashboxTransferId == id &&
+                voucher.FiscalYearId == transfer.FiscalYearId)
             .Select(voucher => new
             {
                 voucher.Id,
@@ -1034,6 +1086,8 @@ public sealed class CashboxTransferService(
             LastModifiedAt: transfer.LastModifiedAt,
             RowVersion: transfer.RowVersion)
         {
+            FiscalYearId = transfer.FiscalYearId,
+            FiscalYearName = transfer.FiscalYearName,
             DestinationAmount = receiptVoucher.Amount,
             DestinationCurrency = receiptVoucher.Currency,
             DestinationExchangeRate = receiptVoucher.ExchangeRate,
@@ -1108,6 +1162,7 @@ public sealed class CashboxTransferService(
         CashboxTransferFilterRequest filters)
     {
         if (filters.Search?.Trim().Length > 100 ||
+            filters.FiscalYearId is <= 0 ||
             filters.SourceCashboxId is <= 0 ||
             filters.DestinationCashboxId is <= 0 ||
             filters.ToDate < filters.FromDate)

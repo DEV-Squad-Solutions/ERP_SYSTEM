@@ -36,17 +36,19 @@ dotnet tool restore
 dotnet ef database update --project src/MiniErp.Infrastructure --startup-project src/MiniErp.Api
 ```
 
-The initial migration creates the standard Identity tables for users, roles, claims, external logins, tokens, and user-role membership. Pending migrations are applied automatically at startup when `Database:ApplyMigrationsOnStartup` is `true` (the default). Set it to `false` in environments where migrations are managed by deployment tooling.
+The initial migration creates the standard Identity tables for users, roles, claims, external logins, tokens, and user-role membership. Automatic migration at application startup is disabled by default. Apply migrations explicitly with the `dotnet ef database update` command above, or opt in for a controlled environment by setting `Database:ApplyMigrationsOnStartup` to `true` (environment variable: `Database__ApplyMigrationsOnStartup=true`).
 
 ## Seed data
 
-Infrastructure includes an idempotent Bogus seeder for Identity users and catalog data. Pending migrations are applied before the seeder runs. Seeding is enabled by default in the base configuration, including production.
+Infrastructure includes an idempotent Bogus seeder for Identity users and catalog data. Both automatic migration and seeding are disabled by default, including in Development. Apply migrations manually first, then explicitly opt in to seeding only when development/test data is required:
 
 ```powershell
 $env:Seed__Enabled = "true"
 $env:Seed__Password = "use-a-strong-secret-password"
 dotnet run --project src/MiniErp.Api/MiniErp.Api.csproj --launch-profile https
 ```
+
+To opt in to both operations for a controlled local startup, also set `$env:Database__ApplyMigrationsOnStartup = "true"`. Leave both settings disabled for normal application startup and production deployments.
 
 The current base seed password is a temporary development credential. Replace it with `Seed__Password` through the production environment or a secret provider before using the application in a real production environment. The application fails fast when seeding is enabled without a password.
 

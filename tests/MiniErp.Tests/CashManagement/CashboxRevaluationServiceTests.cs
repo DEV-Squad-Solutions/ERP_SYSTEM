@@ -9,6 +9,114 @@ namespace MiniErp.Tests.CashManagement;
 public sealed class CashboxRevaluationServiceTests
 {
     [Fact]
+    public async Task Get_DefaultsToCurrentFiscalYearAndSupportsHistoricalSelection()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (3, 1, '2025', '2025-01-01', '2025-12-31', 2, 0,
+                 'test', '2025-01-01', 'test', 0);
+
+            INSERT INTO CashboxRevaluations (
+                Id, CompanyId, FiscalYearId, CashboxId, RevaluationDate,
+                ClosingRate, ForeignAmount, CarryingBaseAmount,
+                TargetBaseAmount, DeltaBaseAmount, JournalEntryId,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (91, 1, 3, 6, '2025-12-31', 50, 100, 4800, 5000, 200,
+                 NULL, 'test', '2025-12-31', 'test', 0),
+                (92, 1, 1, 6, '2026-01-31', 60, 100, 5500, 6000, 500,
+                 NULL, 'test', '2026-01-31', 'test', 0);
+            """);
+
+        var service = database.CreateCashboxRevaluationService(1);
+
+        var current = await service.GetAsync();
+        var historical = await service.GetAsync(fiscalYearId: 3);
+
+        Assert.True(current.IsSuccess);
+        var currentRow = Assert.Single(current.Value);
+        Assert.Equal(1, currentRow.FiscalYearId);
+        Assert.Equal("2026", currentRow.FiscalYearName);
+        Assert.Equal(92, currentRow.Id);
+        Assert.True(historical.IsSuccess);
+        var historicalRow = Assert.Single(historical.Value);
+        Assert.Equal(3, historicalRow.FiscalYearId);
+        Assert.Equal("2025", historicalRow.FiscalYearName);
+        Assert.Equal(91, historicalRow.Id);
+    }
+
+    [Fact]
+    public async Task Revaluation_UsesOnlyTheDateFiscalYearLedgerAndBackdatedHistory()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (3, 1, '2025', '2025-01-01', '2025-12-31', 2, 0,
+                 'test', '2025-01-01', 'test', 0),
+                (4, 1, '2027', '2027-01-01', '2027-12-31', 1, 0,
+                 'test', '2027-01-01', 'test', 0);
+
+            UPDATE JournalEntryLines
+            SET Debit = 5500, Currency = 3, ExchangeRate = 55,
+                TransactionDebit = 100
+            WHERE Id = 1006;
+
+            INSERT INTO CashboxRevaluations (
+                CompanyId, FiscalYearId, CashboxId, RevaluationDate,
+                ClosingRate, ForeignAmount, CarryingBaseAmount,
+                TargetBaseAmount, DeltaBaseAmount, JournalEntryId,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 4, 6, '2027-06-30', 70, 100, 6500, 7000, 500,
+                 NULL, 'test', '2027-06-30', 'test', 0);
+            """);
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 2001,
+            entryNumber: "JE-OLD-EUR",
+            entryDate: new DateOnly(2025, 12, 31),
+            entryType: JournalEntryType.Automatic,
+            sourceType: null,
+            sourceId: null,
+            sourceNumber: null,
+            lines:
+            [
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 1,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 6,
+                    Debit: 5_000m,
+                    Credit: 0m,
+                    Currency: CurrencyCode.EUR,
+                    ExchangeRate: 50m,
+                    TransactionDebit: 100m,
+                    TransactionCredit: 0m)
+            ],
+            fiscalYearId: 3);
+
+        var result = await database.CreateCashboxRevaluationService(1)
+            .CreateAsync(new CashboxRevaluationRequest(
+                CashboxId: 6,
+                RevaluationDate: new DateOnly(2026, 1, 31),
+                ClosingRate: 60m));
+
+        Assert.True(result.IsSuccess, string.Join("; ", result.Errors.Select(error => error.Code)));
+        Assert.Equal(1, result.Value.FiscalYearId);
+        Assert.Equal("2026", result.Value.FiscalYearName);
+        Assert.Equal(100m, result.Value.ForeignAmount);
+        Assert.Equal(5_500m, result.Value.CarryingBaseAmount);
+        Assert.Equal(500m, result.Value.DeltaBaseAmount);
+    }
+
+    [Fact]
     public async Task Revaluation_PostsGainThenIncrementalLossWithoutChangingForeignQuantity()
     {
         await using var database = await CashManagementTestDatabase.CreateAsync();

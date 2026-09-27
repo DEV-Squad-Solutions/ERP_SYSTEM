@@ -7,4 +7,5 @@ public sealed record DriverTripCostFilterRequest(
     int? DriverId = null,
     string? InvoiceNumber = null,
     string? TripNumber = null,
-    bool? HasCost = null);
+    bool? HasCost = null,
+    int? FiscalYearId = null);

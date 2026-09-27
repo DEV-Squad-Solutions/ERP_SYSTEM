@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.InventoryCounts;
+using MiniErp.Application.Features.InventoryStockReports;
 using MiniErp.Application.Features.StockAdjustments;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
@@ -300,6 +301,61 @@ public sealed class InventoryDocumentServiceTests
     }
 
     [Fact]
+    public async Task StockAdjustment_GetAllDefaultsToCurrentFiscalYear()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        await database.ConfigureSeparateFiscalYearsAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO StockAdjustments (
+                CompanyId, FiscalYearId, StoreId, DocumentNumber,
+                DocumentDate, Direction, Reason, SourceInventoryCountId,
+                LastModifiedAt, CreatedById, CreatedOn, CreatedByPc,
+                IsDeleted)
+            VALUES
+                (1, 1, 1, 'ADJ-2025', '2025-06-01', 1, NULL, NULL,
+                 '2025-06-01', 'test', '2025-06-01', 'test', 0),
+                (1, 100, 1, 'ADJ-2026', '2026-06-01', 1, NULL, NULL,
+                 '2026-06-01', 'test', '2026-06-01', 'test', 0);
+            """);
+        var service = database.CreateStockAdjustmentService();
+
+        var currentYear = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 });
+        var nextYear = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new StockAdjustmentFilterRequest(FiscalYearId: 100));
+        var invalidDate = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new StockAdjustmentFilterRequest(
+                FiscalYearId: 1,
+                FromDate: new DateOnly(2026, 1, 1)));
+
+        Assert.True(currentYear.IsSuccess);
+        var currentItem = Assert.Single(currentYear.Value.Items);
+        Assert.Equal("ADJ-2025", currentItem.DocumentNumber);
+        Assert.Equal(1, currentItem.FiscalYearId);
+        Assert.Equal("2025", currentItem.FiscalYearName);
+
+        Assert.True(nextYear.IsSuccess);
+        var nextItem = Assert.Single(nextYear.Value.Items);
+        Assert.Equal("ADJ-2026", nextItem.DocumentNumber);
+        Assert.Equal(100, nextItem.FiscalYearId);
+        Assert.Equal("2026", nextItem.FiscalYearName);
+        Assert.Equal(
+            "StockAdjustments.NotFound",
+            (await service.GetByIdAsync(nextItem.Id)).Error.Code);
+        Assert.Equal(
+            100,
+            (await service.GetByIdAsync(nextItem.Id, fiscalYearId: 100))
+                .Value.FiscalYearId);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            invalidDate.Error.Code);
+    }
+
+    [Fact]
     public async Task StockAdjustment_DeleteSoftDeletesAggregateAndTouchesHeader()
     {
         await using var database =
@@ -375,6 +431,197 @@ public sealed class InventoryDocumentServiceTests
         Assert.All(
             result.Value.Lines,
             line => Assert.Null(line.PhysicalQuantity));
+    }
+
+    [Fact]
+    public async Task InventoryCount_GetAllDefaultsToCurrentFiscalYear()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        await database.ConfigureSeparateFiscalYearsAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO InventoryCounts (
+                CompanyId, FiscalYearId, StoreId, DocumentNumber,
+                CountDate, SnapshotTakenAt, ReconciledAt, Notes,
+                LastModifiedAt, CreatedById, CreatedOn, CreatedByPc,
+                IsDeleted)
+            VALUES
+                (1, 1, 1, 'IC-2025', '2025-06-01',
+                 '2025-06-01', NULL, NULL, '2025-06-01',
+                 'test', '2025-06-01', 'test', 0),
+                (1, 100, 1, 'IC-2026', '2026-06-01',
+                 '2026-06-01', NULL, NULL, '2026-06-01',
+                 'test', '2026-06-01', 'test', 0);
+            """);
+        var service = database.CreateInventoryCountService();
+
+        var currentYear = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 });
+        var nextYear = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new InventoryCountFilterRequest(FiscalYearId: 100));
+        var invalidDate = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new InventoryCountFilterRequest(
+                FiscalYearId: 1,
+                FromDate: new DateOnly(2026, 1, 1)));
+
+        Assert.True(currentYear.IsSuccess);
+        var currentItem = Assert.Single(currentYear.Value.Items);
+        Assert.Equal("IC-2025", currentItem.DocumentNumber);
+        Assert.Equal(1, currentItem.FiscalYearId);
+        Assert.Equal("2025", currentItem.FiscalYearName);
+
+        Assert.True(nextYear.IsSuccess);
+        var nextItem = Assert.Single(nextYear.Value.Items);
+        Assert.Equal("IC-2026", nextItem.DocumentNumber);
+        Assert.Equal(100, nextItem.FiscalYearId);
+        Assert.Equal("2026", nextItem.FiscalYearName);
+        Assert.Equal(
+            "InventoryCounts.NotFound",
+            (await service.GetByIdAsync(nextItem.Id)).Error.Code);
+        Assert.Equal(
+            100,
+            (await service.GetByIdAsync(nextItem.Id, fiscalYearId: 100))
+                .Value.FiscalYearId);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            invalidDate.Error.Code);
+    }
+
+    [Fact]
+    public async Task ClosedFiscalYearBlocksAdjustmentAndInventoryCountMutations()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        var adjustmentService = database.CreateStockAdjustmentService();
+        var countService = database.CreateInventoryCountService();
+        var adjustment = (await adjustmentService.AddAsync(
+            AdjustmentRequest(
+                StockAdjustmentDirection.Increase,
+                2m))).Value;
+        var count = (await countService.AddAsync(CountRequest())).Value;
+        await database.Context.FiscalYears
+            .Where(year => year.Id == 1)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(
+                year => year.Status,
+                FiscalYearStatus.Closed));
+        database.Context.ChangeTracker.Clear();
+
+        var adjustmentUpdate = await adjustmentService.UpdateAsync(
+            adjustment.Id,
+            new StockAdjustmentUpdateRequest(
+                StoreId: adjustment.StoreId,
+                DocumentDate: adjustment.DocumentDate,
+                Direction: adjustment.Direction,
+                Reason: "closed",
+                Lines: [AdjustmentLine(1, 2m, null)],
+                RowVersion: adjustment.RowVersion));
+        var adjustmentDelete = await adjustmentService.DeleteAsync(
+            adjustment.Id);
+        var countUpdate = await countService.UpdateAsync(
+            count.Id,
+            new InventoryCountUpdateRequest(
+                Notes: "closed",
+                Lines: count.Lines.Select(line =>
+                    new InventoryCountLineUpdateRequest(
+                        ItemId: line.ItemId,
+                        PhysicalQuantity: line.SystemQuantity,
+                        Notes: null)).ToArray(),
+                RowVersion: count.RowVersion));
+        var countReconcile = await countService.ReconcileAsync(
+            count.Id,
+            new InventoryCountReconcileRequest(count.RowVersion));
+        var countDelete = await countService.DeleteAsync(
+            count.Id,
+            count.RowVersion);
+
+        Assert.Equal("FiscalYears.Closed", adjustmentUpdate.Error.Code);
+        Assert.Equal("FiscalYears.Closed", adjustmentDelete.Error.Code);
+        Assert.Equal("FiscalYears.Closed", countUpdate.Error.Code);
+        Assert.Equal("FiscalYears.Closed", countReconcile.Error.Code);
+        Assert.Equal("FiscalYears.Closed", countDelete.Error.Code);
+        Assert.Single(await database.Context.StockAdjustments
+            .Where(item => item.Id == adjustment.Id)
+            .ToListAsync());
+        Assert.Single(await database.Context.InventoryCounts
+            .Where(item => item.Id == count.Id)
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task InventoryStockReport_UsesOnlySelectedFiscalYearMovements()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        await database.ConfigureSeparateFiscalYearsAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO ItemMovements (
+                CompanyId, FiscalYearId, StoreId, ItemId, ItemUnitId,
+                MovementType, ReferenceId, ReferenceNumber, MovementDate,
+                QuantityIn, QuantityOut, CostStatus, PendingCostQuantity,
+                UnitCost, TotalCost, QuantityAfter, AverageCostAfter,
+                InventoryValueAfter, Description, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 1, 1, 1, 1, 501, 'FY-2025', '2025-05-01',
+                 5, 0, 1, 0, 2, 10, 5, 2, 10, NULL,
+                 'test', '2025-05-01', 'test', 0),
+                (1, 100, 1, 1, 1, 1, 601, 'FY-2026', '2026-05-01',
+                 11, 0, 1, 0, 3, 33, 11, 3, 33, NULL,
+                 'test', '2026-05-01', 'test', 0);
+            """);
+        var service = database.CreateInventoryStockReportService();
+        var pagination = new PaginationRequest
+        {
+            PageNumber = 1,
+            PageSize = 20
+        };
+
+        var currentYear = await service.GetAsync(
+            pagination,
+            new InventoryStockReportFilterRequest(
+                StoreId: 1,
+                AsOfDate: new DateOnly(2025, 12, 31),
+                ItemId: 1));
+        var nextYear = await service.GetAsync(
+            pagination,
+            new InventoryStockReportFilterRequest(
+                StoreId: 1,
+                AsOfDate: new DateOnly(2026, 12, 31),
+                ItemId: 1,
+                FiscalYearId: 100));
+
+        Assert.True(currentYear.IsSuccess);
+        Assert.Equal(1, currentYear.Value.FiscalYearId);
+        Assert.Equal("2025", currentYear.Value.FiscalYearName);
+        Assert.Equal(5m, Assert.Single(currentYear.Value.Items).Balance);
+
+        Assert.True(nextYear.IsSuccess);
+        Assert.Equal(100, nextYear.Value.FiscalYearId);
+        Assert.Equal("2026", nextYear.Value.FiscalYearName);
+        Assert.Equal(11m, Assert.Single(nextYear.Value.Items).Balance);
+    }
+
+    [Fact]
+    public async Task InventoryStockReport_RejectsAsOfDateOutsideSelectedFiscalYear()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        await database.ConfigureSeparateFiscalYearsAsync();
+        var service = database.CreateInventoryStockReportService();
+
+        var result = await service.GetAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new InventoryStockReportFilterRequest(
+                StoreId: 1,
+                AsOfDate: new DateOnly(2026, 1, 1),
+                FiscalYearId: 1));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.QueryDateOutsideRange", result.Error.Code);
     }
 
     [Fact]

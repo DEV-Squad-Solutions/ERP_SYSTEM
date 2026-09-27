@@ -10,7 +10,8 @@ public sealed record ProfitabilityReportFilterRequest(
     int? StoreId = null,
     int? ItemId = null,
     int? ItemsCategoryId = null,
-    string? Search = null);
+    string? Search = null,
+    int? FiscalYearId = null);
 
 public sealed class ProfitabilityReportFilterRequestValidator
     : AbstractValidator<ProfitabilityReportFilterRequest>
@@ -32,6 +33,10 @@ public sealed class ProfitabilityReportFilterRequestValidator
         RuleFor(request => request.ItemsCategoryId)
             .GreaterThan(0)
             .When(request => request.ItemsCategoryId.HasValue);
+
+        RuleFor(request => request.FiscalYearId)
+            .GreaterThan(0)
+            .When(request => request.FiscalYearId.HasValue);
 
         RuleFor(request => request)
             .Must(request =>

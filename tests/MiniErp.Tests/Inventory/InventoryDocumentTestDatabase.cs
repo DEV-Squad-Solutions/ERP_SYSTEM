@@ -7,6 +7,7 @@ using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
 using MiniErp.Infrastructure.Services.Inventory;
 using MiniErp.Infrastructure.Services.InventoryCounts;
+using MiniErp.Infrastructure.Services.FiscalYears;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.StockAdjustments;
 using MiniErp.Infrastructure.Services.StockTransfers;
@@ -27,6 +28,22 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
 
     public ApplicationDbContext Context { get; }
 
+    public Task ConfigureSeparateFiscalYearsAsync() =>
+        Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears
+            SET Name = '2025', StartDate = '2025-01-01', EndDate = '2025-12-31'
+            WHERE Id = 1;
+
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent, RowVersion, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                100, 1, '2026', '2026-01-01', '2026-12-31', 1,
+                0, randomblob(8), 'test', '2026-01-01', 'test', 0);
+            """);
+
     public static async Task<InventoryDocumentTestDatabase> CreateAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -43,6 +60,7 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
 
         await CreateSchemaAsync(context);
         await SeedAsync(context);
+        await TestFiscalYearSchema.EnsureAsync(context);
 
         return new InventoryDocumentTestDatabase(connection, context);
     }
@@ -65,7 +83,9 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
             currentCompany,
             stockService,
             costingService,
-            TimeProvider.System);
+            TimeProvider.System,
+            new FiscalYearQueryScopeResolver(Context, currentCompany),
+            new FiscalYearPeriodGuard(Context, currentCompany));
     }
 
     public StockTransferService CreateStockTransferService(
@@ -83,14 +103,45 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
                 currentCompany,
                 TimeProvider.System),
             TimeProvider.System,
-            fiscalYearPeriodGuard);
+            new FiscalYearQueryScopeResolver(Context, currentCompany),
+            fiscalYearPeriodGuard ??
+                new FiscalYearPeriodGuard(Context, currentCompany));
     }
 
     public InventoryCostReportService CreateInventoryCostReportService(
+        int companyId = 1)
+    {
+        var currentCompany = new TestCurrentCompanyContext(companyId);
+        return new InventoryCostReportService(
+            Context,
+            currentCompany,
+            new FiscalYearQueryScopeResolver(Context, currentCompany));
+    }
+
+    public InventoryStockReportService CreateInventoryStockReportService(
+        int companyId = 1)
+    {
+        var currentCompany = new TestCurrentCompanyContext(companyId);
+        return new InventoryStockReportService(
+            Context,
+            currentCompany,
+            new FiscalYearQueryScopeResolver(Context, currentCompany));
+    }
+
+    public InventoryStockService CreateInventoryStockService(
+        int companyId = 1) =>
+        new(Context, new TestCurrentCompanyContext(companyId));
+
+    public InventoryCostingService CreateInventoryCostingService(
         int companyId = 1) =>
         new(
             Context,
-            new TestCurrentCompanyContext(companyId));
+            new TestCurrentCompanyContext(companyId),
+            TimeProvider.System);
+
+    public FiscalYearInventoryCarryForwardService
+        CreateInventoryCarryForwardService(int companyId = 1) =>
+        new(Context, new TestCurrentCompanyContext(companyId));
 
     public InventoryCountService CreateInventoryCountService(
         int companyId = 1)
@@ -108,6 +159,8 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
             Context,
             new PaginationService(),
             currentCompany,
+            new FiscalYearQueryScopeResolver(Context, currentCompany),
+            new FiscalYearPeriodGuard(Context, currentCompany),
             stockService,
             costingService,
             TimeProvider.System);

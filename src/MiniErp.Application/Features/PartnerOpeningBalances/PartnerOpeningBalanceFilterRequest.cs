@@ -8,4 +8,5 @@ public sealed record PartnerOpeningBalanceFilterRequest(
     CurrencyCode? Currency = null,
     PartnerBalanceType? BalanceType = null,
     DateOnly? FromDate = null,
-    DateOnly? ToDate = null);
+    DateOnly? ToDate = null,
+    int? FiscalYearId = null);

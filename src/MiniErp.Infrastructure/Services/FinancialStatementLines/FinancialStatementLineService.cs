@@ -15,7 +15,8 @@ namespace MiniErp.Infrastructure.Services.FinancialStatementLines;
 public sealed class FinancialStatementLineService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver)
     : IFinancialStatementLineService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -167,6 +168,7 @@ public sealed class FinancialStatementLineService(
 
     public async Task<Result<FinancialStatementLineResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -174,7 +176,18 @@ public sealed class FinancialStatementLineService(
             return Result<FinancialStatementLineResponse>.Failure(InvalidId());
         }
 
-        var response = await ProjectResponseQuery(id)
+        var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYearResult.IsFailure)
+        {
+            return Result<FinancialStatementLineResponse>.Failure(
+                fiscalYearResult.Errors);
+        }
+
+        var response = await ProjectResponseQuery(
+                id,
+                fiscalYearResult.Value.FiscalYearId)
             .FirstOrDefaultAsync(cancellationToken);
         return response is null
             ? Result<FinancialStatementLineResponse>.Failure(NotFound(id))
@@ -426,10 +439,16 @@ public sealed class FinancialStatementLineService(
         return Result.Success();
     }
 
-    private IQueryable<FinancialStatementLineResponse> ProjectResponseQuery(int id) =>
+    private IQueryable<FinancialStatementLineResponse> ProjectResponseQuery(
+        int id,
+        int? fiscalYearId = null) =>
         dbContext.FinancialStatementLines
             .AsNoTracking()
-            .Where(line => line.CompanyId == companyId && line.Id == id)
+            .Where(line =>
+                line.CompanyId == companyId &&
+                (!fiscalYearId.HasValue ||
+                 line.FiscalYearId == fiscalYearId.Value) &&
+                line.Id == id)
             .ProjectToType<FinancialStatementLineResponse>();
 
     private async Task<Result> ValidateScopeAsync(

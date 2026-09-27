@@ -4,6 +4,8 @@ public sealed record DriverTripCostResponse(
     int DriverTripId,
     string TripNumber,
     DateOnly TripDate,
+    int FiscalYearId,
+    string FiscalYearName,
     int InvoiceId,
     string InvoiceNumber,
     int BusinessPartnerId,
