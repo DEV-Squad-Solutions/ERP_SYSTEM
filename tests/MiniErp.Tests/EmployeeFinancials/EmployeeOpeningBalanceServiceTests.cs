@@ -232,4 +232,203 @@ public sealed class EmployeeOpeningBalanceServiceTests
             "FiscalYears.QueryDateOutsideRange",
             crossYearUpdate.Error.Code);
     }
+
+    [Fact]
+    public async Task GetAllAsync_IncludesClosingEntryAsOneReadOnlyCarriedRow()
+    {
+        await using var database =
+            await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        await database.ConfigureSeparateFiscalYearsAsync();
+        var service = database.CreateOpeningBalanceService();
+
+        var manual = await service.AddAsync(
+            new EmployeeOpeningBalanceRequest(
+                EmployeeId: 1,
+                DocumentDate: new DateOnly(2026, 1, 1),
+                Currency: CurrencyCode.EGP,
+                BalanceType: EmployeeBalanceType.Credit,
+                Amount: 50m,
+                Notes: "Manual opening"));
+        Assert.True(manual.IsSuccess);
+
+        await SeedClosingEmployeeBalanceAsync(
+            database,
+            employeeBalance: 125m);
+        const int expectedEntryId = 801;
+        const int expectedLineId = 901;
+
+        var firstPage = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 1 },
+            new EmployeeOpeningBalanceFilterRequest
+            {
+                FiscalYearId = 100,
+                Search = "2025"
+            });
+        var mergedFirstPage = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 1 },
+            new EmployeeOpeningBalanceFilterRequest { FiscalYearId = 100 });
+        var mergedSecondPage = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 2, PageSize = 1 },
+            new EmployeeOpeningBalanceFilterRequest { FiscalYearId = 100 });
+
+        Assert.True(firstPage.IsSuccess);
+        Assert.Equal(1, firstPage.Value.TotalCount);
+        var carried = Assert.Single(firstPage.Value.Items);
+        Assert.Equal(-expectedLineId, carried.Id);
+        Assert.Equal(1, carried.CompanyId);
+        Assert.Equal(100, carried.FiscalYearId);
+        Assert.Equal("2026", carried.FiscalYearName);
+        Assert.Equal(1, carried.EmployeeId);
+        Assert.Equal("Monthly Employee", carried.EmployeeName);
+        Assert.Equal("Emp-001", carried.EmployeeCode);
+        Assert.Null(carried.PayrollEntryId);
+        Assert.Equal("2025", carried.DocumentNumber);
+        Assert.Equal(new DateOnly(2026, 1, 1), carried.DocumentDate);
+        Assert.Equal(CurrencyCode.EGP, carried.Currency);
+        Assert.Equal(CurrencyCode.EGP, carried.BaseCurrency);
+        Assert.Equal(1m, carried.ExchangeRate);
+        Assert.Equal(EmployeeBalanceType.Debit, carried.BalanceType);
+        Assert.Equal(125m, carried.Amount);
+        Assert.Equal(125m, carried.BaseAmount);
+        Assert.Equal(
+            "رصيد مرحّل من إقفال السنة المالية 2025",
+            carried.Notes);
+        Assert.Empty(carried.RowVersion);
+        Assert.True(carried.IsCarriedForward);
+        Assert.True(carried.IsReadOnly);
+        Assert.Equal(
+            JournalEntrySourceType.FiscalYearClosing,
+            carried.SourceType);
+        Assert.Equal(expectedEntryId, carried.JournalEntryId);
+        Assert.Equal(expectedLineId, carried.JournalEntryLineId);
+        Assert.Equal(1, carried.SourceFiscalYearId);
+        Assert.Equal("2025", carried.SourceFiscalYearName);
+
+        Assert.False(manual.Value.IsCarriedForward);
+        Assert.False(manual.Value.IsReadOnly);
+        Assert.Null(manual.Value.SourceType);
+        Assert.Null(manual.Value.JournalEntryId);
+        Assert.Null(manual.Value.JournalEntryLineId);
+        Assert.Null(manual.Value.SourceFiscalYearId);
+        Assert.Null(manual.Value.SourceFiscalYearName);
+
+        Assert.True(mergedFirstPage.IsSuccess);
+        Assert.Equal(2, mergedFirstPage.Value.TotalCount);
+        Assert.Equal(2, mergedFirstPage.Value.TotalPages);
+        Assert.True(Assert.Single(mergedFirstPage.Value.Items).IsCarriedForward);
+        Assert.True(mergedSecondPage.IsSuccess);
+        Assert.Equal(manual.Value.Id, Assert.Single(mergedSecondPage.Value.Items).Id);
+    }
+
+    [Fact]
+    public async Task CarriedForwardRow_UsesSelectedYearIdentityAndRejectsWrites()
+    {
+        await using var database =
+            await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        await database.ConfigureSeparateFiscalYearsAsync();
+        var service = database.CreateOpeningBalanceService();
+        await SeedClosingEmployeeBalanceAsync(
+            database,
+            employeeBalance: -300m);
+        const int carriedId = -901;
+
+        var hiddenInCurrentYear = await service.GetByIdAsync(carriedId);
+        var explicitNextYear = await service.GetByIdAsync(
+            carriedId,
+            fiscalYearId: 100);
+        var update = await service.UpdateAsync(
+            carriedId,
+            new EmployeeOpeningBalanceUpdateRequest(
+                EmployeeId: 1,
+                DocumentDate: new DateOnly(2026, 1, 1),
+                Currency: CurrencyCode.EGP,
+                BalanceType: EmployeeBalanceType.Credit,
+                Amount: 300m,
+                Notes: null,
+                RowVersion: []));
+        var delete = await service.DeleteAsync(carriedId);
+
+        Assert.True(hiddenInCurrentYear.IsFailure);
+        Assert.Equal(
+            "EmployeeOpeningBalances.NotFound",
+            hiddenInCurrentYear.Error.Code);
+        Assert.True(explicitNextYear.IsSuccess);
+        Assert.Equal(carriedId, explicitNextYear.Value.Id);
+        Assert.Equal(EmployeeBalanceType.Credit, explicitNextYear.Value.BalanceType);
+        Assert.Equal(300m, explicitNextYear.Value.Amount);
+        Assert.True(update.IsFailure);
+        Assert.Equal(
+            "EmployeeOpeningBalances.CarriedForwardReadOnly",
+            update.Error.Code);
+        Assert.True(delete.IsFailure);
+        Assert.Equal(
+            "EmployeeOpeningBalances.CarriedForwardReadOnly",
+            delete.Error.Code);
+    }
+
+    private static Task SeedClosingEmployeeBalanceAsync(
+        PayrollEntryTestDatabase database,
+        decimal employeeBalance)
+    {
+        var secondEmployeeBalance = employeeBalance > 0m ? 25m : -25m;
+        var firstEmployeeBalance = employeeBalance - secondEmployeeBalance;
+        var firstDebit = Math.Max(firstEmployeeBalance, 0m);
+        var firstCredit = Math.Max(-firstEmployeeBalance, 0m);
+        var secondDebit = Math.Max(secondEmployeeBalance, 0m);
+        var secondCredit = Math.Max(-secondEmployeeBalance, 0m);
+        var offsetDebit = Math.Max(-employeeBalance, 0m);
+        var offsetCredit = Math.Max(employeeBalance, 0m);
+
+        return database.Context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            INSERT INTO JournalEntries (
+                Id, CompanyId, FiscalYearId, EntryNumber, EntryDate,
+                Description, EntryType, SourceType, SourceId, SourceNumber,
+                Status, PostedOn, RowVersion, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                801, 1, 100, 'OB-2025', '2026-01-01',
+                'Closing transfer', 3, 13, 1, '2025', 1,
+                '2026-01-01', randomblob(8), 'test', '2026-01-01',
+                'test', 0);
+
+            INSERT INTO JournalEntryLines (
+                Id, CompanyId, JournalEntryId, AccountId, PartyType,
+                PartyId, Description, Debit, Credit, Currency, ExchangeRate,
+                TransactionDebit, TransactionCredit, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                901, 1, 801, 1, 3, 1, 'Employee carry forward',
+                CAST({firstDebit} AS NUMERIC), CAST({firstCredit} AS NUMERIC),
+                1, 1, CAST({firstDebit} AS NUMERIC),
+                CAST({firstCredit} AS NUMERIC), 'test', '2026-01-01',
+                'test', 0);
+
+            INSERT INTO JournalEntryLines (
+                Id, CompanyId, JournalEntryId, AccountId, PartyType,
+                PartyId, Description, Debit, Credit, Currency, ExchangeRate,
+                TransactionDebit, TransactionCredit, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                902, 1, 801, 2, 3, 1, 'Employee carry forward part 2',
+                CAST({secondDebit} AS NUMERIC),
+                CAST({secondCredit} AS NUMERIC), 1, 1,
+                CAST({secondDebit} AS NUMERIC),
+                CAST({secondCredit} AS NUMERIC), 'test', '2026-01-01',
+                'test', 0);
+
+            INSERT INTO JournalEntryLines (
+                Id, CompanyId, JournalEntryId, AccountId, PartyType,
+                PartyId, Description, Debit, Credit, Currency, ExchangeRate,
+                TransactionDebit, TransactionCredit, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                903, 1, 801, 3, NULL, NULL, 'Opening equity offset',
+                CAST({offsetDebit} AS NUMERIC),
+                CAST({offsetCredit} AS NUMERIC), 1, 1,
+                CAST({offsetDebit} AS NUMERIC),
+                CAST({offsetCredit} AS NUMERIC), 'test', '2026-01-01',
+                'test', 0);
+            """);
+    }
 }

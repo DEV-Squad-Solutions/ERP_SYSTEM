@@ -598,6 +598,7 @@ public sealed class FiscalYearService(
                 line.JournalEntry.FiscalYearId == fiscalYear.Id &&
                 line.JournalEntry.Status == JournalEntryStatus.Posted &&
                 line.JournalEntry.ReversalOfEntryId == null &&
+                line.JournalEntry.ReversedOn == null &&
                 line.Account.AccountType != AccountType.Revenue &&
                 line.Account.AccountType != AccountType.Expense)
             .GroupBy(line => new
@@ -624,7 +625,11 @@ public sealed class FiscalYearService(
             .Where(row => row.Balance != 0m)
             .ToListAsync(cancellationToken);
 
-        if (balances.Count == 0)
+        var employeeDeltas = await LoadEmployeeOperationalDeltasAsync(
+            fiscalYear.Id,
+            cancellationToken);
+
+        if (balances.Count == 0 && employeeDeltas.Count == 0)
         {
             if (existingTransfer is not null)
             {
@@ -671,6 +676,64 @@ public sealed class FiscalYearService(
                 };
             })
             .ToList();
+
+        if (employeeDeltas.Count > 0)
+        {
+            var requiredMappingTypes = employeeDeltas
+                .Select(delta => delta.BaseBalance > 0m
+                    ? AccountingMappingType.EmployeeReceivable
+                    : AccountingMappingType.EmployeeControl)
+                .Distinct()
+                .ToArray();
+            var employeeAccounts = await dbContext.AccountMappings
+                .AsNoTracking()
+                .Where(mapping =>
+                    mapping.CompanyId == companyId &&
+                    mapping.FiscalYearId == nextYear.Id &&
+                    mapping.SourceId == null &&
+                    requiredMappingTypes.Contains(mapping.MappingType))
+                .ToDictionaryAsync(
+                    mapping => mapping.MappingType,
+                    mapping => mapping.AccountId,
+                    cancellationToken);
+
+            foreach (var delta in employeeDeltas)
+            {
+                var mappingType = delta.BaseBalance > 0m
+                    ? AccountingMappingType.EmployeeReceivable
+                    : AccountingMappingType.EmployeeControl;
+                if (!employeeAccounts.TryGetValue(mappingType, out var accountId))
+                {
+                    return Result.Failure(
+                        EmployeeBalanceAccountMissing(nextYear.Name, mappingType));
+                }
+
+                var transactionBalance = delta.TransactionBalance == 0m
+                    ? delta.BaseBalance
+                    : delta.TransactionBalance;
+                lines.Add(new JournalEntryLine
+                {
+                    CompanyId = companyId,
+                    AccountId = accountId,
+                    PartyType = JournalPartyType.Employee,
+                    PartyId = delta.EmployeeId,
+                    Description = "ترحيل فرق الرصيد التشغيلي للموظف",
+                    Debit = delta.BaseBalance > 0m ? delta.BaseBalance : 0m,
+                    Credit = delta.BaseBalance < 0m ? -delta.BaseBalance : 0m,
+                    Currency = delta.Currency,
+                    ExchangeRate = delta.Currency == baseCurrency
+                        ? 1m
+                        : ExchangeRateRules.RoundRate(
+                            Math.Abs(delta.BaseBalance / transactionBalance)),
+                    TransactionDebit = transactionBalance > 0m
+                        ? transactionBalance
+                        : 0m,
+                    TransactionCredit = transactionBalance < 0m
+                        ? -transactionBalance
+                        : 0m
+                });
+            }
+        }
         var net = lines.Sum(line => line.Debit - line.Credit);
         if (net != 0m)
         {
@@ -741,6 +804,129 @@ public sealed class FiscalYearService(
         });
         return Result.Success();
     }
+
+    private async Task<IReadOnlyList<EmployeeOperationalDelta>>
+        LoadEmployeeOperationalDeltasAsync(
+            int fiscalYearId,
+            CancellationToken cancellationToken)
+    {
+        var openingBalances = await dbContext.EmployeeOpeningBalances
+            .AsNoTracking()
+            .Where(balance =>
+                balance.CompanyId == companyId &&
+                balance.FiscalYearId == fiscalYearId)
+            .Select(balance => new EmployeeOperationalBalance(
+                balance.EmployeeId,
+                balance.Currency,
+                balance.BalanceType == EmployeeBalanceType.Debit
+                    ? (balance.BaseAmount != 0m
+                        ? balance.BaseAmount
+                        : balance.Amount)
+                    : -(balance.BaseAmount != 0m
+                        ? balance.BaseAmount
+                        : balance.Amount),
+                balance.BalanceType == EmployeeBalanceType.Debit
+                    ? balance.Amount
+                    : -balance.Amount))
+            .ToListAsync(cancellationToken);
+
+        var movements = await dbContext.EmployeeMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYearId)
+            .Select(movement => new EmployeeOperationalBalance(
+                movement.EmployeeId,
+                movement.Currency,
+                movement.BaseDebit - movement.BaseCredit,
+                movement.Debit - movement.Credit))
+            .ToListAsync(cancellationToken);
+
+        var manualLedger = await dbContext.JournalEntryLines
+            .AsNoTracking()
+            .Where(line =>
+                line.CompanyId == companyId &&
+                line.PartyType == JournalPartyType.Employee &&
+                line.PartyId.HasValue &&
+                line.JournalEntry.FiscalYearId == fiscalYearId &&
+                line.JournalEntry.Status == JournalEntryStatus.Posted &&
+                line.JournalEntry.ReversalOfEntryId == null &&
+                line.JournalEntry.ReversedOn == null &&
+                line.JournalEntry.SourceType !=
+                    JournalEntrySourceType.EmployeeOpeningBalance &&
+                line.JournalEntry.SourceType !=
+                    JournalEntrySourceType.CashVoucher)
+            .Select(line => new EmployeeOperationalBalance(
+                line.PartyId!.Value,
+                line.Currency,
+                line.Debit - line.Credit,
+                line.TransactionDebit - line.TransactionCredit))
+            .ToListAsync(cancellationToken);
+
+        var postedLedger = await dbContext.JournalEntryLines
+            .AsNoTracking()
+            .Where(line =>
+                line.CompanyId == companyId &&
+                line.PartyType == JournalPartyType.Employee &&
+                line.PartyId.HasValue &&
+                line.JournalEntry.FiscalYearId == fiscalYearId &&
+                line.JournalEntry.Status == JournalEntryStatus.Posted &&
+                line.JournalEntry.ReversalOfEntryId == null &&
+                line.JournalEntry.ReversedOn == null &&
+                line.Account.AccountType != AccountType.Revenue &&
+                line.Account.AccountType != AccountType.Expense)
+            .Select(line => new EmployeeOperationalBalance(
+                line.PartyId!.Value,
+                line.Currency,
+                line.Debit - line.Credit,
+                line.TransactionDebit - line.TransactionCredit))
+            .ToListAsync(cancellationToken);
+
+        var operational = openingBalances
+            .Concat(movements)
+            .Concat(manualLedger)
+            .GroupBy(row => new { row.EmployeeId, row.Currency })
+            .ToDictionary(
+                group => (group.Key.EmployeeId, group.Key.Currency),
+                group => (
+                    Base: group.Sum(row => row.BaseBalance),
+                    Transaction: group.Sum(row => row.TransactionBalance)));
+        var ledger = postedLedger
+            .GroupBy(row => new { row.EmployeeId, row.Currency })
+            .ToDictionary(
+                group => (group.Key.EmployeeId, group.Key.Currency),
+                group => (
+                    Base: group.Sum(row => row.BaseBalance),
+                    Transaction: group.Sum(row => row.TransactionBalance)));
+
+        return operational.Keys
+            .Union(ledger.Keys)
+            .Select(key =>
+            {
+                operational.TryGetValue(key, out var operationalBalance);
+                ledger.TryGetValue(key, out var ledgerBalance);
+                return new EmployeeOperationalDelta(
+                    EmployeeId: key.EmployeeId,
+                    Currency: key.Currency,
+                    BaseBalance: operationalBalance.Base - ledgerBalance.Base,
+                    TransactionBalance: operationalBalance.Transaction -
+                        ledgerBalance.Transaction);
+            })
+            .Where(delta => delta.BaseBalance != 0m)
+            .ToArray();
+    }
+
+    private sealed record EmployeeOperationalBalance(
+        int EmployeeId,
+        CurrencyCode Currency,
+        decimal BaseBalance,
+        decimal TransactionBalance);
+
+    private sealed record EmployeeOperationalDelta(
+        int EmployeeId,
+        CurrencyCode Currency,
+        decimal BaseBalance,
+        decimal TransactionBalance);
 
     private async Task EnsureExchangeRateCarryForwardAsync(
         FiscalYear fiscalYear,

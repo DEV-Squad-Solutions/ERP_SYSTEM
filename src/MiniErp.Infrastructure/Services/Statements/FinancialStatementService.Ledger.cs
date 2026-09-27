@@ -29,12 +29,14 @@ public sealed partial class FinancialStatementService
                     : year.IsCurrent))
             .Select(year => new FiscalYearScope(
                 year.Id,
+                year.Name,
                 year.StartDate,
                 year.EndDate))
             .SingleOrDefaultAsync(cancellationToken);
 
     private sealed record FiscalYearScope(
         int Id,
+        string Name,
         DateOnly StartDate,
         DateOnly EndDate);
 }

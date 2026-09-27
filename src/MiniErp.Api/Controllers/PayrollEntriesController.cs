@@ -37,9 +37,13 @@ public sealed class PayrollEntriesController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(
         int id,
+        [FromQuery] int? fiscalYearId,
         CancellationToken cancellationToken)
     {
-        var result = await payrollEntryService.GetByIdAsync(id, cancellationToken);
+        var result = await payrollEntryService.GetByIdAsync(
+            id,
+            fiscalYearId,
+            cancellationToken);
         return this.ToActionResult(result);
     }
 
@@ -67,6 +71,7 @@ public sealed class PayrollEntriesController(
             request.IsMoved,
             request.WorkPlaceStatus,
             request.PlaceName,
+            request.FiscalYearId,
             cancellationToken);
         return this.ToActionResult(result);
     }

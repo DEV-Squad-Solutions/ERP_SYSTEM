@@ -17,6 +17,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
         IPaginationService paginationService,
         ICurrentCompanyContext currentCompanyContext,
         IExchangeRateResolver exchangeRateResolver,
+        IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
         IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
         : IPayrollEntryService, IScopedService
     {
@@ -34,9 +35,20 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             if (validationError != null)
                 return Result<PagedResponse<PayrollEntriesListResponse>>.Failure(validationError);
 
+            var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+                filters.FiscalYearId,
+                filters.StartDate,
+                filters.EndDate,
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+                return Result<PagedResponse<PayrollEntriesListResponse>>.Failure(
+                    fiscalYearResult.Errors);
+
             var baseQuery = dbContext.PayrollEntries
                 .AsNoTracking()
-                .Where(e => e.CompanyId == companyId);
+                .Where(e =>
+                    e.CompanyId == companyId &&
+                    e.FiscalYearId == fiscalYearResult.Value.FiscalYearId);
 
             var sorted = ApplyFilters(baseQuery, filters);
 
@@ -50,13 +62,22 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
 
         public async Task<Result<PayrollEntryResponse>> GetByIdAsync(
             int id,
+            int? fiscalYearId = null,
             CancellationToken cancellationToken = default)
         {
+            var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+                fiscalYearId,
+                cancellationToken: cancellationToken);
+            if (fiscalYearResult.IsFailure)
+                return Result<PayrollEntryResponse>.Failure(fiscalYearResult.Errors);
+
             var entry = await dbContext.PayrollEntries
                 .AsNoTracking()
                 .Include(e => e.Employee)
                 .FirstOrDefaultAsync(
-                    e => e.Id == id && e.CompanyId == companyId,
+                    e => e.Id == id &&
+                         e.CompanyId == companyId &&
+                         e.FiscalYearId == fiscalYearResult.Value.FiscalYearId,
                     cancellationToken);
 
             if (entry is null)
@@ -111,6 +132,15 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     Error.Validation(
                         "PayrollEntry.InvalidDateRange",
                         "تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية."));
+
+            var fiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                startDate,
+                endDate,
+                fiscalYearId: null,
+                cancellationToken);
+            if (fiscalYearGuard.IsFailure)
+                return Result<PayrollEntryResponse>.Failure(
+                    fiscalYearGuard.Errors);
 
             var hasOverlap = await dbContext.PayrollEntries
                 .AnyAsync(p => p.CompanyId == companyId &&
@@ -221,6 +251,18 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                             $"تاريخ البداية للموظف {emp.Name} ({startDate}) يجب أن يكون قبل أو يساوي تاريخ النهاية ({endDate})."));
 
                 dateRanges[item.EmployeeId] = (startDate, endDate);
+            }
+
+            foreach (var range in dateRanges.Values)
+            {
+                var fiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                    range.StartDate,
+                    range.EndDate,
+                    fiscalYearId: null,
+                    cancellationToken);
+                if (fiscalYearGuard.IsFailure)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        fiscalYearGuard.Errors);
             }
 
             var minStartDate = dateRanges.Values.Min(r => r.StartDate);
@@ -366,6 +408,20 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             {
                 await transaction.RollbackAsync(cancellationToken);
                 return Result<PayrollEntryResponse>.Failure(guardError);
+            }
+
+            var payrollFiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                entry.StartDate,
+                entry.EndDate,
+                entry.FiscalYearId,
+                cancellationToken);
+            if (payrollFiscalYearGuard.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Result<PayrollEntryResponse>.Failure(
+                    Error.Conflict(
+                        "PayrollEntry.ClosedFiscalYearPaymentRequiresSettlement",
+                        "لا يمكن تعديل مسير رواتب يخص سنة مالية مغلقة. يلزم تسوية الرصيد المرحل في السنة الحالية."));
             }
 
             if (fiscalYearPeriodGuard is not null)
@@ -561,6 +617,20 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     await transaction.RollbackAsync(cancellationToken);
                     return Result<List<PayrollEntryResponse>>.Failure(guardError);
                 }
+
+                var payrollFiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                    entry.StartDate,
+                    entry.EndDate,
+                    entry.FiscalYearId,
+                    cancellationToken);
+                if (payrollFiscalYearGuard.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        Error.Conflict(
+                            "PayrollEntry.ClosedFiscalYearPaymentRequiresSettlement",
+                            "لا يمكن تعديل مسير رواتب يخص سنة مالية مغلقة. يلزم تسوية الرصيد المرحل في السنة الحالية."));
+                }
             }
 
             if (fiscalYearPeriodGuard is not null)
@@ -734,6 +804,15 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             if (guardError is not null)
                 return Result<PayrollEntryResponse>.Failure(guardError);
 
+            var existingFiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                entry.StartDate,
+                entry.EndDate,
+                entry.FiscalYearId,
+                cancellationToken);
+            if (existingFiscalYearGuard.IsFailure)
+                return Result<PayrollEntryResponse>.Failure(
+                    existingFiscalYearGuard.Errors);
+
             if (request.EmployeeId.HasValue && request.EmployeeId.Value != entry.EmployeeId)
                 return Result<PayrollEntryResponse>.Failure(
                     Error.Validation("PayrollEntry.CannotChangeEmployee", "لا يمكن تغيير الموظف لقيد راتب مسجل مسبقًا."));
@@ -760,6 +839,15 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     Error.Validation("PayrollEntry.InvalidDateRange",
                         "تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية.",
                         nameof(request.EndDate)));
+
+            var fiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                startDate,
+                newEndDate,
+                entry.FiscalYearId,
+                cancellationToken);
+            if (fiscalYearGuard.IsFailure)
+                return Result<PayrollEntryResponse>.Failure(
+                    fiscalYearGuard.Errors);
 
             var hasOverlap = await dbContext.PayrollEntries
                 .AnyAsync(p => p.CompanyId == companyId &&
@@ -840,6 +928,15 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 var guardError = ValidateForUpdate(entry);
                 if (guardError is not null)
                     return Result<List<PayrollEntryResponse>>.Failure(guardError);
+
+                var existingFiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                    entry.StartDate,
+                    entry.EndDate,
+                    entry.FiscalYearId,
+                    cancellationToken);
+                if (existingFiscalYearGuard.IsFailure)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        existingFiscalYearGuard.Errors);
             }
 
             var ineligible = entries.Where(e => e.Employee == null || !e.Employee.IsActive || e.Employee.WorkPlaceStatus != WorkPlaceStatus.InCompany)
@@ -868,6 +965,19 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                             $"تاريخ البداية للموظف {emp.Name} ({startDate}) يجب أن يكون قبل أو يساوي تاريخ النهاية ({newEndDate})."));
 
                 dateRanges[item.Id] = (startDate, newEndDate);
+            }
+
+            foreach (var item in request.Entries)
+            {
+                var range = dateRanges[item.Id];
+                var fiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                    range.StartDate,
+                    range.EndDate,
+                    entriesMap[item.Id].FiscalYearId,
+                    cancellationToken);
+                if (fiscalYearGuard.IsFailure)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        fiscalYearGuard.Errors);
             }
 
             var minStartDate = dateRanges.Values.Min(r => r.StartDate);
@@ -994,6 +1104,15 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             if (guardError is not null)
                 return Result<PayrollEntryResponse>.Failure(guardError);
 
+            var fiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                entry.StartDate,
+                entry.EndDate,
+                entry.FiscalYearId,
+                cancellationToken);
+            if (fiscalYearGuard.IsFailure)
+                return Result<PayrollEntryResponse>.Failure(
+                    fiscalYearGuard.Errors);
+
             if (entry.Employee is null)
                 return Result<PayrollEntryResponse>.Failure(
                     Error.NotFound("Employee.NotFound", "لم يتم العثور على بيانات الموظف المرتبطة بقيد الراتب."));
@@ -1070,6 +1189,14 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             if (guardError is not null)
                 return Result.Failure(guardError);
 
+            var fiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                entry.StartDate,
+                entry.EndDate,
+                entry.FiscalYearId,
+                cancellationToken);
+            if (fiscalYearGuard.IsFailure)
+                return Result.Failure(fiscalYearGuard.Errors);
+
             dbContext.PayrollEntries.Remove(entry);
             await dbContext.SaveChangesAsync(cancellationToken);
             return Result.Success();
@@ -1105,6 +1232,14 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 var guardError = ValidateForUpdate(entry);
                 if (guardError is not null)
                     return Result.Failure(guardError);
+
+                var fiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                    entry.StartDate,
+                    entry.EndDate,
+                    entry.FiscalYearId,
+                    cancellationToken);
+                if (fiscalYearGuard.IsFailure)
+                    return Result.Failure(fiscalYearGuard.Errors);
             }
 
             dbContext.PayrollEntries.RemoveRange(entries);
@@ -1120,9 +1255,21 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
         {
             filters ??= new PayrollDashboardFilterRequest();
 
+            var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+                filters.FiscalYearId,
+                filters.FromDate,
+                filters.ToDate,
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+                return Result<PayrollDashboardResponse>.Failure(
+                    fiscalYearResult.Errors);
+            var fiscalYear = fiscalYearResult.Value;
+
             var payrollQuery = dbContext.PayrollEntries
                 .AsNoTracking()
-                .Where(p => p.CompanyId == companyId);
+                .Where(p =>
+                    p.CompanyId == companyId &&
+                    p.FiscalYearId == fiscalYear.FiscalYearId);
 
             if (filters.FromDate.HasValue)
                 payrollQuery = payrollQuery.Where(p => p.StartDate >= filters.FromDate.Value);
@@ -1150,7 +1297,9 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
 
             var movementQuery = dbContext.EmployeeMovements
                 .AsNoTracking()
-                .Where(m => m.CompanyId == companyId);
+                .Where(m =>
+                    m.CompanyId == companyId &&
+                    m.FiscalYearId == fiscalYear.FiscalYearId);
 
             if (filters.FromDate.HasValue)
                 movementQuery = movementQuery.Where(m => m.MovementDate >= filters.FromDate.Value);
@@ -1219,7 +1368,10 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
 
             var recentSalaryTransfers = await dbContext.EmployeeOpeningBalances
                 .AsNoTracking()
-                .Where(b => b.CompanyId == companyId && b.PayrollEntryId.HasValue)
+                .Where(b =>
+                    b.CompanyId == companyId &&
+                    b.FiscalYearId == fiscalYear.FiscalYearId &&
+                    b.PayrollEntryId.HasValue)
                 .OrderByDescending(b => b.DocumentDate)
                 .ThenByDescending(b => b.Id)
                 .Take(10)
@@ -1239,7 +1391,10 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
 
             var recentOpeningBalances = await dbContext.EmployeeOpeningBalances
                 .AsNoTracking()
-                .Where(b => b.CompanyId == companyId && !b.PayrollEntryId.HasValue)
+                .Where(b =>
+                    b.CompanyId == companyId &&
+                    b.FiscalYearId == fiscalYear.FiscalYearId &&
+                    !b.PayrollEntryId.HasValue)
                 .OrderByDescending(b => b.DocumentDate)
                 .ThenByDescending(b => b.Id)
                 .Take(5)
@@ -1267,6 +1422,8 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             var totalDeductions = (payrollStats?.TotalDeduction ?? 0m) + (movementStats?.TotalMovementDeductions ?? 0m);
 
             var response = new PayrollDashboardResponse(
+                FiscalYearId:    fiscalYear.FiscalYearId,
+                FiscalYearName:  fiscalYear.FiscalYearName,
                 TotalPayrolls:   payrollStats?.TotalGross ?? 0m,
                 NetPayable:      payrollStats?.TotalNet ?? 0m,
                 TotalPaid:       payrollStats?.TotalMoved ?? 0m,
@@ -1304,6 +1461,15 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
 
             var startDate = request.StartDate;
             var endDate = request.EndDate;
+
+            var fiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                startDate,
+                endDate,
+                fiscalYearId: null,
+                cancellationToken);
+            if (fiscalYearGuard.IsFailure)
+                return Result<PayrollEntryResponse>.Failure(
+                    fiscalYearGuard.Errors);
 
             var existingEntries = await dbContext.PayrollEntries
                 .AsNoTracking()
@@ -1441,6 +1607,18 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 dateRanges[item.EmployeeId] = (startDate, endDate);
             }
 
+            foreach (var range in dateRanges.Values)
+            {
+                var fiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                    range.StartDate,
+                    range.EndDate,
+                    fiscalYearId: null,
+                    cancellationToken);
+                if (fiscalYearGuard.IsFailure)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        fiscalYearGuard.Errors);
+            }
+
             var existingEntries = await dbContext.PayrollEntries
                 .AsNoTracking()
                 .Where(p => p.CompanyId == companyId &&
@@ -1555,6 +1733,15 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             if (guardError is not null)
                 return Result<PayrollEntryResponse>.Failure(guardError);
 
+            var existingFiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                entry.StartDate,
+                entry.EndDate,
+                entry.FiscalYearId,
+                cancellationToken);
+            if (existingFiscalYearGuard.IsFailure)
+                return Result<PayrollEntryResponse>.Failure(
+                    existingFiscalYearGuard.Errors);
+
             var employee = entry.Employee;
             if (employee is null)
                 return Result<PayrollEntryResponse>.Failure(
@@ -1570,6 +1757,15 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
 
             var startDate = request.StartDate;
             var endDate = request.EndDate;
+
+            var fiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                startDate,
+                endDate,
+                entry.FiscalYearId,
+                cancellationToken);
+            if (fiscalYearGuard.IsFailure)
+                return Result<PayrollEntryResponse>.Failure(
+                    fiscalYearGuard.Errors);
 
             var existingEntries = await dbContext.PayrollEntries
                 .AsNoTracking()
@@ -1666,6 +1862,15 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 var guardError = ValidateForUpdate(entry);
                 if (guardError is not null)
                     return Result<List<PayrollEntryResponse>>.Failure(guardError);
+
+                var existingFiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                    entry.StartDate,
+                    entry.EndDate,
+                    entry.FiscalYearId,
+                    cancellationToken);
+                if (existingFiscalYearGuard.IsFailure)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        existingFiscalYearGuard.Errors);
             }
 
             var ineligible = entries.Where(e => e.Employee == null || !e.Employee.IsActive || e.Employee.WorkPlaceStatus != WorkPlaceStatus.OutCompany)
@@ -1692,6 +1897,19 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                     return Result<List<PayrollEntryResponse>>.Failure(dateError);
 
                 dateRanges[item.Id] = (startDate, endDate);
+            }
+
+            foreach (var item in request.Entries)
+            {
+                var range = dateRanges[item.Id];
+                var fiscalYearGuard = await EnsurePayrollPeriodOpenAsync(
+                    range.StartDate,
+                    range.EndDate,
+                    entriesMap[item.Id].FiscalYearId,
+                    cancellationToken);
+                if (fiscalYearGuard.IsFailure)
+                    return Result<List<PayrollEntryResponse>>.Failure(
+                        fiscalYearGuard.Errors);
             }
 
             var employeeIds = entries.Select(e => e.EmployeeId).Distinct().ToList();
@@ -1791,6 +2009,7 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
             new(
                 Id:                             entry.Id,
                 CompanyId:                      entry.CompanyId,
+                FiscalYearId:                   entry.FiscalYearId,
                 StartDate:                      entry.StartDate,
                 EndDate:                        entry.EndDate,
                 EmployeeId:                     entry.EmployeeId,

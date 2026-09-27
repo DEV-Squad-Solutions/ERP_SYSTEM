@@ -50,9 +50,11 @@ public interface IFinancialStatementService
 
     Task<Result<EmployeeAccountBalanceResponse>> GetEmployeeBalanceAsync(
         int employeeId,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<EmployeeAccountSummaryResponse>> GetEmployeeAccountSummaryAsync(
         int employeeId,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 }

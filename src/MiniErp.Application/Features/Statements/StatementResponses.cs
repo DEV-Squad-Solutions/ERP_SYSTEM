@@ -326,6 +326,8 @@ public sealed record EmployeeStatementResponse(
     EmployeeStatementSummaryResponse Summary)
 {
     public CurrencyCode BaseCurrency { get; init; }
+    public int FiscalYearId { get; init; }
+    public string FiscalYearName { get; init; } = string.Empty;
 }
 
 public sealed record EmployeeAccountBalanceResponse(
@@ -337,7 +339,11 @@ public sealed record EmployeeAccountBalanceResponse(
     string BalanceDescription,
     decimal TotalCredits,
     decimal TotalDebits,
-    DateOnly? LastMovementDate);
+    DateOnly? LastMovementDate)
+{
+    public int FiscalYearId { get; init; }
+    public string FiscalYearName { get; init; } = string.Empty;
+}
 
 public sealed record EmployeeProfileResponse(
     int Id,
@@ -395,4 +401,8 @@ public sealed record EmployeeAccountSummaryResponse(
     DateOnly? LastMovementDate,
     decimal TotalWithdrawals = 0m,
     IReadOnlyList<EmployeeAccountRecentMovementResponse>? RecentMovements = null,
-    IReadOnlyList<EmployeeAccountPayrollTransactionResponse>? PayrollSalaryTransactions = null);
+    IReadOnlyList<EmployeeAccountPayrollTransactionResponse>? PayrollSalaryTransactions = null)
+{
+    public int FiscalYearId { get; init; }
+    public string FiscalYearName { get; init; } = string.Empty;
+}

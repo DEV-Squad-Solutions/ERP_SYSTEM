@@ -12,5 +12,6 @@ public interface IPayrollReportService
         bool? isMoved = null,
         Domain.Enums.WorkPlaceStatus? workPlaceStatus = null,
         string? placeName = null,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 }

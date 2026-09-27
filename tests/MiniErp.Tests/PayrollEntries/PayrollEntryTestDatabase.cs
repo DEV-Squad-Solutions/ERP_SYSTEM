@@ -9,6 +9,7 @@ using MiniErp.Application.Features.EmployeeOpeningBalances;
 using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Application.Features.FiscalYears;
 using MiniErp.Application.Features.PayrollEntries;
+using MiniErp.Application.Features.PayrollReport;
 using MiniErp.Application.Features.ProfitabilityReports;
 using MiniErp.Application.Features.Statements;
 using MiniErp.Domain.Entities.CashManagement;
@@ -23,6 +24,7 @@ using MiniErp.Infrastructure.Services.ExchangeRates;
 using MiniErp.Infrastructure.Services.FiscalYears;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.PayrollEntries;
+using MiniErp.Infrastructure.Services.PayrollReports;
 using MiniErp.Infrastructure.Services.Statements;
 using MiniErp.Tests.TestDoubles;
 using System;
@@ -82,12 +84,11 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
         services.AddScoped<IEmployeeOpeningBalanceService, EmployeeOpeningBalanceService>();
         services.AddScoped<IEmployeeMovementService, EmployeeMovementService>();
         services.AddScoped<IPayrollEntryService, PayrollEntryService>();
+        services.AddScoped<IPayrollReportService, PayrollReportService>();
         services.AddScoped<IFinancialStatementService, FinancialStatementService>();
         services.AddSingleton<ICurrentCompanyContext>(new TestCurrentCompanyContext(companyId));
         if (fiscalYearPeriodGuard is not null)
-        {
             services.AddSingleton(fiscalYearPeriodGuard);
-        }
 
         var serviceProvider = services.BuildServiceProvider();
         var scope = serviceProvider.CreateAsyncScope();
@@ -343,6 +344,9 @@ public sealed class PayrollEntryTestDatabase : IAsyncDisposable
     {
         return scope.ServiceProvider.GetRequiredService<IPayrollEntryService>();
     }
+
+    public IPayrollReportService CreatePayrollReportService() =>
+        scope.ServiceProvider.GetRequiredService<IPayrollReportService>();
 
     public IEmployeeOpeningBalanceService CreateOpeningBalanceService()
     {

@@ -18,5 +18,9 @@ public sealed class PayrollPeriodReportByDateRangeRequestValidator
         RuleFor(r => r)
             .Must(r => r.StartDate <= r.EndDate)
             .WithMessage("تاريخ البدء يجب أن يكون قبل أو يساوي تاريخ الانتهاء.");
+
+        RuleFor(r => r.FiscalYearId)
+            .GreaterThan(0)
+            .When(r => r.FiscalYearId.HasValue);
     }
 }

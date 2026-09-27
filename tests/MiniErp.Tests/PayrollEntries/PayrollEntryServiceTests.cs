@@ -18,6 +18,151 @@ namespace MiniErp.Tests.PayrollEntries;
 public sealed class PayrollEntryServiceTests
 {
     [Fact]
+    public async Task PayrollReads_DefaultToCurrentYear_AndAllowExplicitHistoricalYear()
+    {
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(1);
+        await database.ConfigureSeparateFiscalYearsAsync();
+        var historical = await SeedPayableEntryAsync(
+            database,
+            employeeId: 1,
+            startDate: new DateOnly(2025, 12, 1),
+            endDate: new DateOnly(2025, 12, 31),
+            netSalary: 5_000m);
+        var otherYear = await SeedPayableEntryAsync(
+            database,
+            employeeId: 1,
+            startDate: new DateOnly(2026, 1, 1),
+            endDate: new DateOnly(2026, 1, 31),
+            netSalary: 6_000m);
+        var service = database.CreatePayrollService();
+
+        var current = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 });
+        var explicitYear = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new PayrollEntryFilterRequest(FiscalYearId: 100));
+        var hiddenByDefault = await service.GetByIdAsync(otherYear.Id);
+        var explicitDetails = await service.GetByIdAsync(
+            otherYear.Id,
+            fiscalYearId: 100);
+
+        Assert.True(current.IsSuccess);
+        Assert.Equal(historical.Id, Assert.Single(current.Value.Items).Id);
+        Assert.Equal(1, Assert.Single(current.Value.Items).FiscalYearId);
+        Assert.True(explicitYear.IsSuccess);
+        Assert.Equal(otherYear.Id, Assert.Single(explicitYear.Value.Items).Id);
+        Assert.Equal(100, Assert.Single(explicitYear.Value.Items).FiscalYearId);
+        Assert.True(hiddenByDefault.IsFailure);
+        Assert.True(explicitDetails.IsSuccess);
+        Assert.Equal(100, explicitDetails.Value.FiscalYearId);
+    }
+
+    [Fact]
+    public async Task PayrollDashboardAndReport_FilterEveryTransactionByFiscalYear()
+    {
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(1);
+        await database.ConfigureSeparateFiscalYearsAsync();
+        await SeedPayableEntryAsync(
+            database, 1, new DateOnly(2025, 12, 1),
+            new DateOnly(2025, 12, 31), 5_000m);
+        await SeedPayableEntryAsync(
+            database, 1, new DateOnly(2026, 1, 1),
+            new DateOnly(2026, 1, 31), 9_000m);
+
+        var oldMovement = new EmployeeMovement
+        {
+            CompanyId = 1,
+            FiscalYearId = 1,
+            EmployeeId = 1,
+            Type = EmployeeMovementType.Debit,
+            MovementDate = new DateOnly(2025, 12, 15),
+            Currency = CurrencyCode.EGP
+        };
+        oldMovement.ApplyAmounts(EmployeeMovementType.Debit, 50m);
+        oldMovement.ApplyExchangeRate(1m);
+        var newMovement = new EmployeeMovement
+        {
+            CompanyId = 1,
+            FiscalYearId = 100,
+            EmployeeId = 1,
+            Type = EmployeeMovementType.Debit,
+            MovementDate = new DateOnly(2026, 1, 15),
+            Currency = CurrencyCode.EGP
+        };
+        newMovement.ApplyAmounts(EmployeeMovementType.Debit, 700m);
+        newMovement.ApplyExchangeRate(1m);
+        database.Context.EmployeeMovements.AddRange(oldMovement, newMovement);
+        await database.Context.SaveChangesAsync();
+
+        var dashboard = await database.CreatePayrollService().GetDashboardAsync();
+        var report = await database.CreatePayrollReportService().BuildReportAsync(
+            new DateOnly(2025, 1, 1),
+            new DateOnly(2025, 12, 31));
+
+        Assert.True(dashboard.IsSuccess);
+        Assert.Equal(1, dashboard.Value.FiscalYearId);
+        Assert.Equal(5_000m, dashboard.Value.TotalPayrolls);
+        Assert.Equal(50m, dashboard.Value.TotalDebits);
+        Assert.DoesNotContain(
+            dashboard.Value.RecentOperations,
+            operation => operation.Date.Year == 2026);
+        Assert.True(report.IsSuccess);
+        Assert.Equal(1, report.Value.FiscalYearId);
+        Assert.Equal(5_000m, report.Value.Summary.TotalNetSalary);
+        Assert.Single(report.Value.Employees);
+    }
+
+    [Fact]
+    public async Task AddAsync_PeriodCrossesFiscalYearBoundary_IsRejected()
+    {
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(1);
+        await database.ConfigureSeparateFiscalYearsAsync();
+        var employee = await database.Context.Employees.FindAsync(1);
+        employee!.UpdateLastDayOfReceivingSalary(new DateOnly(2025, 12, 30));
+        await database.Context.SaveChangesAsync();
+
+        var result = await database.CreatePayrollService().AddAsync(
+            new PayrollEntryCreateRequest(
+                EmployeeId: 1,
+                EndDate: new DateOnly(2026, 1, 2)));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.QueryDateOutsideRange", result.Error.Code);
+        Assert.Empty(await database.Context.PayrollEntries.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ClosedFiscalYear_BlocksUpdateRecalculateDeleteAndSalaryMove()
+    {
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(1);
+        var entry = await SeedPayableEntryAsync(
+            database, 1, new DateOnly(2026, 8, 1),
+            new DateOnly(2026, 8, 31), 6_000m);
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE FiscalYears SET Status = 2 WHERE Id = 1;");
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreatePayrollService();
+
+        var update = await service.UpdateAsync(
+            entry.Id,
+            new PayrollEntryUpdateRequest(Bonus: 1m));
+        var recalculate = await service.RecalculateAsync(entry.Id);
+        var delete = await service.DeleteAsync(entry.Id);
+        var move = await service.MoveSalaryForEmployeeAccountAsync(
+            entry.Id,
+            new PayrollEntrySalaryPaymentRequest(new DateOnly(2026, 9, 1)));
+
+        Assert.Equal("FiscalYears.Closed", update.Error.Code);
+        Assert.Equal("FiscalYears.Closed", recalculate.Error.Code);
+        Assert.Equal("FiscalYears.Closed", delete.Error.Code);
+        Assert.Equal(
+            "PayrollEntry.ClosedFiscalYearPaymentRequiresSettlement",
+            move.Error.Code);
+        Assert.NotNull(await database.Context.PayrollEntries.FindAsync(entry.Id));
+        Assert.Empty(await database.Context.EmployeeOpeningBalances.ToListAsync());
+    }
+
+    [Fact]
     public async Task MoveSalary_ClosedPostingDate_PreservesPayrollAndEmployeeLedger()
     {
         var closedDate = new DateOnly(2026, 9, 30);

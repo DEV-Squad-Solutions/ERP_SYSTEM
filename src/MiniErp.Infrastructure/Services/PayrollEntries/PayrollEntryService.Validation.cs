@@ -3,11 +3,35 @@ using MiniErp.Application.Features.EmployeeAttendance;
 using MiniErp.Application.Features.PayrollEntries;
 using MiniErp.Domain.Entities.Payroll;
 using MiniErp.Domain.Enums;
+using static MiniErp.Application.Features.FiscalYears.FiscalYearErrors;
 
 namespace MiniErp.Infrastructure.Services.PayrollEntries;
 
 public sealed partial class PayrollEntryService
 {
+    private async Task<Result> EnsurePayrollPeriodOpenAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        int? fiscalYearId,
+        CancellationToken cancellationToken)
+    {
+        var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId,
+            startDate,
+            endDate,
+            cancellationToken);
+        if (fiscalYearResult.IsFailure)
+            return Result.Failure(fiscalYearResult.Errors);
+
+        var fiscalYear = fiscalYearResult.Value;
+        return fiscalYear.Status == FiscalYearStatus.Open
+            ? Result.Success()
+            : Result.Failure(Closed(
+                startDate,
+                fiscalYear.FiscalYearName,
+                nameof(PayrollEntry.StartDate)));
+    }
+
     private static Error? ValidateFilters(PayrollEntryFilterRequest filters, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(filters.Search) && filters.Search.Length > 100)
@@ -33,6 +57,12 @@ public sealed partial class PayrollEntryService
                 "PayrollEntry.InvalidEmployeeType",
                 "نوع الموظف المحدد غير صالح.",
                 nameof(filters.EmployeeType));
+
+        if (filters.FiscalYearId is <= 0)
+            return Error.Validation(
+                "FiscalYears.InvalidId",
+                "معرف السنة المالية غير صالح.",
+                nameof(filters.FiscalYearId));
 
         return null;
     }

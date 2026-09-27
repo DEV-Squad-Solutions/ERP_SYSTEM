@@ -20,4 +20,19 @@ public sealed record EmployeeOpeningBalanceResponse(
     decimal Amount,
     decimal BaseAmount,
     string? Notes,
-    byte[] RowVersion);
+    byte[] RowVersion)
+{
+    public bool IsCarriedForward { get; init; }
+
+    public bool IsReadOnly { get; init; }
+
+    public JournalEntrySourceType? SourceType { get; init; }
+
+    public int? JournalEntryId { get; init; }
+
+    public int? JournalEntryLineId { get; init; }
+
+    public int? SourceFiscalYearId { get; init; }
+
+    public string? SourceFiscalYearName { get; init; }
+}

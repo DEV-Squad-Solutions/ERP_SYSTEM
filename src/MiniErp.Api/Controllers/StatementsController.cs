@@ -189,10 +189,12 @@ public sealed class StatementsController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetEmployeeBalance(
         int employeeId,
+        [FromQuery] int? fiscalYearId,
         CancellationToken cancellationToken)
     {
         var result = await statementService.GetEmployeeBalanceAsync(
             employeeId,
+            fiscalYearId,
             cancellationToken);
         return this.ToActionResult(result);
     }
@@ -203,10 +205,12 @@ public sealed class StatementsController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetEmployeeAccountSummary(
         int employeeId,
+        [FromQuery] int? fiscalYearId,
         CancellationToken cancellationToken)
     {
         var result = await statementService.GetEmployeeAccountSummaryAsync(
             employeeId,
+            fiscalYearId,
             cancellationToken);
         return this.ToActionResult(result);
     }

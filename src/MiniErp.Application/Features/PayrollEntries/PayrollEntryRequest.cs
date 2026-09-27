@@ -8,7 +8,8 @@ public sealed record PayrollEntryFilterRequest(
     DateOnly? EndDate = null,
     bool? IsSalaryMoveToEmployeeAccount = null,
     EmployeeType? EmployeeType = null,
-    string? Search = null);
+    string? Search = null,
+    int? FiscalYearId = null);
 
 public sealed record PayrollEntryCreateRequest(
     int EmployeeId,

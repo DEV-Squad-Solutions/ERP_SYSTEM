@@ -1,4 +1,5 @@
 using MiniErp.Application.Common.Results;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.FiscalYears;
 
@@ -86,6 +87,13 @@ public static class FiscalYearErrors
         Error.Conflict(
             "FiscalYears.OpeningBalanceAccountMissing",
             $"لا يوجد حساب حقوق ملكية لترحيل أرصدة السنة المالية إلى '{fiscalYearName}'.");
+
+    public static Error EmployeeBalanceAccountMissing(
+        string fiscalYearName,
+        AccountingMappingType mappingType) =>
+        Error.Conflict(
+            "FiscalYears.EmployeeBalanceAccountMissing",
+            $"لا يوجد ربط {mappingType} لترحيل الرصيد التشغيلي للموظفين إلى السنة المالية '{fiscalYearName}'.");
 
     public static Error NextFiscalYearClosed(string fiscalYearName) =>
         Error.Conflict(

@@ -171,23 +171,26 @@ public sealed partial class FinancialStatementService
                     BaseClosingBalanceAmount = Math.Abs(closingBalance)
                 })
             {
-                BaseCurrency = employee.BaseCurrency
+                BaseCurrency = employee.BaseCurrency,
+                FiscalYearId = fiscalYear.Id,
+                FiscalYearName = fiscalYear.Name
             });
     }
 
     public async Task<Result<EmployeeAccountBalanceResponse>> GetEmployeeBalanceAsync(
         int employeeId,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         var fiscalYear = await ResolveFiscalYearAsync(
-            fiscalYearId: null,
+            fiscalYearId,
             fromDate: null,
             toDate: null,
             cancellationToken);
         if (fiscalYear is null)
         {
             return Result<EmployeeAccountBalanceResponse>.Failure(
-                FiscalYearNotFound(null));
+                FiscalYearNotFound(fiscalYearId));
         }
 
         var employee = await dbContext.Employees
@@ -235,12 +238,17 @@ public sealed partial class FinancialStatementService
                 BalanceDescription: EmployeeAccountRules.GetBalanceDescription(balance),
                 TotalCredits: totalCredit,
                 TotalDebits: totalDebit,
-                LastMovementDate: totals?.LastDate));
+                LastMovementDate: totals?.LastDate)
+            {
+                FiscalYearId = fiscalYear.Id,
+                FiscalYearName = fiscalYear.Name
+            });
     }
 
     public async Task<Result<EmployeeAccountSummaryResponse>>
         GetEmployeeAccountSummaryAsync(
             int employeeId,
+            int? fiscalYearId = null,
             CancellationToken cancellationToken = default)
     {
         if (employeeId <= 0)
@@ -262,14 +270,14 @@ public sealed partial class FinancialStatementService
         }
 
         var fiscalYear = await ResolveFiscalYearAsync(
-            fiscalYearId: null,
+            fiscalYearId,
             fromDate: null,
             toDate: null,
             cancellationToken);
         if (fiscalYear is null)
         {
             return Result<EmployeeAccountSummaryResponse>.Failure(
-                FiscalYearNotFound(null));
+                FiscalYearNotFound(fiscalYearId));
         }
         var baseCurrency = await dbContext.CompanySettings
             .AsNoTracking()
@@ -428,7 +436,11 @@ public sealed partial class FinancialStatementService
                 LastMovementDate: totals?.LastDate,
                 TotalWithdrawals: 0m,
                 RecentMovements: recentMovements,
-                PayrollSalaryTransactions: payrollTransactions));
+                PayrollSalaryTransactions: payrollTransactions)
+            {
+                FiscalYearId = fiscalYear.Id,
+                FiscalYearName = fiscalYear.Name
+            });
     }
 
     private IQueryable<EmployeeStatementRaw> CreateEmployeeRows(
