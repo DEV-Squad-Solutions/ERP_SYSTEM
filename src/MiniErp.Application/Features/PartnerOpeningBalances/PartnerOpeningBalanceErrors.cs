@@ -33,6 +33,11 @@ public static class PartnerOpeningBalanceErrors
             "PartnerOpeningBalances.InvalidId",
             "يجب أن يكون رقم رصيد الشريك أكبر من صفر.");
 
+    public static Error CarriedForwardReadOnly() =>
+        Error.Conflict(
+            "PartnerOpeningBalances.CarriedForwardReadOnly",
+            "الرصيد المرحّل من إقفال السنة للعرض فقط ولا يمكن تعديله أو حذفه.");
+
     public static Error NotFound(int id) =>
         Error.NotFound(
             "PartnerOpeningBalances.NotFound",

@@ -18,4 +18,7 @@ public sealed record PartnerOpeningBalanceResponse(
     decimal Amount,
     decimal BaseAmount,
     string? Notes,
-    byte[] RowVersion);
+    byte[] RowVersion)
+{
+    public bool IsCarriedForward { get; init; }
+}
