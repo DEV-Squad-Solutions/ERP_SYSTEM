@@ -71,7 +71,6 @@ public sealed class PayrollEntriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -100,7 +99,6 @@ public sealed class PayrollEntriesController(
                 result.Value);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost("out-company")]
     [ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -130,7 +128,6 @@ public sealed class PayrollEntriesController(
                 result.Value);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost("out-company/bulk")]
     [ProducesResponseType<List<PayrollEntryResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -157,7 +154,6 @@ public sealed class PayrollEntriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost("bulk")]
     [ProducesResponseType<List<PayrollEntryResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -182,7 +178,6 @@ public sealed class PayrollEntriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost("{id:int}/move-salary")]
     [ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -216,7 +211,6 @@ public sealed class PayrollEntriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost("move-salary/bulk")]
     [HttpPost("bulk/move-salary")]
     [ProducesResponseType<List<PayrollEntryResponse>>(StatusCodes.Status200OK)]
@@ -250,7 +244,6 @@ public sealed class PayrollEntriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}")]
     [ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -271,7 +264,6 @@ public sealed class PayrollEntriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPut("bulk")]
     [ProducesResponseType<List<PayrollEntryResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -295,7 +287,6 @@ public sealed class PayrollEntriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPut("out-company/{id:int}")]
     [ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -317,7 +308,6 @@ public sealed class PayrollEntriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPut("out-company/bulk")]
     [ProducesResponseType<List<PayrollEntryResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -341,7 +331,6 @@ public sealed class PayrollEntriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost("{id:int}/recalculate")]
     [ProducesResponseType<PayrollEntryResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -361,7 +350,6 @@ public sealed class PayrollEntriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -381,7 +369,6 @@ public sealed class PayrollEntriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpDelete("bulk")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]

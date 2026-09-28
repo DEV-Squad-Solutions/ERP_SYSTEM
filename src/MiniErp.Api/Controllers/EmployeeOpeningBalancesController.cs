@@ -43,7 +43,6 @@ public sealed class EmployeeOpeningBalancesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<EmployeeOpeningBalanceResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -82,7 +81,6 @@ public sealed class EmployeeOpeningBalancesController(
                 result.Value);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}")]
     [ProducesResponseType<EmployeeOpeningBalanceResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -116,7 +114,6 @@ public sealed class EmployeeOpeningBalancesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

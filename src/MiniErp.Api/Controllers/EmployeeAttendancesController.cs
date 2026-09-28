@@ -61,7 +61,6 @@ public sealed class EmployeeAttendancesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<EmployeeAttendanceResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -82,7 +81,6 @@ public sealed class EmployeeAttendancesController(
                 result.Value);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost("bulk")]
     [ProducesResponseType<List<EmployeeAttendanceResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -97,7 +95,6 @@ public sealed class EmployeeAttendancesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}")]
     [ProducesResponseType<EmployeeAttendanceResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -114,7 +111,6 @@ public sealed class EmployeeAttendancesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPut("bulk")]
     [ProducesResponseType<List<EmployeeAttendanceResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -129,7 +125,6 @@ public sealed class EmployeeAttendancesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -143,7 +138,6 @@ public sealed class EmployeeAttendancesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpDelete("bulk")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]

@@ -51,7 +51,6 @@ public sealed class EmployeesController(
     }
 
 
-    [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<EmployeeResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
@@ -71,7 +70,6 @@ public sealed class EmployeesController(
                 result.Value);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}")]
     [ProducesResponseType<EmployeeResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -88,7 +86,6 @@ public sealed class EmployeesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

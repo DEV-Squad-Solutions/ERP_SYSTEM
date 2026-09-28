@@ -49,7 +49,6 @@ public sealed class EmployeeMovementsController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<EmployeeMovementResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -78,7 +77,6 @@ public sealed class EmployeeMovementsController(
                 result.Value);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost("bulk")]
     [ProducesResponseType<List<EmployeeMovementResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -103,7 +101,6 @@ public sealed class EmployeeMovementsController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
