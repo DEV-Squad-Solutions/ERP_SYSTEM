@@ -31,7 +31,8 @@ namespace MiniErp.Application.Features.EmployeeAttendance
         DateOnly? WorkDateFrom = null,
         DateOnly? WorkDateTo = null,
         EmployeeAttendanceStatus? Status = null,
-        string? Search = null);
+        string? Search = null,
+        int? FiscalYearId = null);
 
     public sealed record BulkEmployeeAttendanceRequest(
         List<IndividualAttendanceRecordRequest> Attendances);

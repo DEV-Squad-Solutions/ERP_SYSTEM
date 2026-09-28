@@ -13,6 +13,9 @@ public sealed class DriverTripCostMappingRegister : IRegister
                 response => response.TripNumber,
                 trip => "TR-" + trip.Id)
             .Map(
+                response => response.FiscalYearName,
+                trip => trip.FiscalYear.Name)
+            .Map(
                 response => response.BusinessPartnerId,
                 trip => trip.BusinessPartnerId)
             .Map(

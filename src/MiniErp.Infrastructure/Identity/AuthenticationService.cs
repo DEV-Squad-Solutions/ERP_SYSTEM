@@ -75,6 +75,10 @@ public sealed class AuthenticationService(
             user,
             companies[0].Id,
             cancellationToken);
+        if (tokenResult.IsFailure)
+        {
+            return Result<LoginResponse>.Failure(tokenResult.Error);
+        }
 
         return Result<LoginResponse>.Success(new LoginResponse(
             UserId: user.Id,
@@ -131,6 +135,89 @@ public sealed class AuthenticationService(
             cancellationToken);
     }
 
+    public async Task<Result<IReadOnlyList<CompanyAccessResponse>>>
+        GetCompaniesAsync(
+            Guid userId,
+            CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty)
+        {
+            return Result<IReadOnlyList<CompanyAccessResponse>>.Failure(
+                InvalidUserContext());
+        }
+
+        var companies = await GetAllowedCompaniesAsync(
+            userId,
+            cancellationToken);
+
+        return companies.Count == 0
+            ? Result<IReadOnlyList<CompanyAccessResponse>>.Failure(
+                NoCompanyAccess())
+            : Result<IReadOnlyList<CompanyAccessResponse>>.Success(companies);
+    }
+
+    public async Task<Result<TokenResponse>> SwitchCompanyAsync(
+        Guid userId,
+        int currentCompanyId,
+        SwitchCompanyRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty || currentCompanyId <= 0)
+        {
+            return Result<TokenResponse>.Failure(InvalidUserContext());
+        }
+
+        var tokenHash = HashRefreshToken(request.RefreshToken);
+        var storedToken = await dbContext.RefreshTokens
+            .Include(token => token.User)
+            .SingleOrDefaultAsync(
+                token => token.TokenHash == tokenHash,
+                cancellationToken);
+
+        var now = timeProvider.GetUtcNow();
+        if (storedToken is null ||
+            storedToken.UserId != userId ||
+            storedToken.CompanyId != currentCompanyId ||
+            storedToken.RevokedAtUtc is not null ||
+            storedToken.ExpiresAtUtc <= now ||
+            string.IsNullOrEmpty(storedToken.SecurityStampSnapshot) ||
+            !string.Equals(
+                storedToken.SecurityStampSnapshot,
+                storedToken.User.SecurityStamp,
+                StringComparison.Ordinal) ||
+            !await signInManager.CanSignInAsync(storedToken.User) ||
+            await userManager.IsLockedOutAsync(storedToken.User))
+        {
+            return InvalidRefreshToken();
+        }
+
+        var hasCompanyAccess = await dbContext.UserCompanies
+            .AsNoTracking()
+            .AnyAsync(
+                userCompany =>
+                    userCompany.UserId == userId &&
+                    userCompany.CompanyId == request.CompanyId,
+                cancellationToken);
+        if (!hasCompanyAccess)
+        {
+            return Result<TokenResponse>.Failure(CompanyAccessDenied());
+        }
+
+        storedToken.RevokedAtUtc = now;
+
+        try
+        {
+            return await CreateTokenPairAsync(
+                storedToken.User,
+                request.CompanyId,
+                cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return InvalidRefreshToken();
+        }
+    }
+
     public async Task<Result<TokenResponse>> RefreshAsync(
         RefreshTokenRequest request,
         CancellationToken cancellationToken = default)
@@ -146,7 +233,12 @@ public sealed class AuthenticationService(
         if (storedToken is null ||
             storedToken.CompanyId is not int companyId ||
             storedToken.RevokedAtUtc is not null ||
-            storedToken.ExpiresAtUtc <= now)
+            storedToken.ExpiresAtUtc <= now ||
+            string.IsNullOrEmpty(storedToken.SecurityStampSnapshot) ||
+            !string.Equals(
+                storedToken.SecurityStampSnapshot,
+                storedToken.User.SecurityStamp,
+                StringComparison.Ordinal))
         {
             return InvalidRefreshToken();
         }
@@ -217,6 +309,11 @@ public sealed class AuthenticationService(
         int companyId,
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrEmpty(user.SecurityStamp))
+        {
+            return Result<TokenResponse>.Failure(InvalidUserContext());
+        }
+
         var accessToken = await CreateAccessTokenAsync(user, companyId);
         var rawRefreshToken = CreateRefreshToken();
         var now = timeProvider.GetUtcNow();
@@ -228,6 +325,7 @@ public sealed class AuthenticationService(
             CompanyId = companyId,
             TokenHash = HashRefreshToken(rawRefreshToken),
             CreatedAtUtc = now,
+            SecurityStampSnapshot = user.SecurityStamp,
             ExpiresAtUtc = now.AddDays(
                 options.RefreshToken.ExpirationDays)
         });

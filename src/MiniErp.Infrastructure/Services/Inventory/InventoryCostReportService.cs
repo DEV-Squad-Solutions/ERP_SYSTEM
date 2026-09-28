@@ -12,7 +12,8 @@ namespace MiniErp.Infrastructure.Services.Inventory;
 
 public sealed class InventoryCostReportService(
     ApplicationDbContext dbContext,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver)
     : IInventoryCostReportService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -38,6 +39,19 @@ public sealed class InventoryCostReportService(
         {
             return Result<InventoryCostReportResponse>.Failure(ItemRequired());
         }
+
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.FromDate,
+            toDate: filters.ToDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<InventoryCostReportResponse>.Failure(
+                fiscalYear.Errors);
+        }
+
+        var fiscalYearScope = fiscalYear.Value;
 
         var store = await dbContext.Stores
             .AsNoTracking()
@@ -91,7 +105,8 @@ public sealed class InventoryCostReportService(
             .Where(movement =>
                 movement.CompanyId == companyId &&
                 movement.StoreId == store.Id &&
-                movement.ItemId == item.Id)
+                movement.ItemId == item.Id &&
+                movement.FiscalYearId == fiscalYearScope.FiscalYearId)
             .OrderBy(movement => movement.MovementDate)
             .ThenBy(movement => movement.CreatedOn)
             .ThenBy(movement => movement.Id)
@@ -149,6 +164,10 @@ public sealed class InventoryCostReportService(
                     allocation.CompanyId == companyId &&
                     allocation.StoreId == store.Id &&
                     allocation.ItemId == item.Id &&
+                    allocation.OutboundMovement.FiscalYearId ==
+                        fiscalYearScope.FiscalYearId &&
+                    allocation.InboundMovement.FiscalYearId ==
+                        fiscalYearScope.FiscalYearId &&
                     (pageMovementIds.Contains(allocation.OutboundMovementId) ||
                      pageMovementIds.Contains(allocation.InboundMovementId)))
                 .Select(allocation => new AllocationProjection
@@ -227,11 +246,16 @@ public sealed class InventoryCostReportService(
                     [])))
             .ToArray();
 
-        var openingMovement = timeline
+        var fiscalYearOpeningMovement = timeline
             .Where(movement =>
-                filters.FromDate.HasValue &&
-                movement.MovementDate < filters.FromDate.Value)
+                movement.MovementType == ItemMovementType.OpeningBalance)
             .LastOrDefault();
+        var reportOpeningMovement = filters.FromDate.HasValue
+            ? timeline
+                .Where(movement =>
+                    movement.MovementDate < filters.FromDate.Value)
+                .LastOrDefault() ?? fiscalYearOpeningMovement
+            : fiscalYearOpeningMovement;
         var closingMovement = timeline
             .Where(movement =>
                 !filters.ToDate.HasValue ||
@@ -242,7 +266,8 @@ public sealed class InventoryCostReportService(
                 (!filters.FromDate.HasValue ||
                  movement.MovementDate >= filters.FromDate.Value) &&
                 (!filters.ToDate.HasValue ||
-                 movement.MovementDate <= filters.ToDate.Value))
+                 movement.MovementDate <= filters.ToDate.Value) &&
+                movement.MovementType != ItemMovementType.OpeningBalance)
             .ToArray();
         var asOfMovements = timeline
             .Where(movement =>
@@ -250,24 +275,15 @@ public sealed class InventoryCostReportService(
                 movement.MovementDate <= filters.ToDate.Value)
             .ToArray();
 
-        var currentBalance = await dbContext.ItemStoreBalances
-            .AsNoTracking()
-            .Where(balance =>
-                balance.CompanyId == companyId &&
-                balance.StoreId == store.Id &&
-                balance.ItemId == item.Id)
-            .Select(balance => new
-            {
-                balance.Quantity,
-                balance.AverageCost,
-                balance.InventoryValue
-            })
-            .SingleOrDefaultAsync(cancellationToken);
+        var effectiveClosingMovement =
+            closingMovement ?? reportOpeningMovement;
 
         var summary = new InventoryCostReportSummaryResponse(
-            OpeningQuantity: openingMovement?.QuantityAfter ?? 0m,
-            OpeningAverageCost: openingMovement?.AverageCostAfter ?? 0m,
-            OpeningInventoryValue: openingMovement?.InventoryValueAfter ?? 0m,
+            OpeningQuantity: reportOpeningMovement?.QuantityAfter ?? 0m,
+            OpeningAverageCost:
+                reportOpeningMovement?.AverageCostAfter ?? 0m,
+            OpeningInventoryValue:
+                reportOpeningMovement?.InventoryValueAfter ?? 0m,
             TotalQuantityIn: periodMovements.Sum(movement => movement.QuantityIn),
             TotalQuantityOut: periodMovements.Sum(movement => movement.QuantityOut),
             TotalInboundCost: periodMovements
@@ -276,12 +292,16 @@ public sealed class InventoryCostReportService(
             TotalOutboundCost: periodMovements
                 .Where(movement => movement.QuantityOut > 0m)
                 .Sum(movement => movement.TotalCost),
-            ClosingQuantity: closingMovement?.QuantityAfter ?? 0m,
-            ClosingAverageCost: closingMovement?.AverageCostAfter ?? 0m,
-            ClosingInventoryValue: closingMovement?.InventoryValueAfter ?? 0m,
-            CurrentQuantity: currentBalance?.Quantity ?? 0m,
-            CurrentAverageCost: currentBalance?.AverageCost ?? 0m,
-            CurrentInventoryValue: currentBalance?.InventoryValue ?? 0m,
+            ClosingQuantity: effectiveClosingMovement?.QuantityAfter ?? 0m,
+            ClosingAverageCost:
+                effectiveClosingMovement?.AverageCostAfter ?? 0m,
+            ClosingInventoryValue:
+                effectiveClosingMovement?.InventoryValueAfter ?? 0m,
+            CurrentQuantity: effectiveClosingMovement?.QuantityAfter ?? 0m,
+            CurrentAverageCost:
+                effectiveClosingMovement?.AverageCostAfter ?? 0m,
+            CurrentInventoryValue:
+                effectiveClosingMovement?.InventoryValueAfter ?? 0m,
             PendingCostQuantity: asOfMovements
                 .Where(movement =>
                     movement.PendingCostQuantity > 0m)
@@ -295,6 +315,8 @@ public sealed class InventoryCostReportService(
 
         return Result<InventoryCostReportResponse>.Success(
             new InventoryCostReportResponse(
+                FiscalYearId: fiscalYearScope.FiscalYearId,
+                FiscalYearName: fiscalYearScope.FiscalYearName,
                 StoreId: store.Id,
                 StoreCode: store.Code,
                 StoreName: store.Name,

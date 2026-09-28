@@ -3,6 +3,7 @@ using MiniErp.Domain.Enums;
 namespace MiniErp.Application.Features.InvoiceItemPricing;
 
 public sealed record InvoiceItemPricingFilterRequest(
+    int? FiscalYearId = null,
     string? Search = null,
     int? InvoiceId = null,
     int? ItemId = null,

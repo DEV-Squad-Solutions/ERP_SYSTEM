@@ -11,6 +11,10 @@ public sealed class StockTransfer : AuditableEntity
 
     public Company Company { get; set; } = null!;
 
+    public int FiscalYearId { get; set; }
+
+    public MiniErp.Domain.Entities.Accounting.FiscalYear FiscalYear { get; set; } = null!;
+
     public string DocumentNumber { get; set; } = string.Empty;
 
     public DateOnly TransferDate { get; set; }

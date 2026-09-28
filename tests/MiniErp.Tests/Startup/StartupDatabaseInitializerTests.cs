@@ -200,6 +200,43 @@ public sealed class StartupDatabaseInitializerTests
     }
 
     [Fact]
+    public async Task DisabledMigrationsAndSeeding_ChecksConnectivityOnlyAndMarksReady()
+    {
+        var initializer = new StartupDatabaseInitializer();
+        var status = new StartupDatabaseStatus();
+        var connectivityChecks = 0;
+        var migrationCalls = 0;
+        var seedCalls = 0;
+
+        await initializer.InitializeAsync(
+            applyMigrations: false,
+            seedEnabled: false,
+            canConnectAsync: _ =>
+            {
+                Interlocked.Increment(ref connectivityChecks);
+                return Task.FromResult(true);
+            },
+            applyMigrationsAsync: _ =>
+            {
+                Interlocked.Increment(ref migrationCalls);
+                return Task.CompletedTask;
+            },
+            seedAsync: _ =>
+            {
+                Interlocked.Increment(ref seedCalls);
+                return Task.CompletedTask;
+            },
+            status: status,
+            logger: NullLogger.Instance);
+
+        Assert.Equal(1, connectivityChecks);
+        Assert.Equal(0, migrationCalls);
+        Assert.Equal(0, seedCalls);
+        Assert.True(status.GetSnapshot().IsReady);
+        Assert.Equal("Ready", status.GetSnapshot().State);
+    }
+
+    [Fact]
     public async Task Middleware_ReturnsStructured503_WhenDatabaseIsNotReady()
     {
         var status = new StartupDatabaseStatus();

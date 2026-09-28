@@ -1,4 +1,5 @@
 using MiniErp.Domain.Common.Entities;
+using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Enums;
 
 namespace MiniErp.Domain.Entities.Companies;
@@ -10,6 +11,10 @@ public sealed class ExchangeRate : AuditableEntity
     public int CompanyId { get; set; }
 
     public Company Company { get; set; } = null!;
+
+    public int FiscalYearId { get; set; }
+
+    public FiscalYear FiscalYear { get; set; } = null!;
 
     public CurrencyCode Currency { get; set; }
 

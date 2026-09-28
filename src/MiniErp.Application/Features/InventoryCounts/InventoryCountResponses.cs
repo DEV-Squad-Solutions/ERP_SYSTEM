@@ -17,6 +17,8 @@ public sealed record InventoryCountLineResponse(
 public sealed record InventoryCountListResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
+    string FiscalYearName,
     int StoreId,
     string StoreName,
     string DocumentNumber,
@@ -35,6 +37,8 @@ public sealed record InventoryCountListResponse(
 public sealed record InventoryCountResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
+    string FiscalYearName,
     int StoreId,
     string StoreName,
     string DocumentNumber,

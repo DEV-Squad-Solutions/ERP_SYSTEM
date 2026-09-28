@@ -23,4 +23,5 @@ public sealed record OperationalTrialBalanceFilterRequest(
         OperationalTrialBalanceViewMode.Detailed,
     OperationalTrialBalanceCategory? Category = null,
     bool IncludeZeroBalances = false,
-    int? AccountId = null);
+    int? AccountId = null,
+    int? FiscalYearId = null);

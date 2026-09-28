@@ -14,6 +14,8 @@ public sealed class DriverTripService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
+    IFiscalYearPeriodGuard fiscalYearPeriodGuard,
     IDriverTripPostingService? driverTripPostingService = null)
     : IDriverTripService, IScopedService
 {
@@ -26,6 +28,17 @@ public sealed class DriverTripService(
             CancellationToken cancellationToken = default)
     {
         filters ??= new DriverTripCostFilterRequest();
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.FromDate,
+            toDate: filters.ToDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<PagedResponse<DriverTripCostResponse>>.Failure(
+                fiscalYear.Errors);
+        }
+
         var search = filters.Search?.Trim();
         var invoiceNumber = filters.InvoiceNumber?.Trim();
         var tripNumber = filters.TripNumber?.Trim();
@@ -34,7 +47,9 @@ public sealed class DriverTripService(
 
         var query = dbContext.DriverTrips
             .AsNoTracking()
-            .Where(trip => trip.CompanyId == companyId)
+            .Where(trip =>
+                trip.CompanyId == companyId &&
+                trip.FiscalYearId == fiscalYear.Value.FiscalYearId)
             .Where(trip =>
                 string.IsNullOrEmpty(search) ||
                 trip.InvoiceNumber.Contains(search) ||
@@ -63,14 +78,15 @@ public sealed class DriverTripService(
             .Where(trip =>
                 !filters.HasCost.HasValue ||
                 (trip.Cost.HasValue && trip.Cost.Value > 0m) ==
-                filters.HasCost.Value)
+                filters.HasCost.Value);
+        var orderedQuery = query
             .OrderByDescending(trip => trip.TripDate)
             .ThenByDescending(trip => trip.Id);
 
         return await paginationService.PaginateAsync<
             DriverTrip,
             DriverTripCostResponse>(
-            query,
+            orderedQuery,
             pagination,
             cancellationToken);
     }
@@ -119,6 +135,21 @@ public sealed class DriverTripService(
         {
             return Result<DriverTripBulkCostUpdateResponse>.Failure(
                 TripsNotFound());
+        }
+
+        foreach (var tripDate in trips
+                     .Select(trip => trip.TripDate)
+                     .Distinct())
+        {
+            var periodResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                tripDate,
+                nameof(DriverTripCostResponse.TripDate),
+                cancellationToken);
+            if (periodResult.IsFailure)
+            {
+                return Result<DriverTripBulkCostUpdateResponse>.Failure(
+                    periodResult.Errors);
+            }
         }
 
         var requestById = request.Items.ToDictionary(

@@ -5,6 +5,8 @@ namespace MiniErp.Application.Features.PartnerOpeningBalances;
 public sealed record PartnerOpeningBalanceResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
+    string FiscalYearName,
     int BusinessPartnerId,
     string BusinessPartnerName,
     string DocumentNumber,
@@ -16,4 +18,7 @@ public sealed record PartnerOpeningBalanceResponse(
     decimal Amount,
     decimal BaseAmount,
     string? Notes,
-    byte[] RowVersion);
+    byte[] RowVersion)
+{
+    public bool IsCarriedForward { get; init; }
+}

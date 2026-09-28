@@ -12,6 +12,10 @@ public sealed class PartnerOpeningBalance : AuditableEntity
 
     public Company Company { get; set; } = null!;
 
+    public int FiscalYearId { get; set; }
+
+    public MiniErp.Domain.Entities.Accounting.FiscalYear FiscalYear { get; set; } = null!;
+
     public int BusinessPartnerId { get; set; }
 
     public BusinessPartner BusinessPartner { get; set; } = null!;

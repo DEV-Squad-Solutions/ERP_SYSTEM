@@ -358,6 +358,8 @@ public sealed class AccountMappingService(
                 accountType == AccountType.Liability,
             AccountingMappingType.Sales or
             AccountingMappingType.SalesReturn or
+            AccountingMappingType.ServiceSales or
+            AccountingMappingType.ServiceSalesReturn or
             AccountingMappingType.ExchangeGain or
             AccountingMappingType.InventoryAdjustmentGain =>
                 accountType == AccountType.Revenue,
@@ -370,8 +372,12 @@ public sealed class AccountMappingService(
                 accountType == AccountType.Equity,
             AccountingMappingType.Purchase =>
                 accountType is AccountType.Asset or AccountType.Expense,
+            AccountingMappingType.ServicePurchase =>
+                accountType == AccountType.Expense,
             AccountingMappingType.PurchaseReturn =>
                 accountType is AccountType.Asset or AccountType.Revenue,
+            AccountingMappingType.ServicePurchaseReturn =>
+                accountType is AccountType.Expense or AccountType.Revenue,
             AccountingMappingType.CashMovementType => movementClassification switch
             {
                 CashMovementClassification.Expense => accountType == AccountType.Expense,

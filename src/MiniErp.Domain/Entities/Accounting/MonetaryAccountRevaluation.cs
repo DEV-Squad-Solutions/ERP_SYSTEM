@@ -17,6 +17,10 @@ public sealed class MonetaryAccountRevaluation : AuditableEntity
 
     public Company Company { get; set; } = null!;
 
+    public int FiscalYearId { get; set; }
+
+    public MiniErp.Domain.Entities.Accounting.FiscalYear FiscalYear { get; set; } = null!;
+
     public int AccountId { get; set; }
 
     public Account Account { get; set; } = null!;

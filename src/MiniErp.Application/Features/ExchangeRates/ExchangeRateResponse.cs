@@ -5,6 +5,8 @@ namespace MiniErp.Application.Features.ExchangeRates;
 public sealed record ExchangeRateResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
+    string FiscalYearName,
     CurrencyCode BaseCurrency,
     CurrencyCode Currency,
     DateOnly RateDate,

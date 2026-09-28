@@ -14,6 +14,29 @@ public sealed partial class FinancialStatementService
     /// </summary>
     private IQueryable<JournalEntryLine> PostedLedgerLines() =>
         PostedJournalLedgerLines.Create(dbContext, companyId);
+
+    private Task<FiscalYearScope?> ResolveFiscalYearAsync(
+        int? fiscalYearId,
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        CancellationToken cancellationToken) =>
+        dbContext.FiscalYears
+            .AsNoTracking()
+            .Where(year =>
+                year.CompanyId == companyId &&
+                (fiscalYearId.HasValue
+                    ? year.Id == fiscalYearId.Value
+                    : year.IsCurrent))
+            .Select(year => new FiscalYearScope(
+                year.Id,
+                year.StartDate,
+                year.EndDate))
+            .SingleOrDefaultAsync(cancellationToken);
+
+    private sealed record FiscalYearScope(
+        int Id,
+        DateOnly StartDate,
+        DateOnly EndDate);
 }
 
 internal static class PostedJournalLedgerLines

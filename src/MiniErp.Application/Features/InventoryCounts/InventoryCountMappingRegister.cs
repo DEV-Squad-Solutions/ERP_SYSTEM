@@ -25,6 +25,9 @@ public sealed class InventoryCountMappingRegister : IRegister
                     : (decimal?)null);
 
         config.ForType<InventoryCount, InventoryCountListResponse>()
+            .Map(
+                response => response.FiscalYearName,
+                count => count.FiscalYear.Name)
             .Map(response => response.StoreName, count => count.Store.Name)
             .Map(response => response.LineCount, count => count.Lines.Count())
             .Map(
@@ -54,6 +57,9 @@ public sealed class InventoryCountMappingRegister : IRegister
                     .FirstOrDefault());
 
         config.ForType<InventoryCount, InventoryCountResponse>()
+            .Map(
+                response => response.FiscalYearName,
+                count => count.FiscalYear.Name)
             .Map(response => response.StoreName, count => count.Store.Name)
             .Map(
                 response => response.IncreaseAdjustmentId,

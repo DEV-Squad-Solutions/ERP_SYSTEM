@@ -1347,7 +1347,8 @@ public static class DevelopmentDataSeeder
                     $"Seed draft for Company {companyId}")
             .Select(line => new InventoryCostingKey(
                 line.StockOpeningBalance.StoreId,
-                line.ItemId))
+                line.ItemId,
+                line.StockOpeningBalance.FiscalYearId))
             .ToListAsync(cancellationToken);
         var invoiceKeys = await dbContext.InvoiceLines
             .AsNoTracking()
@@ -1358,7 +1359,8 @@ public static class DevelopmentDataSeeder
                 line.Invoice.ExportInvoiceCode.StartsWith("SEED-"))
             .Select(line => new InventoryCostingKey(
                 line.Invoice.StoreId,
-                line.ItemId!.Value))
+                line.ItemId!.Value,
+                line.Invoice.FiscalYearId))
             .ToListAsync(cancellationToken);
         var keys = openingBalanceKeys
             .Concat(invoiceKeys)
@@ -3543,7 +3545,8 @@ public static class DevelopmentDataSeeder
         var requiredAccountCodes = new[]
         {
             "1110", "1200", "1300", "1400", "2100", "2200", "3100", "3200",
-            "4100", "4200", "4300", "4400", "5100", "5200", "5400", "5500"
+            "4100", "4150", "4200", "4300", "4400", "5100", "5200", "5250",
+            "5400", "5500"
         };
         if (requiredAccountCodes.Any(code => !accounts.ContainsKey(code)))
         {
@@ -3628,6 +3631,10 @@ public static class DevelopmentDataSeeder
             Add(AccountingMappingType.OpeningBalanceEquity, null, "3200");
             Add(AccountingMappingType.EmployeeReceivable, null, "1400");
             Add(AccountingMappingType.DriverTripExpense, null, "5200");
+            Add(AccountingMappingType.ServiceSales, null, "4150");
+            Add(AccountingMappingType.ServiceSalesReturn, null, "4150");
+            Add(AccountingMappingType.ServicePurchase, null, "5250");
+            Add(AccountingMappingType.ServicePurchaseReturn, null, "5250");
 
             if (pending.Count > 0)
             {
@@ -3661,12 +3668,14 @@ public static class DevelopmentDataSeeder
             ("3200", "مقابل الأرصدة الافتتاحية", "3000", AccountType.Equity, NormalBalance.Credit, true),
             ("4000", "الإيرادات", null, AccountType.Revenue, NormalBalance.Credit, false),
             ("4100", "إيرادات المبيعات", "4000", AccountType.Revenue, NormalBalance.Credit, true),
+            ("4150", "إيرادات الخدمات", "4000", AccountType.Revenue, NormalBalance.Credit, true),
             ("4200", "إيرادات أخرى", "4000", AccountType.Revenue, NormalBalance.Credit, true),
             ("4300", "أرباح فروق العملات", "4000", AccountType.Revenue, NormalBalance.Credit, true),
             ("4400", "أرباح زيادة المخزون", "4000", AccountType.Revenue, NormalBalance.Credit, true),
             ("5000", "المصروفات", null, AccountType.Expense, NormalBalance.Debit, false),
             ("5100", "تكلفة المبيعات", "5000", AccountType.Expense, NormalBalance.Debit, true),
             ("5200", "مصروفات التشغيل", "5000", AccountType.Expense, NormalBalance.Debit, true),
+            ("5250", "مصروفات الخدمات", "5000", AccountType.Expense, NormalBalance.Debit, true),
             ("5300", "مصروفات إدارية", "5000", AccountType.Expense, NormalBalance.Debit, true),
             ("5400", "خسائر فروق العملات", "5000", AccountType.Expense, NormalBalance.Debit, true),
             ("5500", "خسائر عجز المخزون", "5000", AccountType.Expense, NormalBalance.Debit, true)
@@ -3784,11 +3793,13 @@ public static class DevelopmentDataSeeder
             ],
             [
                 ("4100", "IS-110"),
+                ("4150", "IS-110"),
                 ("4200", "IS-120"),
                 ("4300", "IS-130"),
                 ("4400", "IS-140"),
                 ("5100", "IS-210"),
                 ("5200", "IS-220"),
+                ("5250", "IS-220"),
                 ("5300", "IS-230"),
                 ("5400", "IS-240"),
                 ("5500", "IS-250")
@@ -3818,6 +3829,7 @@ public static class DevelopmentDataSeeder
             [
                 ("1200", "CF-110"),
                 ("4100", "CF-110"),
+                ("4150", "CF-110"),
                 ("1300", "CF-120"),
                 ("2100", "CF-120"),
                 ("1400", "CF-140"),
@@ -3828,6 +3840,7 @@ public static class DevelopmentDataSeeder
                 ("4400", "CF-140"),
                 ("5100", "CF-130"),
                 ("5200", "CF-130"),
+                ("5250", "CF-130"),
                 ("5300", "CF-130"),
                 ("5400", "CF-140"),
                 ("5500", "CF-140"),

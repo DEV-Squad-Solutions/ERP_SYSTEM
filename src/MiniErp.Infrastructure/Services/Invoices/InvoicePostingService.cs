@@ -6,6 +6,7 @@ using MiniErp.Application.Features.FiscalYears;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 using static MiniErp.Application.Features.FiscalYears.FiscalYearErrors;
@@ -41,6 +42,8 @@ public sealed class InvoicePostingService(
                 entity.Currency,
                 entity.Total,
                 entity.ExchangeRate,
+                entity.BaseSubtotal,
+                entity.BaseDiscountAmount,
                 entity.BaseTotal,
                 entity.Notes
             })
@@ -51,7 +54,63 @@ public sealed class InvoicePostingService(
                 InvoiceErrors.NotFound(invoiceId));
         }
 
-        var isItemInvoice = await dbContext.ItemMovements
+        var invoiceAmount = invoice.BaseTotal > 0m
+            ? invoice.BaseTotal
+            : ExchangeRateRules.ConvertToBase(
+                invoice.Total,
+                invoice.ExchangeRate);
+
+        var invoiceLines = await dbContext.InvoiceLines
+            .AsNoTracking()
+            .Where(line =>
+                line.CompanyId == companyId &&
+                line.InvoiceId == invoice.Id)
+            .Select(line => new
+            {
+                line.ItemId,
+                line.BaseTotal
+            })
+            .ToListAsync(cancellationToken);
+        var hasItemLines = invoiceLines.Any(line => line.ItemId.HasValue);
+        var hasServiceLines = invoiceLines.Any(line => !line.ItemId.HasValue);
+        var lineBaseSubtotal = InventoryCostRules.RoundValue(
+            invoiceLines.Sum(line => line.BaseTotal));
+        var itemBaseSubtotal = InventoryCostRules.RoundValue(
+            invoiceLines
+                .Where(line => line.ItemId.HasValue)
+                .Sum(line => line.BaseTotal));
+        var serviceBaseSubtotal = InventoryCostRules.RoundValue(
+            invoiceLines
+                .Where(line => !line.ItemId.HasValue)
+                .Sum(line => line.BaseTotal));
+        var baseSubtotal = invoice.BaseSubtotal > 0m
+            ? invoice.BaseSubtotal
+            : lineBaseSubtotal;
+        var itemAmount = AllocateNetAmount(
+            itemBaseSubtotal,
+            baseSubtotal,
+            invoice.BaseDiscountAmount);
+        var serviceAmount = AllocateNetAmount(
+            serviceBaseSubtotal,
+            baseSubtotal,
+            invoice.BaseDiscountAmount);
+        var allocatedNetAmount = InventoryCostRules.RoundValue(
+            itemAmount + serviceAmount);
+        if (allocatedNetAmount != invoiceAmount)
+        {
+            if (hasServiceLines)
+            {
+                serviceAmount = InventoryCostRules.RoundValue(
+                    serviceAmount + invoiceAmount - allocatedNetAmount);
+            }
+            else
+            {
+                itemAmount = InventoryCostRules.RoundValue(
+                    itemAmount + invoiceAmount - allocatedNetAmount);
+            }
+        }
+
+        var hasItemMovements = await dbContext.ItemMovements
             .AsNoTracking()
             .AnyAsync(
                 movement =>
@@ -62,7 +121,12 @@ public sealed class InvoicePostingService(
                      movement.MovementType == ItemMovementType.Purchase ||
                      movement.MovementType == ItemMovementType.PurchaseReturn),
                 cancellationToken);
-        var hasUnresolvedPurchaseReturnCost = isItemInvoice &&
+        if (!hasItemLines && hasItemMovements && invoiceLines.Count == 0)
+        {
+            itemAmount = invoiceAmount;
+            serviceAmount = 0m;
+        }
+        var hasUnresolvedPurchaseReturnCost = hasItemMovements &&
             invoice.InvoiceType == InvoiceType.PurchaseReturn &&
             await dbContext.ItemMovements
                 .AsNoTracking()
@@ -123,20 +187,6 @@ public sealed class InvoicePostingService(
         }
 
         var mappingTypes = GetInvoiceMappings(invoice.InvoiceType);
-        var invoiceMappingType = isItemInvoice &&
-            invoice.InvoiceType is InvoiceType.Purchase or InvoiceType.PurchaseReturn
-                ? AccountingMappingType.Inventory
-                : mappingTypes.Invoice;
-        var invoiceAccountResult = await accountMappingResolver.ResolveAsync(
-            fiscalYear.Id,
-            invoiceMappingType,
-            cancellationToken: cancellationToken);
-        if (invoiceAccountResult.IsFailure)
-        {
-            return Result<AutomaticJournalEntryResult>.Failure(
-                invoiceAccountResult.Errors);
-        }
-
         var controlAccountResult = await accountMappingResolver.ResolveAsync(
             fiscalYear.Id,
             mappingTypes.Control,
@@ -147,11 +197,6 @@ public sealed class InvoicePostingService(
                 controlAccountResult.Errors);
         }
 
-        var invoiceAmount = invoice.BaseTotal > 0m
-            ? invoice.BaseTotal
-            : ExchangeRateRules.ConvertToBase(
-                invoice.Total,
-                invoice.ExchangeRate);
         var lines = new List<JournalEntryLineRequest>();
         var transactionInvoiceAmount =
             ExchangeRateRules.IsValidRate(invoice.ExchangeRate)
@@ -159,25 +204,60 @@ public sealed class InvoicePostingService(
                     invoiceAmount,
                     invoice.ExchangeRate)
                 : invoice.Total;
-        if (isItemInvoice &&
-            invoice.InvoiceType == InvoiceType.PurchaseReturn)
+        if (invoice.InvoiceType == InvoiceType.PurchaseReturn)
         {
-            var carryingCost = await dbContext.ItemMovements
-                .AsNoTracking()
-                .Where(movement =>
-                    movement.CompanyId == companyId &&
-                    movement.ReferenceId == invoice.Id &&
-                    movement.MovementType == ItemMovementType.PurchaseReturn)
-                .SumAsync(
-                    movement => (decimal?)movement.TotalCost,
-                    cancellationToken) ?? 0m;
-            var costDifference = invoiceAmount - carryingCost;
+            var itemAccountId = 0;
+            if (itemAmount > 0m)
+            {
+                var itemAccountResult = await accountMappingResolver.ResolveAsync(
+                    fiscalYear.Id,
+                    (hasItemLines || hasItemMovements)
+                        ? AccountingMappingType.Inventory
+                        : mappingTypes.Invoice,
+                    cancellationToken: cancellationToken);
+                if (itemAccountResult.IsFailure)
+                {
+                    return Result<AutomaticJournalEntryResult>.Failure(
+                        itemAccountResult.Errors);
+                }
+
+                itemAccountId = itemAccountResult.Value;
+            }
+
+            var serviceAccountId = 0;
+            if (serviceAmount > 0m)
+            {
+                var serviceAccountResult = await accountMappingResolver.ResolveAsync(
+                    fiscalYear.Id,
+                    AccountingMappingType.ServicePurchaseReturn,
+                    cancellationToken: cancellationToken);
+                if (serviceAccountResult.IsFailure)
+                {
+                    return Result<AutomaticJournalEntryResult>.Failure(
+                        serviceAccountResult.Errors);
+                }
+
+                serviceAccountId = serviceAccountResult.Value;
+            }
+
+            var carryingCost = hasItemMovements
+                ? await dbContext.ItemMovements
+                    .AsNoTracking()
+                    .Where(movement =>
+                        movement.CompanyId == companyId &&
+                        movement.ReferenceId == invoice.Id &&
+                        movement.MovementType == ItemMovementType.PurchaseReturn)
+                    .SumAsync(
+                        movement => (decimal?)movement.TotalCost,
+                        cancellationToken) ?? 0m
+                : 0m;
             var adjustmentAccountId = 0;
-            if (costDifference != 0m)
+            var itemDifference = itemAmount - carryingCost;
+            if (itemDifference != 0m)
             {
                 var adjustmentResult = await accountMappingResolver.ResolveAsync(
                     fiscalYear.Id,
-                    costDifference > 0m
+                    itemDifference > 0m
                         ? AccountingMappingType.InventoryAdjustmentGain
                         : AccountingMappingType.InventoryAdjustmentLoss,
                     cancellationToken: cancellationToken);
@@ -189,32 +269,82 @@ public sealed class InvoicePostingService(
 
                 adjustmentAccountId = adjustmentResult.Value;
             }
+
             AddPurchaseReturnItemLines(
                 lines,
-                controlAccountResult.Value,
-                invoiceAccountResult.Value,
-                carryingCost,
-                invoiceAmount,
-                invoice.Currency,
-                invoice.ExchangeRate,
-                transactionInvoiceAmount,
-                invoice.InvoiceNumber,
-                invoice.BusinessPartnerId,
-                adjustmentAccountId);
+                supplierAccountId: controlAccountResult.Value,
+                inventoryAccountId: itemAccountId,
+                carryingCost: carryingCost,
+                itemAmount: itemAmount,
+                invoiceAmount: invoiceAmount,
+                currency: invoice.Currency,
+                exchangeRate: invoice.ExchangeRate,
+                transactionInvoiceAmount: transactionInvoiceAmount,
+                invoiceNumber: invoice.InvoiceNumber,
+                businessPartnerId: invoice.BusinessPartnerId,
+                adjustmentAccountId: adjustmentAccountId,
+                serviceAccountId: serviceAccountId,
+                serviceAmount: serviceAmount);
         }
         else
         {
+            var allocations = new List<InvoicePostingAllocation>();
+            if (itemAmount > 0m)
+            {
+                var itemAccountResult = await accountMappingResolver.ResolveAsync(
+                    fiscalYear.Id,
+                    (hasItemLines || hasItemMovements) && invoice.InvoiceType is
+                        InvoiceType.Purchase
+                        ? AccountingMappingType.Inventory
+                        : mappingTypes.Invoice,
+                    cancellationToken: cancellationToken);
+                if (itemAccountResult.IsFailure)
+                {
+                    return Result<AutomaticJournalEntryResult>.Failure(
+                        itemAccountResult.Errors);
+                }
+
+                allocations.Add(new InvoicePostingAllocation(
+                    AccountId: itemAccountResult.Value,
+                    Amount: itemAmount,
+                    Description: "الأصناف"));
+            }
+
+            if (serviceAmount > 0m)
+            {
+                var serviceAccountResult = await accountMappingResolver.ResolveAsync(
+                    fiscalYear.Id,
+                    invoice.InvoiceType switch
+                    {
+                        InvoiceType.Sales => AccountingMappingType.ServiceSales,
+                        InvoiceType.SalesReturn =>
+                            AccountingMappingType.ServiceSalesReturn,
+                        _ => AccountingMappingType.ServicePurchase
+                    },
+                    cancellationToken: cancellationToken);
+                if (serviceAccountResult.IsFailure)
+                {
+                    return Result<AutomaticJournalEntryResult>.Failure(
+                        serviceAccountResult.Errors);
+                }
+
+                allocations.Add(new InvoicePostingAllocation(
+                    AccountId: serviceAccountResult.Value,
+                    Amount: serviceAmount,
+                    Description: "الخدمات"));
+            }
+
             AddInvoiceAmountLines(
-                lines,
-                invoice.InvoiceType,
-                invoiceAccountResult.Value,
-                controlAccountResult.Value,
-                invoiceAmount,
-                invoice.Currency,
-                invoice.ExchangeRate,
-                transactionInvoiceAmount,
-                invoice.InvoiceNumber,
-                invoice.BusinessPartnerId);
+                lines: lines,
+                invoiceType: invoice.InvoiceType,
+                allocations: allocations,
+                controlAccountId: controlAccountResult.Value,
+                currency: invoice.Currency,
+                exchangeRate: invoice.ExchangeRate,
+                totalAmount: invoiceAmount,
+                transactionTotalAmount: transactionInvoiceAmount,
+                invoiceNumber: invoice.InvoiceNumber,
+                businessPartnerId: invoice.BusinessPartnerId);
         }
 
         var cost = await dbContext.ItemMovements
@@ -427,37 +557,49 @@ public sealed class InvoicePostingService(
     private static void AddInvoiceAmountLines(
         ICollection<JournalEntryLineRequest> lines,
         InvoiceType invoiceType,
-        int invoiceAccountId,
+        IReadOnlyList<InvoicePostingAllocation> allocations,
         int controlAccountId,
-        decimal amount,
         CurrencyCode currency,
         decimal exchangeRate,
-        decimal transactionAmount,
+        decimal totalAmount,
+        decimal transactionTotalAmount,
         string invoiceNumber,
         int businessPartnerId)
     {
         var invoiceSideIsDebit = invoiceType is
             InvoiceType.Purchase or InvoiceType.SalesReturn;
-        lines.Add(new JournalEntryLineRequest(
-            AccountId: invoiceAccountId,
-            Description: $"إجمالي الفاتورة {invoiceNumber}",
-            Debit: invoiceSideIsDebit ? amount : 0m,
-            Credit: invoiceSideIsDebit ? 0m : amount,
-            Currency: currency,
-            ExchangeRate: exchangeRate,
-            TransactionDebit: invoiceSideIsDebit ? transactionAmount : 0m,
-            TransactionCredit: invoiceSideIsDebit ? 0m : transactionAmount));
+        var allocatedTransactionAmount = 0m;
+        for (var index = 0; index < allocations.Count; index++)
+        {
+            var allocation = allocations[index];
+            var transactionAmount = index == allocations.Count - 1
+                ? transactionTotalAmount - allocatedTransactionAmount
+                : ExchangeRateRules.ConvertFromBase(
+                    allocation.Amount,
+                    exchangeRate);
+            allocatedTransactionAmount += transactionAmount;
+            lines.Add(new JournalEntryLineRequest(
+                AccountId: allocation.AccountId,
+                Description: $"{allocation.Description} للفاتورة {invoiceNumber}",
+                Debit: invoiceSideIsDebit ? allocation.Amount : 0m,
+                Credit: invoiceSideIsDebit ? 0m : allocation.Amount,
+                Currency: currency,
+                ExchangeRate: exchangeRate,
+                TransactionDebit: invoiceSideIsDebit ? transactionAmount : 0m,
+                TransactionCredit: invoiceSideIsDebit ? 0m : transactionAmount));
+        }
+
         lines.Add(new JournalEntryLineRequest(
             AccountId: controlAccountId,
             Description: $"طرف الفاتورة {invoiceNumber}",
-            Debit: invoiceSideIsDebit ? 0m : amount,
-            Credit: invoiceSideIsDebit ? amount : 0m,
+            Debit: invoiceSideIsDebit ? 0m : totalAmount,
+            Credit: invoiceSideIsDebit ? totalAmount : 0m,
             PartyType: ToJournalPartyType(invoiceType),
             PartyId: businessPartnerId,
             Currency: currency,
             ExchangeRate: exchangeRate,
-            TransactionDebit: invoiceSideIsDebit ? 0m : transactionAmount,
-            TransactionCredit: invoiceSideIsDebit ? transactionAmount : 0m));
+            TransactionDebit: invoiceSideIsDebit ? 0m : transactionTotalAmount,
+            TransactionCredit: invoiceSideIsDebit ? transactionTotalAmount : 0m));
     }
 
     private static void AddPurchaseReturnItemLines(
@@ -465,13 +607,16 @@ public sealed class InvoicePostingService(
         int supplierAccountId,
         int inventoryAccountId,
         decimal carryingCost,
+        decimal itemAmount,
         decimal invoiceAmount,
         CurrencyCode currency,
         decimal exchangeRate,
         decimal transactionInvoiceAmount,
         string invoiceNumber,
         int businessPartnerId,
-        int adjustmentAccountId)
+        int adjustmentAccountId,
+        int serviceAccountId,
+        decimal serviceAmount)
     {
         lines.Add(new JournalEntryLineRequest(
             AccountId: supplierAccountId,
@@ -484,7 +629,7 @@ public sealed class InvoicePostingService(
             ExchangeRate: exchangeRate,
             TransactionDebit: transactionInvoiceAmount,
             TransactionCredit: 0m));
-        if (carryingCost > 0m)
+        if (carryingCost > 0m && inventoryAccountId > 0)
         {
             lines.Add(new JournalEntryLineRequest(
                 AccountId: inventoryAccountId,
@@ -493,8 +638,8 @@ public sealed class InvoicePostingService(
                 Credit: carryingCost));
         }
 
-        var difference = invoiceAmount - carryingCost;
-        if (difference > 0m)
+        var difference = itemAmount - carryingCost;
+        if (difference > 0m && adjustmentAccountId > 0)
         {
             lines.Add(new JournalEntryLineRequest(
                 AccountId: adjustmentAccountId,
@@ -502,7 +647,7 @@ public sealed class InvoicePostingService(
                 Debit: 0m,
                 Credit: difference));
         }
-        else if (difference < 0m)
+        else if (difference < 0m && adjustmentAccountId > 0)
         {
             lines.Add(new JournalEntryLineRequest(
                 AccountId: adjustmentAccountId,
@@ -510,7 +655,41 @@ public sealed class InvoicePostingService(
                 Debit: Math.Abs(difference),
                 Credit: 0m));
         }
+
+        if (serviceAmount > 0m && serviceAccountId > 0)
+        {
+            var transactionServiceAmount = ExchangeRateRules.ConvertFromBase(
+                serviceAmount,
+                exchangeRate);
+            lines.Add(new JournalEntryLineRequest(
+                AccountId: serviceAccountId,
+                Description: $"خدمات مرتجع الشراء {invoiceNumber}",
+                Debit: 0m,
+                Credit: serviceAmount,
+                Currency: currency,
+                ExchangeRate: exchangeRate,
+                TransactionDebit: 0m,
+                TransactionCredit: transactionServiceAmount));
+        }
     }
+
+    private static decimal AllocateNetAmount(
+        decimal lineSubtotal,
+        decimal invoiceSubtotal,
+        decimal invoiceDiscount) =>
+        lineSubtotal <= 0m
+            ? 0m
+            : invoiceSubtotal <= 0m
+                ? lineSubtotal
+                : InventoryCostRules.RoundValue(
+                    lineSubtotal -
+                    InventoryCostRules.RoundValue(
+                        invoiceDiscount * lineSubtotal / invoiceSubtotal));
+
+    private sealed record InvoicePostingAllocation(
+        int AccountId,
+        decimal Amount,
+        string Description);
 
     private static void AddPaymentLines(
         ICollection<JournalEntryLineRequest> lines,

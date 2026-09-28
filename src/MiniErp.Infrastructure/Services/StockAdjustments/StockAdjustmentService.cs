@@ -20,6 +20,8 @@ public sealed class StockAdjustmentService(
     IInventoryStockService inventoryStockService,
     IInventoryCostingService inventoryCostingService,
     TimeProvider timeProvider,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
+    IFiscalYearPeriodGuard fiscalYearPeriodGuard,
     IInventoryPostingService? inventoryPostingService = null)
     : IStockAdjustmentService, IScopedService
 {
@@ -45,10 +47,25 @@ public sealed class StockAdjustmentService(
                 filterError);
         }
 
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.FromDate,
+            toDate: filters.ToDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<PagedResponse<StockAdjustmentListResponse>>.Failure(
+                fiscalYear.Errors);
+        }
+
         var documentNumber = filters.DocumentNumber?.Trim();
         var query = dbContext.StockAdjustments
             .AsNoTracking()
-            .Where(adjustment => adjustment.CompanyId == companyId)
+            .Where(adjustment =>
+                adjustment.CompanyId == companyId &&
+                adjustment.FiscalYearId == fiscalYear.Value.FiscalYearId);
+
+        var orderedQuery = query
             .Where(adjustment =>
                 string.IsNullOrEmpty(documentNumber) ||
                 adjustment.DocumentNumber.Contains(documentNumber))
@@ -70,7 +87,7 @@ public sealed class StockAdjustmentService(
         var result = await paginationService.PaginateAsync<
             StockAdjustment,
             StockAdjustmentListResponse>(
-                query,
+                orderedQuery,
                 pagination,
                 cancellationToken);
         if (result.IsFailure)
@@ -90,6 +107,7 @@ public sealed class StockAdjustmentService(
 
     public async Task<Result<StockAdjustmentResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -97,7 +115,17 @@ public sealed class StockAdjustmentService(
             return Result<StockAdjustmentResponse>.Failure(InvalidId());
         }
 
-        var response = await ProjectResponseQuery(id)
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<StockAdjustmentResponse>.Failure(fiscalYear.Errors);
+        }
+
+        var response = await ProjectResponseQuery(
+                id,
+                fiscalYear.Value.FiscalYearId)
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
         if (response is not null)
@@ -116,6 +144,15 @@ public sealed class StockAdjustmentService(
         StockAdjustmentRequest request,
         CancellationToken cancellationToken = default)
     {
+        var period = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            request.DocumentDate,
+            nameof(StockAdjustmentRequest.DocumentDate),
+            cancellationToken);
+        if (period.IsFailure)
+        {
+            return Result<StockAdjustmentResponse>.Failure(period.Errors);
+        }
+
         var requested = request.Adapt<StockAdjustment>();
 
         await using var transaction = await dbContext.Database
@@ -261,6 +298,35 @@ public sealed class StockAdjustmentService(
             return Result<StockAdjustmentResponse>.Failure(Concurrency());
         }
 
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: adjustment.FiscalYearId,
+            fromDate: request.DocumentDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<StockAdjustmentResponse>.Failure(fiscalYear.Errors);
+        }
+
+        var currentPeriod = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            adjustment.DocumentDate,
+            nameof(StockAdjustmentRequest.DocumentDate),
+            cancellationToken);
+        if (currentPeriod.IsFailure)
+        {
+            return Result<StockAdjustmentResponse>.Failure(
+                currentPeriod.Errors);
+        }
+
+        var requestedPeriod = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            request.DocumentDate,
+            nameof(StockAdjustmentUpdateRequest.DocumentDate),
+            cancellationToken);
+        if (requestedPeriod.IsFailure)
+        {
+            return Result<StockAdjustmentResponse>.Failure(
+                requestedPeriod.Errors);
+        }
+
         var preparation = await ValidateRequestAsync(
             requested.StoreId,
             requested.Direction,
@@ -390,6 +456,24 @@ public sealed class StockAdjustmentService(
             return Result.Failure(NotFound(id));
         }
 
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: adjustment.FiscalYearId,
+            fromDate: adjustment.DocumentDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result.Failure(fiscalYear.Errors);
+        }
+
+        var period = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            adjustment.DocumentDate,
+            nameof(StockAdjustmentRequest.DocumentDate),
+            cancellationToken);
+        if (period.IsFailure)
+        {
+            return Result.Failure(period.Errors);
+        }
+
         if (adjustment.SourceInventoryCountId.HasValue)
         {
             return Result.Failure(GeneratedAdjustmentImmutable());
@@ -469,11 +553,15 @@ public sealed class StockAdjustmentService(
         return Result.Success();
     }
 
-    private IQueryable<StockAdjustmentResponse> ProjectResponseQuery(int id) =>
+    private IQueryable<StockAdjustmentResponse> ProjectResponseQuery(
+        int id,
+        int? fiscalYearId = null) =>
         dbContext.StockAdjustments
             .Where(adjustment =>
                 adjustment.CompanyId == companyId &&
-                adjustment.Id == id)
+                adjustment.Id == id &&
+                (!fiscalYearId.HasValue ||
+                 adjustment.FiscalYearId == fiscalYearId.Value))
             .ProjectToType<StockAdjustmentResponse>();
 
     private async Task<StockAdjustmentResponse> EnrichResponseAsync(
@@ -910,7 +998,8 @@ public sealed class StockAdjustmentService(
             .Where(line => !line.IsDeleted)
             .Select(line => new InventoryCostingKey(
                 adjustment.StoreId,
-                line.ItemId))
+                line.ItemId,
+                adjustment.FiscalYearId))
             .Distinct()
             .ToArray();
 
@@ -919,7 +1008,8 @@ public sealed class StockAdjustmentService(
         movements
             .Select(movement => new InventoryCostingKey(
                 movement.StoreId,
-                movement.ItemId))
+                movement.ItemId,
+                movement.FiscalYearId))
             .Distinct()
             .ToArray();
 
@@ -934,7 +1024,8 @@ public sealed class StockAdjustmentService(
     private static Error? ValidateFilters(
         StockAdjustmentFilterRequest filters)
     {
-        if (filters.StoreId is <= 0 ||
+        if (filters.FiscalYearId is <= 0 ||
+            filters.StoreId is <= 0 ||
             filters.Direction.HasValue &&
             !Enum.IsDefined(filters.Direction.Value) ||
             filters.ToDate < filters.FromDate)

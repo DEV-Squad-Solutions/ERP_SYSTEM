@@ -31,6 +31,8 @@ public sealed record StockAdjustmentLineResponse(
 public sealed record StockAdjustmentResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
+    string FiscalYearName,
     int StoreId,
     string StoreName,
     string DocumentNumber,
@@ -45,6 +47,8 @@ public sealed record StockAdjustmentResponse(
 public sealed record StockAdjustmentListResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
+    string FiscalYearName,
     int StoreId,
     string StoreName,
     string DocumentNumber,

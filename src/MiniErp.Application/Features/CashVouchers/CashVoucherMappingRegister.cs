@@ -48,6 +48,9 @@ public sealed class CashVoucherMappingRegister : IRegister
 
         config.ForType<CashVoucher, CashVoucherResponse>()
             .Map(
+                response => response.FiscalYearName,
+                voucher => voucher.FiscalYear.Name)
+            .Map(
                 response => response.BaseCurrency,
                 voucher => voucher.Company.Settings == null
                     ? Domain.Enums.CurrencyCode.EGP
@@ -73,6 +76,27 @@ public sealed class CashVoucherMappingRegister : IRegister
                 voucher => voucher.Cashbox == null
                     ? null
                     : voucher.Cashbox.Name)
+            .Map(
+                response => response.CashboxBalance,
+                voucher => voucher.Cashbox == null
+                    ? null
+                    : (decimal?)(
+                        (voucher.Cashbox.OpeningBalanceDate >=
+                             voucher.FiscalYear.StartDate &&
+                         voucher.Cashbox.OpeningBalanceDate <=
+                             voucher.FiscalYear.EndDate
+                            ? voucher.Cashbox.OpeningBalance
+                            : 0m) +
+                        voucher.Cashbox.Vouchers
+                            .Where(cashboxVoucher =>
+                                cashboxVoucher.IsPosted &&
+                                cashboxVoucher.FiscalYearId ==
+                                    voucher.FiscalYearId)
+                            .Sum(cashboxVoucher =>
+                                cashboxVoucher.Direction ==
+                                    Domain.Enums.CashDirection.Receipt
+                                    ? cashboxVoucher.Amount
+                                    : -cashboxVoucher.Amount)))
             .Map(
                 response => response.CashMovementTypeName,
                 voucher => voucher.CashMovementType == null

@@ -497,6 +497,7 @@ public sealed class AutomaticPostingService(
             request.Lines,
             request.FiscalYearId,
             request.SourceType,
+            request.SourceId,
             await GetBaseCurrencyAsync(cancellationToken),
             cancellationToken)
             is { } accountError
@@ -607,6 +608,7 @@ public sealed class AutomaticPostingService(
         IReadOnlyList<JournalEntryLineRequest> lines,
         int fiscalYearId,
         JournalEntrySourceType sourceType,
+        int sourceId,
         CurrencyCode baseCurrency,
         CancellationToken cancellationToken)
     {
@@ -737,10 +739,29 @@ public sealed class AutomaticPostingService(
                 return PartyInactive(line.PartyId.Value, index);
             }
 
+            var isCashboxRevaluationAdjustment =
+                sourceType == JournalEntrySourceType.CashboxRevaluation &&
+                line.PartyType == JournalPartyType.Cashbox &&
+                line.Currency == baseCurrency;
+            var isMonetaryRevaluationAdjustment =
+                sourceType == JournalEntrySourceType.MonetaryAccountRevaluation &&
+                line.Currency == baseCurrency &&
+                partyState.Currency.HasValue &&
+                await dbContext.MonetaryAccountRevaluations
+                    .AsNoTracking()
+                    .AnyAsync(row =>
+                        row.CompanyId == companyId &&
+                        row.Id == sourceId &&
+                        row.FiscalYearId == fiscalYearId &&
+                        row.AccountId == line.AccountId &&
+                        row.Currency == partyState.Currency.Value &&
+                        row.PartyType == line.PartyType &&
+                        row.PartyId == line.PartyId &&
+                        !row.IsDeleted,
+                        cancellationToken);
             if (partyState.Currency.HasValue &&
-                !(sourceType == JournalEntrySourceType.CashboxRevaluation &&
-                  line.PartyType == JournalPartyType.Cashbox &&
-                  line.Currency == baseCurrency) &&
+                !isCashboxRevaluationAdjustment &&
+                !isMonetaryRevaluationAdjustment &&
                 line.Currency != partyState.Currency.Value)
             {
                 return PartyCurrencyMismatch(

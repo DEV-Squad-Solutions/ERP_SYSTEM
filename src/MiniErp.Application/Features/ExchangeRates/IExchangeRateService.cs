@@ -13,11 +13,13 @@ public interface IExchangeRateService
 
     Task<Result<ExchangeRateResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<ExchangeRateResolutionResponse>> ResolveAsync(
         CurrencyCode currency,
         DateOnly date,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<ExchangeRateResponse>> AddAsync(

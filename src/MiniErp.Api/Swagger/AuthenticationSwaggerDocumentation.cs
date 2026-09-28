@@ -33,6 +33,20 @@ public sealed class AuthenticationSwaggerDocumentation(
                     "`selectionToken` and `companyId`.",
                     "The token must be non-empty and `companyId` must be greater than zero.",
                     "An invalid, expired, wrong-purpose, or already-invalidated selection token returns 401. Selecting an unassigned company returns 403. The token expires after five minutes.")),
+            nameof(AuthController.GetCompanies) => (
+                "List the user's companies",
+                SwaggerOperationDescription.Create(
+                    "Returns the companies assigned to the authenticated user for the workspace selector.",
+                    "No request fields are required.",
+                    "A valid selected-company access token is required.",
+                    "Only the authenticated user's company assignments are returned.")),
+            nameof(AuthController.SwitchCompany) => (
+                "Switch the session company",
+                SwaggerOperationDescription.Create(
+                    "Moves the current session to another assigned company without signing in again. The supplied refresh token is revoked and a new access/refresh pair is issued for the target company.",
+                    "`companyId` and the current session's `refreshToken`.",
+                    "The target company id must be positive and the refresh token must belong to the authenticated user and current company.",
+                    "Selecting an unassigned company returns 403. An expired, revoked, reused, or mismatched refresh token returns 401.")),
             nameof(AuthController.Refresh) => (
                 "Refresh the selected-company session",
                 SwaggerOperationDescription.Create(

@@ -62,6 +62,10 @@ public sealed class ExchangeRateFilterRequestValidator
 {
     public ExchangeRateFilterRequestValidator()
     {
+        RuleFor(request => request.FiscalYearId)
+            .GreaterThan(0)
+            .When(request => request.FiscalYearId.HasValue);
+
         RuleFor(request => request.Currency)
             .Must(value => !value.HasValue || Enum.IsDefined(value.Value));
 

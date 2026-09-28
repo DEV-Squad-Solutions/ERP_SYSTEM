@@ -10,13 +10,18 @@ public sealed record InventoryCostReportFilterRequest(
     DateOnly? ToDate = null,
     ItemMovementType? MovementType = null,
     InventoryCostStatus? CostStatus = null,
-    string? Search = null);
+    string? Search = null,
+    int? FiscalYearId = null);
 
 public sealed class InventoryCostReportFilterRequestValidator
     : AbstractValidator<InventoryCostReportFilterRequest>
 {
     public InventoryCostReportFilterRequestValidator()
     {
+        RuleFor(request => request.FiscalYearId)
+            .GreaterThan(0)
+            .When(request => request.FiscalYearId.HasValue);
+
         RuleFor(request => request.StoreId)
             .NotNull()
             .GreaterThan(0)

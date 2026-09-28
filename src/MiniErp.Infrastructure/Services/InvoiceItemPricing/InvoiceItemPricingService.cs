@@ -55,7 +55,10 @@ public sealed class InvoiceItemPricingService(
                 .Take(pagination.PageSize)
                 .ToListAsync(cancellationToken);
 
-        var items = await BuildRowsAsync(pageLines, cancellationToken);
+        var items = await BuildRowsAsync(
+            pageLines,
+            filters.FiscalYearId,
+            cancellationToken);
         var baseCurrency = await GetBaseCurrencyAsync(cancellationToken);
 
         return Result<InvoiceItemPricingPagedResponse>.Success(
@@ -171,6 +174,11 @@ public sealed class InvoiceItemPricingService(
         IQueryable<InvoiceLine> query,
         InvoiceItemPricingFilterRequest filters)
     {
+        query = filters.FiscalYearId.HasValue
+            ? query.Where(line =>
+                line.Invoice.FiscalYearId == filters.FiscalYearId.Value)
+            : query.Where(line => line.Invoice.FiscalYear.IsCurrent);
+
         var search = filters.Search?.Trim();
         if (!string.IsNullOrEmpty(search))
         {
@@ -242,6 +250,7 @@ public sealed class InvoiceItemPricingService(
 
     private async Task<IReadOnlyList<InvoiceItemPricingRowResponse>> BuildRowsAsync(
         IReadOnlyList<LineProjection> lines,
+        int? fiscalYearId,
         CancellationToken cancellationToken)
     {
         if (lines.Count == 0)
@@ -259,13 +268,19 @@ public sealed class InvoiceItemPricingService(
             .ToArray();
         var movementTypes = InvoiceMovementTypes;
 
-        var movements = await dbContext.ItemMovements
+        var movementQuery = dbContext.ItemMovements
             .AsNoTracking()
             .Where(movement =>
                 movement.CompanyId == companyId &&
                 invoiceIds.Contains(movement.ReferenceId) &&
                 itemIds.Contains(movement.ItemId) &&
-                movementTypes.Contains(movement.MovementType))
+                movementTypes.Contains(movement.MovementType));
+        movementQuery = fiscalYearId.HasValue
+            ? movementQuery.Where(movement =>
+                movement.FiscalYearId == fiscalYearId.Value)
+            : movementQuery.Where(movement => movement.FiscalYear.IsCurrent);
+
+        var movements = await movementQuery
             .Select(movement => new MovementProjection
             {
                 InvoiceId = movement.ReferenceId,
@@ -389,6 +404,13 @@ public sealed class InvoiceItemPricingService(
             return InvalidFilters(
                 "لا يمكن أن يتجاوز البحث 200 حرف.",
                 nameof(filters.Search));
+        }
+
+        if (filters.FiscalYearId is <= 0)
+        {
+            return InvalidFilters(
+                "رقم السنة المالية غير صالح.",
+                nameof(filters.FiscalYearId));
         }
 
         if (filters.InvoiceId is <= 0)

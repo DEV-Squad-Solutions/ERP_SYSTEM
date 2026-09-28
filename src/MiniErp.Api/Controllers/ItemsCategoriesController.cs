@@ -54,7 +54,6 @@ public sealed class ItemsCategoriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<ItemsCategoryResponse>(
         StatusCodes.Status201Created)]
@@ -81,7 +80,6 @@ public sealed class ItemsCategoriesController(
                 result.Value);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}")]
     [ProducesResponseType<ItemsCategoryResponse>(
         StatusCodes.Status200OK)]
@@ -106,7 +104,6 @@ public sealed class ItemsCategoriesController(
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

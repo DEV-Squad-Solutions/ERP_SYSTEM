@@ -51,6 +51,8 @@ public sealed record InventoryCostReportSummaryResponse(
     int RevaluedMovementCount);
 
 public sealed record InventoryCostReportResponse(
+    int FiscalYearId,
+    string FiscalYearName,
     int StoreId,
     string StoreCode,
     string StoreName,

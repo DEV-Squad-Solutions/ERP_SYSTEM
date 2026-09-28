@@ -12,6 +12,16 @@ public interface IAuthenticationService
         SelectCompanyRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<Result<IReadOnlyList<CompanyAccessResponse>>> GetCompaniesAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<TokenResponse>> SwitchCompanyAsync(
+        Guid userId,
+        int currentCompanyId,
+        SwitchCompanyRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<Result<TokenResponse>> RefreshAsync(
         RefreshTokenRequest request,
         CancellationToken cancellationToken = default);

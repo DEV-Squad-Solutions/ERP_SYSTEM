@@ -274,6 +274,7 @@ public sealed class CountryServiceTests
 
             await CreateSchemaAsync(context);
             await SeedAsync(context);
+            await TestFiscalYearSchema.EnsureAsync(context);
 
             return new CountryTestDatabase(connection, context);
         }

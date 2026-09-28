@@ -10,6 +10,8 @@ public enum InvoiceFilterErrorKind
     CountryId,
     StoreId,
     DriverId,
+    ItemId,
+    FiscalYearId,
     DateRange
 }
 
@@ -70,6 +72,12 @@ public static class InvoiceErrors
             InvoiceFilterErrorKind.DriverId => (
                 nameof(InvoiceFilterRequest.DriverId),
                 "أدخل رقم سائق أكبر من صفر."),
+            InvoiceFilterErrorKind.ItemId => (
+                nameof(InvoiceFilterRequest.ItemId),
+                "أدخل رقم صنف أكبر من صفر."),
+            InvoiceFilterErrorKind.FiscalYearId => (
+                nameof(InvoiceFilterRequest.FiscalYearId),
+                "أدخل رقم سنة مالية أكبر من صفر."),
             InvoiceFilterErrorKind.DateRange => (
                 nameof(InvoiceFilterRequest.ToDate),
                 "تاريخ النهاية يجب أن يكون بعد تاريخ البداية."),

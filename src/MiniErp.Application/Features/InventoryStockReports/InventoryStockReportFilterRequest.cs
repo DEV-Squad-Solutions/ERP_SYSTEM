@@ -6,4 +6,5 @@ public sealed record InventoryStockReportFilterRequest(
     string? Search = null,
     int? ItemId = null,
     int? ItemUnitId = null,
-    bool? HasStock = null);
+    bool? HasStock = null,
+    int? FiscalYearId = null);

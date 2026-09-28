@@ -20,5 +20,9 @@ public enum AccountingMappingType
     InventoryAdjustmentLoss = 16,
     OpeningBalanceEquity = 17,
     EmployeeReceivable = 18,
-    DriverTripExpense = 19
+    DriverTripExpense = 19,
+    ServiceSales = 20,
+    ServiceSalesReturn = 21,
+    ServicePurchase = 22,
+    ServicePurchaseReturn = 23
 }

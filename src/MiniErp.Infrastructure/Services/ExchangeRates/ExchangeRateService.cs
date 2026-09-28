@@ -18,6 +18,8 @@ public sealed class ExchangeRateService(
     ICurrentCompanyContext currentCompanyContext,
     TimeProvider timeProvider,
     IExchangeRateResolver exchangeRateResolver,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
+    IFiscalYearPeriodGuard fiscalYearPeriodGuard,
     IExchangeRateProvider? exchangeRateProvider = null,
     IExchangeRatePostingSynchronizer? exchangeRatePostingSynchronizer = null,
     IInventoryCostingService? inventoryCostingService = null)
@@ -32,6 +34,19 @@ public sealed class ExchangeRateService(
     {
         filters ??= new ExchangeRateFilterRequest();
 
+        var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.DateFrom,
+            toDate: filters.DateTo,
+            cancellationToken: cancellationToken);
+        if (fiscalYearResult.IsFailure)
+        {
+            return Result<PagedResponse<ExchangeRateResponse>>.Failure(
+                fiscalYearResult.Errors);
+        }
+
+        var fiscalYearId = fiscalYearResult.Value.FiscalYearId;
+
         var normalizedSearch = Normalize(filters.Search);
         CurrencyCode[] searchCurrencies = normalizedSearch is null
             ? []
@@ -43,7 +58,9 @@ public sealed class ExchangeRateService(
 
         var query = dbContext.ExchangeRates
             .AsNoTracking()
-            .Where(rate => rate.CompanyId == companyId);
+            .Where(rate =>
+                rate.CompanyId == companyId &&
+                rate.FiscalYearId == fiscalYearId);
 
         if (normalizedSearch is not null)
         {
@@ -97,6 +114,7 @@ public sealed class ExchangeRateService(
 
     public async Task<Result<ExchangeRateResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -104,7 +122,18 @@ public sealed class ExchangeRateService(
             return Result<ExchangeRateResponse>.Failure(InvalidId());
         }
 
-        var response = await ProjectResponseQuery(id)
+        var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYearResult.IsFailure)
+        {
+            return Result<ExchangeRateResponse>.Failure(
+                fiscalYearResult.Errors);
+        }
+
+        var response = await ProjectResponseQuery(
+                id,
+                fiscalYearResult.Value.FiscalYearId)
             .FirstOrDefaultAsync(cancellationToken);
 
         return response is null
@@ -115,8 +144,20 @@ public sealed class ExchangeRateService(
     public async Task<Result<ExchangeRateResolutionResponse>> ResolveAsync(
         CurrencyCode currency,
         DateOnly date,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
+        var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: fiscalYearId,
+            fromDate: date,
+            toDate: date,
+            cancellationToken: cancellationToken);
+        if (fiscalYearResult.IsFailure)
+        {
+            return Result<ExchangeRateResolutionResponse>.Failure(
+                fiscalYearResult.Errors);
+        }
+
         var result = await exchangeRateResolver.ResolveAsync(
             currency,
             date,
@@ -211,6 +252,16 @@ public sealed class ExchangeRateService(
         ExchangeRateImportRequest request,
         CancellationToken cancellationToken = default)
     {
+        var periodResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            request.RateDate,
+            nameof(ExchangeRateImportRequest.RateDate),
+            cancellationToken);
+        if (periodResult.IsFailure)
+        {
+            return Result<ExchangeRateImportResponse>.Failure(
+                periodResult.Errors);
+        }
+
         if (exchangeRateProvider is null)
         {
             return Result<ExchangeRateImportResponse>.Failure(
@@ -259,6 +310,21 @@ public sealed class ExchangeRateService(
             }
 
             return Result<ExchangeRateImportResponse>.Failure(providerResult.Error);
+        }
+
+        foreach (var rateDate in received
+                     .Select(rate => rate.RateDate)
+                     .Distinct())
+        {
+            periodResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                rateDate,
+                nameof(ExternalExchangeRate.RateDate),
+                cancellationToken);
+            if (periodResult.IsFailure)
+            {
+                return Result<ExchangeRateImportResponse>.Failure(
+                    periodResult.Errors);
+            }
         }
 
         await using var transaction = await dbContext.Database
@@ -379,6 +445,15 @@ public sealed class ExchangeRateService(
         ExchangeRateRequest request,
         CancellationToken cancellationToken = default)
     {
+        var periodResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            request.RateDate,
+            nameof(ExchangeRateRequest.RateDate),
+            cancellationToken);
+        if (periodResult.IsFailure)
+        {
+            return Result<ExchangeRateResponse>.Failure(periodResult.Errors);
+        }
+
         await using var transaction = await dbContext.Database
             .BeginTransactionAsync(
                 IsolationLevel.Serializable,
@@ -465,6 +540,24 @@ public sealed class ExchangeRateService(
             return Result<ExchangeRateResponse>.Failure(NotFound(id));
         }
 
+        var periodResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            rate.RateDate,
+            nameof(ExchangeRateUpdateRequest.RateDate),
+            cancellationToken);
+        if (periodResult.IsFailure)
+        {
+            return Result<ExchangeRateResponse>.Failure(periodResult.Errors);
+        }
+
+        periodResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            request.RateDate,
+            nameof(ExchangeRateUpdateRequest.RateDate),
+            cancellationToken);
+        if (periodResult.IsFailure)
+        {
+            return Result<ExchangeRateResponse>.Failure(periodResult.Errors);
+        }
+
         if (!rate.RowVersion.SequenceEqual(request.RowVersion))
         {
             return Result<ExchangeRateResponse>.Failure(Concurrency());
@@ -548,7 +641,8 @@ public sealed class ExchangeRateService(
                         line.Invoice.InvoiceType == InvoiceType.Purchase)
                     .Select(line => new InventoryCostingKey(
                         line.Invoice.StoreId,
-                        line.ItemId!.Value))
+                        line.ItemId!.Value,
+                        line.Invoice.FiscalYearId))
                     .Distinct()
                     .ToArrayAsync(cancellationToken);
                 var costingError = await inventoryCostingService
@@ -616,6 +710,15 @@ public sealed class ExchangeRateService(
         if (rate is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        var periodResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            rate.RateDate,
+            nameof(ExchangeRateRequest.RateDate),
+            cancellationToken);
+        if (periodResult.IsFailure)
+        {
+            return periodResult;
         }
 
         if (await IsReferencedAsync(id, cancellationToken))
@@ -710,11 +813,14 @@ public sealed class ExchangeRateService(
                 cancellationToken);
 
     private IOrderedQueryable<ExchangeRateResponse> ProjectResponseQuery(
-        int id) =>
+        int id,
+        int? fiscalYearId = null) =>
         dbContext.ExchangeRates
             .AsNoTracking()
             .Where(rate =>
                 rate.CompanyId == companyId &&
+                (!fiscalYearId.HasValue ||
+                 rate.FiscalYearId == fiscalYearId.Value) &&
                 rate.Id == id)
             .ProjectToType<ExchangeRateResponse>()
             .OrderBy(response => response.Id);
@@ -749,7 +855,10 @@ public sealed class ExchangeRateService(
                    "IX_ExchangeRates_CompanyId_Currency_RateDate",
                    StringComparison.OrdinalIgnoreCase) ||
             message.Contains(
-                "ExchangeRates.CompanyId, ExchangeRates.Currency, ExchangeRates.RateDate",
+                "ExchangeRates.CompanyId, ExchangeRates.FiscalYearId, ExchangeRates.Currency, ExchangeRates.RateDate",
+                StringComparison.OrdinalIgnoreCase) ||
+            message.Contains(
+                "UNIQUE constraint failed: ExchangeRates.CompanyId, ExchangeRates.FiscalYearId, ExchangeRates.Currency, ExchangeRates.RateDate",
                 StringComparison.OrdinalIgnoreCase) ||
             message.Contains(
                 "UNIQUE constraint failed: ExchangeRates.CompanyId, ExchangeRates.Currency, ExchangeRates.RateDate",

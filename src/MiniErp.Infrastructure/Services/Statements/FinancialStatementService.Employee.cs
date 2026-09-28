@@ -21,6 +21,19 @@ public sealed partial class FinancialStatementService
             return Result<EmployeeStatementResponse>.Failure(paginationError);
         }
 
+        var fiscalYear = await ResolveFiscalYearAsync(
+            filters.FiscalYearId,
+            filters.FromDate,
+            filters.ToDate,
+            cancellationToken);
+        if (fiscalYear is null)
+        {
+            return Result<EmployeeStatementResponse>.Failure(
+                FiscalYearNotFound(filters.FiscalYearId));
+        }
+        var fromDate = filters.FromDate ?? fiscalYear.StartDate;
+        var toDate = filters.ToDate ?? fiscalYear.EndDate;
+
         var employee = await dbContext.Employees
             .AsNoTracking()
             .Where(entity =>
@@ -42,19 +55,23 @@ public sealed partial class FinancialStatementService
                 EmployeeNotFound(filters.EmployeeId));
         }
 
-        var allRows = CreateEmployeeRows(employee.Id);
-        var openingBalance = filters.FromDate.HasValue
-            ? await allRows
-                .Where(row => row.Date < filters.FromDate.Value)
+        var allRows = CreateEmployeeRows(employee.Id, fiscalYear.Id);
+        var openingRows = allRows.Where(row => row.IsOpening);
+        var nonOpeningRows = allRows.Where(row => !row.IsOpening);
+        var openingBalance = await openingRows
+            .SumAsync(row => (decimal?)(row.Credit - row.Debit),
+                cancellationToken) ?? 0m;
+        if (fromDate > fiscalYear.StartDate)
+        {
+            openingBalance += await nonOpeningRows
+                .Where(row => row.Date < fromDate)
                 .SumAsync(row => (decimal?)(row.Credit - row.Debit),
-                    cancellationToken) ?? 0m
-            : 0m;
+                    cancellationToken) ?? 0m;
+        }
         var search = filters.Search?.Trim();
-        var query = allRows
-            .Where(row => !filters.FromDate.HasValue ||
-                row.Date >= filters.FromDate.Value)
-            .Where(row => !filters.ToDate.HasValue ||
-                row.Date <= filters.ToDate.Value)
+        var query = nonOpeningRows
+            .Where(row => row.Date >= fromDate)
+            .Where(row => row.Date <= toDate)
             .Where(row => !filters.SourceType.HasValue ||
                 row.SourceType == filters.SourceType.Value)
             .Where(row => !filters.MovementType.HasValue ||
@@ -162,6 +179,17 @@ public sealed partial class FinancialStatementService
         int employeeId,
         CancellationToken cancellationToken = default)
     {
+        var fiscalYear = await ResolveFiscalYearAsync(
+            fiscalYearId: null,
+            fromDate: null,
+            toDate: null,
+            cancellationToken);
+        if (fiscalYear is null)
+        {
+            return Result<EmployeeAccountBalanceResponse>.Failure(
+                FiscalYearNotFound(null));
+        }
+
         var employee = await dbContext.Employees
             .AsNoTracking()
             .Where(entity =>
@@ -183,7 +211,7 @@ public sealed partial class FinancialStatementService
                 EmployeeNotFound(employeeId));
         }
 
-        var allRows = CreateEmployeeRows(employee.Id);
+        var allRows = CreateEmployeeRows(employee.Id, fiscalYear.Id);
         var totals = await allRows
             .GroupBy(_ => 1)
             .Select(rows => new
@@ -232,13 +260,24 @@ public sealed partial class FinancialStatementService
             return Result<EmployeeAccountSummaryResponse>.Failure(
                 EmployeeNotFound(employeeId));
         }
+
+        var fiscalYear = await ResolveFiscalYearAsync(
+            fiscalYearId: null,
+            fromDate: null,
+            toDate: null,
+            cancellationToken);
+        if (fiscalYear is null)
+        {
+            return Result<EmployeeAccountSummaryResponse>.Failure(
+                FiscalYearNotFound(null));
+        }
         var baseCurrency = await dbContext.CompanySettings
             .AsNoTracking()
             .Where(settings => settings.CompanyId == companyId)
             .Select(settings => (CurrencyCode?)settings.BaseCurrency)
             .FirstOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
 
-        var allRows = CreateEmployeeRows(employeeId);
+        var allRows = CreateEmployeeRows(employeeId, fiscalYear.Id);
         var totals = await allRows
             .GroupBy(_ => 1)
             .Select(rows => new
@@ -259,6 +298,7 @@ public sealed partial class FinancialStatementService
             .AsNoTracking()
             .Where(balance =>
                 balance.CompanyId == companyId &&
+                balance.FiscalYearId == fiscalYear.Id &&
                 balance.EmployeeId == employeeId)
             .Select(balance => new
             {
@@ -268,7 +308,12 @@ public sealed partial class FinancialStatementService
             })
             .ToListAsync(cancellationToken);
 
-        var openingBalance = openingBalances
+        var carriedOpeningBalance = await allRows
+            .Where(row => row.IsOpening)
+            .SumAsync(
+                row => (decimal?)(row.Credit - row.Debit),
+                cancellationToken) ?? 0m;
+        var openingBalance = carriedOpeningBalance + openingBalances
             .Where(b => !b.PayrollEntryId.HasValue)
             .Sum(b => b.BalanceType == EmployeeBalanceType.Credit ? b.Amount : -b.Amount);
 
@@ -280,6 +325,7 @@ public sealed partial class FinancialStatementService
             .AsNoTracking()
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYear.Id &&
                 movement.EmployeeId == employeeId)
             .GroupBy(_ => 1)
             .Select(group => new
@@ -294,6 +340,7 @@ public sealed partial class FinancialStatementService
             .AsNoTracking()
             .Where(payroll =>
                 payroll.CompanyId == companyId &&
+                payroll.FiscalYearId == fiscalYear.Id &&
                 payroll.EmployeeId == employeeId)
             .GroupBy(_ => 1)
             .Select(group => new
@@ -306,6 +353,7 @@ public sealed partial class FinancialStatementService
             .AsNoTracking()
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYear.Id &&
                 movement.EmployeeId == employeeId)
             .OrderByDescending(movement => movement.MovementDate)
             .ThenByDescending(movement => movement.Id)
@@ -329,6 +377,7 @@ public sealed partial class FinancialStatementService
             .AsNoTracking()
             .Where(payroll =>
                 payroll.CompanyId == companyId &&
+                payroll.FiscalYearId == fiscalYear.Id &&
                 payroll.EmployeeId == employeeId)
             .OrderByDescending(payroll => payroll.EndDate)
             .ThenByDescending(payroll => payroll.Id)
@@ -382,18 +431,22 @@ public sealed partial class FinancialStatementService
                 PayrollSalaryTransactions: payrollTransactions));
     }
 
-    private IQueryable<EmployeeStatementRaw> CreateEmployeeRows(int employeeId)
+    private IQueryable<EmployeeStatementRaw> CreateEmployeeRows(
+        int employeeId,
+        int fiscalYearId)
     {
         var openingBalances = dbContext.EmployeeOpeningBalances
             .AsNoTracking()
             .Where(balance =>
                 balance.CompanyId == companyId &&
+                balance.FiscalYearId == fiscalYearId &&
                 balance.EmployeeId == employeeId &&
                 !balance.PayrollEntryId.HasValue)
             .Select(balance => new EmployeeStatementRaw
             {
                 JournalEntryLineId = null,
                 JournalEntryId = null,
+                IsOpening = false,
                 SourceId = balance.Id,
                 SourceType = EmployeeStatementSourceType.OpeningBalance,
                 MovementType = null,
@@ -425,12 +478,14 @@ public sealed partial class FinancialStatementService
             .AsNoTracking()
             .Where(balance =>
                 balance.CompanyId == companyId &&
+                balance.FiscalYearId == fiscalYearId &&
                 balance.EmployeeId == employeeId &&
                 balance.PayrollEntryId.HasValue)
             .Select(balance => new EmployeeStatementRaw
             {
                 JournalEntryLineId = null,
                 JournalEntryId = null,
+                IsOpening = false,
                 SourceId = balance.PayrollEntryId!.Value,
                 SourceType = EmployeeStatementSourceType.SalaryTransfer,
                 MovementType = null,
@@ -456,11 +511,13 @@ public sealed partial class FinancialStatementService
             .AsNoTracking()
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYearId &&
                 movement.EmployeeId == employeeId)
             .Select(movement => new EmployeeStatementRaw
             {
                 JournalEntryLineId = null,
                 JournalEntryId = null,
+                IsOpening = false,
                 SourceId = movement.CashVoucherId.HasValue ? movement.CashVoucherId.Value : movement.Id,
                 SourceType = movement.CashVoucherId.HasValue
                     ? EmployeeStatementSourceType.CashVoucher
@@ -497,12 +554,15 @@ public sealed partial class FinancialStatementService
             .Where(line =>
                 line.PartyType == JournalPartyType.Employee &&
                 line.PartyId == employeeId &&
+                line.JournalEntry.FiscalYearId == fiscalYearId &&
                 line.JournalEntry.SourceType != JournalEntrySourceType.EmployeeOpeningBalance &&
                 line.JournalEntry.SourceType != JournalEntrySourceType.CashVoucher)
             .Select(line => new EmployeeStatementRaw
             {
                 JournalEntryLineId = line.Id,
                 JournalEntryId = line.JournalEntryId,
+                IsOpening = line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.FiscalYearClosing,
                 SourceId = line.JournalEntryId,
                 SourceType = EmployeeStatementSourceType.JournalEntry,
                 MovementType = null,
@@ -539,6 +599,7 @@ internal sealed class EmployeeStatementRaw
 {
     public int? JournalEntryLineId { get; init; }
     public int? JournalEntryId { get; init; }
+    public bool IsOpening { get; init; }
     public int SourceId { get; init; }
     public EmployeeStatementSourceType SourceType { get; init; }
     public EmployeeMovementType? MovementType { get; init; }

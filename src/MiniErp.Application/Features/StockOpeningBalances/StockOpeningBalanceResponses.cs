@@ -34,6 +34,8 @@ public sealed record StockOpeningBalanceLineResponse(
 public sealed record StockOpeningBalanceListResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
+    string FiscalYearName,
     int StoreId,
     string StoreName,
     string DocumentNumber,
@@ -46,6 +48,8 @@ public sealed record StockOpeningBalanceListResponse(
 public sealed record StockOpeningBalanceResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
+    string FiscalYearName,
     int StoreId,
     string StoreName,
     string DocumentNumber,

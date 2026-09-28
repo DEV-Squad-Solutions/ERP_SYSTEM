@@ -12,6 +12,7 @@ public interface IEmployeeOpeningBalanceService
 
     Task<Result<EmployeeOpeningBalanceResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<EmployeeOpeningBalanceResponse>> AddAsync(

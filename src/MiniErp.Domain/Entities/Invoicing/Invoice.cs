@@ -18,6 +18,10 @@ public sealed class Invoice : AuditableEntity
 
     public Company Company { get; set; } = null!;
 
+    public int FiscalYearId { get; set; }
+
+    public MiniErp.Domain.Entities.Accounting.FiscalYear FiscalYear { get; set; } = null!;
+
     public string InvoiceNumber { get; set; } = string.Empty;
 
     public string? ExportInvoiceCode { get; set; }

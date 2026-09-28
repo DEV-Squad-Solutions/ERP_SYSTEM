@@ -146,4 +146,90 @@ public sealed class EmployeeOpeningBalanceServiceTests
         Assert.Single(result.Value.Items);
         Assert.Equal(2000m, result.Value.Items[0].Amount);
     }
+
+    [Fact]
+    public async Task GetAllAsync_DefaultsToCurrentFiscalYearAndAllowsHistoricalYear()
+    {
+        await using var database =
+            await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        await database.ConfigureSeparateFiscalYearsAsync();
+        var service = database.CreateOpeningBalanceService();
+
+        var currentCreated = await service.AddAsync(
+            new EmployeeOpeningBalanceRequest(
+                EmployeeId: 1,
+                DocumentDate: new DateOnly(2025, 1, 1),
+                Currency: CurrencyCode.EGP,
+                BalanceType: EmployeeBalanceType.Credit,
+                Amount: 1000m,
+                Notes: "2025 opening"));
+        var nextCreated = await service.AddAsync(
+            new EmployeeOpeningBalanceRequest(
+                EmployeeId: 1,
+                DocumentDate: new DateOnly(2026, 1, 1),
+                Currency: CurrencyCode.EGP,
+                BalanceType: EmployeeBalanceType.Credit,
+                Amount: 2000m,
+                Notes: "2026 opening"));
+
+        Assert.True(currentCreated.IsSuccess);
+        Assert.True(nextCreated.IsSuccess);
+
+        var currentYear = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 });
+        var nextYear = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new EmployeeOpeningBalanceFilterRequest
+            {
+                FiscalYearId = 100
+            });
+
+        Assert.True(currentYear.IsSuccess);
+        var currentItem = Assert.Single(currentYear.Value.Items);
+        Assert.Equal(currentCreated.Value.Id, currentItem.Id);
+        Assert.Equal(1, currentItem.FiscalYearId);
+        Assert.Equal("2025", currentItem.FiscalYearName);
+
+        Assert.True(nextYear.IsSuccess);
+        var nextItem = Assert.Single(nextYear.Value.Items);
+        Assert.Equal(nextCreated.Value.Id, nextItem.Id);
+        Assert.Equal(100, nextItem.FiscalYearId);
+        Assert.Equal("2026", nextItem.FiscalYearName);
+
+        var hiddenNextYearBalance = await service.GetByIdAsync(nextItem.Id);
+        var explicitNextYearBalance = await service.GetByIdAsync(
+            nextItem.Id,
+            fiscalYearId: 100);
+        var invalidCurrentYearRange = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new EmployeeOpeningBalanceFilterRequest
+            {
+                FromDate = new DateOnly(2026, 1, 1)
+            });
+        var crossYearUpdate = await service.UpdateAsync(
+            currentCreated.Value.Id,
+            new EmployeeOpeningBalanceUpdateRequest(
+                EmployeeId: currentCreated.Value.EmployeeId,
+                DocumentDate: new DateOnly(2026, 1, 1),
+                Currency: currentCreated.Value.Currency,
+                BalanceType: currentCreated.Value.BalanceType,
+                Amount: currentCreated.Value.Amount,
+                Notes: currentCreated.Value.Notes,
+                RowVersion: currentCreated.Value.RowVersion));
+
+        Assert.True(hiddenNextYearBalance.IsFailure);
+        Assert.Equal(
+            "EmployeeOpeningBalances.NotFound",
+            hiddenNextYearBalance.Error.Code);
+        Assert.True(explicitNextYearBalance.IsSuccess);
+        Assert.Equal(nextItem.Id, explicitNextYearBalance.Value.Id);
+        Assert.True(invalidCurrentYearRange.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            invalidCurrentYearRange.Error.Code);
+        Assert.True(crossYearUpdate.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            crossYearUpdate.Error.Code);
+    }
 }

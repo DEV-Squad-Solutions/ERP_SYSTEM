@@ -23,6 +23,7 @@ public interface IFinancialStatementLineService
 
     Task<Result<FinancialStatementLineResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<FinancialStatementLineResponse>> AddAsync(

@@ -22,6 +22,19 @@ public sealed partial class FinancialStatementService
                 paginationError);
         }
 
+        var fiscalYear = await ResolveFiscalYearAsync(
+            filters.FiscalYearId,
+            filters.FromDate,
+            filters.ToDate,
+            cancellationToken);
+        if (fiscalYear is null)
+        {
+            return Result<ContainerStoreStatementResponse>.Failure(
+                StatementErrors.FiscalYearNotFound(filters.FiscalYearId));
+        }
+        var fromDate = filters.FromDate ?? fiscalYear.StartDate;
+        var toDate = filters.ToDate ?? fiscalYear.EndDate;
+
         var partnerRaw = await dbContext.BusinessPartners
             .AsNoTracking()
             .Where(entity =>
@@ -93,16 +106,17 @@ public sealed partial class FinancialStatementService
             .AsNoTracking()
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYear.Id &&
                 movement.BusinessPartnerId == filters.BusinessPartnerId &&
                 movement.ContainerStoreId == store.Id)
             .Where(movement =>
                 !filters.ContainerId.HasValue ||
                 movement.ContainerId == filters.ContainerId.Value);
 
-        var openingByContainer = filters.FromDate.HasValue
+        var openingByContainer = fromDate > fiscalYear.StartDate
             ? await baseMovements
                 .Where(movement =>
-                    movement.MovementDate < filters.FromDate.Value)
+                    movement.MovementDate < fromDate)
                 .GroupBy(movement => movement.ContainerId)
                 .Select(group => new
                 {
@@ -119,12 +133,8 @@ public sealed partial class FinancialStatementService
         var search = filters.Search?.Trim();
         var invoiceNumber = filters.InvoiceNumber?.Trim();
         var query = baseMovements
-            .Where(movement =>
-                !filters.FromDate.HasValue ||
-                movement.MovementDate >= filters.FromDate.Value)
-            .Where(movement =>
-                !filters.ToDate.HasValue ||
-                movement.MovementDate <= filters.ToDate.Value)
+            .Where(movement => movement.MovementDate >= fromDate)
+            .Where(movement => movement.MovementDate <= toDate)
             .Where(movement =>
                 !filters.InvoiceType.HasValue ||
                 movement.Invoice.InvoiceType == filters.InvoiceType.Value)

@@ -15,7 +15,8 @@ public sealed record CashboxStatementFilterRequest(
     int? DriverId = null,
     int? DriverTripId = null,
     string? VoucherNumber = null,
-    int? EmployeeId = null);
+    int? EmployeeId = null,
+    int? FiscalYearId = null);
 
 public sealed record PartnerStatementFilterRequest(
     int BusinessPartnerId,
@@ -25,7 +26,8 @@ public sealed record PartnerStatementFilterRequest(
     PartnerStatementSourceType? SourceType = null,
     BusinessPartnerMovementType? MovementType = null,
     int? CashMovementTypeId = null,
-    CashMovementClassification? Classification = null);
+    CashMovementClassification? Classification = null,
+    int? FiscalYearId = null);
 
 public sealed record DriverStatementFilterRequest(
     int DriverId,
@@ -38,7 +40,8 @@ public sealed record DriverStatementFilterRequest(
     int? DriverTripId = null,
     string? InvoiceNumber = null,
     bool? TransactionsWithoutTrip = null,
-    bool? HasCost = null);
+    bool? HasCost = null,
+    int? FiscalYearId = null);
 
 public sealed record ContainerStoreStatementFilterRequest(
     int BusinessPartnerId,
@@ -48,7 +51,8 @@ public sealed record ContainerStoreStatementFilterRequest(
     int? ContainerId = null,
     InvoiceType? InvoiceType = null,
     string? InvoiceNumber = null,
-    ContainerMovementDirection? Direction = null);
+    ContainerMovementDirection? Direction = null,
+    int? FiscalYearId = null);
 
 public sealed record EmployeeStatementFilterRequest(
     int EmployeeId,
@@ -56,7 +60,8 @@ public sealed record EmployeeStatementFilterRequest(
     DateOnly? FromDate = null,
     DateOnly? ToDate = null,
     EmployeeStatementSourceType? SourceType = null,
-    EmployeeMovementType? MovementType = null);
+    EmployeeMovementType? MovementType = null,
+    int? FiscalYearId = null);
 
 public enum ContainerMovementDirection
 {

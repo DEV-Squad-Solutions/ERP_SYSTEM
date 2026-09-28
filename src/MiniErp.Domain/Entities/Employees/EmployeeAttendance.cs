@@ -14,6 +14,10 @@ namespace MiniErp.Domain.Entities.Employees
         public int CompanyId { get; set; }
         public Company Company { get; set; } = null!;
 
+        public int FiscalYearId { get; set; }
+
+        public MiniErp.Domain.Entities.Accounting.FiscalYear FiscalYear { get; set; } = null!;
+
         public int EmployeeId { get; set; }
         public Employee Employee { get; set; } = default!;
 

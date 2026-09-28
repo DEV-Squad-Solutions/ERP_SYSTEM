@@ -12,11 +12,23 @@ public sealed partial class FinancialStatementService
             OperationalTrialBalanceFilterRequest filters,
             CancellationToken cancellationToken = default)
     {
+        var fiscalYear = await ResolveFiscalYearAsync(
+            filters.FiscalYearId,
+            filters.FromDate,
+            filters.ToDate,
+            cancellationToken);
+        if (fiscalYear is null)
+        {
+            return Result<OperationalTrialBalanceResponse>.Failure(
+                StatementErrors.FiscalYearNotFound(filters.FiscalYearId));
+        }
+
         var balances = new List<OperationalAccountBalance>();
         if (ShouldLoadCategory(filters, OperationalTrialBalanceCategory.Cashbox))
         {
             balances.AddRange(await LoadPartyBalancesAsync(
                 filters,
+                fiscalYear.Id,
                 JournalPartyType.Cashbox,
                 OperationalTrialBalanceCategory.Cashbox,
                 cancellationToken));
@@ -25,6 +37,7 @@ public sealed partial class FinancialStatementService
         {
             balances.AddRange(await LoadPartyBalancesAsync(
                 filters,
+                fiscalYear.Id,
                 JournalPartyType.Customer,
                 OperationalTrialBalanceCategory.Partner,
                 cancellationToken));
@@ -33,6 +46,7 @@ public sealed partial class FinancialStatementService
         {
             balances.AddRange(await LoadPartyBalancesAsync(
                 filters,
+                fiscalYear.Id,
                 JournalPartyType.Driver,
                 OperationalTrialBalanceCategory.Driver,
                 cancellationToken));
@@ -41,6 +55,7 @@ public sealed partial class FinancialStatementService
         {
             balances.AddRange(await LoadPartyBalancesAsync(
                 filters,
+                fiscalYear.Id,
                 JournalPartyType.Employee,
                 OperationalTrialBalanceCategory.Employee,
                 cancellationToken));
@@ -49,6 +64,7 @@ public sealed partial class FinancialStatementService
         {
             balances.AddRange(await LoadAccountBalancesAsync(
                 filters,
+                fiscalYear.Id,
                 AccountType.Revenue,
                 OperationalTrialBalanceCategory.Revenue,
                 cancellationToken));
@@ -57,6 +73,7 @@ public sealed partial class FinancialStatementService
         {
             balances.AddRange(await LoadAccountBalancesAsync(
                 filters,
+                fiscalYear.Id,
                 AccountType.Expense,
                 OperationalTrialBalanceCategory.Expense,
                 cancellationToken));
@@ -116,6 +133,7 @@ public sealed partial class FinancialStatementService
     private async Task<IReadOnlyList<OperationalAccountBalance>>
         LoadPartyBalancesAsync(
             OperationalTrialBalanceFilterRequest filters,
+            int fiscalYearId,
             JournalPartyType partyType,
             OperationalTrialBalanceCategory category,
             CancellationToken cancellationToken)
@@ -179,6 +197,7 @@ public sealed partial class FinancialStatementService
             : new[] { partyType };
         var groups = await PostedLedgerLines()
             .Where(line =>
+                line.JournalEntry.FiscalYearId == fiscalYearId &&
                 line.PartyType.HasValue &&
                 partyTypes.Contains(line.PartyType.Value) &&
                 line.PartyId.HasValue &&
@@ -186,7 +205,11 @@ public sealed partial class FinancialStatementService
             .GroupBy(line => new
             {
                 AccountId = line.PartyId!.Value,
-                IsOpening = line.JournalEntry.EntryDate < filters.FromDate
+                IsOpening = line.JournalEntry.EntryType ==
+                    JournalEntryType.Opening ||
+                    line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.FiscalYearClosing ||
+                    line.JournalEntry.EntryDate < filters.FromDate
             })
             .Select(group => new AccountMovementGroup(
                 AccountId: group.Key.AccountId,
@@ -201,6 +224,7 @@ public sealed partial class FinancialStatementService
     private async Task<IReadOnlyList<OperationalAccountBalance>>
         LoadAccountBalancesAsync(
             OperationalTrialBalanceFilterRequest filters,
+            int fiscalYearId,
             AccountType accountType,
             OperationalTrialBalanceCategory category,
             CancellationToken cancellationToken)
@@ -229,6 +253,7 @@ public sealed partial class FinancialStatementService
                     accountName: account.Name));
         var groups = await PostedLedgerLines()
             .Where(line =>
+                line.JournalEntry.FiscalYearId == fiscalYearId &&
                 line.Account.CompanyId == companyId &&
                 line.Account.AccountType == accountType &&
                 (!filters.AccountId.HasValue ||
@@ -237,7 +262,11 @@ public sealed partial class FinancialStatementService
             .GroupBy(line => new
             {
                 AccountId = line.AccountId,
-                IsOpening = line.JournalEntry.EntryDate < filters.FromDate
+                IsOpening = line.JournalEntry.EntryType ==
+                    JournalEntryType.Opening ||
+                    line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.FiscalYearClosing ||
+                    line.JournalEntry.EntryDate < filters.FromDate
             })
             .Select(group => new AccountMovementGroup(
                 AccountId: group.Key.AccountId,

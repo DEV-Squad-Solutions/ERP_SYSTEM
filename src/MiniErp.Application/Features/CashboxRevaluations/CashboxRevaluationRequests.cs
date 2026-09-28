@@ -9,6 +9,8 @@ public sealed record CashboxRevaluationRequest(
 
 public sealed record CashboxRevaluationResponse(
     int Id,
+    int FiscalYearId,
+    string FiscalYearName,
     int CashboxId,
     string CashboxName,
     CurrencyCode Currency,

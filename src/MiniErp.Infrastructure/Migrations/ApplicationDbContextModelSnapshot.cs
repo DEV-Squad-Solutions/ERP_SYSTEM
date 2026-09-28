@@ -338,7 +338,7 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.ToTable("AccountMappings", null, t =>
                         {
-                            t.HasCheckConstraint("CK_AccountMappings_MappingType", "[MappingType] IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)");
+                            t.HasCheckConstraint("CK_AccountMappings_MappingType", "[MappingType] IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23)");
 
                             t.HasCheckConstraint("CK_AccountMappings_SourceShape", "(([MappingType] IN (1, 2) AND [SourceId] IS NOT NULL) OR ([MappingType] NOT IN (1, 2) AND [SourceId] IS NULL))");
                         });
@@ -923,6 +923,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasPrecision(28, 8)
                         .HasColumnType("decimal(28,8)");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("ForeignAmount")
                         .HasPrecision(19, 4)
                         .HasColumnType("decimal(19,4)");
@@ -958,6 +961,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_MonetaryAccountRevaluations_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "JournalEntryId");
 
@@ -1153,6 +1159,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasColumnType("decimal(28,12)")
                         .HasDefaultValue(1m);
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<int?>("InvoiceId")
                         .HasColumnType("int");
 
@@ -1183,6 +1192,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasIndex("CompanyId", "CashVoucherId")
                         .IsUnique()
                         .HasFilter("[CashVoucherId] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_BusinessPartnerMovements_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "InvoiceId")
                         .IsUnique()
@@ -1271,6 +1283,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Property<int?>("ExchangeRateId")
                         .HasColumnType("int");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -1306,6 +1321,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasFilter("[IsDeleted] = 0");
 
                     b.HasIndex("CompanyId", "ExchangeRateId");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_PartnerOpeningBalances_Company_FiscalYear");
 
                     b.ToTable("PartnerOpeningBalances", (string)null);
                 });
@@ -1547,6 +1565,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<int?>("InvoiceId")
                         .HasColumnType("int");
 
@@ -1600,6 +1621,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CompanyId", "ExchangeRateId");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_CashVouchers_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "InvoiceId")
                         .HasFilter("[InvoiceId] IS NOT NULL AND [IsDeleted] = 0");
@@ -1809,6 +1833,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasPrecision(28, 8)
                         .HasColumnType("decimal(28,8)");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("ForeignAmount")
                         .HasPrecision(19, 4)
                         .HasColumnType("decimal(19,4)");
@@ -1838,6 +1865,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_CashboxRevaluations_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "JournalEntryId");
 
@@ -1893,6 +1923,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Property<int>("DestinationCashboxId")
                         .HasColumnType("int");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -1934,6 +1967,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CompanyId", "DestinationCashboxId");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_CashboxTransfers_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "SourceCashboxId");
 
@@ -2403,6 +2439,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Property<DateTime?>("DeletedOn")
                         .HasColumnType("datetime2");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -2446,11 +2485,14 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CompanyId", "Currency", "RateDate")
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_ExchangeRates_Company_FiscalYear");
+
+                    b.HasIndex("CompanyId", "FiscalYearId", "Currency", "RateDate")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
 
-                    b.HasIndex("CompanyId", "Currency", "RateDate", "Id");
+                    b.HasIndex("CompanyId", "FiscalYearId", "Currency", "RateDate", "Id");
 
                     b.ToTable("ExchangeRates", null, t =>
                         {
@@ -2584,6 +2626,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<int>("IncomingUnits")
                         .HasColumnType("int");
 
@@ -2622,6 +2667,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasIndex("CompanyId", "ContainerId");
 
                     b.HasIndex("CompanyId", "ContainerStoreId");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_ContainerMovements_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "InvoiceId", "ContainerId")
                         .IsUnique()
@@ -2876,6 +2924,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Property<int>("EmployeeId")
                         .HasColumnType("int");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -2920,6 +2971,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasAlternateKey("CompanyId", "Id");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_EmployeeAttendances_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "WorkDate");
 
@@ -3011,6 +3065,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasColumnType("decimal(28,12)")
                         .HasDefaultValue(1m);
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -3042,6 +3099,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasIndex("CompanyId", "CashVoucherId")
                         .IsUnique()
                         .HasFilter("[CashVoucherId] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_EmployeeMovements_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "Type", "MovementDate");
 
@@ -3126,6 +3186,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Property<int?>("ExchangeRateId")
                         .HasColumnType("int");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -3164,6 +3227,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasIndex("CompanyId", "EmployeeId");
 
                     b.HasIndex("CompanyId", "ExchangeRateId");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_EmployeeOpeningBalances_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "PayrollEntryId")
                         .IsUnique()
@@ -3281,6 +3347,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -3322,6 +3391,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasIndex("CompanyId", "DocumentNumber")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_InventoryCounts_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "StoreId");
 
@@ -3457,6 +3529,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("InventoryValueAfter")
                         .HasPrecision(28, 8)
                         .HasColumnType("decimal(28,8)");
@@ -3523,6 +3598,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_ItemMovements_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "ItemId");
 
@@ -3677,6 +3755,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -3715,6 +3796,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasIndex("CompanyId", "DocumentNumber")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_StockAdjustments_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "StoreId");
 
@@ -3855,6 +3939,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -3887,6 +3974,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasIndex("CompanyId", "DocumentNumber")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_StockOpeningBalances_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "StoreId");
 
@@ -4041,6 +4131,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -4081,6 +4174,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasIndex("CompanyId", "DocumentNumber")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_StockTransfers_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "SourceStoreId");
 
@@ -4374,6 +4470,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<DateOnly>("InvoiceDate")
                         .HasColumnType("date");
 
@@ -4479,6 +4578,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasIndex("CompanyId", "DriverId");
 
                     b.HasIndex("CompanyId", "ExchangeRateId");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_Invoices_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "InvoiceNumber");
 
@@ -4777,6 +4879,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Property<DateTime?>("DeletedOn")
                         .HasColumnType("datetime2");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<int>("InvoiceCurrency")
                         .HasColumnType("int");
 
@@ -4812,6 +4917,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasIndex("CompanyId", "CashVoucherId")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_InvoicePayments_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "InvoiceId", "Id");
 
@@ -4981,6 +5089,9 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<int>("InvoiceId")
                         .HasColumnType("int");
 
@@ -5019,6 +5130,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CompanyId", "BusinessPartnerId");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_DriverTrips_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "InvoiceId")
                         .IsUnique()
@@ -5102,6 +5216,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Property<DateOnly>("EndDate")
                         .HasColumnType("date");
 
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("GrossSalary")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
@@ -5161,6 +5278,9 @@ namespace MiniErp.Infrastructure.Migrations
                     b.HasIndex("CompanyId", "EmployeeId");
 
                     b.HasIndex("CompanyId", "EmployeeType");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_PayrollEntries_Company_FiscalYear");
 
                     b.HasIndex("CompanyId", "StartDate", "EndDate");
 
@@ -5368,6 +5488,11 @@ namespace MiniErp.Infrastructure.Migrations
                         .IsRequired()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
+
+                    b.Property<string>("SecurityStampSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
 
                     b.Property<string>("TokenHash")
                         .IsRequired()
@@ -5669,6 +5794,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Accounting.JournalEntry", "JournalEntry")
                         .WithMany()
                         .HasForeignKey("CompanyId", "JournalEntryId")
@@ -5678,6 +5810,8 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("Account");
 
                     b.Navigation("Company");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("JournalEntry");
                 });
@@ -5714,6 +5848,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasPrincipalKey("CompanyId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Invoicing.Invoice", "Invoice")
                         .WithMany()
                         .HasForeignKey("CompanyId", "InvoiceId")
@@ -5725,6 +5866,8 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("CashVoucher");
 
                     b.Navigation("Company");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("Invoice");
                 });
@@ -5750,11 +5893,20 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasPrincipalKey("CompanyId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("BusinessPartner");
 
                     b.Navigation("Company");
 
                     b.Navigation("ExchangeRateRecord");
+
+                    b.Navigation("FiscalYear");
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.CashManagement.CashMovementType", b =>
@@ -5830,6 +5982,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasPrincipalKey("CompanyId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Invoicing.Invoice", "Invoice")
                         .WithMany("PaymentVouchers")
                         .HasForeignKey("CompanyId", "InvoiceId")
@@ -5855,6 +6014,8 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("Employee");
 
                     b.Navigation("ExchangeRateRecord");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("Invoice");
                 });
@@ -5893,6 +6054,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Accounting.JournalEntry", "JournalEntry")
                         .WithMany()
                         .HasForeignKey("CompanyId", "JournalEntryId")
@@ -5902,6 +6070,8 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("Cashbox");
 
                     b.Navigation("Company");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("JournalEntry");
                 });
@@ -5921,6 +6091,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.CashManagement.Cashbox", "SourceCashbox")
                         .WithMany()
                         .HasForeignKey("CompanyId", "SourceCashboxId")
@@ -5931,6 +6108,8 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("Company");
 
                     b.Navigation("DestinationCashbox");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("SourceCashbox");
                 });
@@ -6016,7 +6195,16 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("Company");
+
+                    b.Navigation("FiscalYear");
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.Containers.Container", b =>
@@ -6059,6 +6247,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Invoicing.Invoice", "Invoice")
                         .WithMany()
                         .HasForeignKey("CompanyId", "InvoiceId")
@@ -6073,6 +6268,8 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("Container");
 
                     b.Navigation("ContainerStore");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("Invoice");
                 });
@@ -6132,9 +6329,18 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("Company");
 
                     b.Navigation("Employee");
+
+                    b.Navigation("FiscalYear");
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.Employees.EmployeeMovement", b =>
@@ -6158,11 +6364,20 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("CashVoucher");
 
                     b.Navigation("Company");
 
                     b.Navigation("Employee");
+
+                    b.Navigation("FiscalYear");
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.Employees.EmployeeOpeningBalance", b =>
@@ -6186,6 +6401,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasPrincipalKey("CompanyId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Payroll.PayrollEntry", "PayrollEntry")
                         .WithMany()
                         .HasForeignKey("CompanyId", "PayrollEntryId")
@@ -6197,6 +6419,8 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("Employee");
 
                     b.Navigation("ExchangeRateRecord");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("PayrollEntry");
                 });
@@ -6256,6 +6480,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Inventory.Store", "Store")
                         .WithMany()
                         .HasForeignKey("CompanyId", "StoreId")
@@ -6264,6 +6495,8 @@ namespace MiniErp.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Company");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("Store");
                 });
@@ -6314,6 +6547,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Catalog.Item", "Item")
                         .WithMany()
                         .HasForeignKey("CompanyId", "ItemId")
@@ -6335,6 +6575,8 @@ namespace MiniErp.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Company");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("Item");
 
@@ -6380,6 +6622,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Inventory.InventoryCount", "SourceInventoryCount")
                         .WithMany("GeneratedStockAdjustments")
                         .HasForeignKey("CompanyId", "SourceInventoryCountId")
@@ -6394,6 +6643,8 @@ namespace MiniErp.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Company");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("SourceInventoryCount");
 
@@ -6446,6 +6697,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Inventory.Store", "Store")
                         .WithMany()
                         .HasForeignKey("CompanyId", "StoreId")
@@ -6454,6 +6712,8 @@ namespace MiniErp.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Company");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("Store");
                 });
@@ -6510,6 +6770,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Inventory.Store", "SourceStore")
                         .WithMany()
                         .HasForeignKey("CompanyId", "SourceStoreId")
@@ -6520,6 +6787,8 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("Company");
 
                     b.Navigation("DestinationStore");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("SourceStore");
                 });
@@ -6619,6 +6888,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasPrincipalKey("CompanyId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Catalog.ItemsCategory", "ItemsCategory")
                         .WithMany("Invoices")
                         .HasForeignKey("CompanyId", "ItemsCategoryId")
@@ -6643,6 +6919,8 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("Driver");
 
                     b.Navigation("ExchangeRateRecord");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("ItemsCategory");
 
@@ -6737,6 +7015,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Invoicing.Invoice", "Invoice")
                         .WithMany("Payments")
                         .HasForeignKey("CompanyId", "InvoiceId")
@@ -6747,6 +7032,8 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("CashVoucher");
 
                     b.Navigation("Company");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("Invoice");
                 });
@@ -6784,6 +7071,13 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("MiniErp.Domain.Entities.Invoicing.Invoice", "Invoice")
                         .WithMany()
                         .HasForeignKey("CompanyId", "InvoiceId")
@@ -6796,6 +7090,8 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("Company");
 
                     b.Navigation("Driver");
+
+                    b.Navigation("FiscalYear");
 
                     b.Navigation("Invoice");
                 });
@@ -6815,9 +7111,18 @@ namespace MiniErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("Company");
 
                     b.Navigation("Employee");
+
+                    b.Navigation("FiscalYear");
                 });
 
             modelBuilder.Entity("MiniErp.Infrastructure.Identity.RefreshToken", b =>

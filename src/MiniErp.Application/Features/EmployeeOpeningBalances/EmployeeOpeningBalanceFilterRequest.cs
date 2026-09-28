@@ -18,5 +18,7 @@ public sealed record EmployeeOpeningBalanceFilterRequest
 
     public DateOnly? ToDate { get; init; }
 
+    public int? FiscalYearId { get; init; }
+
     public string? Search { get; init; }
 }

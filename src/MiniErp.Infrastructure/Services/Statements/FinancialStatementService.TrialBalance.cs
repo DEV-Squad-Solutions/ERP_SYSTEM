@@ -16,12 +16,9 @@ public sealed partial class FinancialStatementService
             .AsNoTracking()
             .Where(year =>
                 year.CompanyId == companyId &&
-                (!filters.FiscalYearId.HasValue ||
-                 year.Id == filters.FiscalYearId.Value) &&
-                year.StartDate <= filters.FromDate &&
-                year.EndDate >= filters.ToDate)
-            .OrderByDescending(year => year.IsCurrent)
-            .ThenBy(year => year.StartDate)
+                (filters.FiscalYearId.HasValue
+                    ? year.Id == filters.FiscalYearId.Value
+                    : year.IsCurrent))
             .Select(year => new
             {
                 year.Id,

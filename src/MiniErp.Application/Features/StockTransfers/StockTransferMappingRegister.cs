@@ -27,6 +27,9 @@ public sealed class StockTransferMappingRegister : IRegister
                 request => Normalize(request.Notes));
 
         config.ForType<StockTransfer, StockTransferListResponse>()
+            .Map(
+                response => response.FiscalYearName,
+                transfer => transfer.FiscalYear.Name)
             .Map(response => response.SourceStoreName, transfer => transfer.SourceStore.Name)
             .Map(response => response.DestinationStoreName, transfer => transfer.DestinationStore.Name)
             .Map(response => response.LineCount, transfer => transfer.Lines.Count())

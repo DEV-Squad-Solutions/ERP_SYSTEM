@@ -46,6 +46,14 @@ public sealed class InvoiceFilterRequestValidator
             .GreaterThan(0)
             .When(filter => filter.DriverId.HasValue);
 
+        RuleFor(filter => filter.ItemId)
+            .GreaterThan(0)
+            .When(filter => filter.ItemId.HasValue);
+
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue);
+
         RuleFor(filter => filter.ToDate)
             .GreaterThanOrEqualTo(filter => filter.FromDate)
             .When(filter =>

@@ -12,6 +12,7 @@ public interface IInventoryCountService
 
     Task<Result<InventoryCountResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<InventoryCountResponse>> AddAsync(

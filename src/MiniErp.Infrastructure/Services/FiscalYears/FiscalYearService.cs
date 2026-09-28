@@ -10,6 +10,7 @@ using MiniErp.Application.Features.AccountingReadiness;
 using MiniErp.Application.Features.AccountMappings;
 using MiniErp.Application.Features.Companies;
 using MiniErp.Domain.Entities.Accounting;
+using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 
@@ -21,7 +22,9 @@ public sealed class FiscalYearService(
     ICurrentCompanyContext currentCompanyContext,
     TimeProvider timeProvider,
     IAccountingReadinessService? accountingReadinessService = null,
-    IDefaultAccountingSetupService? defaultAccountingSetupService = null)
+    IDefaultAccountingSetupService? defaultAccountingSetupService = null,
+    IFiscalYearInventoryCarryForwardService?
+        inventoryCarryForwardService = null)
     : IFiscalYearService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -101,6 +104,45 @@ public sealed class FiscalYearService(
             : Result<FiscalYearResponse>.Success(response);
     }
 
+    public async Task<Result<FiscalYearResponse>> SetCurrentAsync(
+        int id,
+        CancellationToken cancellationToken = default)
+    {
+        if (id <= 0)
+        {
+            return Result<FiscalYearResponse>.Failure(InvalidId());
+        }
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
+        var fiscalYear = await dbContext.FiscalYears
+            .FirstOrDefaultAsync(
+                year =>
+                    year.CompanyId == companyId &&
+                    year.Id == id,
+                cancellationToken);
+        if (fiscalYear is null)
+        {
+            return Result<FiscalYearResponse>.Failure(NotFound(id));
+        }
+
+        if (!fiscalYear.IsCurrent)
+        {
+            await ClearCurrentAsync(id, cancellationToken);
+            fiscalYear.IsCurrent = true;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        var response = await ProjectResponseQuery(id)
+            .FirstAsync(cancellationToken);
+
+        return Result<FiscalYearResponse>.Success(response);
+    }
+
     public async Task<Result<FiscalYearResponse>> AddAsync(
         FiscalYearRequest request,
         CancellationToken cancellationToken = default)
@@ -149,6 +191,9 @@ public sealed class FiscalYearService(
 
         dbContext.FiscalYears.Add(fiscalYear);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await EnsureExchangeRateCarryForwardAsync(
+            fiscalYear,
+            cancellationToken);
 
         if (defaultAccountingSetupService is not null)
         {
@@ -346,6 +391,11 @@ public sealed class FiscalYearService(
             return Result<FiscalYearResponse>.Failure(InvalidId());
         }
 
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
         var fiscalYear = await dbContext.FiscalYears
             .FirstOrDefaultAsync(
                 entity =>
@@ -367,6 +417,57 @@ public sealed class FiscalYearService(
 
         if (status == FiscalYearStatus.Closed)
         {
+            var nextStartDate = fiscalYear.StartDate.AddYears(1);
+            var nextEndDate = fiscalYear.EndDate.AddYears(1);
+            var nextYear = await dbContext.FiscalYears
+                .Where(year =>
+                    year.CompanyId == companyId &&
+                    year.StartDate == nextStartDate &&
+                    year.EndDate == nextEndDate)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (nextYear is null)
+            {
+                if (await DateRangeOverlapsAsync(
+                        nextStartDate,
+                        nextEndDate,
+                        excludedId: null,
+                        cancellationToken))
+                {
+                    return Result<FiscalYearResponse>.Failure(
+                        DateRangeOverlaps());
+                }
+
+                nextYear = new FiscalYear
+                {
+                    CompanyId = companyId,
+                    Name = await GenerateNextFiscalYearNameAsync(
+                        fiscalYear,
+                        cancellationToken),
+                    StartDate = nextStartDate,
+                    EndDate = nextEndDate,
+                    Status = FiscalYearStatus.Open,
+                    IsCurrent = false
+                };
+                dbContext.FiscalYears.Add(nextYear);
+                await dbContext.SaveChangesAsync(cancellationToken);
+
+                if (defaultAccountingSetupService is not null)
+                {
+                    await defaultAccountingSetupService.EnsureFiscalYearAsync(
+                        companyId,
+                        nextYear.Id,
+                        cancellationToken);
+                }
+            }
+            await EnsureExchangeRateCarryForwardAsync(
+                nextYear,
+                cancellationToken);
+            if (nextYear.Status != FiscalYearStatus.Open)
+            {
+                return Result<FiscalYearResponse>.Failure(
+                    NextFiscalYearClosed(nextYear.Name));
+            }
+
             var readiness = accountingReadinessService is null
                 ? null
                 : await accountingReadinessService.GetAsync(
@@ -393,10 +494,9 @@ public sealed class FiscalYearService(
                 return Result<FiscalYearResponse>.Failure(errors);
             }
 
-            await using var transaction = await dbContext.Database
-                .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             var transfer = await TransferClosingBalancesAsync(
                 fiscalYear,
+                nextYear,
                 cancellationToken);
             if (transfer.IsFailure)
             {
@@ -404,8 +504,30 @@ public sealed class FiscalYearService(
                 return Result<FiscalYearResponse>.Failure(transfer.Errors);
             }
 
+            if (inventoryCarryForwardService is not null)
+            {
+                var inventoryTransfer = await inventoryCarryForwardService
+                    .CarryForwardAsync(
+                        sourceFiscalYearId: fiscalYear.Id,
+                        targetFiscalYearId: nextYear.Id,
+                        targetStartDate: nextYear.StartDate,
+                        sourceFiscalYearName: fiscalYear.Name,
+                        cancellationToken: cancellationToken);
+                if (inventoryTransfer.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Result<FiscalYearResponse>.Failure(
+                        inventoryTransfer.Errors);
+                }
+            }
+
             fiscalYear.Status = status;
             fiscalYear.ClosedOn = timeProvider.GetUtcNow().UtcDateTime;
+            if (fiscalYear.IsCurrent)
+            {
+                fiscalYear.IsCurrent = false;
+                nextYear.IsCurrent = true;
+            }
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
@@ -414,12 +536,40 @@ public sealed class FiscalYearService(
             return Result<FiscalYearResponse>.Success(closedResponse);
         }
 
+        var laterClosedYear = await dbContext.FiscalYears
+            .AsNoTracking()
+            .Where(year =>
+                year.CompanyId == companyId &&
+                year.StartDate > fiscalYear.EndDate &&
+                year.Status == FiscalYearStatus.Closed)
+            .OrderBy(year => year.StartDate)
+            .Select(year => year.Name)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (laterClosedYear is not null)
+        {
+            return Result<FiscalYearResponse>.Failure(
+                LaterFiscalYearClosed(laterClosedYear));
+        }
+
+        var existingTransfer = await dbContext.JournalEntries
+            .Include(entry => entry.Lines)
+            .SingleOrDefaultAsync(entry =>
+                entry.CompanyId == companyId &&
+                entry.EntryType == JournalEntryType.Opening &&
+                entry.SourceType == JournalEntrySourceType.FiscalYearClosing &&
+                entry.SourceId == fiscalYear.Id,
+                cancellationToken);
+        if (existingTransfer is not null)
+        {
+            dbContext.JournalEntryLines.RemoveRange(existingTransfer.Lines);
+            dbContext.JournalEntries.Remove(existingTransfer);
+        }
+
         fiscalYear.Status = status;
-        fiscalYear.ClosedOn = status == FiscalYearStatus.Closed
-            ? timeProvider.GetUtcNow().UtcDateTime
-            : null;
+        fiscalYear.ClosedOn = null;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         var response = await ProjectResponseQuery(id)
             .FirstAsync(cancellationToken);
@@ -429,26 +579,9 @@ public sealed class FiscalYearService(
 
     private async Task<Result> TransferClosingBalancesAsync(
         FiscalYear fiscalYear,
+        FiscalYear nextYear,
         CancellationToken cancellationToken)
     {
-        var nextYear = await dbContext.FiscalYears
-            .AsNoTracking()
-            .Where(year =>
-                year.CompanyId == companyId &&
-                year.StartDate > fiscalYear.EndDate)
-            .OrderBy(year => year.StartDate)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        // A terminal year has no destination for opening balances.
-        if (nextYear is null)
-        {
-            return Result.Success();
-        }
-        if (nextYear.Status != FiscalYearStatus.Open)
-        {
-            return Result.Failure(NextFiscalYearClosed(nextYear.Name));
-        }
-
         var existingTransfer = await dbContext.JournalEntries
             .Include(entry => entry.Lines)
             .SingleOrDefaultAsync(entry =>
@@ -473,7 +606,8 @@ public sealed class FiscalYearService(
                 line.Account.Code,
                 line.Account.Name,
                 line.PartyType,
-                line.PartyId
+                line.PartyId,
+                line.Currency
             })
             .Select(group => new
             {
@@ -482,7 +616,10 @@ public sealed class FiscalYearService(
                 group.Key.Name,
                 group.Key.PartyType,
                 group.Key.PartyId,
-                Balance = group.Sum(line => line.Debit - line.Credit)
+                group.Key.Currency,
+                Balance = group.Sum(line => line.Debit - line.Credit),
+                TransactionBalance = group.Sum(line =>
+                    line.TransactionDebit - line.TransactionCredit)
             })
             .Where(row => row.Balance != 0m)
             .ToListAsync(cancellationToken);
@@ -505,19 +642,33 @@ public sealed class FiscalYearService(
             .SingleOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
 
         var lines = balances
-            .Select(balance => new JournalEntryLine
+            .Select(balance =>
             {
-                CompanyId = companyId,
-                AccountId = balance.AccountId,
-                PartyType = balance.PartyType,
-                PartyId = balance.PartyId,
-                Description = $"ترحيل رصيد {balance.Code} - {balance.Name}",
-                Debit = balance.Balance > 0m ? balance.Balance : 0m,
-                Credit = balance.Balance < 0m ? -balance.Balance : 0m,
-                Currency = baseCurrency,
-                ExchangeRate = 1m,
-                TransactionDebit = balance.Balance > 0m ? balance.Balance : 0m,
-                TransactionCredit = balance.Balance < 0m ? -balance.Balance : 0m
+                var transactionBalance = balance.TransactionBalance == 0m
+                    ? balance.Balance
+                    : balance.TransactionBalance;
+                return new JournalEntryLine
+                {
+                    CompanyId = companyId,
+                    AccountId = balance.AccountId,
+                    PartyType = balance.PartyType,
+                    PartyId = balance.PartyId,
+                    Description =
+                        $"ترحيل رصيد {balance.Code} - {balance.Name}",
+                    Debit = balance.Balance > 0m ? balance.Balance : 0m,
+                    Credit = balance.Balance < 0m ? -balance.Balance : 0m,
+                    Currency = balance.Currency,
+                    ExchangeRate = balance.Currency == baseCurrency
+                        ? 1m
+                        : ExchangeRateRules.RoundRate(
+                            Math.Abs(balance.Balance / transactionBalance)),
+                    TransactionDebit = transactionBalance > 0m
+                        ? transactionBalance
+                        : 0m,
+                    TransactionCredit = transactionBalance < 0m
+                        ? -transactionBalance
+                        : 0m
+                };
             })
             .ToList();
         var net = lines.Sum(line => line.Debit - line.Credit);
@@ -591,6 +742,59 @@ public sealed class FiscalYearService(
         return Result.Success();
     }
 
+    private async Task EnsureExchangeRateCarryForwardAsync(
+        FiscalYear fiscalYear,
+        CancellationToken cancellationToken)
+    {
+        var existingCurrencies = await dbContext.ExchangeRates
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(rate =>
+                rate.CompanyId == companyId &&
+                !rate.IsDeleted &&
+                rate.FiscalYearId == fiscalYear.Id)
+            .Select(rate => rate.Currency)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var latestRates = await dbContext.ExchangeRates
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(rate =>
+                rate.CompanyId == companyId &&
+                !rate.IsDeleted &&
+                rate.RateDate < fiscalYear.StartDate)
+            .OrderByDescending(rate => rate.RateDate)
+            .ThenByDescending(rate => rate.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var latestRate in latestRates
+                     .GroupBy(rate => rate.Currency)
+                     .Select(group => group.First())
+                     .Where(rate => !existingCurrencies.Contains(rate.Currency)))
+        {
+            var carryForward = new ExchangeRate
+            {
+                CompanyId = companyId,
+                FiscalYearId = fiscalYear.Id,
+                Currency = latestRate.Currency,
+                RateDate = fiscalYear.StartDate,
+                Rate = latestRate.Rate,
+                Source = latestRate.Source,
+                Provider = latestRate.Provider,
+                Notes = latestRate.Notes
+            };
+            carryForward.Touch(timeProvider.GetUtcNow().UtcDateTime);
+            dbContext.ExchangeRates.Add(carryForward);
+        }
+
+        if (dbContext.ChangeTracker.Entries<ExchangeRate>()
+                .Any(entry => entry.State == EntityState.Added))
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+
     private IQueryable<FiscalYearResponse> ProjectResponseQuery(
         int? id = null,
         bool? isCurrent = null) =>
@@ -616,6 +820,28 @@ public sealed class FiscalYearService(
                      fiscalYear.Id != excludedId.Value) &&
                     fiscalYear.Name.ToUpper() == name.Trim().ToUpper(),
                 cancellationToken);
+
+    private async Task<string> GenerateNextFiscalYearNameAsync(
+        FiscalYear fiscalYear,
+        CancellationToken cancellationToken)
+    {
+        var nextStartYear = fiscalYear.StartDate.AddYears(1).Year;
+        var baseName = fiscalYear.Name.Trim() ==
+            fiscalYear.StartDate.Year.ToString()
+                ? nextStartYear.ToString()
+                : $"{fiscalYear.Name.Trim()} - {nextStartYear}";
+        var candidate = baseName;
+        var suffix = 2;
+        while (await NameExistsAsync(
+                   candidate,
+                   excludedId: null,
+                   cancellationToken))
+        {
+            candidate = $"{baseName} ({suffix++})";
+        }
+
+        return candidate;
+    }
 
     private Task<bool> DateRangeOverlapsAsync(
         DateOnly startDate,

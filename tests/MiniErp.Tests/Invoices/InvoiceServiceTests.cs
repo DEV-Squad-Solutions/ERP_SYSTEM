@@ -6,11 +6,13 @@ using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
+using MiniErp.Application.Features.DriverTrips;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Application.Features.PartnerItemReports;
 using MiniErp.Application.Features.ProfitabilityReports;
 using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Catalog;
+using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Containers;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Inventory;
@@ -20,6 +22,7 @@ using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
+using MiniErp.Infrastructure.Services.FiscalYears;
 using MiniErp.Infrastructure.Services.Inventory;
 using MiniErp.Infrastructure.Services.Invoices;
 using MiniErp.Infrastructure.Services.Pagination;
@@ -3100,7 +3103,91 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task Update_ReplacesDriverTripSideEffect()
+    public async Task Update_PreservesCostedDriverTripAndSynchronizesPosting()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var postingService = new RecordingDriverTripPostingService(
+            database.Context);
+        var service = database.CreateService(
+            driverTripPostingService: postingService);
+        var created = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                driverId: 1))).Value;
+        var originalTrip = await database.Context.DriverTrips.SingleAsync();
+        var originalTripId = originalTrip.Id;
+        originalTrip.Price = 30m;
+        originalTrip.Cost = 12.5m;
+        originalTrip.CostNotes = "Keep this cost";
+        await database.Context.SaveChangesAsync();
+        database.Context.ChangeTracker.Clear();
+
+        var result = await service.UpdateAsync(
+            created.Id,
+            CreateUpdateRequest(
+                created,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
+                invoiceDate: new DateOnly(2026, 7, 26),
+                businessPartnerId: 2,
+                driverId: 2) with
+            {
+                ExportInvoiceCode = "EXP-UPDATED"
+            });
+
+        Assert.True(result.IsSuccess);
+        var trip = await database.Context.DriverTrips
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal(originalTripId, trip.Id);
+        Assert.Equal(2, trip.DriverId);
+        Assert.Equal(2, trip.BusinessPartnerId);
+        Assert.Equal(created.Id, trip.InvoiceId);
+        Assert.Equal(new DateOnly(2026, 7, 26), trip.TripDate);
+        Assert.Equal("EXP-UPDATED", trip.ExportInvoiceCode);
+        Assert.Equal(30m, trip.Price);
+        Assert.Equal(12.5m, trip.Cost);
+        Assert.Equal("Keep this cost", trip.CostNotes);
+        var posting = Assert.Single(postingService.SynchronizedTrips);
+        Assert.Equal(originalTripId, posting.Id);
+        Assert.Equal(2, posting.DriverId);
+        Assert.Equal(new DateOnly(2026, 7, 26), posting.TripDate);
+        Assert.Empty(postingService.DeletedTripIds);
+    }
+
+    [Fact]
+    public async Task Update_RemovesUnreferencedDriverTripAndPosting()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var postingService = new RecordingDriverTripPostingService(
+            database.Context);
+        var service = database.CreateService(
+            driverTripPostingService: postingService);
+        var created = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                driverId: 1))).Value;
+        var tripId = await database.Context.DriverTrips
+            .Select(trip => trip.Id)
+            .SingleAsync();
+
+        var result = await service.UpdateAsync(
+            created.Id,
+            CreateUpdateRequest(
+                created,
+                [new InvoiceLineRequest(1, 2, 1m, 10m, null)]) with
+            {
+                DriverId = null,
+                ActualDriverName = null
+            });
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(await database.Context.DriverTrips.ToListAsync());
+        Assert.Equal([tripId], postingService.DeletedTripIds);
+        Assert.Empty(postingService.SynchronizedTrips);
+    }
+
+    [Fact]
+    public async Task Update_WithReferencedDriverTripAllowsNonDriverChanges()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
         var service = database.CreateService();
@@ -3108,6 +3195,43 @@ public sealed class InvoiceServiceTests
             CreateRequest(
                 InvoiceType.SalesReturn,
                 driverId: 1))).Value;
+        var trip = await database.Context.DriverTrips.SingleAsync();
+        database.Context.CashVouchers.Add(CreateDriverTripVoucher(trip));
+        await database.Context.SaveChangesAsync();
+        database.Context.ChangeTracker.Clear();
+
+        var result = await service.UpdateAsync(
+            created.Id,
+            CreateUpdateRequest(
+                created,
+                [new InvoiceLineRequest(1, 2, 1m, 11m, null)]));
+
+        Assert.True(result.IsSuccess);
+        var preservedTrip = await database.Context.DriverTrips
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal(trip.Id, preservedTrip.Id);
+        Assert.Equal(
+            trip.Id,
+            await database.Context.CashVouchers
+                .Where(voucher => voucher.DriverTripId.HasValue)
+                .Select(voucher => voucher.DriverTripId)
+                .SingleAsync());
+    }
+
+    [Fact]
+    public async Task Update_WithReferencedDriverTripRejectsDriverChange()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var created = (await service.AddAsync(
+            CreateRequest(
+                InvoiceType.SalesReturn,
+                driverId: 1))).Value;
+        var trip = await database.Context.DriverTrips.SingleAsync();
+        database.Context.CashVouchers.Add(CreateDriverTripVoucher(trip));
+        await database.Context.SaveChangesAsync();
+        database.Context.ChangeTracker.Clear();
 
         var result = await service.UpdateAsync(
             created.Id,
@@ -3116,10 +3240,13 @@ public sealed class InvoiceServiceTests
                 [new InvoiceLineRequest(1, 2, 1m, 10m, null)],
                 driverId: 2));
 
-        Assert.True(result.IsSuccess);
-        var trip = await database.Context.DriverTrips.SingleAsync();
-        Assert.Equal(2, trip.DriverId);
-        Assert.Equal(created.Id, trip.InvoiceId);
+        Assert.True(result.IsFailure);
+        Assert.Equal("Invoices.DriverTripHasCashVouchers", result.Error.Code);
+        var preservedTrip = await database.Context.DriverTrips
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal(trip.Id, preservedTrip.Id);
+        Assert.Equal(1, preservedTrip.DriverId);
     }
 
     [Fact]
@@ -5383,6 +5510,175 @@ public sealed class InvoiceServiceTests
     }
 
     [Fact]
+    public async Task GetAll_DefaultsToCurrentFiscalYearAndSupportsSelection()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears SET IsCurrent = 0 WHERE CompanyId = 1;
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent)
+            VALUES (
+                3, 1, '2025', '2025-01-01', '2025-12-31', 1, 1);
+            """);
+        var service = database.CreateService();
+        var queryService = database.CreateQueryService();
+        var in2025 = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                invoiceDate: new DateOnly(2025, 7, 25)));
+        var in2026 = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                invoiceDate: new DateOnly(2026, 7, 25)));
+
+        var current = await queryService.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest(),
+            new InvoiceFilterRequest());
+        var selected2026 = await queryService.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest(),
+            new InvoiceFilterRequest(FiscalYearId: 1));
+
+        Assert.True(in2025.IsSuccess);
+        Assert.True(in2026.IsSuccess);
+        Assert.Equal(3, in2025.Value.FiscalYearId);
+        Assert.Equal(1, in2026.Value.FiscalYearId);
+        var partnerMovements = await database.Context.BusinessPartnerMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.InvoiceId == in2025.Value.Id ||
+                movement.InvoiceId == in2026.Value.Id)
+            .ToDictionaryAsync(
+                movement => movement.InvoiceId!.Value,
+                movement => movement.FiscalYearId);
+        Assert.Equal(3, partnerMovements[in2025.Value.Id]);
+        Assert.Equal(1, partnerMovements[in2026.Value.Id]);
+        var inventoryMovements = await database.Context.ItemMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.ReferenceId == in2025.Value.Id ||
+                movement.ReferenceId == in2026.Value.Id)
+            .Select(movement => new
+            {
+                InvoiceId = movement.ReferenceId,
+                movement.FiscalYearId
+            })
+            .ToListAsync();
+        Assert.Equal(
+            [3],
+            inventoryMovements
+                .Where(row => row.InvoiceId == in2025.Value.Id)
+                .Select(row => row.FiscalYearId)
+                .Distinct());
+        Assert.Equal(
+            [1],
+            inventoryMovements
+                .Where(row => row.InvoiceId == in2026.Value.Id)
+                .Select(row => row.FiscalYearId)
+                .Distinct());
+        Assert.Equal(in2025.Value.Id, Assert.Single(current.Value.Items).Id);
+        Assert.Equal(
+            in2026.Value.Id,
+            Assert.Single(selected2026.Value.Items).Id);
+
+        var hidden2026Details = await queryService.GetByIdAsync(
+            in2026.Value.Id);
+        var selected2026Details = await queryService.GetByIdAsync(
+            in2026.Value.Id,
+            fiscalYearId: 1);
+        var current2025Details = await queryService.GetByIdAsync(
+            in2025.Value.Id);
+
+        Assert.True(hidden2026Details.IsFailure);
+        Assert.Equal("Invoices.NotFound", hidden2026Details.Error.Code);
+        Assert.True(selected2026Details.IsSuccess);
+        Assert.Equal(1, selected2026Details.Value.FiscalYearId);
+        Assert.True(current2025Details.IsSuccess);
+        Assert.Equal(3, current2025Details.Value.FiscalYearId);
+
+        var currentReturnSources = await queryService.GetReturnSourcesAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest(),
+            new InvoiceReturnSourceFilterRequest(
+                BusinessPartnerId: 1,
+                StoreId: 1,
+                ReturnType: InvoiceReturnType.PurchaseReturn,
+                AsOfDate: new DateOnly(2025, 12, 31)));
+        var selected2026ReturnSources =
+            await queryService.GetReturnSourcesAsync(
+                new MiniErp.Application.Common.Models.PaginationRequest(),
+                new InvoiceReturnSourceFilterRequest(
+                    BusinessPartnerId: 1,
+                    StoreId: 1,
+                    ReturnType: InvoiceReturnType.PurchaseReturn,
+                    AsOfDate: new DateOnly(2026, 12, 31),
+                    FiscalYearId: 1));
+
+        Assert.True(currentReturnSources.IsSuccess);
+        Assert.Equal(
+            in2025.Value.Id,
+            Assert.Single(currentReturnSources.Value.Items).InvoiceId);
+        Assert.True(selected2026ReturnSources.IsSuccess);
+        Assert.Equal(
+            in2026.Value.Id,
+            Assert.Single(selected2026ReturnSources.Value.Items).InvoiceId);
+    }
+
+    [Fact]
+    public async Task ProfitabilityReports_DefaultToCurrentFiscalYearAndSupportHistoricalSelection()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE CompanySettings
+            SET StockBalanceCheckMode = 0
+            WHERE CompanyId = 1;
+
+            UPDATE FiscalYears SET IsCurrent = 0 WHERE CompanyId = 1;
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent)
+            VALUES (
+                3, 1, '2025', '2025-01-01', '2025-12-31', 1, 1);
+            """);
+        var invoiceService = database.CreateService();
+        var in2025 = await invoiceService.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                invoiceDate: new DateOnly(2025, 7, 25)));
+        var in2026 = await invoiceService.AddAsync(
+            CreateRequest(
+                InvoiceType.Sales,
+                invoiceDate: new DateOnly(2026, 7, 25)));
+        Assert.True(in2025.IsSuccess, in2025.Error.Description);
+        Assert.True(in2026.IsSuccess, in2026.Error.Description);
+
+        var reports = database.CreateProfitabilityReportService();
+        var currentInvoices = await reports.GetInvoicesAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new ProfitabilityReportFilterRequest());
+        var historicalInvoices = await reports.GetInvoicesAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new ProfitabilityReportFilterRequest(FiscalYearId: 1));
+        var currentItems = await reports.GetItemsAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new ProfitabilityReportFilterRequest());
+
+        Assert.True(currentInvoices.IsSuccess);
+        Assert.Equal(
+            in2025.Value.Id,
+            Assert.Single(currentInvoices.Value.Invoices).InvoiceId);
+        Assert.True(historicalInvoices.IsSuccess);
+        Assert.Equal(
+            in2026.Value.Id,
+            Assert.Single(historicalInvoices.Value.Invoices).InvoiceId);
+        Assert.True(currentItems.IsSuccess);
+        Assert.All(
+            currentItems.Value.Items,
+            item => Assert.Equal(1, item.InvoiceCount));
+    }
+
+    [Fact]
     public async Task GetItemBalance_ReturnsBalanceThroughTheSelectedDate()
     {
         await using var database = await InvoiceTestDatabase.CreateAsync();
@@ -5649,6 +5945,57 @@ public sealed class InvoiceServiceTests
         Assert.Equal(34m, result.Value.Summary.Total);
         Assert.Equal(5m, result.Value.Summary.PaidAmount);
         Assert.Equal(29m, result.Value.Summary.RemainingAmount);
+        Assert.Equal(4m, result.Value.Summary.TotalQuantity);
+    }
+
+    [Fact]
+    public async Task GetAll_FiltersByItemAndSummarizesOnlyThatItemQuantity()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var queryService = database.CreateQueryService();
+
+        var first = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines: [new InvoiceLineRequest(1, 2, 3m, 10m, null)],
+                invoiceNumber: "ITEM-FILTER-001"));
+        var second = await service.AddAsync(
+            CreateRequest(
+                InvoiceType.Purchase,
+                PaymentTerm.Credit,
+                lines: [new InvoiceLineRequest(2, 1, 5m, 8m, null)],
+                invoiceNumber: "ITEM-FILTER-002"));
+
+        Assert.True(first.IsSuccess, first.Error.Description);
+        Assert.True(second.IsSuccess, second.Error.Description);
+
+        var filtered = await queryService.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageSize = 1
+            },
+            new InvoiceFilterRequest
+            {
+                ItemId = 1
+            });
+        var unfiltered = await queryService.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest());
+
+        Assert.True(filtered.IsSuccess, filtered.Error.Description);
+        var invoice = Assert.Single(filtered.Value.Items);
+        Assert.Equal("ITEM-FILTER-001", invoice.InvoiceNumber);
+        Assert.Equal(1, filtered.Value.TotalCount);
+        Assert.Equal(60m, filtered.Value.Summary.Subtotal);
+        Assert.Equal(0m, filtered.Value.Summary.DiscountAmount);
+        Assert.Equal(60m, filtered.Value.Summary.Total);
+        Assert.Equal(0m, filtered.Value.Summary.PaidAmount);
+        Assert.Equal(60m, filtered.Value.Summary.RemainingAmount);
+        Assert.Equal(6m, filtered.Value.Summary.TotalQuantity);
+
+        Assert.True(unfiltered.IsSuccess, unfiltered.Error.Description);
+        Assert.Equal(11m, unfiltered.Value.Summary.TotalQuantity);
     }
 
     [Fact]
@@ -5674,6 +6021,7 @@ public sealed class InvoiceServiceTests
         Assert.Equal(0m, result.Value.Summary.Total);
         Assert.Equal(0m, result.Value.Summary.PaidAmount);
         Assert.Equal(0m, result.Value.Summary.RemainingAmount);
+        Assert.Equal(0m, result.Value.Summary.TotalQuantity);
     }
 
     [Fact]
@@ -5780,6 +6128,10 @@ public sealed class InvoiceServiceTests
             new InvoiceFilterRequest
             {
                 DriverId = -1
+            },
+            new InvoiceFilterRequest
+            {
+                ItemId = 0
             },
             new InvoiceFilterRequest
             {
@@ -6992,6 +7344,30 @@ public sealed class InvoiceServiceTests
         return movement;
     }
 
+    private static CashVoucher CreateDriverTripVoucher(DriverTrip trip)
+    {
+        var voucher = new CashVoucher
+        {
+            CompanyId = trip.CompanyId,
+            VoucherNumber = $"DRV-{trip.Id}",
+            VoucherDate = trip.TripDate,
+            Direction = CashDirection.Payment,
+            CashboxId = 1,
+            CashMovementTypeId = 1,
+            PartyType = CashPartyType.Driver,
+            DriverId = trip.DriverId,
+            DriverTripId = trip.Id,
+            Amount = 5m,
+            Currency = CurrencyCode.EGP,
+            IsPosted = true
+        };
+        voucher.ApplyExchangeRate(
+            exchangeRateId: null,
+            exchangeRate: 1m);
+        voucher.Touch(DateTime.UtcNow);
+        return voucher;
+    }
+
     private static async Task<Error?> InvokeValidateStockAsync(
         InvoiceService service,
         Invoice invoice,
@@ -7018,6 +7394,43 @@ public sealed class InvoiceServiceTests
         var task = Assert.IsType<Task<Error?>>(invocation);
         return await task;
     }
+
+    private sealed class RecordingDriverTripPostingService(
+        ApplicationDbContext context) : IDriverTripPostingService
+    {
+        public List<DriverTripPostingSnapshot> SynchronizedTrips { get; } = [];
+
+        public List<int> DeletedTripIds { get; } = [];
+
+        public async Task<Result> SynchronizeAsync(
+            int driverTripId,
+            CancellationToken cancellationToken = default)
+        {
+            var trip = await context.DriverTrips
+                .AsNoTracking()
+                .Where(candidate => candidate.Id == driverTripId)
+                .Select(candidate => new DriverTripPostingSnapshot(
+                    Id: candidate.Id,
+                    DriverId: candidate.DriverId,
+                    TripDate: candidate.TripDate))
+                .SingleAsync(cancellationToken);
+            SynchronizedTrips.Add(trip);
+            return Result.Success();
+        }
+
+        public Task<Result> DeleteAsync(
+            int driverTripId,
+            CancellationToken cancellationToken = default)
+        {
+            DeletedTripIds.Add(driverTripId);
+            return Task.FromResult(Result.Success());
+        }
+    }
+
+    private sealed record DriverTripPostingSnapshot(
+        int Id,
+        int DriverId,
+        DateOnly TripDate);
 
     private sealed class InvoiceTestDatabase : IAsyncDisposable
     {
@@ -7049,12 +7462,14 @@ public sealed class InvoiceServiceTests
 
             await CreateSchemaAsync(context);
             await SeedAsync(context);
+            await TestFiscalYearSchema.EnsureAsync(context);
 
             return new InvoiceTestDatabase(connection, context);
         }
 
         public InvoiceService CreateService(
-            IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
+            IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
+            IDriverTripPostingService? driverTripPostingService = null)
         {
             var companyContext = new TestCurrentCompanyContext(1);
             var invoiceInventoryService = CreateInvoiceInventoryService(
@@ -7064,7 +7479,8 @@ public sealed class InvoiceServiceTests
                 Context,
                 new PaginationService(),
                 companyContext,
-                invoiceInventoryService);
+                invoiceInventoryService,
+                new FiscalYearQueryScopeResolver(Context, companyContext));
 
             return new InvoiceService(
                 Context,
@@ -7073,7 +7489,8 @@ public sealed class InvoiceServiceTests
                 new MiniErp.Tests.TestExchangeRateResolver(),
                 invoiceInventoryService,
                 TimeProvider.System,
-                fiscalYearPeriodGuard);
+                fiscalYearPeriodGuard,
+                driverTripPostingService: driverTripPostingService);
         }
 
         public InvoiceQueryService CreateQueryService()
@@ -7083,7 +7500,8 @@ public sealed class InvoiceServiceTests
                 Context,
                 new PaginationService(),
                 companyContext,
-                CreateInvoiceInventoryService(companyContext));
+                CreateInvoiceInventoryService(companyContext),
+                new FiscalYearQueryScopeResolver(Context, companyContext));
         }
 
         private InvoiceInventoryService CreateInvoiceInventoryService(
@@ -7132,6 +7550,28 @@ public sealed class InvoiceServiceTests
                     BaseCurrency INTEGER NOT NULL DEFAULT 1,
                     StockBalanceCheckMode INTEGER NOT NULL DEFAULT 1,
                     FOREIGN KEY (CompanyId) REFERENCES Companies(Id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE FiscalYears (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    Name TEXT NOT NULL,
+                    StartDate TEXT NOT NULL,
+                    EndDate TEXT NOT NULL,
+                    Status INTEGER NOT NULL,
+                    IsCurrent INTEGER NOT NULL,
+                    ClosedOn TEXT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL DEFAULT '',
+                    CreatedOn TEXT NOT NULL DEFAULT '2026-01-01',
+                    CreatedByPc TEXT NOT NULL DEFAULT '',
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE Accounts (
@@ -7281,6 +7721,7 @@ public sealed class InvoiceServiceTests
                 CREATE TABLE StockOpeningBalances (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL DEFAULT 1,
                     StoreId INTEGER NOT NULL,
                     DocumentDate TEXT NOT NULL,
                     IsDeleted INTEGER NOT NULL
@@ -7299,6 +7740,7 @@ public sealed class InvoiceServiceTests
                 CREATE TABLE Invoices (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL DEFAULT 1,
                     InvoiceNumber TEXT NOT NULL,
                     ExportInvoiceCode TEXT NULL,
                     PartnerInvoiceNo TEXT NULL,
@@ -7400,6 +7842,7 @@ public sealed class InvoiceServiceTests
                 CREATE TABLE ItemMovements (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL DEFAULT 1,
                     StoreId INTEGER NOT NULL,
                     ItemId INTEGER NOT NULL,
                     ItemUnitId INTEGER NULL,
@@ -7484,6 +7927,7 @@ public sealed class InvoiceServiceTests
                 CREATE TABLE ContainerMovements (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL DEFAULT 1,
                     BusinessPartnerId INTEGER NOT NULL,
                     ContainerStoreId INTEGER NOT NULL,
                     ContainerId INTEGER NOT NULL,
@@ -7508,6 +7952,7 @@ public sealed class InvoiceServiceTests
                 CREATE TABLE BusinessPartnerMovements (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL DEFAULT 1,
                     BusinessPartnerId INTEGER NOT NULL,
                     InvoiceId INTEGER NULL,
                     CashVoucherId INTEGER NULL,
@@ -7535,6 +7980,7 @@ public sealed class InvoiceServiceTests
                 CREATE TABLE DriverTrips (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL DEFAULT 1,
                     DriverId INTEGER NOT NULL,
                     ActualDriverName TEXT NULL,
                     InvoiceId INTEGER NOT NULL,
@@ -7642,6 +8088,7 @@ public sealed class InvoiceServiceTests
                 CREATE TABLE CashVouchers (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL DEFAULT 1,
                     InvoiceId INTEGER NULL,
                     CashboxTransferId INTEGER NULL,
                     VoucherNumber TEXT NOT NULL,
@@ -7687,6 +8134,7 @@ public sealed class InvoiceServiceTests
                 CREATE TABLE InvoicePayments (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL DEFAULT 1,
                     InvoiceId INTEGER NOT NULL,
                     CashVoucherId INTEGER NOT NULL,
                     InvoiceCurrency INTEGER NOT NULL,
@@ -7748,6 +8196,13 @@ public sealed class InvoiceServiceTests
                 INSERT INTO CompanySettings (
                     CompanyId, BaseCurrency, StockBalanceCheckMode)
                 VALUES (1, 1, 1);
+
+                INSERT INTO FiscalYears (
+                    Id, CompanyId, Name, StartDate, EndDate, Status,
+                    IsCurrent)
+                VALUES
+                    (1, 1, '2026', '2026-01-01', '2026-12-31', 1, 1),
+                    (2, 2, '2026', '2026-01-01', '2026-12-31', 1, 1);
 
                 INSERT INTO BusinessPartners (
                     Id, CompanyId, Code, Name, Currency, CreditLimit,

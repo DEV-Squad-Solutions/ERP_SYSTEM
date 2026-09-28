@@ -25,6 +25,10 @@ public sealed record CashboxTransferResponse(
     DateTime LastModifiedAt,
     byte[] RowVersion)
 {
+    public int FiscalYearId { get; init; }
+
+    public string FiscalYearName { get; init; } = string.Empty;
+
     public decimal DestinationAmount { get; init; }
 
     public CurrencyCode DestinationCurrency { get; init; }
@@ -51,6 +55,10 @@ public sealed record CashboxTransferListResponse(
     DateTime LastModifiedAt,
     byte[] RowVersion)
 {
+    public int FiscalYearId { get; init; }
+
+    public string FiscalYearName { get; init; } = string.Empty;
+
     public decimal DestinationAmount { get; init; }
 
     public CurrencyCode DestinationCurrency { get; init; }

@@ -19,6 +19,83 @@ public sealed class FinancialStatementServiceTests
     }
 
     [Fact]
+    public async Task NewFiscalYearStatementUsesClosingEntryOnlyAsOpeningBalance()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears SET IsCurrent = 0 WHERE Id = 1;
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                3, 1, '2027', '2027-01-01', '2027-12-31', 1, 1,
+                'test', '2027-01-01', 'test', 0);
+            """);
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 7001,
+            entryNumber: "OB-2027",
+            entryDate: new DateOnly(2027, 1, 1),
+            entryType: JournalEntryType.Opening,
+            sourceType: JournalEntrySourceType.FiscalYearClosing,
+            sourceId: 1,
+            sourceNumber: "2026",
+            lines:
+            [
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 100,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 1,
+                    Debit: 1100m,
+                    Credit: 0m,
+                    Currency: CurrencyCode.EGP,
+                    ExchangeRate: 1m,
+                    TransactionDebit: 1100m,
+                    TransactionCredit: 0m)
+            ],
+            fiscalYearId: 3);
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 7002,
+            entryNumber: "JV-2027",
+            entryDate: new DateOnly(2027, 2, 1),
+            entryType: JournalEntryType.Manual,
+            sourceType: null,
+            sourceId: null,
+            sourceNumber: null,
+            lines:
+            [
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 100,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 1,
+                    Debit: 25m,
+                    Credit: 0m,
+                    Currency: CurrencyCode.EGP,
+                    ExchangeRate: 1m,
+                    TransactionDebit: 25m,
+                    TransactionCredit: 0m)
+            ],
+            fiscalYearId: 3);
+
+        var result = await database.CreateStatementService(1)
+            .GetCashboxStatementAsync(
+                Page(),
+                new CashboxStatementFilterRequest(
+                    CashboxId: 1,
+                    FiscalYearId: 3));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(1100m, result.Value.Summary.OpeningBalance);
+        Assert.Equal(25m, result.Value.Summary.TotalReceipts);
+        Assert.Equal(1125m, result.Value.Summary.ClosingBalance);
+        Assert.Equal(2, result.Value.TotalCount);
+        Assert.DoesNotContain(
+            result.Value.Items,
+            item => item.JournalEntryId == 7001);
+    }
+
+    [Fact]
     public async Task CashboxStatementCalculatesPeriodOpeningAndClosingBalances()
     {
         await using var database =
@@ -837,6 +914,44 @@ public sealed class FinancialStatementServiceTests
         Assert.Equal(0, result.Value.Summary.TotalIncomingUnits);
         Assert.Equal(15, result.Value.Summary.ClosingUnits);
         Assert.Equal(1, result.Value.Summary.DistinctContainerCount);
+    }
+
+    [Fact]
+    public async Task ContainerStoreStatement_DefaultsToCurrentFiscalYearAndSupportsHistoricalSelection()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await SeedContainerStatementDataAsync(database);
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent)
+            VALUES (
+                3, 1, '2025', '2025-01-01', '2025-12-31', 2, 0);
+
+            UPDATE ContainerMovements
+            SET FiscalYearId = 3, MovementDate = '2025-07-10'
+            WHERE Id = 2;
+            """);
+        database.Context.ChangeTracker.Clear();
+        var statements = database.CreateStatementService(1);
+
+        var current = await statements.GetContainerStoreStatementAsync(
+            Page(),
+            new ContainerStoreStatementFilterRequest(
+                BusinessPartnerId: 1,
+                Search: "Needle outgoing"));
+        var historical = await statements.GetContainerStoreStatementAsync(
+            Page(),
+            new ContainerStoreStatementFilterRequest(
+                BusinessPartnerId: 1,
+                Search: "Needle outgoing",
+                FiscalYearId: 3));
+
+        Assert.True(current.IsSuccess);
+        Assert.Empty(current.Value.Items);
+        Assert.True(historical.IsSuccess);
+        Assert.Equal(2, Assert.Single(historical.Value.Items).MovementId);
     }
 
     [Fact]

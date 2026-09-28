@@ -35,4 +35,5 @@ public sealed record CashboxTransferFilterRequest(
     int? SourceCashboxId = null,
     int? DestinationCashboxId = null,
     DateOnly? FromDate = null,
-    DateOnly? ToDate = null);
+    DateOnly? ToDate = null,
+    int? FiscalYearId = null);

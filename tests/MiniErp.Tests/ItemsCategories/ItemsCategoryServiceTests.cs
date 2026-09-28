@@ -178,6 +178,7 @@ public sealed class ItemsCategoryServiceTests
 
             await CreateSchemaAsync(context);
             await SeedAsync(context);
+            await TestFiscalYearSchema.EnsureAsync(context);
 
             return new CategoryTestDatabase(connection, context);
         }

@@ -29,12 +29,14 @@ public sealed class DefaultAccountingSetupService(
         new("3200", "مقابل الأرصدة الافتتاحية", "3000", AccountType.Equity, NormalBalance.Credit, true),
         new("4000", "الإيرادات", null, AccountType.Revenue, NormalBalance.Credit, false),
         new("4100", "إيرادات المبيعات", "4000", AccountType.Revenue, NormalBalance.Credit, true),
+        new("4150", "إيرادات الخدمات", "4000", AccountType.Revenue, NormalBalance.Credit, true),
         new("4200", "إيرادات أخرى", "4000", AccountType.Revenue, NormalBalance.Credit, true),
         new("4300", "أرباح فروق العملات", "4000", AccountType.Revenue, NormalBalance.Credit, true),
         new("4400", "أرباح زيادة المخزون", "4000", AccountType.Revenue, NormalBalance.Credit, true),
         new("5000", "المصروفات", null, AccountType.Expense, NormalBalance.Debit, false),
         new("5100", "تكلفة المبيعات", "5000", AccountType.Expense, NormalBalance.Debit, true),
         new("5200", "مصروفات التشغيل", "5000", AccountType.Expense, NormalBalance.Debit, true),
+        new("5250", "مصروفات الخدمات", "5000", AccountType.Expense, NormalBalance.Debit, true),
         new("5300", "مصروفات إدارية", "5000", AccountType.Expense, NormalBalance.Debit, true),
         new("5400", "خسائر فروق العملات", "5000", AccountType.Expense, NormalBalance.Debit, true),
         new("5500", "خسائر عجز المخزون", "5000", AccountType.Expense, NormalBalance.Debit, true)
@@ -58,7 +60,11 @@ public sealed class DefaultAccountingSetupService(
         new(AccountingMappingType.InventoryAdjustmentLoss, "5500"),
         new(AccountingMappingType.OpeningBalanceEquity, "3200"),
         new(AccountingMappingType.EmployeeReceivable, "1400"),
-        new(AccountingMappingType.DriverTripExpense, "5200")
+        new(AccountingMappingType.DriverTripExpense, "5200"),
+        new(AccountingMappingType.ServiceSales, "4150"),
+        new(AccountingMappingType.ServiceSalesReturn, "4150"),
+        new(AccountingMappingType.ServicePurchase, "5250"),
+        new(AccountingMappingType.ServicePurchaseReturn, "5250")
     ];
 
     private static readonly CashMovementTypeSeed[] CashMovementTypeSeeds =
@@ -160,9 +166,11 @@ public sealed class DefaultAccountingSetupService(
                 new("IS-250", "خسائر عجز المخزون", "IS-200", 250, true)
             ],
             [
-                new("4100", "IS-110"), new("4200", "IS-120"),
+                new("4100", "IS-110"), new("4150", "IS-110"),
+                new("4200", "IS-120"),
                 new("4300", "IS-130"), new("4400", "IS-140"),
                 new("5100", "IS-210"), new("5200", "IS-220"),
+                new("5250", "IS-220"),
                 new("5300", "IS-230"), new("5400", "IS-240"),
                 new("5500", "IS-250")
             ]),
@@ -184,10 +192,12 @@ public sealed class DefaultAccountingSetupService(
             ],
             [
                 new("1200", "CF-110"), new("4100", "CF-110"),
+                new("4150", "CF-110"),
                 new("1300", "CF-120"), new("2100", "CF-120"),
                 new("2200", "CF-130"), new("5100", "CF-130"),
                 new("2300", "CF-130"),
-                new("5200", "CF-130"), new("5300", "CF-130"),
+                new("5200", "CF-130"), new("5250", "CF-130"),
+                new("5300", "CF-130"),
                 new("1400", "CF-140"), new("4200", "CF-140"),
                 new("4300", "CF-140"), new("4400", "CF-140"),
                 new("5400", "CF-140"), new("5500", "CF-140"),

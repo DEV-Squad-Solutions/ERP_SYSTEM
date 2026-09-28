@@ -64,12 +64,28 @@ public sealed class CashboxService(
             .OrderByDescending(cashbox => cashbox.CreatedOn)
             .ThenByDescending(cashbox => cashbox.Id);
 
-        return await paginationService.PaginateAsync<
+        var pageResult = await paginationService.PaginateAsync<
             Cashbox,
             CashboxResponse>(
             query,
             pagination,
             cancellationToken);
+        if (pageResult.IsFailure)
+        {
+            return pageResult;
+        }
+
+        var balances = await LoadCurrentFiscalYearBalancesAsync(
+            pageResult.Value.Items.Select(cashbox => cashbox.Id),
+            cancellationToken);
+        var items = pageResult.Value.Items
+            .Select(cashbox => cashbox with
+            {
+                CurrentBalance = balances.GetValueOrDefault(cashbox.Id)
+            })
+            .ToList();
+        return Result<PagedResponse<CashboxResponse>>.Success(
+            pageResult.Value with { Items = items });
     }
 
     public async Task<Result<IReadOnlyList<CashboxSelectResponse>>>
@@ -84,6 +100,16 @@ public sealed class CashboxService(
             .ThenBy(cashbox => cashbox.Id)
             .ProjectToType<CashboxSelectResponse>()
             .ToListAsync(cancellationToken);
+
+        var balances = await LoadCurrentFiscalYearBalancesAsync(
+            response.Select(cashbox => cashbox.Id),
+            cancellationToken);
+        response = response
+            .Select(cashbox => cashbox with
+            {
+                CurrentBalance = balances.GetValueOrDefault(cashbox.Id)
+            })
+            .ToList();
 
         return Result<IReadOnlyList<CashboxSelectResponse>>.Success(response);
     }
@@ -101,9 +127,15 @@ public sealed class CashboxService(
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
 
-        return response is null
-            ? Result<CashboxResponse>.Failure(NotFound(id))
-            : Result<CashboxResponse>.Success(response);
+        if (response is null)
+        {
+            return Result<CashboxResponse>.Failure(NotFound(id));
+        }
+
+        response = await ApplyCurrentFiscalYearBalanceAsync(
+            response,
+            cancellationToken);
+        return Result<CashboxResponse>.Success(response);
     }
 
     public async Task<Result<CashboxResponse>> AddAsync(
@@ -180,6 +212,9 @@ public sealed class CashboxService(
         var response = await ProjectResponseQuery(cashbox.Id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
+        response = await ApplyCurrentFiscalYearBalanceAsync(
+            response,
+            cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return Result<CashboxResponse>.Success(response);
     }
@@ -348,6 +383,9 @@ public sealed class CashboxService(
         var response = await ProjectResponseQuery(id)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
+        response = await ApplyCurrentFiscalYearBalanceAsync(
+            response,
+            cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return Result<CashboxResponse>.Success(response);
     }
@@ -409,6 +447,93 @@ public sealed class CashboxService(
                 cashbox.CompanyId == companyId &&
                 cashbox.Id == id)
             .ProjectToType<CashboxResponse>();
+
+    private async Task<CashboxResponse> ApplyCurrentFiscalYearBalanceAsync(
+        CashboxResponse response,
+        CancellationToken cancellationToken)
+    {
+        var balances = await LoadCurrentFiscalYearBalancesAsync(
+            [response.Id],
+            cancellationToken);
+        return response with
+        {
+            CurrentBalance = balances.GetValueOrDefault(response.Id)
+        };
+    }
+
+    private async Task<IReadOnlyDictionary<int, decimal>>
+        LoadCurrentFiscalYearBalancesAsync(
+            IEnumerable<int> cashboxIds,
+            CancellationToken cancellationToken)
+    {
+        var ids = cashboxIds.Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return new Dictionary<int, decimal>();
+        }
+
+        var fiscalYear = await dbContext.FiscalYears
+            .AsNoTracking()
+            .Where(year =>
+                year.CompanyId == companyId &&
+                year.IsCurrent)
+            .Select(year => new
+            {
+                year.Id,
+                year.StartDate,
+                year.EndDate
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (fiscalYear is null)
+        {
+            return ids.ToDictionary(id => id, _ => 0m);
+        }
+
+        return await dbContext.Cashboxes
+            .AsNoTracking()
+            .Where(cashbox =>
+                cashbox.CompanyId == companyId &&
+                ids.Contains(cashbox.Id))
+            .Select(cashbox => new
+            {
+                cashbox.Id,
+                Balance =
+                    (cashbox.OpeningBalanceDate >= fiscalYear.StartDate &&
+                     cashbox.OpeningBalanceDate <= fiscalYear.EndDate
+                        ? cashbox.OpeningBalance
+                        : 0m) +
+                    (dbContext.JournalEntryLines
+                        .Where(line =>
+                            line.CompanyId == companyId &&
+                            line.JournalEntry.FiscalYearId == fiscalYear.Id &&
+                            line.JournalEntry.EntryType ==
+                                JournalEntryType.Opening &&
+                            line.JournalEntry.SourceType ==
+                                JournalEntrySourceType.FiscalYearClosing &&
+                            line.JournalEntry.Status ==
+                                JournalEntryStatus.Posted &&
+                            line.PartyType == JournalPartyType.Cashbox &&
+                            line.PartyId == cashbox.Id)
+                        .Select(line => (decimal?)
+                            (line.TransactionDebit -
+                             line.TransactionCredit))
+                        .Sum() ?? 0m) +
+                    (cashbox.Vouchers
+                        .Where(voucher =>
+                            voucher.CompanyId == companyId &&
+                            voucher.FiscalYearId == fiscalYear.Id &&
+                            voucher.IsPosted)
+                        .Select(voucher => (decimal?)
+                            (voucher.Direction == CashDirection.Receipt
+                                ? voucher.Amount
+                                : -voucher.Amount))
+                        .Sum() ?? 0m)
+            })
+            .ToDictionaryAsync(
+                row => row.Id,
+                row => row.Balance,
+                cancellationToken);
+    }
 
     private async Task<IReadOnlyList<Error>> FindDuplicateAsync(
         Cashbox cashbox,

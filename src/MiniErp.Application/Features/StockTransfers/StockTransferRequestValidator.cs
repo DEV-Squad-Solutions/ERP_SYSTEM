@@ -90,6 +90,9 @@ public sealed class StockTransferFilterRequestValidator
 {
     public StockTransferFilterRequestValidator()
     {
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue);
         RuleFor(filter => filter.Search)
             .MaximumLength(StockTransferFilterRequest.SearchMaximumLength);
         RuleFor(filter => filter.SourceStoreId)

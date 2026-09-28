@@ -24,12 +24,9 @@ public sealed partial class FinancialStatementService
             .AsNoTracking()
             .Where(year =>
                 year.CompanyId == companyId &&
-                (!request.FiscalYearId.HasValue ||
-                 year.Id == request.FiscalYearId.Value) &&
-                year.StartDate <= request.FromDate &&
-                year.EndDate >= request.ToDate)
-            .OrderByDescending(year => year.IsCurrent)
-            .ThenBy(year => year.StartDate)
+                (request.FiscalYearId.HasValue
+                    ? year.Id == request.FiscalYearId.Value
+                    : year.IsCurrent))
             .Select(year => new
             {
                 year.Id,
@@ -118,6 +115,7 @@ public sealed partial class FinancialStatementService
             .AsNoTracking()
             .AnyAsync(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYear.Id &&
                 movement.MovementDate >= fiscalYear.StartDate &&
                 movement.MovementDate <= request.ToDate &&
                 (movement.CostStatus == InventoryCostStatus.Pending ||
@@ -127,6 +125,7 @@ public sealed partial class FinancialStatementService
                 .AsNoTracking()
                 .AnyAsync(count =>
                     count.CompanyId == companyId &&
+                    count.FiscalYearId == fiscalYear.Id &&
                     count.CountDate >= fiscalYear.StartDate &&
                     count.CountDate <= request.ToDate &&
                     !count.ReconciledAt.HasValue &&

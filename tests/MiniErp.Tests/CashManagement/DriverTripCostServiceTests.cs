@@ -208,6 +208,53 @@ public sealed class DriverTripCostServiceTests
                 .SingleAsync());
     }
 
+    [Fact]
+    public async Task QueryIsYearScopedAndClosedYearCostsCannotBeChanged()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await database.ConfigureSeparateFiscalYearsAsync();
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreateDriverTripService(companyId: 1);
+
+        var current = await service.GetCostEntryAsync(Page());
+        var historical = await service.GetCostEntryAsync(
+            Page(),
+            new DriverTripCostFilterRequest(FiscalYearId: 1));
+
+        Assert.True(current.IsSuccess);
+        var currentTrip = Assert.Single(current.Value.Items);
+        Assert.Equal(2, currentTrip.DriverTripId);
+        Assert.Equal(100, currentTrip.FiscalYearId);
+        Assert.Equal("2026", currentTrip.FiscalYearName);
+
+        Assert.True(historical.IsSuccess);
+        var historicalTrip = Assert.Single(historical.Value.Items);
+        Assert.Equal(1, historicalTrip.DriverTripId);
+        Assert.Equal(1, historicalTrip.FiscalYearId);
+        Assert.Equal("2025", historicalTrip.FiscalYearName);
+
+        var update = await service.UpdateCostsAsync(
+            new DriverTripBulkCostUpdateRequest(
+            [
+                new DriverTripCostUpdateItem(
+                    historicalTrip.DriverTripId,
+                    250m,
+                    "Must remain closed",
+                    historicalTrip.RowVersion)
+            ]));
+
+        Assert.True(update.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            update.Error.Code);
+        Assert.Null(
+            await database.Context.DriverTrips
+                .Where(trip => trip.Id == historicalTrip.DriverTripId)
+                .Select(trip => trip.Cost)
+                .SingleAsync());
+    }
+
     private static PaginationRequest Page() =>
         new()
         {

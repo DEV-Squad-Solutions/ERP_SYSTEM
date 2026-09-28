@@ -12,6 +12,7 @@ using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.PartnerOpeningBalances;
+using MiniErp.Infrastructure.Services.FiscalYears;
 
 namespace MiniErp.Tests.PartnerOpeningBalances;
 
@@ -51,6 +52,127 @@ public sealed class PartnerOpeningBalanceServiceTests
         Assert.Equal(125.50m, item.Amount);
         Assert.Equal("Opening balance", item.Notes);
         Assert.NotEmpty(item.RowVersion);
+        Assert.False(item.IsCarriedForward);
+    }
+
+    [Fact]
+    public async Task GetAll_IncludesCarriedForwardPartnerBalanceAsReadOnly()
+    {
+        await using var database =
+            await PartnerOpeningBalanceTestDatabase.CreateAsync();
+        await database.ConfigureSeparateFiscalYearsAsync();
+        await database.SeedCarriedForwardPartnerBalanceAsync();
+        var service = database.CreateService(companyId: 1);
+
+        var result = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new PartnerOpeningBalanceFilterRequest(FiscalYearId: 100));
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value.Items);
+        Assert.True(item.Id < 0);
+        Assert.True(item.IsCarriedForward);
+        Assert.Equal(100, item.FiscalYearId);
+        Assert.Equal("2026", item.FiscalYearName);
+        Assert.Equal(1, item.BusinessPartnerId);
+        Assert.Equal("Company A Partner", item.BusinessPartnerName);
+        Assert.Equal(new DateOnly(2026, 1, 1), item.DocumentDate);
+        Assert.Equal(PartnerBalanceType.Payable, item.BalanceType);
+        Assert.Equal(4_500m, item.Amount);
+        Assert.Equal(4_500m, item.BaseAmount);
+        Assert.Equal(1m, item.ExchangeRate);
+        Assert.Empty(item.RowVersion);
+
+        var get = await service.GetByIdAsync(item.Id, fiscalYearId: 100);
+        var update = await service.UpdateAsync(
+            item.Id,
+            new PartnerOpeningBalanceUpdateRequest(
+                BusinessPartnerId: item.BusinessPartnerId,
+                DocumentDate: item.DocumentDate,
+                Currency: item.Currency,
+                BalanceType: item.BalanceType,
+                Amount: item.Amount,
+                Notes: item.Notes,
+                RowVersion: [1]));
+        var delete = await service.DeleteAsync(item.Id);
+
+        Assert.True(get.IsSuccess);
+        Assert.True(get.Value.IsCarriedForward);
+        Assert.Equal(
+            "PartnerOpeningBalances.CarriedForwardReadOnly",
+            update.Error.Code);
+        Assert.Equal(
+            "PartnerOpeningBalances.CarriedForwardReadOnly",
+            delete.Error.Code);
+    }
+
+    [Fact]
+    public async Task GetAll_DefaultsToCurrentFiscalYearAndAllowsHistoricalYear()
+    {
+        await using var database =
+            await PartnerOpeningBalanceTestDatabase.CreateAsync();
+        await database.ConfigureSeparateFiscalYearsAsync();
+        var service = database.CreateService(companyId: 1);
+
+        var currentCreated = await service.AddAsync(
+            CreateRequest(documentDate: new DateOnly(2025, 1, 1)));
+        var nextCreated = await service.AddAsync(
+            CreateRequest(documentDate: new DateOnly(2026, 1, 1)));
+
+        Assert.True(currentCreated.IsSuccess);
+        Assert.True(nextCreated.IsSuccess);
+
+        var currentYear = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 });
+        var nextYear = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new PartnerOpeningBalanceFilterRequest(FiscalYearId: 100));
+
+        Assert.True(currentYear.IsSuccess);
+        var currentItem = Assert.Single(currentYear.Value.Items);
+        Assert.Equal(currentCreated.Value.Id, currentItem.Id);
+        Assert.Equal(1, currentItem.FiscalYearId);
+        Assert.Equal("2025", currentItem.FiscalYearName);
+
+        Assert.True(nextYear.IsSuccess);
+        var nextItem = Assert.Single(nextYear.Value.Items);
+        Assert.Equal(nextCreated.Value.Id, nextItem.Id);
+        Assert.Equal(100, nextItem.FiscalYearId);
+        Assert.Equal("2026", nextItem.FiscalYearName);
+
+        var hiddenNextYearBalance = await service.GetByIdAsync(nextItem.Id);
+        var explicitNextYearBalance = await service.GetByIdAsync(
+            nextItem.Id,
+            fiscalYearId: 100);
+        var invalidCurrentYearRange = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new PartnerOpeningBalanceFilterRequest(
+                FromDate: new DateOnly(2026, 1, 1)));
+        var crossYearUpdate = await service.UpdateAsync(
+            currentCreated.Value.Id,
+            new PartnerOpeningBalanceUpdateRequest(
+                BusinessPartnerId: currentCreated.Value.BusinessPartnerId,
+                DocumentDate: new DateOnly(2026, 1, 1),
+                Currency: currentCreated.Value.Currency,
+                BalanceType: currentCreated.Value.BalanceType,
+                Amount: currentCreated.Value.Amount,
+                Notes: currentCreated.Value.Notes,
+                RowVersion: currentCreated.Value.RowVersion));
+
+        Assert.True(hiddenNextYearBalance.IsFailure);
+        Assert.Equal(
+            "PartnerOpeningBalances.NotFound",
+            hiddenNextYearBalance.Error.Code);
+        Assert.True(explicitNextYearBalance.IsSuccess);
+        Assert.Equal(nextItem.Id, explicitNextYearBalance.Value.Id);
+        Assert.True(invalidCurrentYearRange.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            invalidCurrentYearRange.Error.Code);
+        Assert.True(crossYearUpdate.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            crossYearUpdate.Error.Code);
     }
 
     [Fact]
@@ -370,10 +492,11 @@ public sealed class PartnerOpeningBalanceServiceTests
         int businessPartnerId = 1,
         CurrencyCode currency = CurrencyCode.EGP,
         PartnerBalanceType balanceType = PartnerBalanceType.Receivable,
-        decimal amount = 125.50m) =>
+        decimal amount = 125.50m,
+        DateOnly? documentDate = null) =>
         new(
             businessPartnerId,
-            new DateOnly(2026, 1, 1),
+            documentDate ?? new DateOnly(2026, 1, 1),
             currency,
             balanceType,
             amount,
@@ -393,6 +516,42 @@ public sealed class PartnerOpeningBalanceServiceTests
 
         public ApplicationDbContext Context { get; }
 
+        public Task ConfigureSeparateFiscalYearsAsync() =>
+            Context.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE FiscalYears
+                SET Name = '2025', StartDate = '2025-01-01',
+                    EndDate = '2025-12-31'
+                WHERE Id = 1;
+
+                INSERT INTO FiscalYears (
+                    Id, CompanyId, Name, StartDate, EndDate, Status,
+                    IsCurrent, RowVersion, CreatedById, CreatedOn,
+                    CreatedByPc, IsDeleted)
+                VALUES (
+                    100, 1, '2026', '2026-01-01', '2026-12-31', 1,
+                    0, randomblob(8), 'test', '2026-01-01', 'test', 0);
+                """);
+
+        public Task SeedCarriedForwardPartnerBalanceAsync() =>
+            Context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO JournalEntries (
+                    Id, CompanyId, FiscalYearId, EntryNumber, EntryDate,
+                    Description, EntryType, SourceType, SourceId, SourceNumber,
+                    Status, PostedOn, IsDeleted)
+                VALUES (
+                    1, 1, 100, 'OB-1', '2026-01-01', 'Carried forward',
+                    3, 13, 1, '2025', 1, '2026-01-01', 0);
+
+                INSERT INTO JournalEntryLines (
+                    Id, CompanyId, JournalEntryId, AccountId, PartyType,
+                    PartyId, Currency, ExchangeRate, Debit, Credit,
+                    TransactionDebit, TransactionCredit, IsDeleted)
+                VALUES (
+                    1, 1, 1, 1, 2, 1, 1, 1, 0, 4500, 0, 4500, 0);
+                """);
+
         public static async Task<PartnerOpeningBalanceTestDatabase> CreateAsync(
             bool addForcedInsertFailureTrigger = false)
         {
@@ -410,6 +569,7 @@ public sealed class PartnerOpeningBalanceServiceTests
 
             await CreateSchemaAsync(context);
             await SeedReferenceDataAsync(context);
+            await TestFiscalYearSchema.EnsureAsync(context);
 
             if (addForcedInsertFailureTrigger)
             {
@@ -430,8 +590,10 @@ public sealed class PartnerOpeningBalanceServiceTests
         public PartnerOpeningBalanceService CreateService(int companyId) =>
             new(
                 Context,
-                new PaginationService(),
                 new TestCurrentCompanyContext(companyId),
+                new FiscalYearQueryScopeResolver(
+                    Context,
+                    new TestCurrentCompanyContext(companyId)),
                 new MiniErp.Tests.TestExchangeRateResolver());
 
         public async ValueTask DisposeAsync()
@@ -518,6 +680,41 @@ public sealed class PartnerOpeningBalanceServiceTests
                     DeletedById TEXT NULL,
                     DeletedOn TEXT NULL,
                     DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE JournalEntries (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL,
+                    EntryNumber TEXT NOT NULL,
+                    EntryDate TEXT NOT NULL,
+                    Description TEXT NOT NULL,
+                    EntryType INTEGER NOT NULL,
+                    SourceType INTEGER NULL,
+                    SourceId INTEGER NULL,
+                    SourceNumber TEXT NULL,
+                    Status INTEGER NOT NULL,
+                    PostedOn TEXT NOT NULL,
+                    ReversedOn TEXT NULL,
+                    ReversalOfEntryId INTEGER NULL,
+                    IsDeleted INTEGER NOT NULL
+                );
+
+                CREATE TABLE JournalEntryLines (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    JournalEntryId INTEGER NOT NULL,
+                    AccountId INTEGER NOT NULL,
+                    PartyType INTEGER NULL,
+                    PartyId INTEGER NULL,
+                    Description TEXT NULL,
+                    Currency INTEGER NOT NULL,
+                    ExchangeRate NUMERIC NOT NULL,
+                    Debit NUMERIC NOT NULL,
+                    Credit NUMERIC NOT NULL,
+                    TransactionDebit NUMERIC NOT NULL,
+                    TransactionCredit NUMERIC NOT NULL,
                     IsDeleted INTEGER NOT NULL
                 );
 

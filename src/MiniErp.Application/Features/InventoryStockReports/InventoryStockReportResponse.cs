@@ -18,6 +18,8 @@ public sealed record InventoryStockReportSummaryResponse(
     decimal TotalInventoryValue);
 
 public sealed record InventoryStockReportResponse(
+    int FiscalYearId,
+    string FiscalYearName,
     int StoreId,
     string StoreCode,
     string StoreName,

@@ -29,6 +29,19 @@ public sealed partial class InvoiceQueryService
                 filterError);
         }
 
+        var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.AsOfDate,
+            toDate: filters.AsOfDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYearResult.IsFailure)
+        {
+            return Result<PagedResponse<InvoiceReturnSourceResponse>>.Failure(
+                fiscalYearResult.Errors);
+        }
+
+        var fiscalYearId = fiscalYearResult.Value.FiscalYearId;
+
         var sourceType = filters.ReturnType == InvoiceReturnType.SalesReturn
             ? InvoiceType.Sales
             : InvoiceType.Purchase;
@@ -45,6 +58,7 @@ public sealed partial class InvoiceQueryService
             .AsNoTracking()
             .Where(invoice =>
                 invoice.CompanyId == companyId &&
+                invoice.FiscalYearId == fiscalYearId &&
                 invoice.InvoiceType == sourceType &&
                 invoice.ContentType == InvoiceContentType.Items &&
                 invoice.BusinessPartnerId == filters.BusinessPartnerId &&
@@ -67,6 +81,7 @@ public sealed partial class InvoiceQueryService
             (dbContext.InvoiceLines
                 .Where(returnLine =>
                     returnLine.CompanyId == companyId &&
+                    returnLine.Invoice.FiscalYearId == fiscalYearId &&
                     returnLine.SourceInvoiceLineId == sourceLine.Id &&
                     returnLine.Invoice.InvoiceType == returnType &&
                     (!currentReturnInvoiceId.HasValue ||
@@ -127,6 +142,7 @@ public sealed partial class InvoiceQueryService
                     ReturnedQuantity = dbContext.InvoiceLines
                         .Where(returnLine =>
                             returnLine.CompanyId == companyId &&
+                            returnLine.Invoice.FiscalYearId == fiscalYearId &&
                             returnLine.SourceInvoiceLineId == sourceLine.Id &&
                             returnLine.Invoice.InvoiceType == returnType &&
                             (!currentReturnInvoiceId.HasValue ||
@@ -139,6 +155,7 @@ public sealed partial class InvoiceQueryService
                     CostStatus = dbContext.ItemMovements
                         .Where(movement =>
                             movement.CompanyId == companyId &&
+                            movement.FiscalYearId == fiscalYearId &&
                             movement.MovementType == sourceMovementType &&
                             movement.ReferenceId == sourceLine.InvoiceId &&
                             movement.ItemId == sourceLine.ItemId)
@@ -148,6 +165,7 @@ public sealed partial class InvoiceQueryService
                     PendingCostQuantity = dbContext.ItemMovements
                         .Where(movement =>
                             movement.CompanyId == companyId &&
+                            movement.FiscalYearId == fiscalYearId &&
                             movement.MovementType == sourceMovementType &&
                             movement.ReferenceId == sourceLine.InvoiceId &&
                             movement.ItemId == sourceLine.ItemId)
@@ -157,6 +175,7 @@ public sealed partial class InvoiceQueryService
                     UnitCost = dbContext.ItemMovements
                         .Where(movement =>
                             movement.CompanyId == companyId &&
+                            movement.FiscalYearId == fiscalYearId &&
                             movement.MovementType == sourceMovementType &&
                             movement.ReferenceId == sourceLine.InvoiceId &&
                             movement.ItemId == sourceLine.ItemId)
@@ -246,6 +265,11 @@ public sealed partial class InvoiceQueryService
         if (filters.AsOfDate == DateOnly.MinValue)
         {
             return ReturnSourceDateRequired();
+        }
+
+        if (filters.FiscalYearId is <= 0)
+        {
+            return InvalidFilter(InvoiceFilterErrorKind.FiscalYearId);
         }
 
         if (filters.Search?.Trim().Length >

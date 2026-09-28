@@ -13,6 +13,10 @@ public sealed class DriverTrip : AuditableEntity
 
     public Company Company { get; set; } = null!;
 
+    public int FiscalYearId { get; set; }
+
+    public MiniErp.Domain.Entities.Accounting.FiscalYear FiscalYear { get; set; } = null!;
+
     public int DriverId { get; set; }
 
     public Driver Driver { get; set; } = null!;

@@ -13,6 +13,9 @@ public sealed class PartnerOpeningBalanceFilterRequestValidator
             .When(filter => filter.BusinessPartnerId.HasValue);
         RuleFor(filter => filter.Currency).IsInEnum().When(filter => filter.Currency.HasValue);
         RuleFor(filter => filter.BalanceType).IsInEnum().When(filter => filter.BalanceType.HasValue);
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue);
         RuleFor(filter => filter.ToDate)
             .GreaterThanOrEqualTo(filter => filter.FromDate)
             .When(filter => filter.FromDate.HasValue && filter.ToDate.HasValue)

@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations.Schema;
 using MiniErp.Domain.Common.Entities;
 using MiniErp.Domain.Entities.Catalog;
 using MiniErp.Domain.Entities.Companies;
@@ -18,6 +19,12 @@ public sealed class InvoiceLine : AuditableEntity
     public Invoice Invoice { get; set; } = null!;
 
     public int? ItemId { get; set; }
+
+    [NotMapped]
+    public InvoiceLineType LineType =>
+        ItemId.HasValue
+            ? InvoiceLineType.InventoryItem
+            : InvoiceLineType.Service;
 
     public Item? Item { get; set; }
 

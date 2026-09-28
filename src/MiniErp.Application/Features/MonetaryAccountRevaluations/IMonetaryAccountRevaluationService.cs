@@ -7,6 +7,7 @@ namespace MiniErp.Application.Features.MonetaryAccountRevaluations;
 public interface IMonetaryAccountRevaluationService : IScopedService
 {
     Task<Result<IReadOnlyList<MonetaryAccountRevaluationOption>>> GetOptionsAsync(
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<MonetaryAccountRevaluationResponse>> CreateAsync(
@@ -19,5 +20,6 @@ public interface IMonetaryAccountRevaluationService : IScopedService
         int? partyId = null,
         DateOnly? fromDate = null,
         DateOnly? toDate = null,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 }

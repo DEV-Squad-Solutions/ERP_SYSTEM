@@ -20,7 +20,8 @@ public sealed record EmployeeMovementFilterRequest(
     DateOnly? ToDate = null,
     EmployeeMovementType? Type = null,
     CurrencyCode? Currency = null,
-    string? Search = null);
+    string? Search = null,
+    int? FiscalYearId = null);
 
 public sealed record BulkEmployeeMovementRequest(
     List<EmployeeMovementRequest> Movements);
@@ -31,5 +32,6 @@ public sealed record EmployeeMovementReportRequest(
     DateOnly? ToDate = null,
     EmployeeMovementType? Type = null,
     CurrencyCode? Currency = null,
-    string? Search = null);
+    string? Search = null,
+    int? FiscalYearId = null);
 

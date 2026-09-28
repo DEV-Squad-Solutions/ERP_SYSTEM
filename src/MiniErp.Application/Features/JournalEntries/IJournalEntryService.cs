@@ -12,6 +12,7 @@ public interface IJournalEntryService
 
     Task<Result<JournalEntryResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<JournalEntryResponse>> AddAsync(

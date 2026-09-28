@@ -5,6 +5,12 @@ namespace MiniErp.Application.Features.JournalEntries;
 
 public static class JournalEntryErrors
 {
+    public static Error FiscalYearCannotBeChanged() =>
+        Error.Validation(
+            "JournalEntries.FiscalYearCannotBeChanged",
+            "لا يمكن نقل القيد إلى سنة مالية أخرى بعد إنشائه.",
+            "FiscalYearId");
+
     public static Error InvalidId() => Error.Validation(
         "JournalEntries.InvalidId",
         "يجب أن يكون رقم القيد أكبر من صفر.");

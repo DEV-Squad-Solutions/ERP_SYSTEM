@@ -17,13 +17,18 @@ public sealed class CashboxRevaluationsController(
         [FromQuery] int? cashboxId,
         [FromQuery] DateOnly? fromDate,
         [FromQuery] DateOnly? toDate,
+        [FromQuery] int? fiscalYearId,
         CancellationToken cancellationToken)
     {
-        var result = await service.GetAsync(cashboxId, fromDate, toDate, cancellationToken);
+        var result = await service.GetAsync(
+            cashboxId,
+            fromDate,
+            toDate,
+            fiscalYearId,
+            cancellationToken);
         return this.ToActionResult(result);
     }
 
-    [Authorize(Roles = "Admin")]
     [HttpPost]
     [ProducesResponseType<CashboxRevaluationResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> Create(

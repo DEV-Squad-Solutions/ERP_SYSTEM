@@ -18,7 +18,9 @@ public sealed class StockTransferService(
     ICurrentCompanyContext currentCompanyContext,
     IInventoryStockService inventoryStockService,
     IInventoryCostingService inventoryCostingService,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
     : IStockTransferService, IScopedService
 {
     private static readonly ItemMovementType[] TransferMovementTypes =
@@ -41,10 +43,25 @@ public sealed class StockTransferService(
                 filterError);
         }
 
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.FromDate,
+            toDate: filters.ToDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<PagedResponse<StockTransferListResponse>>.Failure(
+                fiscalYear.Errors);
+        }
+
         var search = filters.Search?.Trim();
         var query = dbContext.StockTransfers
             .AsNoTracking()
-            .Where(transfer => transfer.CompanyId == companyId)
+            .Where(transfer =>
+                transfer.CompanyId == companyId &&
+                transfer.FiscalYearId == fiscalYear.Value.FiscalYearId);
+
+        var orderedQuery = query
             .Where(transfer => string.IsNullOrEmpty(search) ||
                 transfer.DocumentNumber.Contains(search) ||
                 transfer.SourceStore.Name.Contains(search) ||
@@ -65,13 +82,14 @@ public sealed class StockTransferService(
         return await paginationService.PaginateAsync<
             StockTransfer,
             StockTransferListResponse>(
-                query,
+                orderedQuery,
                 pagination,
                 cancellationToken);
     }
 
     public async Task<Result<StockTransferResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -79,7 +97,18 @@ public sealed class StockTransferService(
             return Result<StockTransferResponse>.Failure(InvalidId());
         }
 
-        var response = await BuildResponseAsync(id, cancellationToken);
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<StockTransferResponse>.Failure(fiscalYear.Errors);
+        }
+
+        var response = await BuildResponseAsync(
+            id,
+            cancellationToken,
+            fiscalYear.Value.FiscalYearId);
         return response is null
             ? Result<StockTransferResponse>.Failure(NotFound(id))
             : Result<StockTransferResponse>.Success(response);
@@ -97,6 +126,19 @@ public sealed class StockTransferService(
         if (shapeError is not null)
         {
             return Result<StockTransferResponse>.Failure(shapeError);
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.TransferDate,
+                nameof(StockTransferRequest.TransferDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<StockTransferResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
         }
 
         await using var transaction = await dbContext.Database
@@ -217,6 +259,43 @@ public sealed class StockTransferService(
             return Result<StockTransferResponse>.Failure(NotFound(id));
         }
 
+        if (!transfer.RowVersion.SequenceEqual(request.RowVersion))
+        {
+            return Result<StockTransferResponse>.Failure(Concurrency());
+        }
+
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: transfer.FiscalYearId,
+            fromDate: request.TransferDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<StockTransferResponse>.Failure(fiscalYear.Errors);
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                transfer.TransferDate,
+                nameof(StockTransferRequest.TransferDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<StockTransferResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+
+            fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.TransferDate,
+                nameof(StockTransferUpdateRequest.TransferDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result<StockTransferResponse>.Failure(
+                    fiscalYearResult.Errors);
+            }
+        }
+
         var preparation = await PrepareAsync(
             transfer.SourceStoreId,
             transfer.DestinationStoreId,
@@ -233,9 +312,15 @@ public sealed class StockTransferService(
             cancellationToken);
         var oldKeys = GetCostingKeys(movements);
         var newSourceKeys = request.Lines.Select(line =>
-            new InventoryCostingKey(transfer.SourceStoreId, line.ItemId)).ToArray();
+            new InventoryCostingKey(
+                transfer.SourceStoreId,
+                line.ItemId,
+                transfer.FiscalYearId)).ToArray();
         var newDestinationKeys = request.Lines.Select(line =>
-            new InventoryCostingKey(transfer.DestinationStoreId, line.ItemId)).ToArray();
+            new InventoryCostingKey(
+                transfer.DestinationStoreId,
+                line.ItemId,
+                transfer.FiscalYearId)).ToArray();
         await inventoryCostingService.LockAsync(
             oldKeys.Concat(newSourceKeys).Concat(newDestinationKeys).ToArray(),
             cancellationToken);
@@ -344,6 +429,27 @@ public sealed class StockTransferService(
         if (transfer is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: transfer.FiscalYearId,
+            fromDate: transfer.TransferDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result.Failure(fiscalYear.Errors);
+        }
+
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                transfer.TransferDate,
+                nameof(StockTransferRequest.TransferDate),
+                cancellationToken);
+            if (fiscalYearResult.IsFailure)
+            {
+                return Result.Failure(fiscalYearResult.Errors);
+            }
         }
 
         var movements = await LoadMovementsAsync(
@@ -679,15 +785,22 @@ public sealed class StockTransferService(
 
     private async Task<StockTransferResponse?> BuildResponseAsync(
         int id,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? fiscalYearId = null)
     {
         var transfer = await dbContext.StockTransfers
             .AsNoTracking()
-            .Where(entity => entity.CompanyId == companyId && entity.Id == id)
+            .Where(entity =>
+                entity.CompanyId == companyId &&
+                entity.Id == id &&
+                (!fiscalYearId.HasValue ||
+                 entity.FiscalYearId == fiscalYearId.Value))
             .Select(entity => new
             {
                 entity.Id,
                 entity.CompanyId,
+                entity.FiscalYearId,
+                FiscalYearName = entity.FiscalYear.Name,
                 entity.DocumentNumber,
                 entity.TransferDate,
                 entity.SourceStoreId,
@@ -721,6 +834,7 @@ public sealed class StockTransferService(
         var movements = await dbContext.ItemMovements
             .AsNoTracking()
             .Where(movement => movement.CompanyId == companyId &&
+                movement.FiscalYearId == transfer.FiscalYearId &&
                 TransferMovementTypes.Contains(movement.MovementType) &&
                 movement.ReferenceId == transfer.Id &&
                 movement.ReferenceNumber == transfer.DocumentNumber)
@@ -770,6 +884,8 @@ public sealed class StockTransferService(
         return new StockTransferResponse(
             Id: transfer.Id,
             CompanyId: transfer.CompanyId,
+            FiscalYearId: transfer.FiscalYearId,
+            FiscalYearName: transfer.FiscalYearName,
             DocumentNumber: transfer.DocumentNumber,
             TransferDate: transfer.TransferDate,
             SourceStoreId: transfer.SourceStoreId,
@@ -806,7 +922,10 @@ public sealed class StockTransferService(
     private static IReadOnlyCollection<InventoryCostingKey> GetCostingKeys(
         IEnumerable<ItemMovement> movements) =>
         movements.Select(movement =>
-                new InventoryCostingKey(movement.StoreId, movement.ItemId))
+                new InventoryCostingKey(
+                    movement.StoreId,
+                    movement.ItemId,
+                    movement.FiscalYearId))
             .Distinct()
             .ToArray();
 
@@ -818,7 +937,8 @@ public sealed class StockTransferService(
 
     private static Error? ValidateFilters(StockTransferFilterRequest filters)
     {
-        if (filters.Search?.Trim().Length >
+        if (filters.FiscalYearId is <= 0 ||
+            filters.Search?.Trim().Length >
                 StockTransferFilterRequest.SearchMaximumLength ||
             filters.SourceStoreId is <= 0 ||
             filters.DestinationStoreId is <= 0 ||

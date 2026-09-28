@@ -13,5 +13,6 @@ public interface ICashboxRevaluationService : IScopedService
         int? cashboxId = null,
         DateOnly? fromDate = null,
         DateOnly? toDate = null,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 }

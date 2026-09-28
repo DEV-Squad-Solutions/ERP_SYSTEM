@@ -34,6 +34,9 @@ public sealed class CashboxStatementFilterRequestValidator
             .GreaterThan(0)
             .When(filter => filter.EmployeeId.HasValue);
         RuleFor(filter => filter.VoucherNumber).MaximumLength(100);
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue);
     }
 
     private static void AddCommonRules(
@@ -69,6 +72,9 @@ public sealed class PartnerStatementFilterRequestValidator
         RuleFor(filter => filter.Classification)
             .IsInEnum()
             .When(filter => filter.Classification.HasValue);
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue);
         RuleFor(filter => filter.ToDate)
             .GreaterThanOrEqualTo(filter => filter.FromDate)
             .When(filter =>
@@ -99,6 +105,9 @@ public sealed class DriverStatementFilterRequestValidator
             .GreaterThan(0)
             .When(filter => filter.DriverTripId.HasValue);
         RuleFor(filter => filter.InvoiceNumber).MaximumLength(100);
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue);
         RuleFor(filter => filter.ToDate)
             .GreaterThanOrEqualTo(filter => filter.FromDate)
             .When(filter =>
@@ -126,6 +135,9 @@ public sealed class ContainerStoreStatementFilterRequestValidator
         RuleFor(filter => filter.Direction)
             .IsInEnum()
             .When(filter => filter.Direction.HasValue);
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue);
         RuleFor(filter => filter.ToDate)
             .GreaterThanOrEqualTo(filter => filter.FromDate)
             .When(filter =>
@@ -155,6 +167,9 @@ public sealed class OperationalTrialBalanceFilterRequestValidator
         RuleFor(filter => filter.AccountId)
             .GreaterThan(0)
             .When(filter => filter.AccountId.HasValue);
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue);
     }
 }
 
@@ -171,6 +186,9 @@ public sealed class EmployeeStatementFilterRequestValidator
         RuleFor(filter => filter.MovementType)
             .IsInEnum()
             .When(filter => filter.MovementType.HasValue);
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue);
         RuleFor(filter => filter.ToDate)
             .GreaterThanOrEqualTo(filter => filter.FromDate)
             .When(filter =>

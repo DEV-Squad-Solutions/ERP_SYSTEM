@@ -9,7 +9,8 @@ public sealed record CashVoucherHandoverReportFilterRequest(
     DateOnly? FromDate = null,
     DateOnly? ToDate = null,
     CashDirection? Direction = null,
-    string? Search = null);
+    string? Search = null,
+    int? FiscalYearId = null);
 
 public sealed class CashVoucherHandoverReportFilterRequestValidator
     : AbstractValidator<CashVoucherHandoverReportFilterRequest>
@@ -18,6 +19,9 @@ public sealed class CashVoucherHandoverReportFilterRequestValidator
 
     public CashVoucherHandoverReportFilterRequestValidator()
     {
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue);
         RuleFor(filter => filter.CashboxId)
             .GreaterThan(0)
             .When(filter => filter.CashboxId.HasValue);
@@ -73,4 +77,9 @@ public sealed record CashVoucherHandoverReportResponse(
     int TotalCount,
     int TotalPages,
     IReadOnlyList<CashVoucherHandoverCurrencySummary> Summaries,
-    IReadOnlyList<CashVoucherHandoverCashboxBalance> CashboxBalances);
+    IReadOnlyList<CashVoucherHandoverCashboxBalance> CashboxBalances)
+{
+    public int FiscalYearId { get; init; }
+
+    public string FiscalYearName { get; init; } = string.Empty;
+}

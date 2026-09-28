@@ -119,6 +119,11 @@ public sealed class InvoiceMappingRegister : IRegister
     private static void RegisterLineMappings(TypeAdapterConfig config)
     {
         config.ForType<InvoiceLine, InvoiceLineResponse>()
+            .Map(
+                response => response.LineType,
+                line => line.ItemId.HasValue
+                    ? InvoiceLineType.InventoryItem
+                    : InvoiceLineType.Service)
             .Map(response => response.ItemCode, line => line.Item != null ? line.Item.Code : null)
             .Map(response => response.ItemName, line => line.Item != null ? line.Item.Name : line.ItemName)
             .Map(response => response.ItemUnitName, line => line.ItemUnit != null ? line.ItemUnit.Name : null);

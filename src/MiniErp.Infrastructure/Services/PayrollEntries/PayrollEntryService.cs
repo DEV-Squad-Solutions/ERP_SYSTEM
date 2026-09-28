@@ -16,7 +16,8 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
         ApplicationDbContext dbContext,
         IPaginationService paginationService,
         ICurrentCompanyContext currentCompanyContext,
-        IExchangeRateResolver exchangeRateResolver)
+        IExchangeRateResolver exchangeRateResolver,
+        IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
         : IPayrollEntryService, IScopedService
     {
         private readonly int companyId = currentCompanyContext.CompanyId;
@@ -367,6 +368,21 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 return Result<PayrollEntryResponse>.Failure(guardError);
             }
 
+            if (fiscalYearPeriodGuard is not null)
+            {
+                var fiscalYearResult = await fiscalYearPeriodGuard
+                    .EnsureOpenAsync(
+                        request.PostingDate,
+                        nameof(PayrollEntrySalaryPaymentRequest.PostingDate),
+                        cancellationToken);
+                if (fiscalYearResult.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Result<PayrollEntryResponse>.Failure(
+                        fiscalYearResult.Errors);
+                }
+            }
+
             // Check if this payroll entry or another payroll entry for the same employee + period has already been transferred
             var isAlreadyTransferred = await dbContext.EmployeeOpeningBalances
                 .AnyAsync(b =>
@@ -544,6 +560,24 @@ namespace MiniErp.Infrastructure.Services.PayrollEntries
                 {
                     await transaction.RollbackAsync(cancellationToken);
                     return Result<List<PayrollEntryResponse>>.Failure(guardError);
+                }
+            }
+
+            if (fiscalYearPeriodGuard is not null)
+            {
+                foreach (var item in requestedItems)
+                {
+                    var fiscalYearResult = await fiscalYearPeriodGuard
+                        .EnsureOpenAsync(
+                            item.PostingDate,
+                            nameof(PayrollEntrySalaryPaymentRequest.PostingDate),
+                            cancellationToken);
+                    if (fiscalYearResult.IsFailure)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        return Result<List<PayrollEntryResponse>>.Failure(
+                            fiscalYearResult.Errors);
+                    }
                 }
             }
 

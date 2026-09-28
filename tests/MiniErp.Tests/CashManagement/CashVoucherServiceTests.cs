@@ -143,6 +143,9 @@ public sealed class CashVoucherServiceTests
                 movementTypeId: 10,
                 amount: 125m));
         var cashbox = await cashboxes.GetByIdAsync(1);
+        var rows = await vouchers.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashVoucherFilterRequest(CashboxId: 1));
 
         Assert.True(receipt.IsSuccess);
         Assert.True(payment.IsSuccess);
@@ -151,6 +154,146 @@ public sealed class CashVoucherServiceTests
         Assert.Equal(payment.Value.Amount, payment.Value.BaseAmount);
         Assert.Equal(1m, payment.Value.ExchangeRate);
         Assert.Equal(1075m, cashbox.Value.CurrentBalance);
+        Assert.True(rows.IsSuccess, rows.Error.Description);
+        Assert.NotEmpty(rows.Value.Items);
+        Assert.All(
+            rows.Value.Items,
+            row => Assert.Equal(1075m, row.CashboxBalance));
+    }
+
+    [Fact]
+    public async Task CashboxBalanceUsesCarriedOpeningWithoutOldYearVouchers()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE FiscalYears SET IsCurrent = 0 WHERE CompanyId = 1;");
+        await database.Context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                3, 1, '2027', '2027-01-01', '2027-12-31',
+                {(int)FiscalYearStatus.Open}, 1,
+                'test', '2027-01-01', 'test', 0);
+
+            INSERT INTO JournalEntries (
+                Id, CompanyId, FiscalYearId, EntryNumber, EntryDate,
+                Description, EntryType, SourceType, SourceId, Status,
+                PostedOn, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                900, 1, 3, 'OB-2027', '2027-01-01', 'carried opening',
+                {(int)JournalEntryType.Opening},
+                {(int)JournalEntrySourceType.FiscalYearClosing}, 1,
+                {(int)JournalEntryStatus.Posted}, '2027-01-01',
+                'test', '2027-01-01', 'test', 0);
+
+            INSERT INTO JournalEntryLines (
+                Id, CompanyId, JournalEntryId, AccountId, PartyType, PartyId,
+                Debit, Credit, Currency, ExchangeRate, TransactionDebit,
+                TransactionCredit, CreatedById, CreatedOn, CreatedByPc,
+                IsDeleted)
+            VALUES (
+                900, 1, 900, 100, {(int)JournalPartyType.Cashbox}, 1,
+                1075, 0, {(int)CurrencyCode.EGP}, 1, 1075, 0,
+                'test', '2027-01-01', 'test', 0);
+            """);
+        database.Context.ChangeTracker.Clear();
+
+        var cashbox = await database.CreateCashboxService(companyId: 1)
+            .GetByIdAsync(1);
+        var vouchers = await database.CreateVoucherService(companyId: 1)
+            .GetAllAsync(
+                new PaginationRequest { PageNumber = 1, PageSize = 20 });
+
+        Assert.True(cashbox.IsSuccess, cashbox.Error.Description);
+        Assert.Equal(1075m, cashbox.Value.CurrentBalance);
+        Assert.True(vouchers.IsSuccess, vouchers.Error.Description);
+        Assert.Empty(vouchers.Value.Items);
+    }
+
+    [Fact]
+    public async Task VoucherListUsesSelectedFiscalYearAndValidatesDates()
+    {
+        await using var database =
+            await CashManagementTestDatabase.CreateAsync();
+        var oldService = database.CreateVoucherService(companyId: 1);
+        var oldVoucher = await AddVoucherAsync(
+            oldService,
+            CreateRequest(
+                "CV-OLD-YEAR",
+                CashDirection.Receipt,
+                amount: 25m));
+        Assert.True(oldVoucher.IsSuccess, oldVoucher.Error.Description);
+        await database.ConfigureSeparateFiscalYearsAsync();
+        await database.Context.CashVouchers
+            .Where(voucher => voucher.Id == oldVoucher.Value.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(
+                voucher => voucher.VoucherDate,
+                new DateOnly(2025, 7, 27)));
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreateVoucherService(companyId: 1);
+        var currentVoucher = await AddVoucherAsync(
+            service,
+            CreateRequest(
+                "CV-CURRENT-YEAR",
+                CashDirection.Receipt,
+                amount: 30m));
+        Assert.True(
+            currentVoucher.IsSuccess,
+            currentVoucher.Error.Description);
+
+        var current = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashVoucherFilterRequest(
+                VoucherNumber: currentVoucher.Value.VoucherNumber));
+        var historical = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashVoucherFilterRequest(
+                VoucherNumber: oldVoucher.Value.VoucherNumber,
+                FiscalYearId: 1));
+        var invalidRange = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashVoucherFilterRequest(
+                FromDate: new DateOnly(2026, 1, 1),
+                FiscalYearId: 1));
+        var hiddenHistoricalDetail = await service.GetByIdAsync(
+            oldVoucher.Value.Id);
+        var historicalDetail = await service.GetByIdAsync(
+            oldVoucher.Value.Id,
+            fiscalYearId: 1);
+        var currentDetail = await service.GetByIdAsync(
+            currentVoucher.Value.Id);
+
+        var currentRow = Assert.Single(current.Value.Items);
+        Assert.Equal(100, currentRow.FiscalYearId);
+        Assert.Equal("2026", currentRow.FiscalYearName);
+        var historicalRow = Assert.Single(historical.Value.Items);
+        Assert.Equal(1, historicalRow.FiscalYearId);
+        Assert.Equal("2025", historicalRow.FiscalYearName);
+        Assert.True(invalidRange.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            invalidRange.Error.Code);
+        Assert.True(hiddenHistoricalDetail.IsFailure);
+        Assert.Equal(
+            "CashVouchers.NotFound",
+            hiddenHistoricalDetail.Error.Code);
+        Assert.True(historicalDetail.IsSuccess);
+        Assert.Equal(1, historicalDetail.Value.FiscalYearId);
+        Assert.True(currentDetail.IsSuccess);
+        Assert.Equal(100, currentDetail.Value.FiscalYearId);
+
+        var crossYearUpdate = await service.UpdateAsync(
+            oldVoucher.Value.Id,
+            ToUpdateRequest(historicalDetail.Value) with
+            {
+                VoucherDate = new DateOnly(2026, 7, 27)
+            });
+        Assert.True(crossYearUpdate.IsFailure);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            crossYearUpdate.Error.Code);
     }
 
     [Fact]
@@ -183,6 +326,7 @@ public sealed class CashVoucherServiceTests
         Assert.Equal(revenue.Value.Id, voucher.Id);
         Assert.Equal(CashMovementClassification.Revenue,
             voucher.Classification);
+        Assert.Equal(1030m, voucher.CashboxBalance);
     }
 
     [Fact]
@@ -246,6 +390,7 @@ public sealed class CashVoucherServiceTests
         Assert.Equal(CurrencyCode.EGP, opening.BaseCurrency);
         Assert.Equal(1m, opening.ExchangeRate);
         Assert.Equal(100m, opening.BaseAmount);
+        Assert.Equal(-100m, opening.CashboxBalance);
         Assert.Empty(opening.RowVersion);
 
         Assert.Equal(5, Assert.Single(searched.Value.Items).CashboxId);
@@ -496,6 +641,7 @@ public sealed class CashVoucherServiceTests
         Assert.Null(result.Value.BusinessPartnerId);
         Assert.Null(result.Value.DriverId);
         Assert.Equal(1_500m, result.Value.Amount);
+        Assert.Equal(1_000m, result.Value.CashboxBalance);
         var cashbox = await database.CreateCashboxService(1)
             .GetByIdAsync(1);
         Assert.Equal(1_000m, cashbox.Value.CurrentBalance);

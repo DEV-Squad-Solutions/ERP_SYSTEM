@@ -17,6 +17,7 @@ namespace MiniErp.Infrastructure.Services.MonetaryAccountRevaluations;
 public sealed class MonetaryAccountRevaluationService(
     ApplicationDbContext dbContext,
     ICurrentCompanyContext currentCompanyContext,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
     IAccountMappingResolver accountMappingResolver,
     IAutomaticPostingService automaticPostingService,
     TimeProvider timeProvider) : IMonetaryAccountRevaluationService, IScopedService
@@ -24,12 +25,23 @@ public sealed class MonetaryAccountRevaluationService(
     private readonly int companyId = currentCompanyContext.CompanyId;
 
     public async Task<Result<IReadOnlyList<MonetaryAccountRevaluationOption>>> GetOptionsAsync(
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<IReadOnlyList<MonetaryAccountRevaluationOption>>.Failure(
+                fiscalYear.Errors);
+        }
+
         var baseCurrency = await GetBaseCurrencyAsync(cancellationToken);
         var rows = await dbContext.JournalEntryLines
             .AsNoTracking()
             .Where(line => line.CompanyId == companyId &&
+                line.JournalEntry.FiscalYearId == fiscalYear.Value.FiscalYearId &&
                 line.Currency != baseCurrency &&
                 !line.IsDeleted && !line.JournalEntry.IsDeleted &&
                 line.JournalEntry.Status == JournalEntryStatus.Posted &&
@@ -63,6 +75,8 @@ public sealed class MonetaryAccountRevaluationService(
             })
             .Where(group => group.Sum(row => row.ForeignAmount) != 0m)
             .Select(group => new MonetaryAccountRevaluationOption(
+                FiscalYearId: fiscalYear.Value.FiscalYearId,
+                FiscalYearName: fiscalYear.Value.FiscalYearName,
                 AccountId: group.Key.AccountId,
                 AccountCode: group.Key.AccountCode,
                 AccountName: group.Key.AccountName,
@@ -119,13 +133,14 @@ public sealed class MonetaryAccountRevaluationService(
             .Where(year => year.CompanyId == companyId &&
                 year.StartDate <= request.RevaluationDate &&
                 year.EndDate >= request.RevaluationDate)
-            .Select(year => new { year.Id, year.Status })
+            .Select(year => new { year.Id, year.Name, year.Status })
             .SingleOrDefaultAsync(cancellationToken);
         if (fiscalYear is null || fiscalYear.Status != FiscalYearStatus.Open)
             return Result<MonetaryAccountRevaluationResponse>.Failure(FiscalYearClosed());
 
         var existing = dbContext.MonetaryAccountRevaluations.Where(row =>
-            row.CompanyId == companyId && row.AccountId == request.AccountId &&
+            row.CompanyId == companyId && row.FiscalYearId == fiscalYear.Id &&
+            row.AccountId == request.AccountId &&
             row.Currency == request.Currency && row.PartyType == request.PartyType &&
             row.PartyId == request.PartyId && !row.IsDeleted);
         if (await existing.AnyAsync(row => row.RevaluationDate == request.RevaluationDate, cancellationToken))
@@ -136,10 +151,11 @@ public sealed class MonetaryAccountRevaluationService(
         var lines = await dbContext.JournalEntryLines
             .AsNoTracking()
             .Where(line => line.CompanyId == companyId && line.AccountId == request.AccountId &&
-                line.Currency != baseCurrency &&
+                line.JournalEntry.FiscalYearId == fiscalYear.Id &&
+                line.Currency == request.Currency &&
                 line.JournalEntry.EntryDate <= request.RevaluationDate &&
-                (!request.PartyType.HasValue || line.PartyType == request.PartyType) &&
-                (!request.PartyId.HasValue || line.PartyId == request.PartyId) &&
+                line.PartyType == request.PartyType &&
+                line.PartyId == request.PartyId &&
                 !line.IsDeleted && !line.JournalEntry.IsDeleted &&
                 line.JournalEntry.Status == JournalEntryStatus.Posted &&
                 line.JournalEntry.ReversalOfEntryId == null &&
@@ -154,16 +170,27 @@ public sealed class MonetaryAccountRevaluationService(
             })
             .ToListAsync(cancellationToken);
 
-        // Include all posted base-currency lines for carrying value, including
-        // prior revaluation journals. The foreign quantity is restricted to the
-        // selected currency and therefore cannot be changed by a revaluation.
-        var carryingLines = await dbContext.JournalEntryLines
+        var priorRevaluationJournalIds = dbContext.MonetaryAccountRevaluations
+            .AsNoTracking()
+            .Where(row => row.CompanyId == companyId &&
+                row.FiscalYearId == fiscalYear.Id &&
+                row.AccountId == request.AccountId &&
+                row.Currency == request.Currency &&
+                row.PartyType == request.PartyType &&
+                row.PartyId == request.PartyId &&
+                row.RevaluationDate <= request.RevaluationDate &&
+                row.JournalEntryId.HasValue &&
+                !row.IsDeleted)
+            .Select(row => row.JournalEntryId!.Value);
+        var priorRevaluationLines = await dbContext.JournalEntryLines
             .AsNoTracking()
             .Where(line => line.CompanyId == companyId && line.AccountId == request.AccountId &&
+                line.JournalEntry.FiscalYearId == fiscalYear.Id &&
                 line.JournalEntry.EntryDate <= request.RevaluationDate &&
-                (line.Currency == request.Currency || line.Currency == baseCurrency) &&
-                (!request.PartyType.HasValue || line.PartyType == request.PartyType) &&
-                (!request.PartyId.HasValue || line.PartyId == request.PartyId) &&
+                line.Currency == baseCurrency &&
+                line.PartyType == request.PartyType &&
+                line.PartyId == request.PartyId &&
+                priorRevaluationJournalIds.Contains(line.JournalEntryId) &&
                 !line.IsDeleted && !line.JournalEntry.IsDeleted &&
                 line.JournalEntry.Status == JournalEntryStatus.Posted &&
                 line.JournalEntry.ReversalOfEntryId == null &&
@@ -172,10 +199,10 @@ public sealed class MonetaryAccountRevaluationService(
             .ToListAsync(cancellationToken);
 
         var foreignAmount = ExchangeRateRules.RoundBaseAmount(lines
-            .Where(line => line.Currency == request.Currency)
             .Sum(line => line.TransactionDebit - line.TransactionCredit));
-        var carryingBaseAmount = ExchangeRateRules.RoundBaseAmount(carryingLines
-            .Sum(line => line.Debit - line.Credit));
+        var carryingBaseAmount = ExchangeRateRules.RoundBaseAmount(
+            lines.Sum(line => line.Debit - line.Credit) +
+            priorRevaluationLines.Sum(line => line.Debit - line.Credit));
         if (foreignAmount < 0m || carryingBaseAmount < 0m)
             return Result<MonetaryAccountRevaluationResponse>.Failure(NegativeBalance());
 
@@ -187,6 +214,7 @@ public sealed class MonetaryAccountRevaluationService(
         var row = new MonetaryAccountRevaluation
         {
             CompanyId = companyId,
+            FiscalYearId = fiscalYear.Id,
             AccountId = request.AccountId,
             Currency = request.Currency,
             PartyType = request.PartyType,
@@ -253,6 +281,8 @@ public sealed class MonetaryAccountRevaluationService(
         await transaction.CommitAsync(cancellationToken);
         var response = new MonetaryAccountRevaluationResponse(
             Id: row.Id,
+            FiscalYearId: row.FiscalYearId,
+            FiscalYearName: fiscalYear.Name,
             AccountId: account.Id,
             AccountCode: account.Code,
             AccountName: account.Name,
@@ -278,11 +308,24 @@ public sealed class MonetaryAccountRevaluationService(
         int? partyId = null,
         DateOnly? fromDate = null,
         DateOnly? toDate = null,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
+        var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId,
+            fromDate,
+            toDate,
+            cancellationToken);
+        if (fiscalYear.IsFailure)
+        {
+            return Result<IReadOnlyList<MonetaryAccountRevaluationResponse>>.Failure(
+                fiscalYear.Errors);
+        }
+
         var rows = await dbContext.MonetaryAccountRevaluations
             .AsNoTracking()
             .Where(row => row.CompanyId == companyId && !row.IsDeleted &&
+                row.FiscalYearId == fiscalYear.Value.FiscalYearId &&
                 (!accountId.HasValue || row.AccountId == accountId.Value) &&
                 (!partyType.HasValue || row.PartyType == partyType.Value) &&
                 (!partyId.HasValue || row.PartyId == partyId.Value) &&
@@ -292,6 +335,8 @@ public sealed class MonetaryAccountRevaluationService(
             .ThenByDescending(row => row.Id)
             .Select(row => new MonetaryAccountRevaluationResponse(
                 Id: row.Id,
+                FiscalYearId: row.FiscalYearId,
+                FiscalYearName: row.FiscalYear.Name,
                 AccountId: row.AccountId,
                 AccountCode: row.Account.Code,
                 AccountName: row.Account.Name,
@@ -377,6 +422,8 @@ public sealed class MonetaryAccountRevaluationService(
         CancellationToken cancellationToken)
     {
         var options = responses.Select(row => new MonetaryAccountRevaluationOption(
+            FiscalYearId: row.FiscalYearId,
+            FiscalYearName: row.FiscalYearName,
             AccountId: row.AccountId, AccountCode: row.AccountCode, AccountName: row.AccountName,
             Currency: row.Currency, PartyType: row.PartyType, PartyId: row.PartyId,
             PartyCode: row.PartyCode, PartyName: row.PartyName)).ToArray();

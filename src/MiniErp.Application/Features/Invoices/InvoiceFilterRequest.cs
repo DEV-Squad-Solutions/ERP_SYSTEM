@@ -19,4 +19,6 @@ public sealed record InvoiceFilterRequest(
     PaymentTerm? PaymentTerm = null,
     InvoicePriceStatus? PriceStatus = null,
     DateOnly? FromDate = null,
-    DateOnly? ToDate = null);
+    DateOnly? ToDate = null,
+    int? ItemId = null,
+    int? FiscalYearId = null);

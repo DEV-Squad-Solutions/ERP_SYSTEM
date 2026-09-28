@@ -6,10 +6,12 @@ using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.StockOpeningBalances;
 using MiniErp.Domain.Entities.Inventory;
+using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
 using MiniErp.Infrastructure.Services.Inventory;
+using MiniErp.Infrastructure.Services.FiscalYears;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.StockOpeningBalances;
 
@@ -53,6 +55,117 @@ public sealed class StockOpeningBalanceServiceTests
         Assert.Equal(20m, line.QuantityAfter);
         Assert.Equal(3m, line.AverageCostAfter);
         Assert.Equal(60m, line.InventoryValueAfter);
+    }
+
+    [Fact]
+    public async Task GetAll_WithoutFiscalYearFilter_ReturnsOnlyCurrentFiscalYear()
+    {
+        await using var database = await StockOpeningBalanceTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears
+            SET Name = '2025', StartDate = '2025-01-01', EndDate = '2025-12-31'
+            WHERE Id = 1;
+
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent, RowVersion, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                100, 1, '2026', '2026-01-01', '2026-12-31', 1,
+                0, randomblob(8), 'test', '2026-01-01', 'test', 0);
+            """);
+        var service = database.CreateService(companyId: 1);
+        var currentYearBalance = await service.AddAsync(
+            CreateRequest(documentDate: new DateOnly(2025, 1, 1)));
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears SET IsCurrent = 2
+            WHERE CompanyId = 1 AND IsCurrent = 1;
+            UPDATE FiscalYears SET IsCurrent = 1 WHERE Id = 100;
+            UPDATE FiscalYears SET IsCurrent = 0 WHERE IsCurrent = 2;
+            """);
+        var nextYearBalance = await service.AddAsync(
+            CreateRequest(documentDate: new DateOnly(2026, 1, 1)));
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears SET IsCurrent = 2
+            WHERE CompanyId = 1 AND IsCurrent = 1;
+            UPDATE FiscalYears SET IsCurrent = 1 WHERE Id = 1;
+            UPDATE FiscalYears SET IsCurrent = 0 WHERE IsCurrent = 2;
+            """);
+
+        var currentYearResult = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 });
+        var explicitNextYearResult = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new StockOpeningBalanceFilterRequest(FiscalYearId: 100));
+        var invalidDate = await service.GetAllAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new StockOpeningBalanceFilterRequest(
+                FiscalYearId: 1,
+                FromDate: new DateOnly(2026, 1, 1)));
+
+        Assert.True(currentYearResult.IsSuccess);
+        Assert.True(currentYearBalance.IsSuccess);
+        Assert.True(nextYearBalance.IsSuccess);
+        var currentItem = Assert.Single(currentYearResult.Value.Items);
+        Assert.Equal(currentYearBalance.Value.Id, currentItem.Id);
+        Assert.Equal(1, currentItem.FiscalYearId);
+        Assert.Equal("2025", currentItem.FiscalYearName);
+
+        Assert.True(explicitNextYearResult.IsSuccess);
+        var nextItem = Assert.Single(explicitNextYearResult.Value.Items);
+        Assert.Equal(nextYearBalance.Value.Id, nextItem.Id);
+        Assert.Equal(100, nextItem.FiscalYearId);
+        Assert.Equal("2026", nextItem.FiscalYearName);
+        Assert.Equal(
+            "StockOpeningBalances.NotFound",
+            (await service.GetByIdAsync(nextItem.Id)).Error.Code);
+        Assert.Equal(
+            100,
+            (await service.GetByIdAsync(nextItem.Id, fiscalYearId: 100))
+                .Value.FiscalYearId);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            invalidDate.Error.Code);
+    }
+
+    [Fact]
+    public async Task ClosedFiscalYearBlocksOpeningBalanceMutations()
+    {
+        await using var database =
+            await StockOpeningBalanceTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var created = (await service.AddAsync(CreateRequest())).Value;
+        await database.Context.FiscalYears
+            .Where(year => year.Id == created.FiscalYearId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(
+                year => year.Status,
+                FiscalYearStatus.Closed));
+        database.Context.ChangeTracker.Clear();
+
+        var update = await service.UpdateAsync(
+            created.Id,
+            new StockOpeningBalanceUpdateRequest(
+                StoreId: created.StoreId,
+                DocumentDate: created.DocumentDate,
+                Lines: created.Lines.Select(line =>
+                    new StockOpeningBalanceLineRequest(
+                        ItemId: line.ItemId,
+                        Count: line.Count,
+                        Weight: line.Weight,
+                        Price: line.Price,
+                        Notes: line.Notes)).ToArray(),
+                Notes: "closed",
+                RowVersion: created.RowVersion));
+        var delete = await service.DeleteAsync(created.Id);
+        var add = await service.AddAsync(CreateRequest());
+
+        Assert.Equal("FiscalYears.Closed", update.Error.Code);
+        Assert.Equal("FiscalYears.Closed", delete.Error.Code);
+        Assert.Equal("FiscalYears.Closed", add.Error.Code);
+        Assert.True((await service.GetByIdAsync(created.Id)).IsSuccess);
     }
 
     [Fact]
@@ -537,10 +650,11 @@ public sealed class StockOpeningBalanceServiceTests
 
     private static StockOpeningBalanceRequest CreateRequest(
         int storeId = 1,
-        IReadOnlyList<StockOpeningBalanceLineRequest>? lines = null) =>
+        IReadOnlyList<StockOpeningBalanceLineRequest>? lines = null,
+        DateOnly? documentDate = null) =>
         new(
             storeId,
-            new DateOnly(2026, 1, 1),
+            documentDate ?? new DateOnly(2026, 1, 1),
             lines ??
             [
                 new StockOpeningBalanceLineRequest(
@@ -583,6 +697,7 @@ public sealed class StockOpeningBalanceServiceTests
 
             await CreateSchemaAsync(context);
             await SeedReferenceDataAsync(context);
+            await TestFiscalYearSchema.EnsureAsync(context);
 
             if (addForcedLineFailureTrigger)
             {
@@ -613,7 +728,9 @@ public sealed class StockOpeningBalanceServiceTests
                     TimeProvider.System),
                 new InventoryStockService(
                     Context,
-                    companyContext));
+                    companyContext),
+                new FiscalYearQueryScopeResolver(Context, companyContext),
+                new FiscalYearPeriodGuard(Context, companyContext));
         }
 
         public async ValueTask DisposeAsync()

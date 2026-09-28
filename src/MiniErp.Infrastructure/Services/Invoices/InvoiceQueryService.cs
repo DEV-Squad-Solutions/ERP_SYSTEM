@@ -15,7 +15,8 @@ public sealed partial class InvoiceQueryService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
-    IInvoiceInventoryService invoiceInventoryService)
+    IInvoiceInventoryService invoiceInventoryService,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver)
     : IInvoiceQueryService, IScopedService
 {
     private static readonly ItemMovementType[] InvoiceItemMovementTypes =
@@ -40,9 +41,24 @@ public sealed partial class InvoiceQueryService(
             return Result<InvoicePagedResponse>.Failure(filterError);
         }
 
+        var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: filters.FiscalYearId,
+            fromDate: filters.FromDate,
+            toDate: filters.ToDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYearResult.IsFailure)
+        {
+            return Result<InvoicePagedResponse>.Failure(
+                fiscalYearResult.Errors);
+        }
+
+        var fiscalYearId = fiscalYearResult.Value.FiscalYearId;
+
         var query = dbContext.Invoices
             .AsNoTracking()
-            .Where(invoice => invoice.CompanyId == companyId);
+            .Where(invoice =>
+                invoice.CompanyId == companyId &&
+                invoice.FiscalYearId == fiscalYearId);
 
         query = ApplyFilters(query, filters);
 
@@ -50,7 +66,10 @@ public sealed partial class InvoiceQueryService(
             .OrderByDescending(invoice => invoice.InvoiceDate)
             .ThenByDescending(invoice => invoice.Id);
 
-        var aggregate = await GetSummaryAsync(query, cancellationToken);
+        var aggregate = await GetSummaryAsync(
+            query,
+            filters.ItemId,
+            cancellationToken);
         var pageResult = await paginationService.PaginateAsync<
             Invoice,
             InvoiceListResponse>(
@@ -78,6 +97,7 @@ public sealed partial class InvoiceQueryService(
 
     public async Task<Result<InvoiceResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
@@ -85,7 +105,18 @@ public sealed partial class InvoiceQueryService(
             return Result<InvoiceResponse>.Failure(InvalidId());
         }
 
-        var response = await GetResponseAsync(id, cancellationToken);
+        var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: fiscalYearId,
+            cancellationToken: cancellationToken);
+        if (fiscalYearResult.IsFailure)
+        {
+            return Result<InvoiceResponse>.Failure(fiscalYearResult.Errors);
+        }
+
+        var response = await GetResponseAsync(
+            id,
+            fiscalYearResult.Value.FiscalYearId,
+            cancellationToken);
 
         return response is null
             ? Result<InvoiceResponse>.Failure(NotFound(id))
@@ -142,6 +173,16 @@ public sealed partial class InvoiceQueryService(
         if (filters.DriverId is <= 0)
         {
             return InvalidFilter(InvoiceFilterErrorKind.DriverId);
+        }
+
+        if (filters.ItemId is <= 0)
+        {
+            return InvalidFilter(InvoiceFilterErrorKind.ItemId);
+        }
+
+        if (filters.FiscalYearId is <= 0)
+        {
+            return InvalidFilter(InvoiceFilterErrorKind.FiscalYearId);
         }
 
         if (filters.FromDate > filters.ToDate)
@@ -232,6 +273,13 @@ public sealed partial class InvoiceQueryService(
                 invoice.DriverId == filters.DriverId.Value);
         }
 
+        if (filters.ItemId.HasValue)
+        {
+            query = query.Where(invoice =>
+                invoice.Lines.Any(line =>
+                    line.ItemId == filters.ItemId.Value));
+        }
+
         if (filters.PaymentTerm.HasValue)
         {
             query = query.Where(invoice =>
@@ -268,6 +316,7 @@ public sealed partial class InvoiceQueryService(
     private static async Task<(int TotalCount, InvoiceSummaryResponse Summary)>
         GetSummaryAsync(
             IQueryable<Invoice> query,
+            int? itemId,
             CancellationToken cancellationToken)
     {
         var totals = await query
@@ -286,13 +335,26 @@ public sealed partial class InvoiceQueryService(
             })
             .SingleOrDefaultAsync(cancellationToken);
 
+        var quantityQuery = query.SelectMany(invoice => invoice.Lines);
+        if (itemId.HasValue)
+        {
+            quantityQuery = quantityQuery.Where(line =>
+                line.ItemId == itemId.Value);
+        }
+
+        var totalQuantity = await quantityQuery
+            .SumAsync(
+                line => (decimal?)line.Quantity,
+                cancellationToken) ?? 0m;
+
         return totals is null
             ? (0, new InvoiceSummaryResponse(
                 Subtotal: 0m,
                 DiscountAmount: 0m,
                 Total: 0m,
                 PaidAmount: 0m,
-                RemainingAmount: 0m))
+                RemainingAmount: 0m,
+                TotalQuantity: totalQuantity))
             : (
                 totals.TotalCount,
                 new InvoiceSummaryResponse(
@@ -300,7 +362,8 @@ public sealed partial class InvoiceQueryService(
                     DiscountAmount: totals.DiscountAmount,
                     Total: totals.Total,
                     PaidAmount: totals.PaidAmount,
-                    RemainingAmount: totals.RemainingAmount));
+                    RemainingAmount: totals.RemainingAmount,
+                    TotalQuantity: totalQuantity));
     }
 
     public async Task<Result<InvoiceItemBalanceResponse>> GetItemBalanceAsync(
@@ -316,18 +379,22 @@ public sealed partial class InvoiceQueryService(
             invoiceId,
             cancellationToken);
 
-    private IQueryable<InvoiceResponse> ProjectResponseQuery(int id) =>
+    private IQueryable<InvoiceResponse> ProjectResponseQuery(
+        int id,
+        int fiscalYearId) =>
         dbContext.Invoices
             .Where(invoice =>
                 invoice.CompanyId == companyId &&
+                invoice.FiscalYearId == fiscalYearId &&
                 invoice.Id == id)
             .ProjectToType<InvoiceResponse>();
 
     private async Task<InvoiceResponse?> GetResponseAsync(
         int id,
+        int fiscalYearId,
         CancellationToken cancellationToken)
     {
-        var response = await ProjectResponseQuery(id)
+        var response = await ProjectResponseQuery(id, fiscalYearId)
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
         if (response is null)
@@ -340,6 +407,7 @@ public sealed partial class InvoiceQueryService(
             .AsNoTracking()
             .Where(movement =>
                 movement.CompanyId == companyId &&
+                movement.FiscalYearId == fiscalYearId &&
                 movementTypes.Contains(movement.MovementType) &&
                 movement.ReferenceId == id)
             .Select(movement => new InvoiceLineCostSnapshot(

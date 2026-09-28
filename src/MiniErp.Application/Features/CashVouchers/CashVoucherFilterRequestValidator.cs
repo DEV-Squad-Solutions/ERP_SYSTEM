@@ -7,6 +7,9 @@ public sealed class CashVoucherFilterRequestValidator
 {
     public CashVoucherFilterRequestValidator()
     {
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue);
         RuleFor(filter => filter.Search).MaximumLength(256);
         RuleFor(filter => filter.VoucherNumber)
             .MaximumLength(CashVoucherFilterRequest.VoucherNumberMaximumLength);

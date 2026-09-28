@@ -7,10 +7,10 @@ public static class DashboardErrors
     public static Error FiscalYearNotFound() =>
         Error.NotFound(
             "Dashboard.FiscalYearNotFound",
-            "لا توجد سنة مالية تغطي فترة لوحة التحكم.");
+            "لا توجد سنة مالية حالية للشركة.");
 
     public static Error InvalidDateRange() =>
         Error.Validation(
             "Dashboard.InvalidDateRange",
-            "يجب أن يكون تاريخ النهاية بعد تاريخ البداية وألا تزيد الفترة على 366 يومًا.");
+            "فترة لوحة التحكم يجب أن تقع داخل السنة المالية الحالية وألا تزيد على 366 يومًا.");
 }

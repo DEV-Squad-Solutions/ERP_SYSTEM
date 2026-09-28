@@ -102,6 +102,9 @@ public sealed class CashboxTransferFilterRequestValidator
 {
     public CashboxTransferFilterRequestValidator()
     {
+        RuleFor(filter => filter.FiscalYearId)
+            .GreaterThan(0)
+            .When(filter => filter.FiscalYearId.HasValue);
         RuleFor(filter => filter.Search)
             .MaximumLength(100);
         RuleFor(filter => filter.SourceCashboxId)

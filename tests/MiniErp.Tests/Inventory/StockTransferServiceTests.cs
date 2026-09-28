@@ -1,5 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
+using MiniErp.Application.Common.Results;
+using MiniErp.Application.Features.FiscalYears;
 using MiniErp.Application.Features.StockAdjustments;
 using MiniErp.Application.Features.StockTransfers;
 using MiniErp.Domain.Enums;
@@ -13,6 +16,192 @@ public sealed class StockTransferServiceTests
     {
         MappingConfiguration.Register(
             typeof(InfrastructureAssemblyMarker).Assembly);
+    }
+
+    [Fact]
+    public async Task GetAllDefaultsToCurrentFiscalYear()
+    {
+        await using var database =
+            await InventoryDocumentTestDatabase.CreateAsync();
+        await database.ConfigureSeparateFiscalYearsAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO StockTransfers (
+                CompanyId, FiscalYearId, DocumentNumber, TransferDate,
+                SourceStoreId, DestinationStoreId, Notes, LastModifiedAt,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 'STF-2025', '2025-06-01', 1, 4, NULL,
+                 '2025-06-01', 'test', '2025-06-01', 'test', 0),
+                (1, 100, 'STF-2026', '2026-06-01', 1, 4, NULL,
+                 '2026-06-01', 'test', '2026-06-01', 'test', 0);
+            """);
+        var service = database.CreateStockTransferService();
+
+        var currentYear = await service.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new StockTransferFilterRequest());
+        var nextYear = await service.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new StockTransferFilterRequest(FiscalYearId: 100));
+        var invalidDate = await service.GetAllAsync(
+            new MiniErp.Application.Common.Models.PaginationRequest
+            {
+                PageNumber = 1,
+                PageSize = 20
+            },
+            new StockTransferFilterRequest(
+                FiscalYearId: 1,
+                FromDate: new DateOnly(2026, 1, 1)));
+
+        Assert.True(currentYear.IsSuccess);
+        var currentItem = Assert.Single(currentYear.Value.Items);
+        Assert.Equal("STF-2025", currentItem.DocumentNumber);
+        Assert.Equal(1, currentItem.FiscalYearId);
+        Assert.Equal("2025", currentItem.FiscalYearName);
+
+        Assert.True(nextYear.IsSuccess);
+        var nextItem = Assert.Single(nextYear.Value.Items);
+        Assert.Equal("STF-2026", nextItem.DocumentNumber);
+        Assert.Equal(100, nextItem.FiscalYearId);
+        Assert.Equal("2026", nextItem.FiscalYearName);
+        Assert.Equal(
+            "StockTransfers.NotFound",
+            (await service.GetByIdAsync(nextItem.Id)).Error.Code);
+        Assert.Equal(
+            100,
+            (await service.GetByIdAsync(nextItem.Id, fiscalYearId: 100))
+                .Value.FiscalYearId);
+        Assert.Equal(
+            "FiscalYears.QueryDateOutsideRange",
+            invalidDate.Error.Code);
+    }
+
+    [Fact]
+    public async Task Add_ClosedTransferDate_IsRejectedBeforeAnyWrite()
+    {
+        await using var database = await InventoryDocumentTestDatabase.CreateAsync();
+        var closedDate = new DateOnly(2026, 7, 2);
+        var service = database.CreateStockTransferService(
+            fiscalYearPeriodGuard: new ClosedDateGuard(closedDate));
+
+        var result = await service.AddAsync(Request(quantity: 1m));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.Closed", result.Error.Code);
+        Assert.Empty(await database.Context.StockTransfers.ToListAsync());
+        Assert.Empty(await database.Context.ItemMovements
+            .Where(movement =>
+                movement.MovementType == ItemMovementType.TransferOut ||
+                movement.MovementType == ItemMovementType.TransferIn)
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Update_ClosedOriginalDate_CannotBeMovedIntoOpenPeriod()
+    {
+        await using var database = await InventoryDocumentTestDatabase.CreateAsync();
+        await AddSourceCostAsync(database, quantity: 10m, unitCost: 20m);
+        var created = (await database.CreateStockTransferService()
+            .AddAsync(Request(quantity: 2m))).Value;
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreateStockTransferService(
+            fiscalYearPeriodGuard: new ClosedDateGuard(created.TransferDate));
+
+        var result = await service.UpdateAsync(
+            created.Id,
+            new StockTransferUpdateRequest(
+                TransferDate: new DateOnly(2026, 7, 3),
+                Notes: "must not persist",
+                Lines: [new StockTransferLineRequest(
+                    ItemId: 1,
+                    Quantity: 3m,
+                    Notes: null)],
+                RowVersion: created.RowVersion));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.Closed", result.Error.Code);
+        var persisted = await database.Context.StockTransfers
+            .AsNoTracking()
+            .Include(transfer => transfer.Lines)
+            .SingleAsync(transfer => transfer.Id == created.Id);
+        Assert.Equal(created.TransferDate, persisted.TransferDate);
+        Assert.Equal(2m, Assert.Single(persisted.Lines).Quantity);
+        Assert.Null(persisted.Notes);
+    }
+
+    [Fact]
+    public async Task Update_ClosedRequestedDate_PreservesDocumentAndMovements()
+    {
+        await using var database = await InventoryDocumentTestDatabase.CreateAsync();
+        await AddSourceCostAsync(database, quantity: 10m, unitCost: 20m);
+        var created = (await database.CreateStockTransferService()
+            .AddAsync(Request(quantity: 2m))).Value;
+        var closedDate = new DateOnly(2026, 7, 3);
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreateStockTransferService(
+            fiscalYearPeriodGuard: new ClosedDateGuard(closedDate));
+
+        var result = await service.UpdateAsync(
+            created.Id,
+            new StockTransferUpdateRequest(
+                TransferDate: closedDate,
+                Notes: "must not persist",
+                Lines: [new StockTransferLineRequest(
+                    ItemId: 1,
+                    Quantity: 3m,
+                    Notes: null)],
+                RowVersion: created.RowVersion));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.Closed", result.Error.Code);
+        var persistedMovements = await database.Context.ItemMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.ReferenceId == created.Id &&
+                (movement.MovementType == ItemMovementType.TransferOut ||
+                 movement.MovementType == ItemMovementType.TransferIn))
+            .ToListAsync();
+        Assert.Equal(2, persistedMovements.Count);
+        Assert.All(persistedMovements, movement =>
+        {
+            Assert.Equal(created.TransferDate, movement.MovementDate);
+            Assert.Equal(2m, movement.QuantityIn + movement.QuantityOut);
+        });
+    }
+
+    [Fact]
+    public async Task Delete_ClosedTransferDate_PreservesDocumentAndPairedMovements()
+    {
+        await using var database = await InventoryDocumentTestDatabase.CreateAsync();
+        await AddSourceCostAsync(database, quantity: 10m, unitCost: 20m);
+        var created = (await database.CreateStockTransferService()
+            .AddAsync(Request(quantity: 2m))).Value;
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreateStockTransferService(
+            fiscalYearPeriodGuard: new ClosedDateGuard(created.TransferDate));
+
+        var result = await service.DeleteAsync(created.Id);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FiscalYears.Closed", result.Error.Code);
+        Assert.True(await database.Context.StockTransfers
+            .AsNoTracking()
+            .AnyAsync(transfer => transfer.Id == created.Id));
+        Assert.Equal(2, await database.Context.ItemMovements
+            .AsNoTracking()
+            .CountAsync(movement =>
+                movement.ReferenceId == created.Id &&
+                (movement.MovementType == ItemMovementType.TransferOut ||
+                 movement.MovementType == ItemMovementType.TransferIn)));
     }
 
     [Fact]
@@ -309,5 +498,20 @@ public sealed class StockTransferServiceTests
                     }
                 ]));
         Assert.True(result.IsSuccess, result.Error.Description);
+    }
+
+    private sealed class ClosedDateGuard(
+        DateOnly closedDate) : IFiscalYearPeriodGuard
+    {
+        public Task<Result> EnsureOpenAsync(
+            DateOnly date,
+            string fieldName,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(date == closedDate
+                ? Result.Failure(FiscalYearErrors.Closed(
+                    date,
+                    fiscalYearName: "Closed test year",
+                    fieldName: fieldName))
+                : Result.Success());
     }
 }

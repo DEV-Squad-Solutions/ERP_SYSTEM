@@ -12,6 +12,7 @@ public interface IEmployeeAttendanceService
 
     Task<Result<EmployeeAttendanceResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<EmployeeAttendanceResponse>> AddAsync(
