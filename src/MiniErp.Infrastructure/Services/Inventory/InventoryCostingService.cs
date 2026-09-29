@@ -59,9 +59,7 @@ public sealed class InventoryCostingService(
                 ? storeComparison
                 : left.ItemId.CompareTo(right.ItemId);
         });
-        var normalizedKeys = await ResolveFiscalYearKeysAsync(
-            keys,
-            cancellationToken);
+        var normalizedKeys = EnsureFiscalYearKeys(keys);
         var pendingKeys = new SortedSet<InventoryCostingKey>(
             normalizedKeys,
             keyComparer);
@@ -153,30 +151,21 @@ public sealed class InventoryCostingService(
         return null;
     }
 
-    private async Task<IReadOnlyCollection<InventoryCostingKey>>
-        ResolveFiscalYearKeysAsync(
-            IReadOnlyCollection<InventoryCostingKey> keys,
-            CancellationToken cancellationToken)
+    private static IReadOnlyCollection<InventoryCostingKey>
+        EnsureFiscalYearKeys(
+            IReadOnlyCollection<InventoryCostingKey> keys)
     {
-        if (keys.All(key => key.FiscalYearId.HasValue))
+        // Defaulting a missing fiscal year to the current one silently
+        // recalculates the wrong year for documents dated in another open
+        // year, so every caller must pass the document's own fiscal year.
+        if (keys.Any(key => !key.FiscalYearId.HasValue))
         {
-            return keys;
+            throw new InvalidOperationException(
+                "Inventory costing recalculation requires the fiscal year " +
+                "of every store/item key.");
         }
 
-        var currentFiscalYearId = await dbContext.FiscalYears
-            .AsNoTracking()
-            .Where(year =>
-                year.CompanyId == companyId &&
-                year.IsCurrent)
-            .Select(year => (int?)year.Id)
-            .SingleOrDefaultAsync(cancellationToken) ?? 0;
-
-        return keys
-            .Select(key => key.FiscalYearId.HasValue
-                ? key
-                : key with { FiscalYearId = currentFiscalYearId })
-            .Distinct()
-            .ToArray();
+        return keys.Distinct().ToArray();
     }
 
     private Task<int?> ResolveFiscalYearIdAsync(

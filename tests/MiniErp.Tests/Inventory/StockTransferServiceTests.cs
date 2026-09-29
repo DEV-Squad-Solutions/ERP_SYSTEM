@@ -243,6 +243,54 @@ public sealed class StockTransferServiceTests
     }
 
     [Fact]
+    public async Task Create_InOpenNonCurrentFiscalYear_CostsTheTransferInItsOwnYear()
+    {
+        await using var database = await InventoryDocumentTestDatabase.CreateAsync();
+        // 2026 stays open, but 2027 is the current fiscal year.
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears
+            SET Name = '2026', StartDate = '2026-01-01',
+                EndDate = '2026-12-31', IsCurrent = 0
+            WHERE Id = 1;
+
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent, RowVersion, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                100, 1, '2027', '2027-01-01', '2027-12-31', 1,
+                1, randomblob(8), 'test', '2027-01-01', 'test', 0);
+            """);
+        await AddSourceCostAsync(database, 10m, 20m);
+
+        var result = await database.CreateStockTransferService().AddAsync(
+            Request(4m));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(1, result.Value.FiscalYearId);
+        var line = Assert.Single(result.Value.Lines);
+        Assert.Equal(10m, line.SourceUnitCost);
+        Assert.Equal(10m, line.DestinationUnitCost);
+        Assert.Equal(40m, line.DestinationTotalCost);
+        Assert.Equal(10m, line.DestinationAverageCostAfter);
+        Assert.Equal(40m, line.DestinationInventoryValueAfter);
+
+        var movements = await database.Context.ItemMovements
+            .AsNoTracking()
+            .Where(movement =>
+                movement.ReferenceNumber == result.Value.DocumentNumber)
+            .ToListAsync();
+        Assert.Equal(2, movements.Count);
+        Assert.All(movements, movement =>
+        {
+            Assert.Equal(1, movement.FiscalYearId);
+            Assert.Equal(10m, movement.UnitCost);
+            Assert.Equal(40m, movement.TotalCost);
+        });
+    }
+
+    [Fact]
     public async Task Create_RejectsQuantityAboveSourceHistoricalBalance()
     {
         await using var database = await InventoryDocumentTestDatabase.CreateAsync();

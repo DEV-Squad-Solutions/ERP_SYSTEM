@@ -204,8 +204,17 @@ public sealed class StockTransferService(
             AddMovements(transfer);
             await dbContext.SaveChangesAsync(cancellationToken);
 
+            // The first save assigns the fiscal year that covers TransferDate.
+            // Recalculate that year, not the current one: a transfer can be
+            // dated in another open fiscal year.
             var costingError = await inventoryCostingService.RecalculateAsync(
-                sourceKeys,
+                sourceKeys
+                    .Select(key => key with
+                    {
+                        FiscalYearId = transfer.FiscalYearId
+                    })
+                    .Distinct()
+                    .ToArray(),
                 cancellationToken);
             if (costingError is not null)
             {
