@@ -469,6 +469,20 @@ public sealed class FinancialStatementReportTests
             financialPosition.Value.Totals.TotalLiabilitiesAndEquity);
         Assert.True(financialPosition.Value.Totals.IsBalanced);
         Assert.True(financialPosition.Value.IsReadyForReporting);
+
+        // The year's result is an equity row, so the table itself balances.
+        var netResultRow = Assert.Single(
+            financialPosition.Value.Items,
+            item => item.AccountId is null &&
+                item.FinancialStatementLineId is null);
+        Assert.Equal(AccountType.Equity, netResultRow.AccountType);
+        Assert.Equal(900m, netResultRow.OpeningCredit);
+        Assert.Equal(0m, netResultRow.PeriodCredit);
+        Assert.Equal(900m, netResultRow.ClosingCredit);
+        var totals = financialPosition.Value.Totals;
+        Assert.Equal(totals.OpeningDebit, totals.OpeningCredit);
+        Assert.Equal(totals.PeriodDebit, totals.PeriodCredit);
+        Assert.Equal(totals.ClosingDebit, totals.ClosingCredit);
     }
 
     [Fact]

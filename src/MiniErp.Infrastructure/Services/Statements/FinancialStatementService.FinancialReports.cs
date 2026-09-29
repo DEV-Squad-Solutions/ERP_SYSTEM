@@ -99,15 +99,24 @@ public sealed partial class FinancialStatementService
                 statementType,
                 request,
                 mappings);
-        var items = request.ViewMode == TrialBalanceViewMode.Summary
-            ? SummarizeItems(lines)
-            : lines
-                .OrderBy(item => item.FinancialStatementLineCode)
-                .ThenBy(item => item.AccountCode)
-                .ToArray();
+        // The financial position shows the undistributed result of the year
+        // as an equity row, so the table itself (not only the totals) balances.
+        var netResultItem = statementType == FinancialStatementType.FinancialPosition
+            ? BuildNetResultItem(journalLines, request)
+            : null;
+        IReadOnlyList<FinancialStatementReportItemResponse> netResultItems =
+            netResultItem is null ? [] : [netResultItem];
+        var items = (request.ViewMode == TrialBalanceViewMode.Summary
+                ? SummarizeItems(lines)
+                : lines
+                    .OrderBy(item => item.FinancialStatementLineCode)
+                    .ThenBy(item => item.AccountCode)
+                    .ToArray())
+            .Concat(netResultItems)
+            .ToArray();
         var totals = BuildReportTotals(
             statementType,
-            lines,
+            lines.Concat(netResultItems).ToArray(),
             journalLines,
             request,
             unmappedAccounts);
@@ -556,12 +565,13 @@ public sealed partial class FinancialStatementService
                 .Where(item => item.AccountType == AccountType.Asset)
                 .Sum(item => item.ClosingDebit - item.ClosingCredit)
             : 0m;
+        // The year's result is already one of the equity items (the net
+        // result row), so it is not added a second time here.
         var totalLiabilitiesAndEquity = isFinancialPosition
             ? items
                 .Where(item => item.AccountType is
                     AccountType.Liability or AccountType.Equity)
                 .Sum(item => item.ClosingCredit - item.ClosingDebit)
-                + currentNetResult
             : 0m;
         var netCashFlow = statementType == FinancialStatementType.CashFlow
             ? items.Sum(item => item.PeriodDebit - item.PeriodCredit) +
@@ -591,6 +601,56 @@ public sealed partial class FinancialStatementService
             IsBalanced: journalIsBalanced &&
                 statementIsBalanced &&
                 unmapped.Count == 0);
+    }
+
+    /// <summary>
+    /// Builds the equity row for the fiscal year's result up to ToDate:
+    /// the opening columns hold the result before FromDate, the period
+    /// columns the result inside the period. A profit is a credit and a loss
+    /// a debit. It is not an account, so AccountId and the statement line
+    /// are null.
+    /// </summary>
+    private static FinancialStatementReportItemResponse? BuildNetResultItem(
+        IReadOnlyList<ReportJournalLine> journalLines,
+        FinancialStatementReportRequest request)
+    {
+        var resultLines = journalLines
+            .Where(line => line.AccountType is
+                AccountType.Revenue or AccountType.Expense)
+            .ToArray();
+        var openingResult = resultLines
+            .Where(line => line.EntryDate < request.FromDate)
+            .Sum(line => line.Credit - line.Debit);
+        var periodResult = resultLines
+            .Where(line => line.EntryDate >= request.FromDate)
+            .Sum(line => line.Credit - line.Debit);
+        if (openingResult == 0m && periodResult == 0m)
+        {
+            return null;
+        }
+
+        var amount = new ReportAmount
+        {
+            OpeningDebit = Math.Max(-openingResult, 0m),
+            OpeningCredit = Math.Max(openingResult, 0m),
+            PeriodDebit = Math.Max(-periodResult, 0m),
+            PeriodCredit = Math.Max(periodResult, 0m)
+        };
+
+        return new FinancialStatementReportItemResponse(
+            FinancialStatementLineId: null,
+            FinancialStatementLineCode: null,
+            FinancialStatementLineName: "صافي ربح (خسارة) السنة حتى تاريخه",
+            AccountId: null,
+            AccountCode: null,
+            AccountName: null,
+            AccountType: AccountType.Equity,
+            OpeningDebit: amount.OpeningDebit,
+            OpeningCredit: amount.OpeningCredit,
+            PeriodDebit: amount.PeriodDebit,
+            PeriodCredit: amount.PeriodCredit,
+            ClosingDebit: amount.ClosingDebit,
+            ClosingCredit: amount.ClosingCredit);
     }
 
     private static FinancialStatementReportItemResponse ToReportItem(
