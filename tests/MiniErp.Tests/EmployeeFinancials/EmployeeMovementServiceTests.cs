@@ -606,4 +606,30 @@ public sealed class EmployeeMovementServiceTests
         Assert.True(result.IsFailure);
         Assert.Equal("EmployeeMovements.NotFound", result.Error.Code);
     }
+
+    [Fact]
+    public async Task GetAllAsync_WithTypeAndCurrencyFilter_ShouldWork()
+    {
+        await using var database = await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
+        var service = database.CreateMovementService();
+
+        var addResult = await service.AddAsync(new EmployeeMovementRequest(
+            EmployeeId: 1,
+            Type: EmployeeMovementType.Debit,
+            Amount: 500m,
+            Currency: CurrencyCode.EGP,
+            MovementDate: new DateOnly(2026, 8, 1)));
+        Assert.True(addResult.IsSuccess);
+
+        var filter = new EmployeeMovementFilterRequest(
+            Type: EmployeeMovementType.Debit,
+            Currency: CurrencyCode.EGP);
+
+        var result = await service.GetAllAsync(new PaginationRequest(), filter);
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value.Items);
+        Assert.Equal(EmployeeMovementType.Debit, item.Type);
+        Assert.Equal(CurrencyCode.EGP, item.Currency);
+        Assert.Equal("2026", item.FiscalYearName);
+    }
 }
