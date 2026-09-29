@@ -246,6 +246,52 @@ public sealed class CashboxExchangeRateCascadeTests
     }
 
     [Fact]
+    public async Task ExchangeRateUpdateIsBlockedByALaterRevaluationOfTheCurrency()
+    {
+        await using var database = await CascadeTestDatabase.CreateAsync();
+        var rate = await database.Context.ExchangeRates
+            .AsNoTracking()
+            .SingleAsync(entity => entity.Id == database.UsdRateId);
+        database.Context.CashboxRevaluations.Add(new CashboxRevaluation
+        {
+            CompanyId = rate.CompanyId,
+            CashboxId = database.PrimaryCashboxId,
+            RevaluationDate = new DateOnly(2026, 9, 30),
+            ClosingRate = 55m,
+            ForeignAmount = 100m,
+            CarryingBaseAmount = 5_000m,
+            TargetBaseAmount = 5_500m,
+            DeltaBaseAmount = 500m,
+            CreatedOn = DateTime.UtcNow
+        });
+        await database.Context.SaveChangesAsync();
+        database.Context.ChangeTracker.Clear();
+
+        var result = await database.CreateExchangeRateService().UpdateAsync(
+            database.UsdRateId,
+            new ExchangeRateUpdateRequest(
+                Currency: rate.Currency,
+                RateDate: rate.RateDate,
+                Rate: 60m,
+                Source: rate.Source,
+                Notes: rate.Notes,
+                RowVersion: rate.RowVersion,
+                UpdateLinkedTransactions: true));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("ExchangeRates.LaterRevaluationExists", result.Error.Code);
+        database.Context.ChangeTracker.Clear();
+        var storedRate = await database.Context.ExchangeRates
+            .AsNoTracking()
+            .SingleAsync(entity => entity.Id == database.UsdRateId);
+        var invoice = await database.Context.Invoices
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal(50m, storedRate.Rate);
+        Assert.Equal(50m, invoice.ExchangeRate);
+    }
+
+    [Fact]
     public async Task InvalidTransferPairRollsBackEntireCascade()
     {
         await using var database = await CascadeTestDatabase.CreateAsync();

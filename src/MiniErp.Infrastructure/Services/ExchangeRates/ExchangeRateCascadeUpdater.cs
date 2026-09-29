@@ -29,6 +29,19 @@ internal static class ExchangeRateCascadeUpdater
             return null;
         }
 
+        // Documents using this rate are dated on or after its date. A later
+        // revaluation of the currency already fixed its gain/loss from the
+        // old base amounts, so rewriting them would leave that delta wrong.
+        if (await LaterRevaluationExistsAsync(
+                dbContext,
+                companyId,
+                rate,
+                cancellationToken))
+        {
+            return Application.Features.ExchangeRates.ExchangeRateErrors
+                .LaterRevaluationExists();
+        }
+
         var invoices = await dbContext.Invoices
             .IgnoreQueryFilters()
             .Include(invoice => invoice.Lines)
@@ -36,11 +49,12 @@ internal static class ExchangeRateCascadeUpdater
                 invoice.CompanyId == companyId &&
                 invoice.ExchangeRateId == exchangeRateId)
             .ToListAsync(cancellationToken);
+        // Unposted vouchers are updated too: they keep the rate id, so they
+        // must carry the new value when they are posted later.
         var linkedVouchers = await dbContext.CashVouchers
             .IgnoreQueryFilters()
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
-                voucher.IsPosted &&
                 voucher.ExchangeRateId == exchangeRateId)
             .ToListAsync(cancellationToken);
         var transferIds = linkedVouchers
@@ -250,5 +264,31 @@ internal static class ExchangeRateCascadeUpdater
 
         return null;
     }
+
+    private static async Task<bool> LaterRevaluationExistsAsync(
+        ApplicationDbContext dbContext,
+        int companyId,
+        Domain.Entities.Companies.ExchangeRate rate,
+        CancellationToken cancellationToken) =>
+        await dbContext.MonetaryAccountRevaluations
+            .AsNoTracking()
+            .AnyAsync(
+                revaluation =>
+                    revaluation.CompanyId == companyId &&
+                    revaluation.FiscalYearId == rate.FiscalYearId &&
+                    revaluation.Currency == rate.Currency &&
+                    revaluation.RevaluationDate >= rate.RateDate &&
+                    !revaluation.IsDeleted,
+                cancellationToken) ||
+        await dbContext.CashboxRevaluations
+            .AsNoTracking()
+            .AnyAsync(
+                revaluation =>
+                    revaluation.CompanyId == companyId &&
+                    revaluation.FiscalYearId == rate.FiscalYearId &&
+                    revaluation.Cashbox.Currency == rate.Currency &&
+                    revaluation.RevaluationDate >= rate.RateDate &&
+                    !revaluation.IsDeleted,
+                cancellationToken);
 }
 

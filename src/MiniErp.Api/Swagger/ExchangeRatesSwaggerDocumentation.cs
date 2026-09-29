@@ -51,8 +51,8 @@ public sealed class ExchangeRatesSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Admin only. Updates an exchange rate using optimistic concurrency.",
                     "A positive route `id`, complete fields, and the exact returned `rowVersion`.",
-                    "`updateLinkedTransactions` is optional and defaults to `false`. When it is `false`, a rate already used by financial movements keeps the existing protected behavior and returns 409 (`ExchangeRates.Referenced`). When it is `true`, the new rate is saved and all linked invoices, cash vouchers, cashbox transfers, opening balances, and dependent movements are recalculated in the same transaction.",
-                    "For a referenced rate, only the rate value may be changed; its currency and date are immutable. Stale tokens and duplicate dates also return 409.")),
+                    "`updateLinkedTransactions` is optional and defaults to `false`. Notes can always be edited. When it is `false`, changing the value of a rate already used by financial movements returns 409 (`ExchangeRates.Referenced`). When it is `true`, the new rate is saved and all linked invoices, cash vouchers (posted or not), cashbox transfers, opening balances, and dependent movements are recalculated in the same transaction.",
+                    "For a referenced rate, only the rate value and notes may be changed; its currency and date are immutable. Changing the value returns 409 (`ExchangeRates.LaterRevaluationExists`) when the currency was revalued on or after the rate date in the same fiscal year. Editing only the notes keeps the rate's source. Stale tokens and duplicate dates also return 409.")),
             nameof(ExchangeRatesController.PreviewImport) => (
                 "Preview external exchange-rate import",
                 SwaggerOperationDescription.Create(
@@ -65,7 +65,7 @@ public sealed class ExchangeRatesSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Admin only. Fetches CBE/Frankfurter rates, then creates missing imported rates in a serializable transaction.",
                     "`rateDate`, optional `currencies`, and `replaceUnreferencedImportedRates`.",
-                    "Manual rates and referenced imported rates are never overwritten; replacement is opt-in for unreferenced imported rates.",
+                    "Rates are stored on the requested `rateDate` (the rate in effect on that date); when the provider publishes an earlier date, that date is kept in `notes`. Manual rates and referenced imported rates are never overwritten; replacement is opt-in for unreferenced imported rates.",
                     "Provider outages, duplicate races, and concurrency conflicts return documented errors.")),
             nameof(ExchangeRatesController.Delete) => (
                 "Delete an unused exchange rate",

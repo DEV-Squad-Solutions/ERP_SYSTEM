@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using static MiniErp.Application.Features.ExchangeRates.ExchangeRateErrors;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
@@ -312,31 +313,23 @@ public sealed class ExchangeRateService(
             return Result<ExchangeRateImportResponse>.Failure(providerResult.Error);
         }
 
-        foreach (var rateDate in received
-                     .Select(rate => rate.RateDate)
-                     .Distinct())
-        {
-            periodResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
-                rateDate,
-                nameof(ExternalExchangeRate.RateDate),
-                cancellationToken);
-            if (periodResult.IsFailure)
-            {
-                return Result<ExchangeRateImportResponse>.Failure(
-                    periodResult.Errors);
-            }
-        }
-
+        // The provider answers with its latest published rate, which on a
+        // holiday or weekend is dated earlier (for example 1 January returns
+        // 31 December, possibly in a closed fiscal year). The imported rate is
+        // the rate in effect on the requested date, so it is stored on that
+        // date: it stays in the requested (open) fiscal year, where documents
+        // resolve rates. The provider's publication date is kept in Notes.
         await using var transaction = await dbContext.Database
             .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         try
         {
             foreach (var externalRate in received)
             {
+                var importNotes = ProviderDateNote(externalRate);
                 var existing = await dbContext.ExchangeRates.FirstOrDefaultAsync(rate =>
                     rate.CompanyId == companyId &&
                     rate.Currency == externalRate.Currency &&
-                    rate.RateDate == externalRate.RateDate,
+                    rate.RateDate == request.RateDate,
                     cancellationToken);
 
                 if (existing is null)
@@ -345,11 +338,11 @@ public sealed class ExchangeRateService(
                     {
                         CompanyId = companyId,
                         Currency = externalRate.Currency,
-                        RateDate = externalRate.RateDate,
+                        RateDate = request.RateDate,
                         Rate = externalRate.Rate,
                         Source = ExchangeRateSource.Imported,
                         Provider = externalRate.Provider,
-                        Notes = null
+                        Notes = importNotes
                     };
                     imported.Touch(timeProvider.GetUtcNow().UtcDateTime);
                     dbContext.ExchangeRates.Add(imported);
@@ -382,7 +375,7 @@ public sealed class ExchangeRateService(
                 existing.Rate = externalRate.Rate;
                 existing.Source = ExchangeRateSource.Imported;
                 existing.Provider = externalRate.Provider;
-                existing.Notes = null;
+                existing.Notes = importNotes;
                 existing.Touch(timeProvider.GetUtcNow().UtcDateTime);
                 entry.Property(rate => rate.LastModifiedAt).IsModified = true;
                 items.Add(ImportItem(externalRate, ExchangeRateImportItemStatus.Updated, null));
@@ -408,6 +401,13 @@ public sealed class ExchangeRateService(
             BuildImportResponse(request.RateDate, exchangeRateProvider.Name,
                 currencies.Length, received.Count, items));
     }
+
+    private static string? ProviderDateNote(ExternalExchangeRate externalRate) =>
+        externalRate.RateDate == externalRate.RequestedDate
+            ? null
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"سعر المصدر منشور بتاريخ {externalRate.RateDate:yyyy-MM-dd}");
 
     private static ExchangeRateImportItemResponse ImportItem(
         ExternalExchangeRate externalRate,
@@ -564,10 +564,14 @@ public sealed class ExchangeRateService(
         }
 
         var isReferenced = await IsReferencedAsync(id, cancellationToken);
-        if (isReferenced && !request.UpdateLinkedTransactions)
+        var rateChanges = ExchangeRateRules.RoundRate(request.Rate) != rate.Rate;
+        // Notes can change freely; only a new rate value rewrites the linked
+        // documents and therefore needs the explicit cascade option.
+        if (isReferenced && rateChanges && !request.UpdateLinkedTransactions)
         {
             return Result<ExchangeRateResponse>.Failure(Referenced());
         }
+
 
         if (isReferenced &&
             (request.Currency != rate.Currency ||
@@ -616,11 +620,19 @@ public sealed class ExchangeRateService(
             }
         }
 
+        // A user-set value makes the rate manual; editing only its notes keeps
+        // an imported or carried-forward rate's origin.
+        if (rateChanges ||
+            request.Currency != rate.Currency ||
+            request.RateDate != rate.RateDate)
+        {
+            rate.Source = ExchangeRateSource.Manual;
+            rate.Provider = null;
+        }
+
         rate.Currency = request.Currency;
         rate.RateDate = request.RateDate;
         rate.Rate = ExchangeRateRules.RoundRate(request.Rate);
-        rate.Source = ExchangeRateSource.Manual;
-        rate.Provider = null;
         rate.Notes = Normalize(request.Notes);
         rate.Touch(timeProvider.GetUtcNow().UtcDateTime);
         entry.Property(entity => entity.LastModifiedAt).IsModified = true;
@@ -773,44 +785,14 @@ public sealed class ExchangeRateService(
                     (!excludedId.HasValue || rate.Id != excludedId.Value),
                 cancellationToken);
 
-    private async Task<bool> IsReferencedAsync(
+    private Task<bool> IsReferencedAsync(
         int id,
         CancellationToken cancellationToken) =>
-        await dbContext.Invoices
-            .IgnoreQueryFilters()
-            .AnyAsync(
-                invoice =>
-                    invoice.CompanyId == companyId &&
-                    invoice.ExchangeRateId == id,
-                cancellationToken) ||
-        await dbContext.CashVouchers
-            .IgnoreQueryFilters()
-            .AnyAsync(
-                voucher =>
-                    voucher.CompanyId == companyId &&
-                    voucher.ExchangeRateId == id,
-                cancellationToken) ||
-        await dbContext.PartnerOpeningBalances
-            .IgnoreQueryFilters()
-            .AnyAsync(
-                balance =>
-                    balance.CompanyId == companyId &&
-                    balance.ExchangeRateId == id,
-                cancellationToken) ||
-        await dbContext.EmployeeOpeningBalances
-            .IgnoreQueryFilters()
-            .AnyAsync(
-                balance =>
-                    balance.CompanyId == companyId &&
-                    balance.ExchangeRateId == id,
-                cancellationToken) ||
-        await dbContext.Cashboxes
-            .IgnoreQueryFilters()
-            .AnyAsync(
-                cashbox =>
-                    cashbox.CompanyId == companyId &&
-                    cashbox.OpeningExchangeRateId == id,
-                cancellationToken);
+        ExchangeRateReferences.IsReferencedAsync(
+            dbContext,
+            companyId,
+            id,
+            cancellationToken);
 
     private IOrderedQueryable<ExchangeRateResponse> ProjectResponseQuery(
         int id,
@@ -851,7 +833,12 @@ public sealed class ExchangeRateService(
     private static bool IsDuplicateConstraint(DbUpdateException exception)
     {
         var message = exception.ToString();
+        // SQL Server reports the unique index name; the index gained the
+        // FiscalYearId column when rates became fiscal-year owned.
         return message.Contains(
+                   "IX_ExchangeRates_CompanyId_FiscalYearId_Currency_RateDate",
+                   StringComparison.OrdinalIgnoreCase) ||
+            message.Contains(
                    "IX_ExchangeRates_CompanyId_Currency_RateDate",
                    StringComparison.OrdinalIgnoreCase) ||
             message.Contains(

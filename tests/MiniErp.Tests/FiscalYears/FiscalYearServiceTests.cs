@@ -77,6 +77,91 @@ public sealed class FiscalYearServiceTests
 
         Assert.Equal(new DateOnly(2026, 1, 1), carried.RateDate);
         Assert.Equal(50m, carried.Rate);
+        Assert.Equal(ExchangeRateSource.CarriedForward, carried.Source);
+    }
+
+    [Fact]
+    public async Task Close_RefreshesCarriedStartRateWithRatesEnteredAfterNextYearWasCreated()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(
+            companyId: 1,
+            defaultAccountingSetupService: new CapturingAccountingSetupService(),
+            inventoryCarryForwardService: new CapturingInventoryCarryForwardService());
+        var previous = await service.AddAsync(
+            new FiscalYearRequest(
+                "2025",
+                new DateOnly(2025, 1, 1),
+                new DateOnly(2025, 12, 31)));
+        await database.SeedExchangeRateAsync(
+            previous.Value.Id,
+            new DateOnly(2025, 11, 15),
+            48m);
+        // 2026 is created in November, so it first carries the November rate.
+        var next = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+        await database.SeedExchangeRateAsync(
+            previous.Value.Id,
+            new DateOnly(2025, 12, 31),
+            50m);
+
+        var close = await service.CloseAsync(previous.Value.Id);
+
+        Assert.True(close.IsSuccess, string.Join("; ", close.Errors.Select(error => error.Code)));
+        var startRate = await database.Context.ExchangeRates
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .SingleAsync(rate =>
+                rate.CompanyId == 1 &&
+                rate.Currency == CurrencyCode.USD &&
+                rate.FiscalYearId == next.Value.Id);
+        Assert.Equal(new DateOnly(2026, 1, 1), startRate.RateDate);
+        Assert.Equal(50m, startRate.Rate);
+        Assert.Equal(ExchangeRateSource.CarriedForward, startRate.Source);
+    }
+
+    [Fact]
+    public async Task Close_KeepsAStartDateRateEnteredByTheUser()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(
+            companyId: 1,
+            defaultAccountingSetupService: new CapturingAccountingSetupService(),
+            inventoryCarryForwardService: new CapturingInventoryCarryForwardService());
+        var previous = await service.AddAsync(
+            new FiscalYearRequest(
+                "2025",
+                new DateOnly(2025, 1, 1),
+                new DateOnly(2025, 12, 31)));
+        var next = await service.AddAsync(
+            new FiscalYearRequest(
+                "2026",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 12, 31)));
+        await database.SeedExchangeRateAsync(
+            next.Value.Id,
+            new DateOnly(2026, 1, 1),
+            49m);
+        await database.SeedExchangeRateAsync(
+            previous.Value.Id,
+            new DateOnly(2025, 12, 31),
+            50m);
+
+        var close = await service.CloseAsync(previous.Value.Id);
+
+        Assert.True(close.IsSuccess, string.Join("; ", close.Errors.Select(error => error.Code)));
+        var startRate = await database.Context.ExchangeRates
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .SingleAsync(rate =>
+                rate.CompanyId == 1 &&
+                rate.Currency == CurrencyCode.USD &&
+                rate.FiscalYearId == next.Value.Id);
+        Assert.Equal(49m, startRate.Rate);
+        Assert.Equal(ExchangeRateSource.Manual, startRate.Source);
     }
 
     [Fact]
@@ -1271,6 +1356,36 @@ public sealed class FiscalYearServiceTests
                     DeletedById TEXT NULL,
                     DeletedOn TEXT NULL,
                     DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                -- Minimal exchange-rate reference tables used by the
+                -- year-start rate carry-forward.
+                CREATE TABLE Invoices (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    ExchangeRateId INTEGER NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE CashVouchers (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    ExchangeRateId INTEGER NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE PartnerOpeningBalances (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    ExchangeRateId INTEGER NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE Cashboxes (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    OpeningExchangeRateId INTEGER NULL,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 

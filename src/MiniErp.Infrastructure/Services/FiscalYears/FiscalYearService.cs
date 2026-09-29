@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 using static MiniErp.Application.Features.FiscalYears.FiscalYearErrors;
@@ -13,6 +14,7 @@ using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.ExchangeRates;
 
 namespace MiniErp.Infrastructure.Services.FiscalYears;
 
@@ -459,14 +461,18 @@ public sealed class FiscalYearService(
                         cancellationToken);
                 }
             }
-            await EnsureExchangeRateCarryForwardAsync(
-                nextYear,
-                cancellationToken);
+            // Check before carrying rates forward: writing a rate into a
+            // closed year is rejected by the persistence guard as an
+            // exception instead of this documented result.
             if (nextYear.Status != FiscalYearStatus.Open)
             {
                 return Result<FiscalYearResponse>.Failure(
                     NextFiscalYearClosed(nextYear.Name));
             }
+
+            await EnsureExchangeRateCarryForwardAsync(
+                nextYear,
+                cancellationToken);
 
             var readiness = accountingReadinessService is null
                 ? null
@@ -932,50 +938,90 @@ public sealed class FiscalYearService(
         FiscalYear fiscalYear,
         CancellationToken cancellationToken)
     {
-        var existingCurrencies = await dbContext.ExchangeRates
-            .IgnoreQueryFilters()
-            .AsNoTracking()
-            .Where(rate =>
-                rate.CompanyId == companyId &&
-                !rate.IsDeleted &&
-                rate.FiscalYearId == fiscalYear.Id)
-            .Select(rate => rate.Currency)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-
-        var latestRates = await dbContext.ExchangeRates
-            .IgnoreQueryFilters()
-            .AsNoTracking()
-            .Where(rate =>
-                rate.CompanyId == companyId &&
-                !rate.IsDeleted &&
-                rate.RateDate < fiscalYear.StartDate)
-            .OrderByDescending(rate => rate.RateDate)
-            .ThenByDescending(rate => rate.Id)
-            .ToListAsync(cancellationToken);
-
-        foreach (var latestRate in latestRates
-                     .GroupBy(rate => rate.Currency)
-                     .Select(group => group.First())
-                     .Where(rate => !existingCurrencies.Contains(rate.Currency)))
+        // Documents resolve rates inside their own fiscal year only, so every
+        // currency needs a rate on the year's first day. It runs when the
+        // year is created and again when the previous year is closed: rates
+        // entered after creation (for example on 31 December) must still
+        // reach the start date. A user-entered start-date rate is kept; a
+        // carried-forward one is refreshed while no document uses it.
+        var latestRates = (await dbContext.ExchangeRates
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Where(rate =>
+                    rate.CompanyId == companyId &&
+                    !rate.IsDeleted &&
+                    rate.RateDate < fiscalYear.StartDate)
+                .OrderByDescending(rate => rate.RateDate)
+                .ThenByDescending(rate => rate.Id)
+                .ToListAsync(cancellationToken))
+            .GroupBy(rate => rate.Currency)
+            .Select(group => group.First())
+            .ToList();
+        if (latestRates.Count == 0)
         {
-            var carryForward = new ExchangeRate
-            {
-                CompanyId = companyId,
-                FiscalYearId = fiscalYear.Id,
-                Currency = latestRate.Currency,
-                RateDate = fiscalYear.StartDate,
-                Rate = latestRate.Rate,
-                Source = latestRate.Source,
-                Provider = latestRate.Provider,
-                Notes = latestRate.Notes
-            };
-            carryForward.Touch(timeProvider.GetUtcNow().UtcDateTime);
-            dbContext.ExchangeRates.Add(carryForward);
+            return;
         }
 
-        if (dbContext.ChangeTracker.Entries<ExchangeRate>()
-                .Any(entry => entry.State == EntityState.Added))
+        var startDateRates = await dbContext.ExchangeRates
+            .IgnoreQueryFilters()
+            .Where(rate =>
+                rate.CompanyId == companyId &&
+                !rate.IsDeleted &&
+                rate.FiscalYearId == fiscalYear.Id &&
+                rate.RateDate == fiscalYear.StartDate)
+            .ToDictionaryAsync(rate => rate.Currency, cancellationToken);
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        var changed = false;
+
+        foreach (var latestRate in latestRates)
+        {
+            var notes = string.Create(
+                CultureInfo.InvariantCulture,
+                $"مرحل تلقائيًا من سعر {latestRate.RateDate:yyyy-MM-dd}");
+            if (!startDateRates.TryGetValue(
+                    latestRate.Currency,
+                    out var startDateRate))
+            {
+                var carryForward = new ExchangeRate
+                {
+                    CompanyId = companyId,
+                    FiscalYearId = fiscalYear.Id,
+                    Currency = latestRate.Currency,
+                    RateDate = fiscalYear.StartDate,
+                    Rate = latestRate.Rate,
+                    Source = ExchangeRateSource.CarriedForward,
+                    Provider = latestRate.Provider,
+                    Notes = notes
+                };
+                carryForward.Touch(now);
+                dbContext.ExchangeRates.Add(carryForward);
+                changed = true;
+                continue;
+            }
+
+            if (startDateRate.Source != ExchangeRateSource.CarriedForward ||
+                (startDateRate.Rate == latestRate.Rate &&
+                 startDateRate.Notes == notes) ||
+                await ExchangeRateReferences.IsReferencedAsync(
+                    dbContext,
+                    companyId,
+                    startDateRate.Id,
+                    cancellationToken))
+            {
+                continue;
+            }
+
+            startDateRate.Rate = latestRate.Rate;
+            startDateRate.Provider = latestRate.Provider;
+            startDateRate.Notes = notes;
+            startDateRate.Touch(now);
+            dbContext.Entry(startDateRate)
+                .Property(rate => rate.LastModifiedAt)
+                .IsModified = true;
+            changed = true;
+        }
+
+        if (changed)
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }

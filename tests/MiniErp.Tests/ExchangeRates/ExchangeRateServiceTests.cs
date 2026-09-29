@@ -348,6 +348,58 @@ public sealed class ExchangeRateServiceTests
     }
 
     [Fact]
+    public async Task Import_OnHolidayStoresProviderRateOnRequestedDateInTheOpenYear()
+    {
+        await using var database = await ExchangeRateTestDatabase.CreateAsync();
+        // 2025 is closed; 1 January 2026 is a holiday, so the provider
+        // answers with its 31 December 2025 publication.
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears
+            SET Name = '2025', StartDate = '2025-01-01',
+                EndDate = '2025-12-31', Status = 2, IsCurrent = 0
+            WHERE Id = 1;
+
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent, RowVersion, CreatedById, CreatedOn,
+                CreatedByPc, IsDeleted)
+            VALUES (
+                100, 1, '2026', '2026-01-01', '2026-12-31', 1,
+                1, randomblob(8), 'test', '2026-01-01', 'test', 0);
+            """);
+        var service = database.CreateService(
+            1,
+            new FixedDateExchangeRateProvider(
+                publishedDate: new DateOnly(2025, 12, 31),
+                rate: 62.5m));
+
+        var result = await service.ImportAsync(
+            new ExchangeRateImportRequest(
+                RateDate: new DateOnly(2026, 1, 1),
+                Currencies: [CurrencyCode.GBP]));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(1, result.Value.ImportedCount);
+        var stored = await database.Context.ExchangeRates
+            .AsNoTracking()
+            .SingleAsync(rate =>
+                rate.CompanyId == 1 &&
+                rate.Currency == CurrencyCode.GBP);
+        Assert.Equal(new DateOnly(2026, 1, 1), stored.RateDate);
+        Assert.Equal(100, stored.FiscalYearId);
+        Assert.Equal(62.5m, stored.Rate);
+        Assert.Equal(ExchangeRateSource.Imported, stored.Source);
+        Assert.Contains("2025-12-31", stored.Notes);
+
+        var resolved = await database.CreateResolver(1).ResolveAsync(
+            CurrencyCode.GBP,
+            new DateOnly(2026, 1, 1));
+        Assert.True(resolved.IsSuccess, resolved.Error.Description);
+        Assert.Equal(62.5m, resolved.Value.Rate);
+    }
+
+    [Fact]
     public async Task Update_WhenReferencedByAnInvoiceReturnsConflict()
     {
         await using var database = await ExchangeRateTestDatabase.CreateAsync();
@@ -360,13 +412,39 @@ public sealed class ExchangeRateServiceTests
             new ExchangeRateUpdateRequest(
                 rate.Currency,
                 rate.RateDate,
-                rate.Rate,
+                rate.Rate + 1m,
                 rate.Source,
                 rate.Notes,
                 rate.RowVersion));
 
         Assert.True(result.IsFailure);
         Assert.Equal("ExchangeRates.Referenced", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Update_NotesOnReferencedRate_DoesNotNeedLinkedUpdateAndKeepsSource()
+    {
+        await using var database = await ExchangeRateTestDatabase.CreateAsync();
+        await database.AddReferenceAsync("Invoices", 1);
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE ExchangeRates SET Source = 2 WHERE Id = 1");
+        var service = database.CreateService(1);
+        var rate = await database.GetRateAsync(1);
+
+        var result = await service.UpdateAsync(
+            1,
+            new ExchangeRateUpdateRequest(
+                rate.Currency,
+                rate.RateDate,
+                rate.Rate,
+                ExchangeRateSource.Manual,
+                "  ملاحظة جديدة  ",
+                rate.RowVersion));
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal("ملاحظة جديدة", result.Value.Notes);
+        Assert.Equal(rate.Rate, result.Value.Rate);
+        Assert.Equal(ExchangeRateSource.Imported, result.Value.Source);
     }
 
     [Fact]
@@ -517,7 +595,9 @@ public sealed class ExchangeRateServiceTests
             return new ExchangeRateTestDatabase(connection, context, isolationInterceptor);
         }
 
-        public ExchangeRateService CreateService(int companyId)
+        public ExchangeRateService CreateService(
+            int companyId,
+            IExchangeRateProvider? exchangeRateProvider = null)
         {
             var companyContext = new TestCurrentCompanyContext(companyId);
             var resolver = CreateResolver(companyContext);
@@ -533,7 +613,8 @@ public sealed class ExchangeRateServiceTests
                     companyContext),
                 new FiscalYearPeriodGuard(
                     Context,
-                    companyContext));
+                    companyContext),
+                exchangeRateProvider);
         }
 
         public ExchangeRateResolver CreateResolver(int companyId) =>
@@ -573,6 +654,28 @@ public sealed class ExchangeRateServiceTests
             await Context.DisposeAsync();
             await Connection.DisposeAsync();
         }
+    }
+
+    /// <summary>Returns a fixed rate published on <paramref name="publishedDate"/>.</summary>
+    private sealed class FixedDateExchangeRateProvider(
+        DateOnly publishedDate,
+        decimal rate) : IExchangeRateProvider
+    {
+        public string Name => "Test:Provider";
+
+        public Task<Result<ExternalExchangeRate>> GetRateAsync(
+            CurrencyCode currency,
+            CurrencyCode baseCurrency,
+            DateOnly requestedDate,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result<ExternalExchangeRate>.Success(
+                new ExternalExchangeRate(
+                    Currency: currency,
+                    BaseCurrency: baseCurrency,
+                    RequestedDate: requestedDate,
+                    RateDate: publishedDate,
+                    Rate: rate,
+                    Provider: Name)));
     }
 
     private sealed record ExchangeRateRow(

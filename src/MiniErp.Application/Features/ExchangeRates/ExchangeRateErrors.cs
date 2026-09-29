@@ -63,6 +63,11 @@ public static class ExchangeRateErrors
             "ExchangeRates.ReferencedIdentityChangeNotAllowed",
             "لا يمكن تغيير العملة أو التاريخ لسعر صرف مستخدم في مستندات مالية. يمكن تعديل قيمة السعر فقط مع تحديث الحركات المرتبطة.");
 
+    public static Error LaterRevaluationExists() =>
+        Error.Conflict(
+            "ExchangeRates.LaterRevaluationExists",
+            "توجد إعادة تقييم للعملة بتاريخ سعر الصرف أو بعده في نفس السنة المالية؛ تعديل قيمة السعر سيجعل فروق إعادة التقييم المسجلة غير صحيحة.");
+
     public static Error InvalidLinkedTransfer() =>
         Error.Conflict(
             "ExchangeRates.InvalidLinkedTransfer",
