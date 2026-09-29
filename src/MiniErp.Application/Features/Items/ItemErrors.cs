@@ -20,4 +20,10 @@ public static class ItemErrors
         Error.Conflict(
             "Items.InUse",
             "لا يمكن حذف الصنف لارتباطه بمستندات أو حركات حالية أو تاريخية.");
+
+    public static Error ItemUnitChangeNotAllowed() =>
+        Error.Conflict(
+            "Items.ItemUnitChangeNotAllowed",
+            "لا يمكن تغيير وحدة الصنف بعد استخدامه في مستندات أو حركات؛ الكميات المسجلة محسوبة بالوحدة الحالية.",
+            "ItemUnitId");
 }

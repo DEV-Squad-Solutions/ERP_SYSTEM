@@ -152,6 +152,14 @@ public sealed class ItemService(
             return Result<ItemResponse>.Failure(itemUnitResult.Error);
         }
 
+        // Recorded quantities are expressed in the item's unit, and there is
+        // no conversion between units, so the unit is fixed once used.
+        if (item.ItemUnitId != request.ItemUnitId &&
+            await IsInUseAsync(id, cancellationToken))
+        {
+            return Result<ItemResponse>.Failure(ItemUnitChangeNotAllowed());
+        }
+
         var code = item.Code;
         request.Adapt(item);
         item.Code = code;
@@ -179,49 +187,7 @@ public sealed class ItemService(
             return Result.Failure(NotFound(id));
         }
 
-        var isInUse = await dbContext.InvoiceLines
-            .IgnoreQueryFilters()
-            .AnyAsync(
-                line =>
-                    line.CompanyId == companyId &&
-                    line.ItemId == id,
-                cancellationToken) ||
-            await dbContext.StockOpeningBalanceLines
-                .IgnoreQueryFilters()
-                .AnyAsync(
-                    line =>
-                        line.CompanyId == companyId &&
-                        line.ItemId == id,
-                    cancellationToken) ||
-            await dbContext.StockAdjustmentLines
-                .IgnoreQueryFilters()
-                .AnyAsync(
-                    line =>
-                        line.CompanyId == companyId &&
-                        line.ItemId == id,
-                    cancellationToken) ||
-            await dbContext.StockTransferLines
-                .IgnoreQueryFilters()
-                .AnyAsync(
-                    line =>
-                        line.CompanyId == companyId &&
-                        line.ItemId == id,
-                    cancellationToken) ||
-            await dbContext.InventoryCountLines
-                .IgnoreQueryFilters()
-                .AnyAsync(
-                    line =>
-                        line.CompanyId == companyId &&
-                        line.ItemId == id,
-                    cancellationToken) ||
-            await dbContext.ItemMovements
-                .IgnoreQueryFilters()
-                .AnyAsync(
-                    movement =>
-                        movement.CompanyId == companyId &&
-                        movement.ItemId == id,
-                    cancellationToken);
-        if (isInUse)
+        if (await IsInUseAsync(id, cancellationToken))
         {
             return Result.Failure(InUse());
         }
@@ -232,6 +198,52 @@ public sealed class ItemService(
         await dbContext.SaveChangesAsync(cancellationToken);
         return Result.Success();
     }
+
+    private async Task<bool> IsInUseAsync(
+        int id,
+        CancellationToken cancellationToken) =>
+        await dbContext.InvoiceLines
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                line =>
+                    line.CompanyId == companyId &&
+                    line.ItemId == id,
+                cancellationToken) ||
+        await dbContext.StockOpeningBalanceLines
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                line =>
+                    line.CompanyId == companyId &&
+                    line.ItemId == id,
+                cancellationToken) ||
+        await dbContext.StockAdjustmentLines
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                line =>
+                    line.CompanyId == companyId &&
+                    line.ItemId == id,
+                cancellationToken) ||
+        await dbContext.StockTransferLines
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                line =>
+                    line.CompanyId == companyId &&
+                    line.ItemId == id,
+                cancellationToken) ||
+        await dbContext.InventoryCountLines
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                line =>
+                    line.CompanyId == companyId &&
+                    line.ItemId == id,
+                cancellationToken) ||
+        await dbContext.ItemMovements
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                movement =>
+                    movement.CompanyId == companyId &&
+                    movement.ItemId == id,
+                cancellationToken);
 
     private async Task<Result<ItemUnit>> GetActiveItemUnitAsync(
         int itemUnitId,

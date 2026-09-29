@@ -420,6 +420,47 @@ public sealed class InventoryMasterDeletionTests
         Assert.False((await database.GetItemAsync(1)).IsDeleted);
     }
 
+    [Theory]
+    [MemberData(nameof(ItemDependencies))]
+    public async Task UpdateItem_BlocksUnitChangeAfterCurrentAndHistoricalUse(
+        string dependency,
+        bool isDeleted)
+    {
+        await using var database = await InventoryDeletionDatabase.CreateAsync();
+        await database.AddItemDependencyAsync(dependency, isDeleted);
+        var service = database.CreateItemService(companyId: 1);
+
+        var result = await service.UpdateAsync(
+            1,
+            new ItemRequest(
+                3,
+                "Shared Item",
+                null));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Items.ItemUnitChangeNotAllowed", result.Error.Code);
+        Assert.Equal(1, (await database.GetItemAsync(1)).ItemUnitId);
+    }
+
+    [Fact]
+    public async Task UpdateItem_AllowsOtherChangesWhenUsedItemKeepsItsUnit()
+    {
+        await using var database = await InventoryDeletionDatabase.CreateAsync();
+        await database.AddItemDependencyAsync("ItemMovement", false);
+        var service = database.CreateItemService(companyId: 1);
+
+        var result = await service.UpdateAsync(
+            1,
+            new ItemRequest(
+                1,
+                "Renamed Item",
+                null));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value.ItemUnitId);
+        Assert.Equal("Renamed Item", result.Value.Name);
+    }
+
     [Fact]
     public async Task DeleteItem_WhenUnused_SoftDeletesIt()
     {

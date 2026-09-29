@@ -51,7 +51,7 @@ public sealed class ItemsSwaggerDocumentation : IOperationFilter
                     "Admin only. Updates an item while preserving identity, tenant, and creation audit fields.",
                     "A positive route `id` and the same request fields required by create.",
                     "All create validation rules apply; duplicate-code checks exclude the current item.",
-                    "Invalid IDs return 400; missing, deleted, or other-company items return 404; duplicate codes return 409. The selected unit must remain active and in the same company.")),
+                    "Invalid IDs return 400; missing, deleted, or other-company items return 404; duplicate codes return 409. The selected unit must remain active and in the same company. Changing `itemUnitId` after the item is used in invoice, stock document, inventory count, or movement lines returns 409 (`Items.ItemUnitChangeNotAllowed`).")),
             nameof(ItemsController.Delete) => (
                 "Delete an item",
                 SwaggerOperationDescription.Create(
