@@ -37,9 +37,6 @@ public static class MonetaryAccountRevaluationErrors
     public static Error Backdated(DateOnly date) => Error.Conflict(
         "MonetaryAccountRevaluations.Backdated", $"لا يمكن إنشاء إعادة تقييم بتاريخ {date:yyyy-MM-dd} قبل إعادة تقييم لاحقة.");
 
-    public static Error NegativeBalance() => Error.Validation(
-        "MonetaryAccountRevaluations.NegativeBalance", "لا يمكن إعادة تقييم رصيد عملة أو قيمة دفترية سالبة.");
-
     public static Error AccountMappingMissing() => Error.Validation(
         "MonetaryAccountRevaluations.AccountMappingMissing", "يجب إعداد الحساب المرتبط بالطرف وحساب فروق العملة للسنة المالية.");
 }

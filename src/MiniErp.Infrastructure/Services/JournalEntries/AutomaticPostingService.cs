@@ -210,7 +210,26 @@ public sealed class AutomaticPostingService(
                 normalizedLines.Errors);
         }
 
-        request = request with { Lines = normalizedLines.Value };
+        // The source lines must balance exactly before rounding; rounding only
+        // absorbs the per-line scale loss, never a real imbalance.
+        if (ValidateBalance(normalizedLines.Value) is { } unroundedBalanceError)
+        {
+            LogFailure(
+                updateExisting ? "CreateOrUpdate" : "CreateOrGet",
+                request.SourceType,
+                request.SourceId,
+                request.FiscalYearId,
+                failureKind: "Validation");
+            return Result<AutomaticJournalEntryResult>.Failure(
+                unroundedBalanceError);
+        }
+
+        request = request with
+        {
+            Lines = JournalEntryLedgerRounding.RoundToLedgerScale(
+                normalizedLines.Value,
+                baseCurrency)
+        };
         var validation = await ValidateRequestAsync(request, cancellationToken);
         if (validation.IsFailure)
         {

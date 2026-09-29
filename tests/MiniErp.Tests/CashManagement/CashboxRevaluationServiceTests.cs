@@ -191,6 +191,51 @@ public sealed class CashboxRevaluationServiceTests
     }
 
     [Fact]
+    public async Task Revaluation_CorrectsNegativeCarryingAmountForPositiveCash()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        // Receive 100 EUR at 50 (5,000), then pay 90 EUR at 60 (5,400):
+        // 10 EUR remain while the carrying base amount is -400.
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE JournalEntryLines SET Debit = 5000, Currency = 3, " +
+            "ExchangeRate = 50, TransactionDebit = 100 WHERE Id = 1006");
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 2101,
+            entryNumber: "JE-EUR-PAYMENT",
+            entryDate: new DateOnly(2026, 1, 20),
+            entryType: JournalEntryType.Automatic,
+            sourceType: null,
+            sourceId: null,
+            sourceNumber: null,
+            lines:
+            [
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 1,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 6,
+                    Debit: 0m,
+                    Credit: 5_400m,
+                    Currency: CurrencyCode.EUR,
+                    ExchangeRate: 60m,
+                    TransactionDebit: 0m,
+                    TransactionCredit: 90m)
+            ]);
+
+        var result = await database.CreateCashboxRevaluationService(1)
+            .CreateAsync(new CashboxRevaluationRequest(
+                CashboxId: 6,
+                RevaluationDate: new DateOnly(2026, 1, 31),
+                ClosingRate: 60m));
+
+        Assert.True(result.IsSuccess, string.Join("; ", result.Errors.Select(error => error.Code)));
+        Assert.Equal(10m, result.Value.ForeignAmount);
+        Assert.Equal(-400m, result.Value.CarryingBaseAmount);
+        Assert.Equal(600m, result.Value.TargetBaseAmount);
+        Assert.Equal(1_000m, result.Value.DeltaBaseAmount);
+        Assert.NotNull(result.Value.JournalEntryId);
+    }
+
+    [Fact]
     public async Task Revaluation_RejectsClosedFiscalYearAndBaseCurrencyCashbox()
     {
         await using var database = await CashManagementTestDatabase.CreateAsync();

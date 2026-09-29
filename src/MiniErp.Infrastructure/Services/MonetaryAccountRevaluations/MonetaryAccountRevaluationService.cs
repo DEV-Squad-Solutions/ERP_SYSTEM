@@ -170,10 +170,17 @@ public sealed class MonetaryAccountRevaluationService(
             })
             .ToListAsync(cancellationToken);
 
+        // Earlier revaluations are posted as base-currency lines, so they are
+        // not part of the foreign-currency lines above. Include every earlier
+        // revaluation adjustment for this target:
+        // - this year's monetary revaluations, and cashbox revaluations when
+        //   the target is a cashbox (both flows adjust the same balance);
+        // - adjustments of earlier years whose closing balances were carried
+        //   into a later year (the carry-forward groups lines by currency, so
+        //   they reach this year inside a base-currency opening line).
         var priorRevaluationJournalIds = dbContext.MonetaryAccountRevaluations
             .AsNoTracking()
             .Where(row => row.CompanyId == companyId &&
-                row.FiscalYearId == fiscalYear.Id &&
                 row.AccountId == request.AccountId &&
                 row.Currency == request.Currency &&
                 row.PartyType == request.PartyType &&
@@ -182,15 +189,27 @@ public sealed class MonetaryAccountRevaluationService(
                 row.JournalEntryId.HasValue &&
                 !row.IsDeleted)
             .Select(row => row.JournalEntryId!.Value);
+        var carriedForwardFiscalYearIds = dbContext.JournalEntries
+            .AsNoTracking()
+            .Where(entry => entry.CompanyId == companyId &&
+                entry.EntryType == JournalEntryType.Opening &&
+                entry.SourceType == JournalEntrySourceType.FiscalYearClosing &&
+                entry.SourceId.HasValue &&
+                !entry.IsDeleted)
+            .Select(entry => entry.SourceId!.Value);
+        var isCashboxTarget = request.PartyType == JournalPartyType.Cashbox;
         var priorRevaluationLines = await dbContext.JournalEntryLines
             .AsNoTracking()
             .Where(line => line.CompanyId == companyId && line.AccountId == request.AccountId &&
-                line.JournalEntry.FiscalYearId == fiscalYear.Id &&
                 line.JournalEntry.EntryDate <= request.RevaluationDate &&
+                (line.JournalEntry.FiscalYearId == fiscalYear.Id ||
+                 carriedForwardFiscalYearIds.Contains(line.JournalEntry.FiscalYearId)) &&
                 line.Currency == baseCurrency &&
                 line.PartyType == request.PartyType &&
                 line.PartyId == request.PartyId &&
-                priorRevaluationJournalIds.Contains(line.JournalEntryId) &&
+                (priorRevaluationJournalIds.Contains(line.JournalEntryId) ||
+                 (isCashboxTarget &&
+                  line.JournalEntry.SourceType == JournalEntrySourceType.CashboxRevaluation)) &&
                 !line.IsDeleted && !line.JournalEntry.IsDeleted &&
                 line.JournalEntry.Status == JournalEntryStatus.Posted &&
                 line.JournalEntry.ReversalOfEntryId == null &&
@@ -198,13 +217,13 @@ public sealed class MonetaryAccountRevaluationService(
             .Select(line => new { line.Debit, line.Credit })
             .ToListAsync(cancellationToken);
 
+        // Balances are signed: a credit balance (for example a supplier
+        // payable) is revalued with the same target - carrying delta.
         var foreignAmount = ExchangeRateRules.RoundBaseAmount(lines
             .Sum(line => line.TransactionDebit - line.TransactionCredit));
         var carryingBaseAmount = ExchangeRateRules.RoundBaseAmount(
             lines.Sum(line => line.Debit - line.Credit) +
             priorRevaluationLines.Sum(line => line.Debit - line.Credit));
-        if (foreignAmount < 0m || carryingBaseAmount < 0m)
-            return Result<MonetaryAccountRevaluationResponse>.Failure(NegativeBalance());
 
         var targetBaseAmount = decimal.Round(
             ExchangeRateRules.ConvertToBase(foreignAmount, request.ClosingRate),

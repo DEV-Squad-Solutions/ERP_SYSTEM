@@ -31,7 +31,7 @@ public static class CashboxRevaluationErrors
 
     public static Error NegativeBalance() => Error.Validation(
         "CashboxRevaluations.NegativeBalance",
-        "لا يمكن إعادة تقييم خزينة رصيد عملتها أو قيمتها الدفترية سالب؛ صحح الحركات أولاً.");
+        "لا يمكن إعادة تقييم خزينة رصيد عملتها سالب؛ صحح الحركات أولاً.");
 
     public static Error AccountMappingMissing() => Error.Validation(
         "CashboxRevaluations.AccountMappingMissing", "يجب إعداد حساب الخزينة وحساب فروق العملة للسنة المالية.");

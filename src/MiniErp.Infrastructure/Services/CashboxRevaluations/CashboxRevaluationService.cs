@@ -115,7 +115,10 @@ public sealed class CashboxRevaluationService(
             .Sum(line => line.TransactionDebit - line.TransactionCredit));
         var carryingBaseAmount = ExchangeRateRules.RoundBaseAmount(lines
             .Sum(line => line.Debit - line.Credit));
-        if (foreignAmount < 0m || carryingBaseAmount < 0m)
+        // Physical cash cannot be negative, but the carrying amount can be:
+        // receiving at a low rate and paying at a higher rate may leave a
+        // credit base balance that the revaluation must still correct.
+        if (foreignAmount < 0m)
         {
             return Result<CashboxRevaluationResponse>.Failure(
                 NegativeBalance());

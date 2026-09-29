@@ -250,6 +250,107 @@ public sealed class AutomaticPostingServiceTests
     }
 
     [Fact]
+    public async Task Posting_RoundsLinesToLedgerScaleAndKeepsEntryBalanced()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var service = new AutomaticPostingService(
+            database.Context,
+            new TestCurrentCompanyContext(1),
+            TimeProvider.System,
+            NullLogger<AutomaticPostingService>.Instance);
+        // Balanced at 8 dp (10.00005 = 5.00004 + 5.00001), but rounding each
+        // line to 4 dp independently gives 10.0001 against 5.0000 + 5.0000.
+        var request = CreateRequest(10m) with
+        {
+            SourceId = 9043,
+            Lines =
+            [
+                new JournalEntryLineRequest(
+                    AccountId: 2,
+                    Description: "مدين",
+                    Debit: 10.00005m,
+                    Credit: 0m,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 7),
+                new JournalEntryLineRequest(
+                    AccountId: 3,
+                    Description: "دائن 1",
+                    Debit: 0m,
+                    Credit: 5.00004m,
+                    PartyType: JournalPartyType.Customer,
+                    PartyId: 11),
+                new JournalEntryLineRequest(
+                    AccountId: 3,
+                    Description: "دائن 2",
+                    Debit: 0m,
+                    Credit: 5.00001m,
+                    PartyType: JournalPartyType.Customer,
+                    PartyId: 11)
+            ]
+        };
+
+        var result = await service.CreateOrUpdateAsync(request);
+
+        Assert.True(result.IsSuccess, string.Join("; ", result.Errors.Select(error => error.Code)));
+        var lines = await database.Context.JournalEntryLines
+            .AsNoTracking()
+            .Where(line => line.JournalEntryId == result.Value.JournalEntryId)
+            .ToListAsync();
+        Assert.Equal(3, lines.Count);
+        Assert.All(lines, line =>
+        {
+            Assert.Equal(decimal.Round(line.Debit, 4), line.Debit);
+            Assert.Equal(decimal.Round(line.Credit, 4), line.Credit);
+            Assert.Equal(line.Debit, line.TransactionDebit);
+            Assert.Equal(line.Credit, line.TransactionCredit);
+        });
+        Assert.Equal(10.0000m, lines.Sum(line => line.Debit));
+        Assert.Equal(10.0000m, lines.Sum(line => line.Credit));
+    }
+
+    [Fact]
+    public async Task Posting_RejectsSourceImbalanceSmallerThanLedgerScale()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var service = new AutomaticPostingService(
+            database.Context,
+            new TestCurrentCompanyContext(1),
+            TimeProvider.System,
+            NullLogger<AutomaticPostingService>.Instance);
+        // Rounding would hide this 0.00001 difference, so it must be rejected
+        // before rounding is applied.
+        var request = CreateRequest(10m) with
+        {
+            SourceId = 9044,
+            Lines =
+            [
+                new JournalEntryLineRequest(
+                    AccountId: 2,
+                    Description: "مدين",
+                    Debit: 10.00001m,
+                    Credit: 0m,
+                    PartyType: JournalPartyType.Cashbox,
+                    PartyId: 7),
+                new JournalEntryLineRequest(
+                    AccountId: 3,
+                    Description: "دائن",
+                    Debit: 0m,
+                    Credit: 10.00002m,
+                    PartyType: JournalPartyType.Customer,
+                    PartyId: 11)
+            ]
+        };
+
+        var result = await service.CreateOrUpdateAsync(request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Errors, error =>
+            error.Code == "JournalEntries.Unbalanced");
+        Assert.False(await database.Context.JournalEntries
+            .AnyAsync(entry => entry.SourceId == 9044));
+    }
+
+    [Fact]
     public async Task Delete_IsIdempotent_AndRemovesSourceEntry()
     {
         await using var database = await TestDatabase.CreateAsync();
