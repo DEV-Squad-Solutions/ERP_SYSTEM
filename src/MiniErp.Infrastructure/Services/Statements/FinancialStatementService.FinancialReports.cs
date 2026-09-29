@@ -529,42 +529,53 @@ public sealed partial class FinancialStatementService
         var periodCredit = items.Sum(item => item.PeriodCredit);
         var closingDebit = items.Sum(item => item.ClosingDebit);
         var closingCredit = items.Sum(item => item.ClosingCredit);
-        var revenueNet = journalLines
-            .Where(line => line.EntryDate >= request.FromDate)
+        var isFinancialPosition =
+            statementType == FinancialStatementType.FinancialPosition;
+        // The financial position is a point-in-time statement: its balances
+        // run from the fiscal-year start (opening + period), so the current
+        // result it adds to equity must also be year-to-date. The loaded lines
+        // already cover the fiscal year up to ToDate. The income statement
+        // keeps the FromDate..ToDate period result.
+        var resultLines = isFinancialPosition
+            ? journalLines
+            : journalLines.Where(line => line.EntryDate >= request.FromDate);
+        var revenueNet = resultLines
             .Where(line => line.AccountType == AccountType.Revenue)
             .Sum(line => line.Credit - line.Debit);
-        var expenseNet = journalLines
-            .Where(line => line.EntryDate >= request.FromDate)
+        var expenseNet = resultLines
             .Where(line => line.AccountType == AccountType.Expense)
             .Sum(line => line.Debit - line.Credit);
-        var periodNetResult = revenueNet - expenseNet;
+        var currentNetResult = revenueNet - expenseNet;
         var netResult = statementType is
             FinancialStatementType.IncomeStatement or
             FinancialStatementType.FinancialPosition
-            ? periodNetResult
+            ? currentNetResult
             : 0m;
-        var totalAssets = statementType == FinancialStatementType.FinancialPosition
+        var totalAssets = isFinancialPosition
             ? items
                 .Where(item => item.AccountType == AccountType.Asset)
                 .Sum(item => item.ClosingDebit - item.ClosingCredit)
             : 0m;
-        var totalLiabilitiesAndEquity =
-            statementType == FinancialStatementType.FinancialPosition
-                ? items
-                    .Where(item => item.AccountType is
-                        AccountType.Liability or AccountType.Equity)
-                    .Sum(item => item.ClosingCredit - item.ClosingDebit)
-                    + periodNetResult
-                : 0m;
+        var totalLiabilitiesAndEquity = isFinancialPosition
+            ? items
+                .Where(item => item.AccountType is
+                    AccountType.Liability or AccountType.Equity)
+                .Sum(item => item.ClosingCredit - item.ClosingDebit)
+                + currentNetResult
+            : 0m;
         var netCashFlow = statementType == FinancialStatementType.CashFlow
             ? items.Sum(item => item.PeriodDebit - item.PeriodCredit) +
               unmapped.Sum(item => item.PeriodDebit - item.PeriodCredit)
             : 0m;
-        var reportLines = journalLines
-            .Where(line => line.EntryDate >= request.FromDate)
-            .ToArray();
+        var reportLines = isFinancialPosition
+            ? journalLines
+            : journalLines.Where(line => line.EntryDate >= request.FromDate);
         var journalIsBalanced = reportLines.Sum(line => line.Debit) ==
             reportLines.Sum(line => line.Credit);
+        // A financial position is only balanced when the statement equation
+        // holds, not merely when the underlying journals balance.
+        var statementIsBalanced = !isFinancialPosition ||
+            totalAssets == totalLiabilitiesAndEquity;
 
         return new FinancialStatementReportTotalsResponse(
             OpeningDebit: openingDebit,
@@ -577,7 +588,9 @@ public sealed partial class FinancialStatementService
             TotalAssets: totalAssets,
             TotalLiabilitiesAndEquity: totalLiabilitiesAndEquity,
             NetCashFlow: netCashFlow,
-            IsBalanced: journalIsBalanced && unmapped.Count == 0);
+            IsBalanced: journalIsBalanced &&
+                statementIsBalanced &&
+                unmapped.Count == 0);
     }
 
     private static FinancialStatementReportItemResponse ToReportItem(

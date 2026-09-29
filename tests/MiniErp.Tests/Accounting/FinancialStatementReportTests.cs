@@ -440,6 +440,38 @@ public sealed class FinancialStatementReportTests
     }
 
     [Fact]
+    public async Task FinancialPosition_UsesYearToDateResultWhenFromDateIsAfterYearStart()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        // Every revenue and expense entry is dated in July, before FromDate.
+        var request = CreateRequest() with
+        {
+            FromDate = new DateOnly(2026, 8, 1)
+        };
+
+        var incomeStatement = await database.Service
+            .GetFinancialStatementReportAsync(
+                FinancialStatementType.IncomeStatement,
+                request);
+        var financialPosition = await database.Service
+            .GetFinancialStatementReportAsync(
+                FinancialStatementType.FinancialPosition,
+                request);
+
+        Assert.True(incomeStatement.IsSuccess);
+        Assert.Equal(0m, incomeStatement.Value.Totals.NetResult);
+
+        Assert.True(financialPosition.IsSuccess);
+        Assert.Equal(900m, financialPosition.Value.Totals.NetResult);
+        Assert.Equal(1900m, financialPosition.Value.Totals.TotalAssets);
+        Assert.Equal(
+            1900m,
+            financialPosition.Value.Totals.TotalLiabilitiesAndEquity);
+        Assert.True(financialPosition.Value.Totals.IsBalanced);
+        Assert.True(financialPosition.Value.IsReadyForReporting);
+    }
+
+    [Fact]
     public async Task CashFlow_OnlyRequiresMappingsForCashCounterparts()
     {
         await using var database = await TestDatabase.CreateAsync();
