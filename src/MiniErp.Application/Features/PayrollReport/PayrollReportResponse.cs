@@ -49,6 +49,8 @@ public sealed record PayrollReportSummary(
     decimal OutCompanyAmount);
 
 public sealed record PayrollReportResponse(
+    int FiscalYearId,
+    string FiscalYearName,
     DateOnly StartDate,
     DateOnly EndDate,
     PayrollReportSummary Summary,

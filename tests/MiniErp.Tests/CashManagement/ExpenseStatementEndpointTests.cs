@@ -145,11 +145,13 @@ public sealed class ExpenseStatementEndpointTests
 
         public Task<Result<EmployeeAccountBalanceResponse>> GetEmployeeBalanceAsync(
             int employeeId,
+            int? fiscalYearId = null,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
         public Task<Result<EmployeeAccountSummaryResponse>> GetEmployeeAccountSummaryAsync(
             int employeeId,
+            int? fiscalYearId = null,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }

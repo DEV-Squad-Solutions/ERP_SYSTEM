@@ -33,6 +33,11 @@ public static class EmployeeOpeningBalanceErrors
             "EmployeeOpeningBalances.InvalidId",
             "يجب أن يكون رقم رصيد الموظف أكبر من صفر.");
 
+    public static Error CarriedForwardReadOnly() =>
+        Error.Conflict(
+            "EmployeeOpeningBalances.CarriedForwardReadOnly",
+            "الرصيد المرحّل من إقفال السنة للعرض فقط ولا يمكن تعديله أو حذفه.");
+
     public static Error NotFound(int id) =>
         Error.NotFound(
             "EmployeeOpeningBalances.NotFound",

@@ -329,6 +329,54 @@ public sealed class FiscalYearServiceTests
     }
 
     [Fact]
+    public async Task Close_CarriesOnlyEmployeeOperationalDelta_AndRecloseIsIdempotent()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(
+            companyId: 1,
+            accountingReadinessService: new ReadyReadinessService());
+        var first = await service.AddAsync(new FiscalYearRequest(
+            "2026",
+            new DateOnly(2026, 1, 1),
+            new DateOnly(2026, 12, 31)));
+        var next = await service.AddAsync(new FiscalYearRequest(
+            "2027",
+            new DateOnly(2027, 1, 1),
+            new DateOnly(2027, 12, 31),
+            IsCurrent: true));
+        await database.SeedClosingLedgerAsync(first.Value.Id, next.Value.Id);
+        await database.SeedEmployeeOperationalBalancesAsync(
+            first.Value.Id,
+            next.Value.Id);
+        database.ClearTracking();
+
+        Assert.True((await service.CloseAsync(first.Value.Id)).IsSuccess);
+        var firstLines = await database.LoadClosingEmployeeLinesAsync(
+            first.Value.Id);
+
+        Assert.Equal(-750m, firstLines.Sum(line => line.Debit - line.Credit));
+        var delta = Assert.Single(
+            firstLines,
+            line => line.AccountId == 50 && line.Credit == 800m);
+        Assert.Equal(0m, delta.Debit);
+        Assert.Equal(800m, delta.Credit);
+        Assert.Equal(7, delta.PartyId);
+
+        database.ClearTracking();
+        Assert.True((await service.ReopenAsync(first.Value.Id)).IsSuccess);
+        database.ClearTracking();
+        Assert.True((await service.CloseAsync(first.Value.Id)).IsSuccess);
+        var reclosedLines = await database.LoadClosingEmployeeLinesAsync(
+            first.Value.Id);
+
+        Assert.Equal(firstLines.Count, reclosedLines.Count);
+        Assert.Equal(-750m, reclosedLines.Sum(line => line.Debit - line.Credit));
+        Assert.Single(
+            reclosedLines,
+            line => line.AccountId == 50 && line.Credit == 800m);
+    }
+
+    [Fact]
     public async Task Reopen_BlocksWhenLaterYearIsClosedAndPreservesTransfer()
     {
         await using var database = await FiscalYearTestDatabase.CreateAsync();
@@ -908,6 +956,88 @@ public sealed class FiscalYearServiceTests
         public Task ChangeClosingAssetBalanceAsync(decimal amount) =>
             Context.Database.ExecuteSqlInterpolatedAsync($"UPDATE JournalEntryLines SET Debit = {amount} WHERE Id = 501");
 
+        public Task SeedEmployeeOperationalBalancesAsync(
+            int fiscalYearId,
+            int nextFiscalYearId) =>
+            Context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO Accounts (
+                    Id, CompanyId, Code, Name, AccountType, NormalBalance,
+                    IsPosting, IsActive, RowVersion, CreatedById, CreatedOn,
+                    CreatedByPc, IsDeleted)
+                VALUES
+                    (40, 1, '1200', 'Employee receivable', 1, 1, 1, 1,
+                     randomblob(8), '', '2026-01-01', '', 0),
+                    (50, 1, '2100', 'Employee control', 2, 2, 1, 1,
+                     randomblob(8), '', '2026-01-01', '', 0);
+
+                INSERT INTO AccountMappings (
+                    CompanyId, FiscalYearId, MappingType, SourceId, AccountId,
+                    RowVersion, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES
+                    (1, {nextFiscalYearId}, 18, NULL, 40, randomblob(8),
+                     '', '2026-01-01', '', 0),
+                    (1, {nextFiscalYearId}, 11, NULL, 50, randomblob(8),
+                     '', '2026-01-01', '', 0);
+
+                INSERT INTO EmployeeOpeningBalances (
+                    CompanyId, FiscalYearId, EmployeeId, PayrollEntryId,
+                    DocumentNumber, DocumentDate, Currency, ExchangeRate,
+                    BalanceType, Amount, BaseAmount, CreatedById, CreatedOn,
+                    CreatedByPc, IsDeleted)
+                VALUES (
+                    1, {fiscalYearId}, 7, 77, 'PAY-77', '2026-12-01', 1, 1,
+                    2, 1000, 1000, '', '2026-12-01', '', 0);
+
+                INSERT INTO EmployeeMovements (
+                    CompanyId, FiscalYearId, EmployeeId, CashVoucherId, Type,
+                    MovementDate, Currency, Debit, Credit, ExchangeRate,
+                    BaseDebit, BaseCredit, CreatedById, CreatedOn, CreatedByPc,
+                    IsDeleted)
+                VALUES
+                    (1, {fiscalYearId}, 7, NULL, 1, '2026-12-10', 1,
+                     200, 0, 1, 200, 0, '', '2026-12-10', '', 0),
+                    (1, {fiscalYearId}, 7, 700, 1, '2026-12-15', 1,
+                     100, 0, 1, 100, 0, '', '2026-12-15', '', 0);
+
+                INSERT INTO JournalEntries (
+                    Id, CompanyId, FiscalYearId, EntryNumber, EntryDate,
+                    Description, EntryType, SourceType, SourceId, Status,
+                    PostedOn, RowVersion, CreatedById, CreatedOn, CreatedByPc,
+                    IsDeleted)
+                VALUES
+                    (60, 1, {fiscalYearId}, 'CV-700', '2026-12-15',
+                     'cash voucher', 2, 2, 700, 1, '2026-12-15', randomblob(8),
+                     '', '2026-12-15', '', 0),
+                    (61, 1, {fiscalYearId}, 'JV-EMP', '2026-12-20',
+                     'manual employee line', 1, NULL, NULL, 1, '2026-12-20',
+                     randomblob(8), '', '2026-12-20', '', 0);
+
+                INSERT INTO JournalEntryLines (
+                    CompanyId, JournalEntryId, AccountId, PartyType, PartyId,
+                    Debit, Credit, Currency, ExchangeRate, TransactionDebit,
+                    TransactionCredit, CreatedById, CreatedOn, CreatedByPc,
+                    IsDeleted)
+                VALUES
+                    (1, 60, 40, 3, 7, 100, 0, 1, 1, 100, 0,
+                     '', '2026-12-15', '', 0),
+                    (1, 61, 50, 3, 7, 0, 50, 1, 1, 0, 50,
+                     '', '2026-12-20', '', 0);
+                """);
+
+        public Task<List<JournalEntryLine>> LoadClosingEmployeeLinesAsync(
+            int sourceFiscalYearId) =>
+            Context.JournalEntryLines
+                .AsNoTracking()
+                .Where(line =>
+                    line.JournalEntry.CompanyId == 1 &&
+                    line.JournalEntry.EntryType == JournalEntryType.Opening &&
+                    line.JournalEntry.SourceType ==
+                        JournalEntrySourceType.FiscalYearClosing &&
+                    line.JournalEntry.SourceId == sourceFiscalYearId &&
+                    line.PartyType == JournalPartyType.Employee)
+                .OrderBy(line => line.AccountId)
+                .ToListAsync();
+
         public Task<List<ClosingTransferRow>> LoadClosingTransfersAsync(
             int sourceFiscalYearId) =>
             Context.JournalEntries
@@ -1104,6 +1234,61 @@ public sealed class FiscalYearServiceTests
                     ExchangeRate NUMERIC NOT NULL DEFAULT 1,
                     TransactionDebit NUMERIC NOT NULL DEFAULT 0,
                     TransactionCredit NUMERIC NOT NULL DEFAULT 0,
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE EmployeeOpeningBalances (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL,
+                    EmployeeId INTEGER NOT NULL,
+                    PayrollEntryId INTEGER NULL,
+                    DocumentNumber TEXT NOT NULL,
+                    DocumentDate TEXT NOT NULL,
+                    Currency INTEGER NOT NULL,
+                    ExchangeRateId INTEGER NULL,
+                    ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                    BalanceType INTEGER NOT NULL,
+                    Amount NUMERIC NOT NULL,
+                    BaseAmount NUMERIC NOT NULL DEFAULT 0,
+                    Notes TEXT NULL,
+                    RowVersion BLOB NOT NULL DEFAULT (randomblob(8)),
+                    CreatedById TEXT NOT NULL,
+                    CreatedOn TEXT NOT NULL,
+                    CreatedByPc TEXT NOT NULL,
+                    UpdatedById TEXT NULL,
+                    UpdatedOn TEXT NULL,
+                    UpdatedByPc TEXT NULL,
+                    DeletedById TEXT NULL,
+                    DeletedOn TEXT NULL,
+                    DeletedByPc TEXT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE EmployeeMovements (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    FiscalYearId INTEGER NOT NULL,
+                    EmployeeId INTEGER NOT NULL,
+                    CashVoucherId INTEGER NULL,
+                    Type INTEGER NOT NULL,
+                    MovementDate TEXT NOT NULL,
+                    Currency INTEGER NOT NULL,
+                    Debit NUMERIC NOT NULL DEFAULT 0,
+                    Credit NUMERIC NOT NULL DEFAULT 0,
+                    ExchangeRate NUMERIC NOT NULL DEFAULT 1,
+                    BaseDebit NUMERIC NOT NULL DEFAULT 0,
+                    BaseCredit NUMERIC NOT NULL DEFAULT 0,
+                    Notes TEXT NULL,
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
                     CreatedByPc TEXT NOT NULL,

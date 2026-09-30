@@ -817,6 +817,12 @@ public sealed class EmployeeFinancialStatementTests
                 FiscalYearId: 3));
         var balance = await statements.GetEmployeeBalanceAsync(1);
         var summary = await statements.GetEmployeeAccountSummaryAsync(1);
+        var historicalBalance = await statements.GetEmployeeBalanceAsync(
+            1,
+            fiscalYearId: 3);
+        var historicalSummary = await statements.GetEmployeeAccountSummaryAsync(
+            1,
+            fiscalYearId: 3);
 
         Assert.True(current.IsSuccess);
         Assert.Equal(700m, current.Value.Summary.OpeningBalanceAmount);
@@ -830,9 +836,17 @@ public sealed class EmployeeFinancialStatementTests
             Assert.Single(historical.Value.Items).Description);
         Assert.True(balance.IsSuccess);
         Assert.Equal(800m, balance.Value.BalanceAmount);
+        Assert.Equal(1, balance.Value.FiscalYearId);
         Assert.True(summary.IsSuccess);
         Assert.Equal(700m, summary.Value.OpeningBalance);
         Assert.Equal(800m, summary.Value.CurrentBalance);
+        Assert.Equal(1, summary.Value.FiscalYearId);
+        Assert.True(historicalBalance.IsSuccess);
+        Assert.Equal(50m, historicalBalance.Value.BalanceAmount);
+        Assert.Equal(3, historicalBalance.Value.FiscalYearId);
+        Assert.True(historicalSummary.IsSuccess);
+        Assert.Equal(-50m, historicalSummary.Value.CurrentBalance);
+        Assert.Equal(3, historicalSummary.Value.FiscalYearId);
     }
 
     private static async Task<Result<CashVoucherResponse>> AddPostedVoucherAsync(

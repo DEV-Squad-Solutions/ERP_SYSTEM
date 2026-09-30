@@ -6,7 +6,8 @@ public sealed record PayrollDashboardFilterRequest(
     DateOnly? FromDate = null,
     DateOnly? ToDate = null,
     int? EmployeeId = null,
-    EmployeeType? EmployeeType = null);
+    EmployeeType? EmployeeType = null,
+    int? FiscalYearId = null);
 
 public sealed record PayrollDashboardPendingEntryResponse(
     int Id,
@@ -36,6 +37,8 @@ public sealed record PayrollDashboardRecentOperationResponse(
     string? Notes);
 
 public sealed record PayrollDashboardResponse(
+    int FiscalYearId,
+    string FiscalYearName,
     decimal TotalPayrolls,
     decimal NetPayable,
     decimal TotalPaid,

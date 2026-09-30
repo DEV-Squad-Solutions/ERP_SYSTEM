@@ -8,4 +8,5 @@ public sealed record PayrollPeriodReportByDateRangeRequest(
     int? EmployeeId = null,
     bool? IsMoved = null,
     WorkPlaceStatus? WorkPlaceStatus = null,
-    string? PlaceName = null);
+    string? PlaceName = null,
+    int? FiscalYearId = null);

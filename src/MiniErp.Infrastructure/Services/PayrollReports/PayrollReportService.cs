@@ -11,7 +11,8 @@ namespace MiniErp.Infrastructure.Services.PayrollReports;
 
 public sealed class PayrollReportService(
     ApplicationDbContext dbContext,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver)
     : IPayrollReportService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -26,12 +27,23 @@ public sealed class PayrollReportService(
         bool? isMoved = null,
         WorkPlaceStatus? workPlaceStatus = null,
         string? placeName = null,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
+        var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId,
+            startDate,
+            endDate,
+            cancellationToken);
+        if (fiscalYearResult.IsFailure)
+            return Result<PayrollReportResponse>.Failure(fiscalYearResult.Errors);
+        var fiscalYear = fiscalYearResult.Value;
+
         var query = dbContext.PayrollEntries
             .AsNoTracking()
             .Where(e =>
                 e.CompanyId == companyId &&
+                e.FiscalYearId == fiscalYear.FiscalYearId &&
                 e.StartDate >= startDate &&
                 e.EndDate <= endDate);
 
@@ -169,6 +181,8 @@ public sealed class PayrollReportService(
 
         return Result<PayrollReportResponse>.Success(
             new PayrollReportResponse(
+                FiscalYearId: fiscalYear.FiscalYearId,
+                FiscalYearName: fiscalYear.FiscalYearName,
                 StartDate: startDate,
                 EndDate: endDate,
                 Summary: summary,

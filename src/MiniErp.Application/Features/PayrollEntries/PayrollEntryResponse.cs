@@ -20,6 +20,7 @@ public record class AttendanceSummary(
 public record PayrollEntriesListResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
     DateOnly StartDate,
     DateOnly EndDate,
     int EmployeeId,
@@ -41,6 +42,7 @@ public record PayrollEntriesListResponse(
 public record PayrollEntryResponse(
     int Id,
     int CompanyId,
+    int FiscalYearId,
     DateOnly StartDate,
     DateOnly EndDate,
     int EmployeeId,

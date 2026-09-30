@@ -12,6 +12,7 @@ public interface IPayrollEntryService
 
     Task<Result<PayrollEntryResponse>> GetByIdAsync(
         int id,
+        int? fiscalYearId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<PayrollEntryResponse>> AddAsync(
