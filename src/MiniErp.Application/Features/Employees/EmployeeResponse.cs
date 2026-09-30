@@ -41,6 +41,7 @@ namespace MiniErp.Application.Features.Employees
         DateOnly? LastDayOfReceivingSalary,
         bool IsActive,
         WorkPlaceStatus WorkPlaceStatus,
+        decimal Balance,
         string? PlaceName = null
         );
 

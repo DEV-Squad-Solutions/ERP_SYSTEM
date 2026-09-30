@@ -1,4 +1,5 @@
 using FluentValidation;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.BusinessPartners;
 
@@ -12,5 +13,9 @@ public sealed class BusinessPartnerFilterRequestValidator
         RuleFor(filter => filter.Name).MaximumLength(200);
         RuleFor(filter => filter.TaxNumber).MaximumLength(100);
         RuleFor(filter => filter.Currency).IsInEnum().When(filter => filter.Currency.HasValue);
+        RuleFor(filter => filter.BalanceStatus)
+            .IsInEnum()
+            .When(filter => filter.BalanceStatus.HasValue);
     }
 }
+

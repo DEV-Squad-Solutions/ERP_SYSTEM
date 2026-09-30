@@ -5,6 +5,7 @@ using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
+using MiniErp.Infrastructure.Services.Statements;
 using System;
 using System.Collections.Generic;
 using System.Numerics;
@@ -166,5 +167,194 @@ namespace MiniErp.Infrastructure.Services.Employees
                 .Where(attendance => attendance.EmployeeId == id).ToListAsync(cancellationToken);
             return (employee, attendances);
         }
+
+        /// <summary>
+        /// Applies a DB-level balance-status filter using correlated subqueries that mirror
+        /// the same three sources used by <c>CreateEmployeeRows</c> in
+        /// <c>FinancialStatementService.Employee.cs</c>:
+        /// <list type="number">
+        ///   <item>EmployeeOpeningBalances (fiscal-year scoped)</item>
+        ///   <item>EmployeeMovements (fiscal-year scoped)</item>
+        ///   <item>Posted JournalEntryLines where PartyType = Employee (fiscal-year scoped)</item>
+        /// </list>
+        /// Balance = SUM(Credit) − SUM(Debit). Positive → company owes employee (Credit Balance).
+        /// </summary>
+        internal IQueryable<Employee> ApplyBalanceFilter(
+            IQueryable<Employee> query,
+            BalanceStatus status,
+            int fiscalYearId)
+        {
+            if (status == BalanceStatus.All)
+                return query;
+
+            // Source 1 – opening balances (non-payroll entries map Credit type → positive)
+            // Source 2 – movements (Credit and Bonus → positive; Debit and Deduction → negative)
+            // Source 3 – posted manual journal lines tagged to the employee
+            // All three use credit − debit = net signed amount.
+
+            var postedLines = PostedJournalLedgerLines.Create(dbContext, campanyId)
+                .Where(line =>
+                    line.PartyType == JournalPartyType.Employee &&
+                    line.PartyId.HasValue &&
+                    line.JournalEntry.FiscalYearId == fiscalYearId &&
+                    line.JournalEntry.SourceType != JournalEntrySourceType.EmployeeOpeningBalance &&
+                    line.JournalEntry.SourceType != JournalEntrySourceType.CashVoucher);
+
+            return status switch
+            {
+                // Credit Balance: company owes employee → net > 0
+                BalanceStatus.CreditBalance => query.Where(emp =>
+                    (
+                        (dbContext.EmployeeOpeningBalances
+                            .Where(b =>
+                                b.CompanyId == campanyId &&
+                                b.FiscalYearId == fiscalYearId &&
+                                b.EmployeeId == emp.Id)
+                            .Sum(b => b.BalanceType == EmployeeBalanceType.Credit
+                                ? (decimal?)b.Amount
+                                : -(decimal?)b.Amount) ?? 0m)
+                        +
+                        (dbContext.EmployeeMovements
+                            .Where(m =>
+                                m.CompanyId == campanyId &&
+                                m.FiscalYearId == fiscalYearId &&
+                                m.EmployeeId == emp.Id)
+                            .Sum(m => (decimal?)(m.Credit - m.Debit)) ?? 0m)
+                        +
+                        (postedLines
+                            .Where(line => line.PartyId == emp.Id)
+                            .Sum(line => (decimal?)(line.Credit - line.Debit)) ?? 0m)
+                    ) > 0),
+
+                // Debit Balance: employee owes company → net < 0
+                BalanceStatus.DebitBalance => query.Where(emp =>
+                    (
+                        (dbContext.EmployeeOpeningBalances
+                            .Where(b =>
+                                b.CompanyId == campanyId &&
+                                b.FiscalYearId == fiscalYearId &&
+                                b.EmployeeId == emp.Id)
+                            .Sum(b => b.BalanceType == EmployeeBalanceType.Credit
+                                ? (decimal?)b.Amount
+                                : -(decimal?)b.Amount) ?? 0m)
+                        +
+                        (dbContext.EmployeeMovements
+                            .Where(m =>
+                                m.CompanyId == campanyId &&
+                                m.FiscalYearId == fiscalYearId &&
+                                m.EmployeeId == emp.Id)
+                            .Sum(m => (decimal?)(m.Credit - m.Debit)) ?? 0m)
+                        +
+                        (postedLines
+                            .Where(line => line.PartyId == emp.Id)
+                            .Sum(line => (decimal?)(line.Credit - line.Debit)) ?? 0m)
+                    ) < 0),
+
+                // Zero Balance: no transactions at all, or the net is exactly zero
+                BalanceStatus.ZeroBalance => query.Where(emp =>
+                    (
+                        (dbContext.EmployeeOpeningBalances
+                            .Where(b =>
+                                b.CompanyId == campanyId &&
+                                b.FiscalYearId == fiscalYearId &&
+                                b.EmployeeId == emp.Id)
+                            .Sum(b => b.BalanceType == EmployeeBalanceType.Credit
+                                ? (decimal?)b.Amount
+                                : -(decimal?)b.Amount) ?? 0m)
+                        +
+                        (dbContext.EmployeeMovements
+                            .Where(m =>
+                                m.CompanyId == campanyId &&
+                                m.FiscalYearId == fiscalYearId &&
+                                m.EmployeeId == emp.Id)
+                            .Sum(m => (decimal?)(m.Credit - m.Debit)) ?? 0m)
+                        +
+                        (postedLines
+                            .Where(line => line.PartyId == emp.Id)
+                            .Sum(line => (decimal?)(line.Credit - line.Debit)) ?? 0m)
+                    ) == 0),
+
+                _ => query
+            };
+        }
+
+        /// <summary>
+        /// Batch-fetches the signed balance for a set of employee IDs in a single round-trip.
+        /// Unions the same three sources used by <c>CreateEmployeeRows</c>.
+        /// Returns a dictionary keyed by employee ID. Employees with no transactions return 0.
+        /// </summary>
+        internal async Task<Dictionary<int, decimal>> FetchEmployeeBalancesAsync(
+            IReadOnlyCollection<int> employeeIds,
+            int fiscalYearId,
+            CancellationToken cancellationToken)
+        {
+            if (employeeIds.Count == 0)
+                return [];
+
+            var ids = employeeIds.ToArray();
+
+            var postedLines = PostedJournalLedgerLines.Create(dbContext, campanyId)
+                .Where(line =>
+                    line.PartyType == JournalPartyType.Employee &&
+                    line.PartyId.HasValue &&
+                    ids.Contains(line.PartyId!.Value) &&
+                    line.JournalEntry.FiscalYearId == fiscalYearId &&
+                    line.JournalEntry.SourceType != JournalEntrySourceType.EmployeeOpeningBalance &&
+                    line.JournalEntry.SourceType != JournalEntrySourceType.CashVoucher);
+
+            // Opening balances grouped by employee
+            var openingTotals = await dbContext.EmployeeOpeningBalances
+                .Where(b =>
+                    b.CompanyId == campanyId &&
+                    b.FiscalYearId == fiscalYearId &&
+                    ids.Contains(b.EmployeeId))
+                .GroupBy(b => b.EmployeeId)
+                .Select(g => new
+                {
+                    EmployeeId = g.Key,
+                    Signed = g.Sum(b =>
+                        b.BalanceType == EmployeeBalanceType.Credit
+                            ? (decimal?)b.Amount
+                            : -(decimal?)b.Amount)
+                })
+                .ToListAsync(cancellationToken);
+
+            // Movements grouped by employee
+            var movementTotals = await dbContext.EmployeeMovements
+                .Where(m =>
+                    m.CompanyId == campanyId &&
+                    m.FiscalYearId == fiscalYearId &&
+                    ids.Contains(m.EmployeeId))
+                .GroupBy(m => m.EmployeeId)
+                .Select(g => new
+                {
+                    EmployeeId = g.Key,
+                    Signed = g.Sum(m => (decimal?)(m.Credit - m.Debit))
+                })
+                .ToListAsync(cancellationToken);
+
+            // Posted journal lines grouped by employee
+            var journalTotals = await postedLines
+                .GroupBy(line => line.PartyId!.Value)
+                .Select(g => new
+                {
+                    EmployeeId = g.Key,
+                    Signed = g.Sum(line => (decimal?)(line.Credit - line.Debit))
+                })
+                .ToListAsync(cancellationToken);
+
+            // Merge all three sources into a single balance per employee
+            var result = new Dictionary<int, decimal>();
+            foreach (var id in ids)
+            {
+                var opening  = openingTotals.FirstOrDefault(x => x.EmployeeId == id)?.Signed ?? 0m;
+                var movement = movementTotals.FirstOrDefault(x => x.EmployeeId == id)?.Signed ?? 0m;
+                var journal  = journalTotals.FirstOrDefault(x => x.EmployeeId == id)?.Signed ?? 0m;
+                result[id]   = opening + movement + journal;
+            }
+
+            return result;
+        }
     }
-}   
+}
+

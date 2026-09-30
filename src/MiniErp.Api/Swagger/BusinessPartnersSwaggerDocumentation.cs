@@ -20,10 +20,10 @@ public sealed class BusinessPartnersSwaggerDocumentation : IOperationFilter
             nameof(BusinessPartnersController.GetAll) => (
                 "Get paginated business partners",
                 SwaggerOperationDescription.Create(
-                    "Returns a deterministic page of shared customer/supplier records for the selected company, ordered by name and ID. Supplied filters are combined with AND. Each item also includes its active container Store and active assigned Containers.",
-                    "A bearer token containing one `company_id`. Optional query fields are `pageNumber`, `pageSize`, `search`, `code`, `name`, `taxNumber`, `currency`, `isActive`, and `special`.",
-                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100; and enum values must be supported.",
-                    "Invalid pagination returns 400. Pages beyond the result set are empty. Records from other companies and soft-deleted records are never returned. Partners without an active container Store or active assignments return an empty `containers` array.")),
+                    "Returns a deterministic page of shared customer/supplier records for the selected company, ordered by creation date and ID. Supplied filters are combined with AND. Each item also includes its active container Store, active assigned Containers, and the partner's current account balance.",
+                    "A bearer token containing one `company_id`. Optional query fields are `pageNumber`, `pageSize`, `search`, `code`, `name`, `taxNumber`, `currency`, `isActive`, `special`, and `balanceStatus`.",
+                    "`pageNumber` must be greater than zero; `pageSize` must be between 1 and 100; enum values must be supported. `balanceStatus` accepts `All` (0, default), `CreditBalance` (1 — company owes the partner), `DebitBalance` (2 — partner owes the company), or `ZeroBalance` (3 — no outstanding balance).",
+                    "Invalid pagination returns 400. Pages beyond the result set are empty. Records from other companies and soft-deleted records are never returned. The `balance` field in each item is the net signed value (positive = Debit Balance, negative = Credit Balance, zero = settled). Partners without an active container Store or active assignments return an empty `containers` array.")),
             nameof(BusinessPartnersController.GetSelect) => (
                 "Get active business partners for selection",
                 SwaggerOperationDescription.Create(

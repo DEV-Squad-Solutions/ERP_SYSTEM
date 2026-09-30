@@ -15,8 +15,10 @@ namespace MiniErp.Application.Features.Employees
     EmployeeType? EmployeeType = null,
     bool? IsActive = null,
     string? PlaceName = null,
-    WorkPlaceStatus? WorkPlaceStatus = null
+    WorkPlaceStatus? WorkPlaceStatus = null,
+    BalanceStatus? BalanceStatus = null
     );
+
     public record EmployeeSelectedFilterRequest(
         EmployeeType? EmployeeType = null,
         bool? IsActive = null,

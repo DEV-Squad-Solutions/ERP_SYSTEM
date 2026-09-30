@@ -1,4 +1,5 @@
 using FluentValidation;
+using MiniErp.Domain.Enums;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -32,6 +33,9 @@ namespace MiniErp.Application.Features.Employees
             RuleFor(x => x.WorkPlaceStatus)
                 .IsInEnum()
                 .When(x => x.WorkPlaceStatus.HasValue);
+            RuleFor(x => x.BalanceStatus)
+                .IsInEnum()
+                .When(x => x.BalanceStatus.HasValue);
         }
     }
 }

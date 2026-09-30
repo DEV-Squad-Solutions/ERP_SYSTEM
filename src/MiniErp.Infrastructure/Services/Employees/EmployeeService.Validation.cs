@@ -57,8 +57,13 @@ namespace MiniErp.Infrastructure.Services.Employees
             if (filters.WorkPlaceStatus.HasValue && !Enum.IsDefined(typeof(WorkPlaceStatus), filters.WorkPlaceStatus.Value))
                 return Error.Validation(
                     "Employee.InvalidWorkPlaceStatus",
-                    "Ø­Ø§Ù„Ø© Ù…ÙƒØ§Ù† Ø§Ù„Ø¹Ù…Ù„ ØºÙŠØ± ØµØ§Ù„Ø­Ø©.",
+                    "حالة مكان العمل غير صالحة.",
                     nameof(filters.WorkPlaceStatus));
+            if (filters.BalanceStatus.HasValue && !Enum.IsDefined(typeof(BalanceStatus), filters.BalanceStatus.Value))
+                return Error.Validation(
+                    "Employee.InvalidBalanceStatus",
+                    "حالة الرصيد المحددة غير صالحة.",
+                    nameof(filters.BalanceStatus));
             return null;
         }
 

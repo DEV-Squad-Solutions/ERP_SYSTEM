@@ -8,7 +8,10 @@ using MiniErp.Application.Features.BusinessPartners;
 using MiniErp.Application.Features.Stores;
 using MiniErp.Application.Features.StoreContainers;
 using MiniErp.Domain.Entities.BusinessPartners;
+using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.Statements;
+
 
 namespace MiniErp.Infrastructure.Services.BusinessPartners;
 
@@ -50,6 +53,28 @@ public sealed class BusinessPartnerService(
             .Select(partner => partner.Id)
             .ToArray();
 
+        // ── Batch-fetch balances for the current page (one query, no N+1) ──
+        // Balance = SUM(Debit) − SUM(Credit) on all posted journal lines.
+        // Positive  → partner owes the company (Debit Balance).
+        // Negative  → company owes the partner (Credit Balance).
+        var balanceRows = await PostedJournalLedgerLines
+            .Create(dbContext, companyId)
+            .Where(line =>
+                (line.PartyType == JournalPartyType.Customer ||
+                 line.PartyType == JournalPartyType.Supplier) &&
+                line.PartyId.HasValue &&
+                partnerIds.Contains(line.PartyId!.Value))
+            .GroupBy(line => line.PartyId!.Value)
+            .Select(g => new
+            {
+                PartnerId = g.Key,
+                Balance = g.Sum(line => line.Debit - line.Credit)
+            })
+            .ToListAsync(cancellationToken);
+
+        var balanceByPartnerId = balanceRows
+            .ToDictionary(row => row.PartnerId, row => row.Balance);
+
         var containerStores = await dbContext.Stores
             .AsNoTracking()
             .Where(store =>
@@ -84,6 +109,7 @@ public sealed class BusinessPartnerService(
 
                 return partner with
                 {
+                    Balance = balanceByPartnerId.GetValueOrDefault(partner.Id, 0m),
                     ContainerStore = containerStore,
                     Containers = containers
                 };
@@ -94,7 +120,7 @@ public sealed class BusinessPartnerService(
             pageResult.Value with { Items = enrichedItems });
     }
 
-    private static IQueryable<BusinessPartner> ApplyFilters(
+    private IQueryable<BusinessPartner> ApplyFilters(
         IQueryable<BusinessPartner> query,
         BusinessPartnerFilterRequest filters)
     {
@@ -143,8 +169,56 @@ public sealed class BusinessPartnerService(
             query = query.Where(partner => partner.Special == filters.Special.Value);
         }
 
+        if (filters.BalanceStatus.HasValue &&
+            filters.BalanceStatus.Value != BalanceStatus.All)
+        {
+            query = ApplyBalanceStatusFilter(query, filters.BalanceStatus.Value);
+        }
+
         return query;
     }
+
+    /// <summary>
+    /// Applies a DB-level correlated subquery on posted journal lines so only partners
+    /// whose net balance matches the requested status are returned.
+    /// No data is loaded into memory; EF Core translates this to SQL EXISTS / subquery.
+    /// </summary>
+    private IQueryable<BusinessPartner> ApplyBalanceStatusFilter(
+        IQueryable<BusinessPartner> query,
+        BalanceStatus status)
+    {
+        // Canonical posted-line source — same filter predicate used by GetPartnerStatementAsync.
+        var postedLines = PostedJournalLedgerLines.Create(dbContext, companyId)
+            .Where(line =>
+                line.PartyId.HasValue &&
+                (line.PartyType == JournalPartyType.Customer ||
+                 line.PartyType == JournalPartyType.Supplier));
+
+        return status switch
+        {
+            // Credit Balance: company owes the partner → SUM(Debit − Credit) < 0
+            BalanceStatus.CreditBalance => query.Where(partner =>
+                postedLines
+                    .Where(line => line.PartyId == partner.Id)
+                    .Sum(line => (decimal?)(line.Debit - line.Credit)) < 0),
+
+            // Debit Balance: partner owes the company → SUM(Debit − Credit) > 0
+            BalanceStatus.DebitBalance => query.Where(partner =>
+                postedLines
+                    .Where(line => line.PartyId == partner.Id)
+                    .Sum(line => (decimal?)(line.Debit - line.Credit)) > 0),
+
+            // Zero Balance: no posted entries at all, or the net is exactly zero
+            BalanceStatus.ZeroBalance => query.Where(partner =>
+                !postedLines.Any(line => line.PartyId == partner.Id) ||
+                postedLines
+                    .Where(line => line.PartyId == partner.Id)
+                    .Sum(line => (decimal?)(line.Debit - line.Credit)) == 0),
+
+            _ => query
+        };
+    }
+
 
     public async Task<Result<IReadOnlyList<BusinessPartnerSelectResponse>>> GetSelectAsync(
         CancellationToken cancellationToken = default)

@@ -17,7 +17,8 @@ public sealed record BusinessPartnerResponse(
     CurrencyCode Currency,
     decimal CreditLimit,
     bool IsActive,
-    bool Special)
+    bool Special,
+    decimal Balance)
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public StoreResponse? ContainerStore { get; init; }
@@ -29,3 +30,4 @@ public sealed record BusinessPartnerResponse(
         init;
     }
 }
+
