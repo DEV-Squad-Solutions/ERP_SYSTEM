@@ -102,7 +102,8 @@ public sealed class FiscalYearServiceTests
             new FiscalYearRequest(
                 "2026",
                 new DateOnly(2026, 1, 1),
-                new DateOnly(2026, 12, 31)));
+                new DateOnly(2026, 12, 31),
+                IsCurrent: false));
         await database.SeedExchangeRateAsync(
             previous.Value.Id,
             new DateOnly(2025, 12, 31),
@@ -140,7 +141,8 @@ public sealed class FiscalYearServiceTests
             new FiscalYearRequest(
                 "2026",
                 new DateOnly(2026, 1, 1),
-                new DateOnly(2026, 12, 31)));
+                new DateOnly(2026, 12, 31),
+                IsCurrent: false));
         await database.SeedExchangeRateAsync(
             next.Value.Id,
             new DateOnly(2026, 1, 1),
