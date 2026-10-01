@@ -30,5 +30,11 @@ public sealed class BusinessPartnerMappingRegister : IRegister
                 request => string.IsNullOrWhiteSpace(request.TaxNumber)
                     ? null
                     : request.TaxNumber.Trim());
+
+        // Balance is not persisted on the entity; the real value is injected
+        // post-pagination via a batch query. Map to 0m so ProjectToType succeeds.
+        config.ForType<BusinessPartner, BusinessPartnerResponse>()
+            .Map(dest => dest.Balance, _ => 0m);
     }
 }
+

@@ -13,6 +13,9 @@ public sealed class EmployeeMappingRegister : IRegister
             .Map(dest => dest.Salary, src => src.Type == EmployeeType.Monthly ? (src.MonthlySalary ?? 0) : (src.DailySalary ?? 0))
             .Map(dest => dest.LastDayOfReceivingSalary, src => src.LastDayOfReceivingSalary)
             .Map(dest => dest.WorkPlaceStatus, src => src.WorkPlaceStatus)
-            .Map(dest => dest.PlaceName, src => src.PlaceName);
+            .Map(dest => dest.PlaceName, src => src.PlaceName)
+            // Balance is not persisted on the entity; the real value is injected
+            // post-pagination via a batch query. Map to 0m so ProjectToType succeeds.
+            .Map(dest => dest.Balance, _ => 0m);
     }
 }

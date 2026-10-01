@@ -37,14 +37,36 @@ namespace MiniErp.Infrastructure.Services.Employees
 
             query = ApplyFilters(query, filters);
 
+            // ── Balance filter (DB-level, fiscal-year scoped) ──────────────────────
+            // Resolve the current fiscal year only when the balance filter is active,
+            // avoiding an extra round-trip on ordinary list loads.
+            int? fiscalYearId = null;
+            if (filters.BalanceStatus.HasValue &&
+                filters.BalanceStatus.Value != BalanceStatus.All)
+            {
+                fiscalYearId = await dbContext.FiscalYears
+                    .AsNoTracking()
+                    .Where(fy => fy.CompanyId == campanyId && fy.IsCurrent)
+                    .Select(fy => (int?)fy.Id)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (fiscalYearId.HasValue)
+                {
+                    query = ApplyBalanceFilter(
+                        query,
+                        filters.BalanceStatus.Value,
+                        fiscalYearId.Value);
+                }
+            }
+
             var orderedQuery = query
                 .OrderByDescending(e => e.CreatedOn)
                 .ThenByDescending(e => e.Id);
 
+            var aggregateSummary = await GetSummaryAsync(query, cancellationToken);
 
-            var aggregateSummary = await GetSummaryAsync(query,cancellationToken);
-
-            var pagedResult = await paginationService.PaginateAsync<Employee, EmployeeListResponse>(orderedQuery, pagination,aggregateSummary.TotalCount, cancellationToken);
+            var pagedResult = await paginationService.PaginateAsync<Employee, EmployeeListResponse>(
+                orderedQuery, pagination, aggregateSummary.TotalCount, cancellationToken);
             if (pagedResult.IsFailure)
             {
                 return Result<EmployeePageResponse>.Failure(pagedResult.Error);
@@ -52,16 +74,39 @@ namespace MiniErp.Infrastructure.Services.Employees
 
             var page = pagedResult.Value;
 
+            // ── Batch-fetch balances for the current page (no N+1) ────────────────
+            // Resolve fiscal year for balance fetch if not already resolved above.
+            if (!fiscalYearId.HasValue && page.Items.Count > 0)
+            {
+                fiscalYearId = await dbContext.FiscalYears
+                    .AsNoTracking()
+                    .Where(fy => fy.CompanyId == campanyId && fy.IsCurrent)
+                    .Select(fy => (int?)fy.Id)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+
+            IReadOnlyCollection<EmployeeListResponse> items = page.Items;
+            if (fiscalYearId.HasValue && page.Items.Count > 0)
+            {
+                var employeeIds = page.Items.Select(e => e.Id).ToArray();
+                var balances = await FetchEmployeeBalancesAsync(
+                    employeeIds, fiscalYearId.Value, cancellationToken);
+
+                items = page.Items
+                    .Select(e => e with { Balance = balances.GetValueOrDefault(e.Id, 0m) })
+                    .ToArray();
+            }
+
             return Result<EmployeePageResponse>.Success(
                 new EmployeePageResponse(
-                    page.Items,
+                    items,
                     page.PageNumber,
                     page.PageSize,
                     page.TotalCount,
                     page.TotalPages,
                     aggregateSummary.Summary));
-
         }
+
 
         public async Task<Result<IReadOnlyList<SelectEmployeeResponse>>> GetSelectAsync(
             EmployeeSelectedFilterRequest filters = null, 
