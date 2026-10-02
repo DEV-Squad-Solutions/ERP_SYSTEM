@@ -328,7 +328,7 @@ public sealed partial class FinancialStatementService(
                 PartnerNotFound(filters.BusinessPartnerId));
         }
 
-        var allRows = CreatePartnerRows(partner.Id, fiscalYear.Id);
+        var allRows = CreatePartnerRows(partner.Id, partner.Currency, fiscalYear.Id);
         var openingRows = allRows.Where(row => row.IsOpening);
         var nonOpeningRows = allRows.Where(row => !row.IsOpening);
         var openingBalance = await openingRows
@@ -665,6 +665,9 @@ public sealed partial class FinancialStatementService(
         var revaluations = dbContext.CashboxRevaluations
             .AsNoTracking()
             .Where(revaluation => revaluation.CompanyId == companyId);
+        var monetaryRevaluations = dbContext.MonetaryAccountRevaluations
+            .AsNoTracking()
+            .Where(revaluation => revaluation.CompanyId == companyId);
 
         return
             from line in PostedLedgerLines()
@@ -699,6 +702,20 @@ public sealed partial class FinancialStatementService(
                 }
                 into revaluationRows
             from revaluation in revaluationRows.DefaultIfEmpty()
+            join monetaryRevaluation in monetaryRevaluations
+                on new
+                {
+                    line.JournalEntry.SourceId,
+                    line.JournalEntry.SourceType
+                }
+                equals new
+                {
+                    SourceId = (int?)monetaryRevaluation.Id,
+                    SourceType = (JournalEntrySourceType?)
+                        JournalEntrySourceType.MonetaryAccountRevaluation
+                }
+                into monetaryRevaluationRows
+            from monetaryRevaluation in monetaryRevaluationRows.DefaultIfEmpty()
             select new CashboxStatementRaw
             {
                 JournalEntryLineId = line.Id,
@@ -716,11 +733,13 @@ public sealed partial class FinancialStatementService(
                     : line.JournalEntry.SourceNumber ??
                       line.JournalEntry.EntryNumber,
                 MovementName = line.JournalEntry.SourceType ==
-                    JournalEntrySourceType.CashboxRevaluation
+                    JournalEntrySourceType.CashboxRevaluation ||
+                    line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.MonetaryAccountRevaluation
                     ? "إعادة تقييم عملة"
                     : voucher != null
                     ? voucher.CashMovementType != null
-                        ? voucher.CashMovementType.Name
+                        ? voucher.CashMovementType!.Name
                         : voucher.Direction == CashDirection.Receipt
                             ? "سند قبض"
                             : "سند صرف"
@@ -743,11 +762,11 @@ public sealed partial class FinancialStatementService(
                     line.JournalEntry.Description,
                 PartyName = voucher != null &&
                     voucher.BusinessPartner != null
-                        ? voucher.BusinessPartner.Name
+                        ? voucher.BusinessPartner!.Name
                         : voucher != null && voucher.Driver != null
-                            ? voucher.Driver.Name
+                            ? voucher.Driver!.Name
                             : voucher != null && voucher.Employee != null
-                                ? voucher.Employee.Name
+                                ? voucher.Employee!.Name
                                 : null,
                 ExternalPartyName = voucher == null
                     ? null
@@ -769,19 +788,22 @@ public sealed partial class FinancialStatementService(
                     : voucher.Classification ??
                       (voucher.CashMovementType == null
                           ? null
-                          : voucher.CashMovementType.Classification),
-                Currency = line.JournalEntry.SourceType ==
-                    JournalEntrySourceType.CashboxRevaluation
-                    ? cashboxCurrency
-                    : line.Currency,
-                ExchangeRate = revaluation == null
-                    ? line.ExchangeRate
-                    : revaluation.ClosingRate,
-                ReceiptAmount = line.JournalEntry.SourceType ==
+                          : voucher.CashMovementType!.Classification),
+                Currency = cashboxCurrency,
+                ExchangeRate = revaluation != null
+                    ? revaluation.ClosingRate
+                    : monetaryRevaluation != null
+                        ? monetaryRevaluation.ClosingRate
+                        : line.ExchangeRate,
+                // Revaluations (including base-currency adjustments carried
+                // into a new fiscal year) change carrying value, not units.
+                ReceiptAmount = line.Currency != cashboxCurrency ||
+                    line.JournalEntry.SourceType ==
                     JournalEntrySourceType.CashboxRevaluation
                     ? 0m
                     : line.TransactionDebit,
-                PaymentAmount = line.JournalEntry.SourceType ==
+                PaymentAmount = line.Currency != cashboxCurrency ||
+                    line.JournalEntry.SourceType ==
                     JournalEntrySourceType.CashboxRevaluation
                     ? 0m
                     : line.TransactionCredit,
@@ -795,6 +817,7 @@ public sealed partial class FinancialStatementService(
 
     private IQueryable<PartnerStatementRaw> CreatePartnerRows(
         int partnerId,
+        CurrencyCode partnerCurrency,
         int fiscalYearId)
     {
         var invoices = dbContext.Invoices
@@ -803,6 +826,9 @@ public sealed partial class FinancialStatementService(
         var vouchers = dbContext.CashVouchers
             .AsNoTracking()
             .Where(voucher => voucher.CompanyId == companyId);
+        var monetaryRevaluations = dbContext.MonetaryAccountRevaluations
+            .AsNoTracking()
+            .Where(revaluation => revaluation.CompanyId == companyId);
 
         return
             from line in PostedLedgerLines()
@@ -838,6 +864,20 @@ public sealed partial class FinancialStatementService(
                 }
                 into voucherRows
             from voucher in voucherRows.DefaultIfEmpty()
+            join monetaryRevaluation in monetaryRevaluations
+                on new
+                {
+                    line.JournalEntry.SourceId,
+                    line.JournalEntry.SourceType
+                }
+                equals new
+                {
+                    SourceId = (int?)monetaryRevaluation.Id,
+                    SourceType = (JournalEntrySourceType?)
+                        JournalEntrySourceType.MonetaryAccountRevaluation
+                }
+                into monetaryRevaluationRows
+            from monetaryRevaluation in monetaryRevaluationRows.DefaultIfEmpty()
             select new PartnerStatementRaw
             {
                 JournalEntryLineId = line.Id,
@@ -879,9 +919,18 @@ public sealed partial class FinancialStatementService(
                         : null,
                 Description = line.Description ??
                     line.JournalEntry.Description,
-                Debit = line.TransactionDebit,
-                Credit = line.TransactionCredit,
-                ExchangeRate = line.ExchangeRate,
+                // Only native-currency lines represent partner units. Keep
+                // base-currency revaluation and carry-forward adjustments in
+                // the base amounts without adding them to foreign balances.
+                Debit = line.Currency == partnerCurrency
+                    ? line.TransactionDebit
+                    : 0m,
+                Credit = line.Currency == partnerCurrency
+                    ? line.TransactionCredit
+                    : 0m,
+                ExchangeRate = monetaryRevaluation == null
+                    ? line.ExchangeRate
+                    : monetaryRevaluation.ClosingRate,
                 BaseDebit = line.Debit,
                 BaseCredit = line.Credit,
                 ReferenceNumber = voucher != null

@@ -524,6 +524,236 @@ public sealed class AutomaticPostingServiceTests
         Assert.Empty(await database.Context.JournalEntries.ToListAsync());
     }
 
+    [Theory]
+    [InlineData(71, CashDirection.Receipt, JournalPartyType.Customer, 3, false)]
+    [InlineData(72, CashDirection.Payment, JournalPartyType.Supplier, 12, false)]
+    [InlineData(73, CashDirection.Payment, JournalPartyType.Customer, 3, false)]
+    [InlineData(74, CashDirection.Receipt, JournalPartyType.Supplier, 12, false)]
+    [InlineData(71, CashDirection.Receipt, JournalPartyType.Customer, 3, true)]
+    [InlineData(72, CashDirection.Payment, JournalPartyType.Supplier, 12, true)]
+    [InlineData(73, CashDirection.Payment, JournalPartyType.Customer, 3, true)]
+    [InlineData(74, CashDirection.Receipt, JournalPartyType.Supplier, 12, true)]
+    [InlineData(null, CashDirection.Receipt, JournalPartyType.Customer, 3, false)]
+    [InlineData(null, CashDirection.Payment, JournalPartyType.Supplier, 12, false)]
+    public async Task CashVoucherPosting_UsesDocumentPartnerRoleForBothControlAccountAndParty(
+        int? movementTypeId,
+        CashDirection direction,
+        JournalPartyType expectedPartyType,
+        int expectedControlAccountId,
+        bool overrideAccount)
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await PrepareForeignCashVoucherAsync(database.Context);
+        var service = CreateCashVoucherPostingService(database.Context);
+        var voucher = CreatePartnerCashVoucher(direction, movementTypeId);
+        voucher.AccountId = overrideAccount ? expectedControlAccountId : null;
+
+        var result = await service.SynchronizeAsync(voucher);
+
+        Assert.True(result.IsSuccess, string.Join("; ", result.Errors.Select(error => error.Code)));
+        var lines = await database.Context.JournalEntryLines.AsNoTracking().ToListAsync();
+        Assert.Equal(2, lines.Count);
+        var cashbox = Assert.Single(lines, line => line.PartyType == JournalPartyType.Cashbox);
+        var partner = Assert.Single(lines, line => line.PartyType == expectedPartyType);
+        Assert.Equal(2, cashbox.AccountId);
+        Assert.Equal(7, cashbox.PartyId);
+        Assert.Equal(expectedControlAccountId, partner.AccountId);
+        Assert.Equal(11, partner.PartyId);
+        var isReceipt = direction == CashDirection.Receipt;
+        Assert.Equal(isReceipt ? 125m : 0m, cashbox.Debit);
+        Assert.Equal(isReceipt ? 0m : 125m, cashbox.Credit);
+        Assert.Equal(isReceipt ? 2.5m : 0m, cashbox.TransactionDebit);
+        Assert.Equal(isReceipt ? 0m : 2.5m, cashbox.TransactionCredit);
+        Assert.Equal(isReceipt ? 0m : 125m, partner.Debit);
+        Assert.Equal(isReceipt ? 125m : 0m, partner.Credit);
+        Assert.Equal(isReceipt ? 0m : 2.5m, partner.TransactionDebit);
+        Assert.Equal(isReceipt ? 2.5m : 0m, partner.TransactionCredit);
+        Assert.All(lines, line =>
+        {
+            Assert.Equal(CurrencyCode.USD, line.Currency);
+            Assert.Equal(50m, line.ExchangeRate);
+        });
+    }
+
+    [Fact]
+    public async Task CashVoucherPosting_PreservesCorrectRefundRoleAfterMovementDefaultChanges()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await PrepareForeignCashVoucherAsync(database.Context);
+        var service = CreateCashVoucherPostingService(database.Context);
+        var voucher = CreatePartnerCashVoucher(CashDirection.Receipt, movementTypeId: 74);
+        var original = await service.SynchronizeAsync(voucher);
+        Assert.True(original.IsSuccess);
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE CashMovementTypes SET IsDefaultForPurchaseReturn = 0 WHERE Id = 74");
+        voucher.Amount = 3m;
+        voucher.ApplyExchangeRate(exchangeRateId: null, exchangeRate: 50m);
+
+        var updated = await service.SynchronizeAsync(voucher);
+
+        Assert.True(updated.IsSuccess);
+        Assert.Equal(original.Value.JournalEntryId, updated.Value.JournalEntryId);
+        database.Context.ChangeTracker.Clear();
+        var partner = await database.Context.JournalEntryLines.AsNoTracking()
+            .SingleAsync(line => line.PartyType == JournalPartyType.Supplier);
+        Assert.Equal(12, partner.AccountId);
+        Assert.Equal(11, partner.PartyId);
+        Assert.Equal(0m, partner.Debit);
+        Assert.Equal(150m, partner.Credit);
+        Assert.Equal(0m, partner.TransactionDebit);
+        Assert.Equal(3m, partner.TransactionCredit);
+    }
+
+    [Fact]
+    public async Task CashVoucherPosting_ChangedOrdinaryDirectionResolvesNewPartnerRole()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await PrepareForeignCashVoucherAsync(database.Context);
+        var service = CreateCashVoucherPostingService(database.Context);
+        var voucher = CreatePartnerCashVoucher(CashDirection.Payment, movementTypeId: null);
+        var original = await service.SynchronizeAsync(voucher);
+        Assert.True(original.IsSuccess);
+        voucher.Direction = CashDirection.Receipt;
+
+        var updated = await service.SynchronizeAsync(voucher);
+
+        Assert.True(updated.IsSuccess);
+        Assert.Equal(original.Value.JournalEntryId, updated.Value.JournalEntryId);
+        database.Context.ChangeTracker.Clear();
+        var partner = await database.Context.JournalEntryLines.AsNoTracking()
+            .SingleAsync(line => line.PartyType == JournalPartyType.Customer);
+        Assert.Equal(3, partner.AccountId);
+        Assert.Equal(11, partner.PartyId);
+        Assert.Equal(0m, partner.Debit);
+        Assert.Equal(125m, partner.Credit);
+        Assert.Equal(0m, partner.TransactionDebit);
+        Assert.Equal(2.5m, partner.TransactionCredit);
+    }
+
+    [Theory]
+    [InlineData(InvoiceType.Sales, CashDirection.Receipt, JournalPartyType.Customer, 3)]
+    [InlineData(InvoiceType.Purchase, CashDirection.Payment, JournalPartyType.Supplier, 12)]
+    [InlineData(InvoiceType.SalesReturn, CashDirection.Payment, JournalPartyType.Customer, 3)]
+    [InlineData(InvoiceType.PurchaseReturn, CashDirection.Receipt, JournalPartyType.Supplier, 12)]
+    public async Task CashVoucherPosting_UsesLinkedInvoiceRoleWithoutMovementDefaults(
+        InvoiceType invoiceType,
+        CashDirection direction,
+        JournalPartyType expectedPartyType,
+        int expectedAccountId)
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await PrepareForeignCashVoucherAsync(database.Context);
+        await database.Context.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE Invoices SET InvoiceType = {(int)invoiceType} WHERE Id = 60");
+        var voucher = CreatePartnerCashVoucher(direction, movementTypeId: null);
+        voucher.InvoiceId = 60;
+
+        var result = await CreateCashVoucherPostingService(database.Context).SynchronizeAsync(voucher);
+
+        Assert.True(result.IsSuccess, string.Join("; ", result.Errors.Select(error => error.Code)));
+        var partner = await database.Context.JournalEntryLines.AsNoTracking()
+            .SingleAsync(line => line.PartyType == expectedPartyType);
+        Assert.Equal(expectedAccountId, partner.AccountId);
+        Assert.Equal(11, partner.PartyId);
+    }
+
+    [Theory]
+    [InlineData(74, CashDirection.Receipt, true, false, false)]
+    [InlineData(73, CashDirection.Receipt, false, false, false)]
+    [InlineData(71, CashDirection.Payment, true, false, false)]
+    [InlineData(74, CashDirection.Receipt, false, true, false)]
+    [InlineData(71, CashDirection.Receipt, true, false, true)]
+    public async Task CashVoucherPosting_RejectsContradictoryOrAmbiguousPartnerRole(
+        int movementTypeId,
+        CashDirection direction,
+        bool linkSalesInvoice,
+        bool addSalesDefault,
+        bool differentInvoicePartner)
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await PrepareForeignCashVoucherAsync(database.Context);
+        if (addSalesDefault)
+        {
+            await database.Context.Database.ExecuteSqlRawAsync(
+                "UPDATE CashMovementTypes SET IsDefaultForSales = 1 WHERE Id = 74");
+        }
+        if (differentInvoicePartner)
+        {
+            await database.Context.Database.ExecuteSqlRawAsync(
+                "UPDATE Invoices SET BusinessPartnerId = 99 WHERE Id = 60");
+        }
+        var voucher = CreatePartnerCashVoucher(direction, movementTypeId);
+        voucher.InvoiceId = linkSalesInvoice ? 60 : null;
+        voucher.AccountId = 6;
+
+        var result = await CreateCashVoucherPostingService(database.Context).SynchronizeAsync(voucher);
+
+        Assert.True(result.IsFailure);
+        Assert.Contains(result.Errors, error => error.Code is
+            "CashVouchers.PartnerRoleMismatch" or "CashVouchers.MovementTypeDirectionMismatch");
+        Assert.Empty(await database.Context.JournalEntries.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CashVoucherPosting_LinkedInvoiceDisambiguatesSharedMovementDefaults()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await PrepareForeignCashVoucherAsync(database.Context);
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE CashMovementTypes SET IsDefaultForSales = 1 WHERE Id = 74");
+        var voucher = CreatePartnerCashVoucher(CashDirection.Receipt, movementTypeId: 74);
+        voucher.InvoiceId = 60;
+        voucher.AccountId = 3;
+
+        var result = await CreateCashVoucherPostingService(database.Context).SynchronizeAsync(voucher);
+
+        Assert.True(result.IsSuccess, string.Join("; ", result.Errors.Select(error => error.Code)));
+        var partner = await database.Context.JournalEntryLines.AsNoTracking()
+            .SingleAsync(line => line.PartyType == JournalPartyType.Customer);
+        Assert.Equal(3, partner.AccountId);
+        Assert.Equal(11, partner.PartyId);
+        Assert.Equal(125m, partner.Credit);
+        Assert.Equal(2.5m, partner.TransactionCredit);
+    }
+
+    private static CashVoucherPostingService CreateCashVoucherPostingService(ApplicationDbContext context)
+    {
+        var companyContext = new TestCurrentCompanyContext(1);
+        return new CashVoucherPostingService(
+            context,
+            companyContext,
+            new AccountMappingResolver(context, companyContext),
+            new AutomaticPostingService(
+                context, companyContext, TimeProvider.System,
+                NullLogger<AutomaticPostingService>.Instance));
+    }
+
+    private static Task PrepareForeignCashVoucherAsync(ApplicationDbContext context) =>
+        context.Database.ExecuteSqlRawAsync(
+            "UPDATE Cashboxes SET Currency = 2 WHERE Id = 7; " +
+            "UPDATE BusinessPartners SET Currency = 2 WHERE Id = 11;");
+
+    private static CashVoucher CreatePartnerCashVoucher(CashDirection direction, int? movementTypeId)
+    {
+        var voucher = new CashVoucher
+        {
+            Id = 42,
+            CompanyId = 1,
+            VoucherNumber = "REFUND-0042",
+            VoucherDate = new DateOnly(2026, 8, 31),
+            Direction = direction,
+            CashboxId = 7,
+            CashMovementTypeId = movementTypeId,
+            PartyType = CashPartyType.Partner,
+            BusinessPartnerId = 11,
+            Amount = 2.5m,
+            Currency = CurrencyCode.USD,
+            IsPosted = true
+        };
+        voucher.ApplyExchangeRate(exchangeRateId: null, exchangeRate: 50m);
+        return voucher;
+    }
+
     [Fact]
     public async Task CashboxTransferPosting_UsesOneEntryAndBooksExchangeDifference()
     {
@@ -1131,6 +1361,64 @@ public sealed class AutomaticPostingServiceTests
     }
 
     [Fact]
+    public async Task StockOpeningPosting_CarriedInventoryRemovesDuplicateAndPreservesFiscalYearOpening()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var companyContext = new TestCurrentCompanyContext(1);
+        var postingService = new InventoryPostingService(
+            database.Context,
+            companyContext,
+            new AccountMappingResolver(database.Context, companyContext),
+            new AutomaticPostingService(
+                database.Context, companyContext, TimeProvider.System,
+                NullLogger<AutomaticPostingService>.Instance));
+        var obsolete = await postingService.SynchronizeStockOpeningBalanceAsync(80);
+        Assert.True(obsolete.IsSuccess);
+
+        await database.Context.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE StockOpeningBalances
+            SET DocumentNumber = 'FYOB-1-1', Notes = 'AUTO_FY_INVENTORY_CARRY:1'
+            WHERE Id = 80;
+
+            INSERT INTO JournalEntries (
+                Id, CompanyId, FiscalYearId, EntryNumber, EntryDate, Description,
+                EntryType, SourceType, SourceId, SourceNumber, Status, PostedOn)
+            VALUES (
+                900, 1, 1, 'FY-OPEN-900', '2026-01-01', 'Fiscal year inventory opening',
+                {(int)JournalEntryType.Opening}, {(int)JournalEntrySourceType.FiscalYearClosing},
+                1, 'FY-1', {(int)JournalEntryStatus.Posted}, '2026-01-01');
+
+            INSERT INTO JournalEntryLines (
+                CompanyId, JournalEntryId, AccountId, Description, Debit, Credit,
+                Currency, ExchangeRate, TransactionDebit, TransactionCredit)
+            VALUES
+                (1, 900, 8, 'Inventory carried opening', 200, 0,
+                 {(int)CurrencyCode.EGP}, 1, 200, 0),
+                (1, 900, 11, 'Opening equity', 0, 200,
+                 {(int)CurrencyCode.EGP}, 1, 0, 200);
+            """);
+
+        var synchronized = await postingService.SynchronizeStockOpeningBalanceAsync(80);
+        var synchronizedAgain = await postingService.SynchronizeStockOpeningBalanceAsync(80);
+
+        Assert.True(synchronized.IsSuccess);
+        Assert.True(synchronizedAgain.IsSuccess);
+        database.Context.ChangeTracker.Clear();
+        var entry = Assert.Single(await database.Context.JournalEntries.AsNoTracking()
+            .Include(entry => entry.Lines).ToListAsync());
+        Assert.Equal(900, entry.Id);
+        Assert.Equal(JournalEntryType.Opening, entry.EntryType);
+        Assert.Equal(JournalEntrySourceType.FiscalYearClosing, entry.SourceType);
+        var inventory = Assert.Single(entry.Lines, line => line.AccountId == 8);
+        Assert.Equal(200m, inventory.Debit);
+        Assert.Equal(0m, inventory.Credit);
+        Assert.Equal(200m, inventory.TransactionDebit);
+        Assert.Equal(0m, inventory.TransactionCredit);
+        Assert.Equal(200m, entry.Lines.Sum(line => line.Debit));
+        Assert.Equal(200m, entry.Lines.Sum(line => line.Credit));
+    }
+
+    [Fact]
     public async Task PartnerOpeningPosting_ChangesControlSideOnUpdate()
     {
         await using var database = await TestDatabase.CreateAsync();
@@ -1652,6 +1940,7 @@ public sealed class AutomaticPostingServiceTests
                     CompanyId INTEGER NOT NULL,
                     DocumentNumber TEXT NOT NULL,
                     DocumentDate TEXT NOT NULL,
+                    Notes TEXT NULL,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 
@@ -1717,6 +2006,26 @@ public sealed class AutomaticPostingServiceTests
 
                 INSERT INTO CompanySettings (CompanyId, BaseCurrency)
                 VALUES (1, 1);
+
+                CREATE TABLE CashMovementTypes (
+                    Id INTEGER PRIMARY KEY,
+                    CompanyId INTEGER NOT NULL,
+                    Direction INTEGER NOT NULL,
+                    IsDefaultForSales INTEGER NOT NULL DEFAULT 0,
+                    IsDefaultForPurchase INTEGER NOT NULL DEFAULT 0,
+                    IsDefaultForSalesReturn INTEGER NOT NULL DEFAULT 0,
+                    IsDefaultForPurchaseReturn INTEGER NOT NULL DEFAULT 0,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                INSERT INTO CashMovementTypes
+                    (Id, CompanyId, Direction, IsDefaultForSales, IsDefaultForPurchase,
+                     IsDefaultForSalesReturn, IsDefaultForPurchaseReturn)
+                VALUES
+                    (71, 1, 1, 1, 0, 0, 0),
+                    (72, 1, 2, 0, 1, 0, 0),
+                    (73, 1, 2, 0, 0, 1, 0),
+                    (74, 1, 1, 0, 0, 0, 1);
 
                 CREATE TABLE BusinessPartners (
                     Id INTEGER PRIMARY KEY,

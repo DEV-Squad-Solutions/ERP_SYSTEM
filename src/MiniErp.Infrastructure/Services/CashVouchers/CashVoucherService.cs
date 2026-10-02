@@ -447,6 +447,7 @@ public sealed class CashVoucherService(
                             JournalEntrySourceType.FiscalYearClosing &&
                         line.JournalEntry.Status ==
                             JournalEntryStatus.Posted &&
+                        line.Currency == cashbox.Currency &&
                         line.PartyType == JournalPartyType.Cashbox &&
                         line.PartyId == cashbox.Id)
                     .Select(line => (decimal?)
@@ -1023,6 +1024,8 @@ public sealed class CashVoucherService(
         entry.Property(entity => entity.RowVersion).OriginalValue =
             request.RowVersion!;
 
+        var originalPartnerReferences = (
+            voucher.BusinessPartnerId, voucher.CashMovementTypeId, voucher.InvoiceId);
         request.Adapt(voucher);
         voucher.PartyType = preparation.Value.PartyType;
         voucher.Classification = preparation.Value.Classification;
@@ -1033,6 +1036,9 @@ public sealed class CashVoucherService(
             cancellationToken);
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
         entry.Property(entity => entity.LastModifiedAt).IsModified = true;
+
+        var partnerReferencesChanged = originalPartnerReferences != (
+            voucher.BusinessPartnerId, voucher.CashMovementTypeId, voucher.InvoiceId);
 
         try
         {
@@ -1048,7 +1054,10 @@ public sealed class CashVoucherService(
             await dbContext.SaveChangesAsync(cancellationToken);
 
             var postingResult = await cashVoucherPostingService
-                .SynchronizeAsync(voucher, cancellationToken);
+                .SynchronizeAsync(
+                    voucher,
+                    partnerReferencesChanged: partnerReferencesChanged,
+                    cancellationToken: cancellationToken);
             if (postingResult.IsFailure)
             {
                 await transaction.RollbackAsync(cancellationToken);
@@ -1343,6 +1352,8 @@ public sealed class CashVoucherService(
         var entry = dbContext.Entry(voucher);
         entry.Property(entity => entity.RowVersion).OriginalValue =
             item.RowVersion!;
+        var originalPartnerReferences = (
+            voucher.BusinessPartnerId, voucher.CashMovementTypeId, voucher.InvoiceId);
         request.Adapt(voucher);
         voucher.PartyType = preparation.Value.PartyType;
         voucher.Classification = preparation.Value.Classification;
@@ -1350,6 +1361,9 @@ public sealed class CashVoucherService(
         await ApplyPreparationAsync(voucher, preparation.Value, cancellationToken);
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
         entry.Property(entity => entity.LastModifiedAt).IsModified = true;
+
+        var partnerReferencesChanged = originalPartnerReferences != (
+            voucher.BusinessPartnerId, voucher.CashMovementTypeId, voucher.InvoiceId);
 
         try
         {
@@ -1365,7 +1379,10 @@ public sealed class CashVoucherService(
             await dbContext.SaveChangesAsync(cancellationToken);
 
             var postingResult = await cashVoucherPostingService
-                .SynchronizeAsync(voucher, cancellationToken);
+                .SynchronizeAsync(
+                    voucher,
+                    partnerReferencesChanged: partnerReferencesChanged,
+                    cancellationToken: cancellationToken);
             if (postingResult.IsFailure)
             {
                 return Result<CashVoucherBulkItemResponse>.Failure(

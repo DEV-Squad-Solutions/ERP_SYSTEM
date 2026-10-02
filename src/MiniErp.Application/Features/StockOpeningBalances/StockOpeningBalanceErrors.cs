@@ -4,6 +4,11 @@ namespace MiniErp.Application.Features.StockOpeningBalances;
 
 public static class StockOpeningBalanceErrors
 {
+    public static Error CarriedForwardReadOnly() =>
+        Error.Conflict(
+            "StockOpeningBalances.CarriedForwardReadOnly",
+            "الرصيد الافتتاحي المرحل تلقائياً للقراءة فقط؛ عدّل السنة المصدر وأعد إقفالها لتحديثه.");
+
     public static Error RowVersionRequired() =>
         Error.Validation(
             "StockOpeningBalances.RowVersionRequired",

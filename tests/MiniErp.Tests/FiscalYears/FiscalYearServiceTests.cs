@@ -415,6 +415,127 @@ public sealed class FiscalYearServiceTests
         Assert.Equal(0m, partyLine.TransactionCredit);
     }
 
+    [Theory]
+    [InlineData(80, 50, 0, 20, 0, 0)]
+    [InlineData(80, 50, 30, 50, 0, 0)]
+    [InlineData(120, 50, 30, 10, 0, 0)]
+    [InlineData(100, 40, 0, 0, 10, 25)]
+    [InlineData(110, 40, 30, 20, 10, 27.5)]
+    [InlineData(90, 60, 0, 10, -10, -15)]
+    [InlineData(99.9999, 50, 0, 0.0001, 1000000000, 1999998000)]
+    public async Task Close_PreservesForeignUnitsAndBaseResiduals(
+        decimal settledBaseCredit,
+        decimal settledNativeCredit,
+        decimal existingBaseDebit,
+        decimal expectedBaseBalance,
+        decimal expectedNativeBalance,
+        decimal expectedNativeLineBaseBalance)
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(
+            companyId: 1,
+            accountingReadinessService: new ReadyReadinessService());
+        var first = await service.AddAsync(new FiscalYearRequest(
+            Name: "2026",
+            StartDate: new DateOnly(2026, 1, 1),
+            EndDate: new DateOnly(2026, 12, 31)));
+        var next = await service.AddAsync(new FiscalYearRequest(
+            Name: "2027",
+            StartDate: new DateOnly(2027, 1, 1),
+            EndDate: new DateOnly(2027, 12, 31),
+            IsCurrent: true));
+        await database.SeedClosingLedgerAsync(first.Value.Id, next.Value.Id);
+        await database.SeedClosingSettlementAsync(
+            baseCredit: settledBaseCredit,
+            nativeCredit: settledNativeCredit,
+            baseDebit: existingBaseDebit);
+        if (expectedNativeBalance == 1000000000m)
+        {
+            // This valid source line rounds to 100 base units, but the net
+            // carried balance/native ratio is below the 12-place rate scale.
+            await database.Context.Database.ExecuteSqlRawAsync("""
+                UPDATE JournalEntryLines
+                SET TransactionDebit = 1000000050, ExchangeRate = 0.0000001
+                WHERE Id = 501;
+                """);
+        }
+        database.ClearTracking();
+
+        var close = await service.CloseAsync(first.Value.Id);
+
+        Assert.True(close.IsSuccess, string.Join("; ", close.Errors.Select(error => error.Code)));
+        var partyLines = await database.LoadClosingPartyLinesAsync(first.Value.Id);
+        Assert.Equal(expectedBaseBalance, partyLines.Sum(line => line.Debit - line.Credit));
+        var foreignLines = partyLines.Where(line => line.Currency == CurrencyCode.USD).ToArray();
+        Assert.Equal(expectedNativeBalance,
+            foreignLines.Sum(line => line.TransactionDebit - line.TransactionCredit));
+        var baseLine = Assert.Single(partyLines, line => line.Currency == CurrencyCode.EGP);
+        Assert.Equal(expectedBaseBalance - expectedNativeLineBaseBalance,
+            baseLine.Debit - baseLine.Credit);
+        Assert.Equal(baseLine.Debit, baseLine.TransactionDebit);
+        Assert.Equal(baseLine.Credit, baseLine.TransactionCredit);
+        Assert.Equal(1m, baseLine.ExchangeRate);
+        if (expectedNativeBalance == 0m)
+        {
+            Assert.Empty(foreignLines);
+            Assert.Single(partyLines);
+        }
+        else
+        {
+            var foreignLine = Assert.Single(foreignLines);
+            Assert.Equal(expectedNativeLineBaseBalance, foreignLine.Debit - foreignLine.Credit);
+            Assert.Equal(Math.Max(expectedNativeBalance, 0m), foreignLine.TransactionDebit);
+            Assert.Equal(Math.Max(-expectedNativeBalance, 0m), foreignLine.TransactionCredit);
+            Assert.Equal(settledBaseCredit / settledNativeCredit, foreignLine.ExchangeRate);
+        }
+        Assert.All(partyLines, line =>
+        {
+            Assert.Equal(JournalPartyType.Customer, line.PartyType);
+            Assert.Equal(99, line.PartyId);
+            Assert.True(line.ExchangeRate > 0m);
+            Assert.True(
+                (line.Debit > 0m && line.Credit == 0m &&
+                 line.TransactionDebit > 0m && line.TransactionCredit == 0m) ||
+                (line.Credit > 0m && line.Debit == 0m &&
+                 line.TransactionCredit > 0m && line.TransactionDebit == 0m));
+        });
+        var transfer = Assert.Single(await database.LoadClosingTransfersAsync(first.Value.Id));
+        Assert.Equal(next.Value.Id, transfer.FiscalYearId);
+        Assert.Equal(transfer.Debit, transfer.Credit);
+    }
+
+    [Fact]
+    public async Task Close_DoesNotCreateEmptyTransferWhenBaseResidualsCancel()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(
+            companyId: 1,
+            accountingReadinessService: new ReadyReadinessService());
+        var first = await service.AddAsync(new FiscalYearRequest(
+            Name: "2026",
+            StartDate: new DateOnly(2026, 1, 1),
+            EndDate: new DateOnly(2026, 12, 31)));
+        var next = await service.AddAsync(new FiscalYearRequest(
+            Name: "2027",
+            StartDate: new DateOnly(2027, 1, 1),
+            EndDate: new DateOnly(2027, 12, 31),
+            IsCurrent: true));
+        await database.SeedClosingLedgerAsync(first.Value.Id, next.Value.Id);
+        await database.SeedClosingSettlementAsync(
+            baseCredit: 120m,
+            nativeCredit: 50m,
+            baseDebit: 20m);
+        database.ClearTracking();
+
+        Assert.True((await service.CloseAsync(first.Value.Id)).IsSuccess);
+        Assert.Empty(await database.LoadClosingTransfersAsync(first.Value.Id));
+        database.ClearTracking();
+        Assert.True((await service.ReopenAsync(first.Value.Id)).IsSuccess);
+        database.ClearTracking();
+        Assert.True((await service.CloseAsync(first.Value.Id)).IsSuccess);
+        Assert.Empty(await database.LoadClosingTransfersAsync(first.Value.Id));
+    }
+
     [Fact]
     public async Task Close_CarriesOnlyEmployeeOperationalDelta_AndRecloseIsIdempotent()
     {
@@ -1043,6 +1164,51 @@ public sealed class FiscalYearServiceTests
         public Task ChangeClosingAssetBalanceAsync(decimal amount) =>
             Context.Database.ExecuteSqlInterpolatedAsync($"UPDATE JournalEntryLines SET Debit = {amount} WHERE Id = 501");
 
+        public async Task SeedClosingSettlementAsync(
+            decimal baseCredit,
+            decimal nativeCredit,
+            decimal baseDebit)
+        {
+            var rate = baseCredit / nativeCredit;
+            await Context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO JournalEntryLines (
+                    CompanyId, JournalEntryId, AccountId, PartyType, PartyId,
+                    Debit, Credit, Currency, ExchangeRate, TransactionDebit,
+                    TransactionCredit, CreatedById, CreatedOn, CreatedByPc,
+                    IsDeleted)
+                VALUES (
+                    1, 50, 10, 1, 99, 0, {baseCredit}, 2, {rate}, 0,
+                    {nativeCredit}, '', '2026-12-31', '', 0);
+                """);
+            if (baseDebit > 0m)
+            {
+                await Context.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO JournalEntryLines (
+                        CompanyId, JournalEntryId, AccountId, PartyType, PartyId,
+                        Debit, Credit, Currency, ExchangeRate, TransactionDebit,
+                        TransactionCredit, CreatedById, CreatedOn, CreatedByPc,
+                        IsDeleted)
+                    VALUES (
+                        1, 50, 10, 1, 99, {baseDebit}, 0, 1, 1,
+                        {baseDebit}, 0, '', '2026-12-31', '', 0);
+                    """);
+            }
+            var balancingCredit = 100m + baseDebit - baseCredit;
+            if (balancingCredit == 0m)
+            {
+                await Context.Database.ExecuteSqlRawAsync("DELETE FROM JournalEntryLines WHERE Id = 502");
+                return;
+            }
+            await Context.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE JournalEntryLines
+                SET Debit = {Math.Max(-balancingCredit, 0m)},
+                    Credit = {Math.Max(balancingCredit, 0m)},
+                    TransactionDebit = {Math.Max(-balancingCredit, 0m)},
+                    TransactionCredit = {Math.Max(balancingCredit, 0m)}
+                WHERE Id = 502;
+                """);
+        }
+
         public Task SeedEmployeeOperationalBalancesAsync(
             int fiscalYearId,
             int nextFiscalYearId) =>
@@ -1151,6 +1317,18 @@ public sealed class FiscalYearServiceTests
                         JournalEntrySourceType.FiscalYearClosing &&
                     line.JournalEntry.SourceId == sourceFiscalYearId &&
                     line.AccountId == 10);
+
+        public Task<List<JournalEntryLine>> LoadClosingPartyLinesAsync(
+            int sourceFiscalYearId) =>
+            Context.JournalEntryLines
+                .AsNoTracking()
+                .Where(line =>
+                    line.JournalEntry.CompanyId == 1 &&
+                    line.JournalEntry.EntryType == JournalEntryType.Opening &&
+                    line.JournalEntry.SourceType == JournalEntrySourceType.FiscalYearClosing &&
+                    line.JournalEntry.SourceId == sourceFiscalYearId &&
+                    line.AccountId == 10)
+                .ToListAsync();
 
         public async ValueTask DisposeAsync()
         {
@@ -1315,12 +1493,15 @@ public sealed class FiscalYearServiceTests
                     PartyType INTEGER NULL,
                     PartyId INTEGER NULL,
                     Description TEXT NULL,
-                    Debit NUMERIC NOT NULL,
-                    Credit NUMERIC NOT NULL,
+                    -- TEXT affinity preserves decimal values exactly like the
+                    -- production decimal(19,4) columns. NUMERIC affinity coerces
+                    -- large fractional offsets to REAL and loses residuals.
+                    Debit TEXT NOT NULL,
+                    Credit TEXT NOT NULL,
                     Currency INTEGER NOT NULL DEFAULT 1,
-                    ExchangeRate NUMERIC NOT NULL DEFAULT 1,
-                    TransactionDebit NUMERIC NOT NULL DEFAULT 0,
-                    TransactionCredit NUMERIC NOT NULL DEFAULT 0,
+                    ExchangeRate TEXT NOT NULL DEFAULT 1,
+                    TransactionDebit TEXT NOT NULL DEFAULT 0,
+                    TransactionCredit TEXT NOT NULL DEFAULT 0,
                     CreatedById TEXT NOT NULL,
                     CreatedOn TEXT NOT NULL,
                     CreatedByPc TEXT NOT NULL,

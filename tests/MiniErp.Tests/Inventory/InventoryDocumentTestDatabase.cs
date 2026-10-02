@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
+using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
@@ -133,15 +134,27 @@ internal sealed class InventoryDocumentTestDatabase : IAsyncDisposable
         new(Context, new TestCurrentCompanyContext(companyId));
 
     public InventoryCostingService CreateInventoryCostingService(
-        int companyId = 1) =>
+        int companyId = 1,
+        IInventoryCostPostingSynchronizer? postingSynchronizer = null,
+        IFiscalYearPeriodGuard? costingPeriodGuard = null) =>
         new(
             Context,
             new TestCurrentCompanyContext(companyId),
-            TimeProvider.System);
+            TimeProvider.System,
+            postingSynchronizer,
+            costingPeriodGuard);
 
     public FiscalYearInventoryCarryForwardService
-        CreateInventoryCarryForwardService(int companyId = 1) =>
-        new(Context, new TestCurrentCompanyContext(companyId));
+        CreateInventoryCarryForwardService(int companyId = 1,
+            IInventoryCostPostingSynchronizer? postingSynchronizer = null,
+            IInventoryPostingService? inventoryPostingService = null,
+            bool enforceCostingFiscalYearPeriod = false) =>
+        new(Context, new TestCurrentCompanyContext(companyId),
+            CreateInventoryCostingService(companyId, postingSynchronizer,
+                enforceCostingFiscalYearPeriod
+                    ? new FiscalYearPeriodGuard(Context, new TestCurrentCompanyContext(companyId))
+                    : null), CreateInventoryStockService(companyId),
+            inventoryPostingService);
 
     public InventoryCountService CreateInventoryCountService(
         int companyId = 1)

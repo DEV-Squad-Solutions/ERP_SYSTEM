@@ -513,6 +513,28 @@ public sealed class AccountingReadinessService(
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
+        // Repair only obsolete stock-document journals. The accounting fiscal-year
+        // opening entry remains the sole posting for these generated documents.
+        var carriedOpeningIds = await dbContext.StockOpeningBalances
+            .AsNoTracking()
+            .Where(balance => balance.CompanyId == companyId &&
+                balance.FiscalYearId == fiscalYear.Id &&
+                (balance.DocumentNumber.ToUpper().StartsWith(StockOpeningBalanceCarryForwardRules.DocumentNumberPrefix) ||
+                 (balance.Notes != null && balance.Notes.ToUpper().StartsWith(StockOpeningBalanceCarryForwardRules.MarkerPrefix))))
+            .Select(balance => balance.Id)
+            .ToListAsync(cancellationToken);
+        foreach (var openingId in carriedOpeningIds)
+        {
+            var cleanup = await inventoryPostingService.SynchronizeStockOpeningBalanceAsync(
+                openingId, cancellationToken);
+            if (cleanup.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return Result<AccountingBackfillResponse>.Failure(cleanup.Errors);
+            }
+        }
+
         var sources = await LoadSourcesAsync(
             fiscalYear.Id,
             fiscalYear.StartDate,
@@ -788,6 +810,8 @@ public sealed class AccountingReadinessService(
             .Where(balance =>
                 balance.CompanyId == companyId &&
                 balance.FiscalYearId == fiscalYearId &&
+                !balance.DocumentNumber.ToUpper().StartsWith(StockOpeningBalanceCarryForwardRules.DocumentNumberPrefix) &&
+                (balance.Notes == null || !balance.Notes.ToUpper().StartsWith(StockOpeningBalanceCarryForwardRules.MarkerPrefix)) &&
                 balance.DocumentDate >= startDate &&
                 balance.DocumentDate <= endDate &&
                 dbContext.ItemMovements.Any(movement =>
@@ -1332,6 +1356,8 @@ public sealed class AccountingReadinessService(
             balance =>
                 balance.CompanyId == companyId &&
                 balance.FiscalYearId == fiscalYearId &&
+                !balance.DocumentNumber.ToUpper().StartsWith(StockOpeningBalanceCarryForwardRules.DocumentNumberPrefix) &&
+                (balance.Notes == null || !balance.Notes.ToUpper().StartsWith(StockOpeningBalanceCarryForwardRules.MarkerPrefix)) &&
                 balance.DocumentDate >= startDate &&
                 balance.DocumentDate <= endDate,
             cancellationToken);

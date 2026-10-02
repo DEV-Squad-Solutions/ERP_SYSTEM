@@ -1,6 +1,8 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
+using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
@@ -9,10 +11,12 @@ namespace MiniErp.Infrastructure.Services.FiscalYears;
 
 public sealed class FiscalYearInventoryCarryForwardService(
     ApplicationDbContext dbContext,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    IInventoryCostingService inventoryCostingService,
+    IInventoryStockService inventoryStockService,
+    IInventoryPostingService? inventoryPostingService = null)
     : IFiscalYearInventoryCarryForwardService
 {
-    private const string MarkerPrefix = "AUTO_FY_INVENTORY_CARRY:";
     private readonly int companyId = currentCompanyContext.CompanyId;
 
     public async Task<Result> CarryForwardAsync(
@@ -22,6 +26,10 @@ public sealed class FiscalYearInventoryCarryForwardService(
         string sourceFiscalYearName,
         CancellationToken cancellationToken = default)
     {
+        await using var ownedTransaction = dbContext.Database.CurrentTransaction is null
+            ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+            : null;
+
         var movementRows = await dbContext.ItemMovements
             .AsNoTracking()
             .Where(movement =>
@@ -116,13 +124,15 @@ public sealed class FiscalYearInventoryCarryForwardService(
                     "inventory"));
         }
 
-        var marker = $"{MarkerPrefix}{sourceFiscalYearId}";
+        var marker = $"{StockOpeningBalanceCarryForwardRules.MarkerPrefix}{sourceFiscalYearId}";
+        var documentPrefix = $"{StockOpeningBalanceCarryForwardRules.DocumentNumberPrefix}{sourceFiscalYearId}-";
         var existingDocuments = await dbContext.StockOpeningBalances
             .Include(balance => balance.Lines)
             .Where(balance =>
                 balance.CompanyId == companyId &&
                 balance.FiscalYearId == targetFiscalYearId &&
-                balance.Notes == marker)
+                ((balance.Notes != null && balance.Notes.ToUpper() == marker) ||
+                 balance.DocumentNumber.ToUpper().StartsWith(documentPrefix)))
             .ToListAsync(cancellationToken);
         var existingByStore = existingDocuments.ToDictionary(
             balance => balance.StoreId);
@@ -131,9 +141,54 @@ public sealed class FiscalYearInventoryCarryForwardService(
             .GroupBy(row => row.StoreId)
             .ToDictionary(group => group.Key, group => group.ToArray());
 
+        var affectedKeys = closingRows
+            .Select(row => new InventoryCostingKey(row.StoreId, row.ItemId, targetFiscalYearId))
+            .Concat(existingDocuments.SelectMany(document => document.Lines.Select(line =>
+                new InventoryCostingKey(document.StoreId, line.ItemId, targetFiscalYearId))))
+            .Distinct()
+            .ToArray();
+        await inventoryCostingService.LockAsync(affectedKeys, cancellationToken);
+
+        foreach (var document in existingDocuments)
+        {
+            var replacementRows = rowsByStore.GetValueOrDefault(document.StoreId) ?? [];
+            var stockError = await inventoryStockService.ValidateTimelineAsync(
+                new InventoryStockProposal(
+                    StoreId: document.StoreId,
+                    MovementDate: targetStartDate,
+                    IsInbound: true,
+                    Lines: replacementRows.Select(row => new InventoryStockLine(
+                        ItemId: row.ItemId, Quantity: row.Quantity)).ToArray(),
+                    ReplacedMovement: new InventoryMovementReference(
+                        MovementTypes: [ItemMovementType.OpeningBalance],
+                        ReferenceId: document.Id,
+                        ReferenceNumber: document.DocumentNumber),
+                    OperationDescription: "تحديث الرصيد الافتتاحي المرحل عند إعادة إقفال السنة",
+                    ErrorFieldName: "inventory"),
+                cancellationToken);
+            if (stockError is not null)
+            {
+                return Result.Failure(stockError);
+            }
+        }
+
         foreach (var stale in existingDocuments.Where(document =>
                      !rowsByStore.ContainsKey(document.StoreId)))
         {
+            if (inventoryPostingService is not null)
+            {
+                var cleanup = await inventoryPostingService.DeleteAsync(
+                    JournalEntrySourceType.StockOpeningBalance, stale.Id, cancellationToken);
+                if (cleanup.IsFailure)
+                {
+                    if (ownedTransaction is not null)
+                    {
+                        await ownedTransaction.RollbackAsync(cancellationToken);
+                        dbContext.ChangeTracker.Clear();
+                    }
+                    return Result.Failure(cleanup.Errors);
+                }
+            }
             await RemoveDocumentAsync(stale, cancellationToken);
         }
 
@@ -146,7 +201,7 @@ public sealed class FiscalYearInventoryCarryForwardService(
                     CompanyId = companyId,
                     FiscalYearId = targetFiscalYearId,
                     StoreId = storeId,
-                    DocumentNumber = BuildDocumentNumber(
+                    DocumentNumber = StockOpeningBalanceCarryForwardRules.BuildDocumentNumber(
                         sourceFiscalYearId,
                         storeId),
                     DocumentDate = targetStartDate,
@@ -198,39 +253,64 @@ public sealed class FiscalYearInventoryCarryForwardService(
                     movement.ReferenceId == document.Id &&
                     movement.ReferenceNumber == document.DocumentNumber)
                 .ToListAsync(cancellationToken);
-            dbContext.ItemMovements.RemoveRange(oldMovements);
+            var linesByItem = document.Lines.ToDictionary(line => line.ItemId);
+            var staleMovements = oldMovements.Where(movement =>
+                !linesByItem.ContainsKey(movement.ItemId)).ToArray();
+            await RemoveMovementsAsync(staleMovements, cancellationToken);
+            var movementsByItem = oldMovements.Except(staleMovements)
+                .ToDictionary(movement => movement.ItemId);
 
             foreach (var line in document.Lines)
             {
-                var movement = new ItemMovement
+                if (!movementsByItem.TryGetValue(line.ItemId, out var movement))
                 {
-                    CompanyId = companyId,
-                    FiscalYearId = targetFiscalYearId,
-                    StoreId = document.StoreId,
-                    ItemId = line.ItemId,
-                    ItemUnitId = line.ItemUnitId,
-                    MovementType = ItemMovementType.OpeningBalance,
-                    ReferenceId = document.Id,
-                    ReferenceNumber = document.DocumentNumber,
-                    MovementDate = targetStartDate,
-                    QuantityIn = line.Quantity,
-                    QuantityOut = 0m,
-                    Description =
-                        $"رصيد افتتاحي مرحل من السنة المالية {sourceFiscalYearName}"
-                };
+                    movement = new ItemMovement
+                    {
+                        CompanyId = companyId,
+                        FiscalYearId = targetFiscalYearId,
+                        StoreId = document.StoreId,
+                        ItemId = line.ItemId,
+                        MovementType = ItemMovementType.OpeningBalance,
+                        ReferenceId = document.Id,
+                        ReferenceNumber = document.DocumentNumber
+                    };
+                    dbContext.ItemMovements.Add(movement);
+                }
+                movement.ItemUnitId = line.ItemUnitId;
+                movement.MovementDate = targetStartDate;
+                movement.QuantityIn = line.Quantity;
+                movement.QuantityOut = 0m;
+                movement.Description = $"رصيد افتتاحي مرحل من السنة المالية {sourceFiscalYearName}";
+                var row = rowsByStore[document.StoreId].Single(row => row.ItemId == line.ItemId);
+                var preciseValue = InventoryCostRules.CalculateTotal(row.Quantity, row.AverageCost);
                 movement.ApplyCostSnapshot(
                     costStatus: InventoryCostStatus.Final,
                     pendingCostQuantity: 0m,
-                    unitCost: line.Price,
-                    totalCost: line.Total,
-                    quantityAfter: line.Quantity,
-                    averageCostAfter: line.Price,
-                    inventoryValueAfter: line.Total);
-                dbContext.ItemMovements.Add(movement);
+                    unitCost: row.AverageCost,
+                    totalCost: preciseValue,
+                    quantityAfter: row.Quantity,
+                    averageCostAfter: row.AverageCost,
+                    inventoryValueAfter: preciseValue);
             }
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        var costingError = await inventoryCostingService.RecalculateAsync(
+            affectedKeys, cancellationToken);
+        if (costingError is not null)
+        {
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+            }
+            return Result.Failure(costingError);
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+        if (ownedTransaction is not null)
+        {
+            await ownedTransaction.CommitAsync(cancellationToken);
+        }
         return Result.Success();
     }
 
@@ -245,15 +325,27 @@ public sealed class FiscalYearInventoryCarryForwardService(
                 movement.ReferenceId == document.Id &&
                 movement.ReferenceNumber == document.DocumentNumber)
             .ToListAsync(cancellationToken);
-        dbContext.ItemMovements.RemoveRange(movements);
+        await RemoveMovementsAsync(movements, cancellationToken);
         dbContext.StockOpeningBalanceLines.RemoveRange(document.Lines);
         dbContext.StockOpeningBalances.Remove(document);
     }
 
-    private static string BuildDocumentNumber(
-        int sourceFiscalYearId,
-        int storeId) =>
-        $"FYOB-{sourceFiscalYearId}-{storeId}";
+    private async Task RemoveMovementsAsync(
+        IReadOnlyCollection<ItemMovement> movements,
+        CancellationToken cancellationToken)
+    {
+        var ids = movements.Select(movement => movement.Id).ToArray();
+        if (ids.Length == 0)
+        {
+            return;
+        }
+        var allocations = await dbContext.InventoryCostAllocations
+            .Where(allocation => allocation.CompanyId == companyId &&
+                (ids.Contains(allocation.InboundMovementId) || ids.Contains(allocation.OutboundMovementId)))
+            .ToListAsync(cancellationToken);
+        dbContext.InventoryCostAllocations.RemoveRange(allocations);
+        dbContext.ItemMovements.RemoveRange(movements);
+    }
 
     private sealed record ClosingInventoryRow(
         int StoreId,

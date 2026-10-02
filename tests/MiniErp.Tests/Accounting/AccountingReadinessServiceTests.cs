@@ -18,6 +18,64 @@ namespace MiniErp.Tests.Accounting;
 public sealed class AccountingReadinessServiceTests
 {
     [Fact]
+    public async Task Backfill_GeneratedCarryExcludesJournalAndMappingRequirementsAndRepairsObsoleteJournal()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Stores (Id,CompanyId,Code,Name,IsContainerStore,IsActive,CreatedById,CreatedOn,CreatedByPc,IsDeleted)
+            VALUES (1,1,'MAIN','Main',0,1,'test','2026-01-01','test',0);
+            INSERT INTO ItemUnits (Id,CompanyId,Name,IsActive,CreatedById,CreatedOn,CreatedByPc,IsDeleted)
+            VALUES (1,1,'Piece',1,'test','2026-01-01','test',0);
+            INSERT INTO Items (Id,CompanyId,ItemUnitId,Code,Name,IsActive,CreatedById,CreatedOn,CreatedByPc,IsDeleted)
+            VALUES (1,1,1,'ITEM','Item',1,'test','2026-01-01','test',0);
+            INSERT INTO StockOpeningBalances (Id,CompanyId,FiscalYearId,StoreId,DocumentNumber,DocumentDate,
+                Notes,RowVersion,CreatedById,CreatedOn,CreatedByPc,IsDeleted)
+            VALUES (1,1,1,1,'FYOB-8-1','2026-01-01','legacy notes edited',randomblob(8),'test','2026-01-01','test',0);
+            INSERT INTO StockOpeningBalanceLines (Id,CompanyId,StockOpeningBalanceId,ItemId,ItemUnitId,
+                Count,Weight,Quantity,Price,Total,CreatedById,CreatedOn,CreatedByPc,IsDeleted)
+            VALUES (1,1,1,1,1,1,5,5,10,50,'test','2026-01-01','test',0);
+            INSERT INTO ItemMovements (Id,CompanyId,FiscalYearId,StoreId,ItemId,ItemUnitId,MovementType,
+                ReferenceId,ReferenceNumber,MovementDate,QuantityIn,QuantityOut,CostStatus,PendingCostQuantity,
+                UnitCost,TotalCost,QuantityAfter,AverageCostAfter,InventoryValueAfter,CreatedById,CreatedOn,CreatedByPc,IsDeleted)
+            VALUES (1,1,1,1,1,1,5,1,'FYOB-8-1','2026-01-01',5,0,1,0,10,50,5,10,50,'test','2026-01-01','test',0);
+            """);
+
+        var before = await database.Service.GetAsync(1);
+        Assert.True(before.IsSuccess);
+        Assert.True(before.Value.IsReady);
+        Assert.Equal(0, before.Value.TotalSources);
+        Assert.Equal(0, before.Value.MissingJournalSources);
+        Assert.Equal(0, before.Value.MissingOrInvalidMappings);
+
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO Accounts (Id,CompanyId,Code,Name,ParentAccountId,AccountType,NormalBalance,
+                IsPosting,IsActive,RowVersion,CreatedById,CreatedOn,CreatedByPc,IsDeleted)
+            VALUES (1,1,'1110','Inventory',NULL,1,1,1,1,randomblob(8),'test','2026-01-01','test',0),
+                   (2,1,'3100','Equity',NULL,3,2,1,1,randomblob(8),'test','2026-01-01','test',0);
+            INSERT INTO JournalEntries (Id,CompanyId,FiscalYearId,EntryNumber,EntryDate,Description,EntryType,
+                SourceType,SourceId,SourceNumber,Status,PostedOn,RowVersion,CreatedById,CreatedOn,CreatedByPc,IsDeleted)
+            VALUES (1,1,1,'JV-BUG-CARRY','2026-01-01','Obsolete duplicate',4,6,1,'FYOB-8-1',1,
+                '2026-01-01',randomblob(8),'test','2026-01-01','test',0);
+            INSERT INTO JournalEntryLines (Id,CompanyId,JournalEntryId,AccountId,Description,Debit,Credit,
+                Currency,ExchangeRate,TransactionDebit,TransactionCredit,CreatedById,CreatedOn,CreatedByPc,IsDeleted)
+            VALUES (1,1,1,1,'Inventory',50,0,1,1,50,0,'test','2026-01-01','test',0),
+                   (2,1,1,2,'Equity',0,50,1,1,0,50,'test','2026-01-01','test',0);
+            """);
+
+        var repaired = await database.Service.BackfillAsync(1);
+        var repeated = await database.Service.BackfillAsync(1);
+        Assert.True(repaired.IsSuccess, repaired.Error.Description);
+        Assert.True(repeated.IsSuccess, repeated.Error.Description);
+        Assert.True(repaired.Value.Readiness.IsReady);
+        Assert.Equal(0, repeated.Value.CreatedJournals);
+        Assert.False(await database.Context.JournalEntries.AnyAsync(entry =>
+            entry.SourceType == MiniErp.Domain.Enums.JournalEntrySourceType.StockOpeningBalance));
+        Assert.Single(await database.Context.ItemMovements.ToListAsync());
+    }
+
+    [Fact]
     public async Task Backfill_WithNoSources_IsIdempotentAndReady()
     {
         await using var database = await TestDatabase.CreateAsync();

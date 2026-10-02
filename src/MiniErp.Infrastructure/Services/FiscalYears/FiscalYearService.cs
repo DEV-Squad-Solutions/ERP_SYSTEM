@@ -626,9 +626,10 @@ public sealed class FiscalYearService(
                 group.Key.Currency,
                 Balance = group.Sum(line => line.Debit - line.Credit),
                 TransactionBalance = group.Sum(line =>
-                    line.TransactionDebit - line.TransactionCredit)
+                    line.TransactionDebit - line.TransactionCredit),
+                ReferenceLineId = group.Max(line => line.Id)
             })
-            .Where(row => row.Balance != 0m)
+            .Where(row => row.Balance != 0m || row.TransactionBalance != 0m)
             .ToListAsync(cancellationToken);
 
         var employeeDeltas = await LoadEmployeeOperationalDeltasAsync(
@@ -652,36 +653,99 @@ public sealed class FiscalYearService(
             .Select(settings => (CurrencyCode?)settings.BaseCurrency)
             .SingleOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
 
-        var lines = balances
-            .Select(balance =>
+        var lines = new List<JournalEntryLine>();
+        var baseBalances = balances
+            .Where(balance => balance.Currency == baseCurrency)
+            .ToDictionary(
+                balance => (balance.AccountId, balance.PartyType, balance.PartyId),
+                balance => balance.Balance);
+        var referenceLineIds = balances
+            .Where(balance =>
+                balance.Currency != baseCurrency &&
+                balance.TransactionBalance != 0m &&
+                (Math.Sign(balance.Balance) != Math.Sign(balance.TransactionBalance) ||
+                 !ExchangeRateRules.IsValidRate(ExchangeRateRules.RoundRate(
+                     Math.Abs(balance.Balance / balance.TransactionBalance)))))
+            .Select(balance => balance.ReferenceLineId)
+            .ToArray();
+        var referenceRates = referenceLineIds.Length == 0
+            ? new Dictionary<int, decimal>()
+            : await dbContext.JournalEntryLines
+                .AsNoTracking()
+                .Where(line => line.CompanyId == companyId && referenceLineIds.Contains(line.Id))
+                .ToDictionaryAsync(line => line.Id, line => line.ExchangeRate, cancellationToken);
+
+        foreach (var balance in balances.Where(balance => balance.Currency != baseCurrency))
+        {
+            var key = (balance.AccountId, balance.PartyType, balance.PartyId);
+            if (balance.TransactionBalance == 0m)
             {
-                var transactionBalance = balance.TransactionBalance == 0m
-                    ? balance.Balance
-                    : balance.TransactionBalance;
-                return new JournalEntryLine
-                {
-                    CompanyId = companyId,
-                    AccountId = balance.AccountId,
-                    PartyType = balance.PartyType,
-                    PartyId = balance.PartyId,
-                    Description =
-                        $"ترحيل رصيد {balance.Code} - {balance.Name}",
-                    Debit = balance.Balance > 0m ? balance.Balance : 0m,
-                    Credit = balance.Balance < 0m ? -balance.Balance : 0m,
-                    Currency = balance.Currency,
-                    ExchangeRate = balance.Currency == baseCurrency
-                        ? 1m
-                        : ExchangeRateRules.RoundRate(
-                            Math.Abs(balance.Balance / transactionBalance)),
-                    TransactionDebit = transactionBalance > 0m
-                        ? transactionBalance
-                        : 0m,
-                    TransactionCredit = transactionBalance < 0m
-                        ? -transactionBalance
-                        : 0m
-                };
-            })
-            .ToList();
+                // A valuation residual has no foreign units to carry forward.
+                baseBalances.TryGetValue(key, out var existingBaseBalance);
+                baseBalances[key] = existingBaseBalance + balance.Balance;
+                continue;
+            }
+
+            var rate = ExchangeRateRules.RoundRate(
+                Math.Abs(balance.Balance / balance.TransactionBalance));
+            var nativeLineBaseBalance = balance.Balance;
+            if (Math.Sign(balance.Balance) != Math.Sign(balance.TransactionBalance) ||
+                !ExchangeRateRules.IsValidRate(rate))
+            {
+                // Journal lines require positive base/native amounts on the same
+                // side. Use a historical rate for the units and offset its base
+                // value in the base-currency group to retain the actual ledger balance.
+                rate = referenceRates[balance.ReferenceLineId];
+                var referenceBaseAmount = Math.Max(
+                    0.0001m,
+                    decimal.Round(
+                        Math.Abs(balance.TransactionBalance) * rate,
+                        4,
+                        MidpointRounding.AwayFromZero));
+                nativeLineBaseBalance = Math.Sign(balance.TransactionBalance) *
+                    referenceBaseAmount;
+                baseBalances.TryGetValue(key, out var existingBaseBalance);
+                baseBalances[key] = existingBaseBalance + balance.Balance -
+                    nativeLineBaseBalance;
+            }
+
+            lines.Add(new JournalEntryLine
+            {
+                CompanyId = companyId,
+                AccountId = balance.AccountId,
+                PartyType = balance.PartyType,
+                PartyId = balance.PartyId,
+                Description = $"ترحيل رصيد {balance.Code} - {balance.Name}",
+                Debit = nativeLineBaseBalance > 0m ? nativeLineBaseBalance : 0m,
+                Credit = nativeLineBaseBalance < 0m ? -nativeLineBaseBalance : 0m,
+                Currency = balance.Currency,
+                ExchangeRate = rate,
+                TransactionDebit = balance.TransactionBalance > 0m
+                    ? balance.TransactionBalance
+                    : 0m,
+                TransactionCredit = balance.TransactionBalance < 0m
+                    ? -balance.TransactionBalance
+                    : 0m
+            });
+        }
+
+        foreach (var (key, balance) in baseBalances.Where(row => row.Value != 0m))
+        {
+            lines.Add(new JournalEntryLine
+            {
+                CompanyId = companyId,
+                AccountId = key.AccountId,
+                PartyType = key.PartyType,
+                PartyId = key.PartyId,
+                Description = "ترحيل الرصيد بعملة الأساس",
+                Debit = balance > 0m ? balance : 0m,
+                Credit = balance < 0m ? -balance : 0m,
+                Currency = baseCurrency,
+                ExchangeRate = 1m,
+                TransactionDebit = balance > 0m ? balance : 0m,
+                TransactionCredit = balance < 0m ? -balance : 0m
+            });
+        }
 
         if (employeeDeltas.Count > 0)
         {
@@ -740,6 +804,16 @@ public sealed class FiscalYearService(
                 });
             }
         }
+        if (lines.Count == 0)
+        {
+            if (existingTransfer is not null)
+            {
+                dbContext.JournalEntryLines.RemoveRange(existingTransfer.Lines);
+                dbContext.JournalEntries.Remove(existingTransfer);
+            }
+            return Result.Success();
+        }
+
         var net = lines.Sum(line => line.Debit - line.Credit);
         if (net != 0m)
         {

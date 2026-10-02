@@ -7,6 +7,7 @@ using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Application.Features.StockAdjustments;
 using MiniErp.Application.Features.StockOpeningBalances;
 using MiniErp.Domain.Enums;
+using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.JournalEntries;
@@ -90,13 +91,24 @@ public sealed class InventoryPostingService(
             {
                 openingBalance.Id,
                 openingBalance.DocumentNumber,
-                openingBalance.DocumentDate
+                openingBalance.DocumentDate,
+                openingBalance.Notes
             })
             .SingleOrDefaultAsync(cancellationToken);
         if (document is null)
         {
             return Result.Failure(
                 StockOpeningBalanceErrors.NotFound(stockOpeningBalanceId));
+        }
+
+        // Its value is already included in the fiscal year's accounting opening entry.
+        if (StockOpeningBalanceCarryForwardRules.IsCarriedForward(
+                document.DocumentNumber, document.Notes))
+        {
+            return await DeleteAsync(
+                JournalEntrySourceType.StockOpeningBalance,
+                document.Id,
+                cancellationToken);
         }
 
         var fiscalYearResult = await ResolveFiscalYearAsync(
@@ -155,15 +167,15 @@ public sealed class InventoryPostingService(
                 Lines:
                 [
                     new JournalEntryLineRequest(
-                        inventoryResult.Value,
-                        "قيمة المخزون الافتتاحية",
-                        amount,
-                        0m),
+                        AccountId: inventoryResult.Value,
+                        Description: "قيمة المخزون الافتتاحية",
+                        Debit: amount,
+                        Credit: 0m),
                     new JournalEntryLineRequest(
-                        equityResult.Value,
-                        "مقابل رصيد المخزون الافتتاحي",
-                        0m,
-                        amount)
+                        AccountId: equityResult.Value,
+                        Description: "مقابل رصيد المخزون الافتتاحي",
+                        Debit: 0m,
+                        Credit: amount)
                 ]),
             cancellationToken);
     }
@@ -216,15 +228,15 @@ public sealed class InventoryPostingService(
         }
 
         var inventoryLine = new JournalEntryLineRequest(
-            inventoryResult.Value,
-            $"تسوية مخزون {documentNumber}",
-            isIncrease ? amount : 0m,
-            isIncrease ? 0m : amount);
+            AccountId: inventoryResult.Value,
+            Description: $"تسوية مخزون {documentNumber}",
+            Debit: isIncrease ? amount : 0m,
+            Credit: isIncrease ? 0m : amount);
         var counterpartLine = new JournalEntryLineRequest(
-            counterpartResult.Value,
-            $"مقابل تسوية المخزون {documentNumber}",
-            isIncrease ? 0m : amount,
-            isIncrease ? amount : 0m);
+            AccountId: counterpartResult.Value,
+            Description: $"مقابل تسوية المخزون {documentNumber}",
+            Debit: isIncrease ? 0m : amount,
+            Credit: isIncrease ? amount : 0m);
 
         return await SaveAsync(
             new AutomaticJournalEntryRequest(

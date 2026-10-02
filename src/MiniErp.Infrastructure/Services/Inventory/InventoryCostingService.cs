@@ -3,6 +3,7 @@ using static MiniErp.Application.Features.Inventory.InventoryErrors;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.StockAdjustments;
+using MiniErp.Application.Features.FiscalYears;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
@@ -26,7 +27,8 @@ public sealed class InventoryCostingService(
         IReadOnlyCollection<InventoryCostingKey> keys,
         CancellationToken cancellationToken = default)
     {
-        var orderedKeys = keys
+        var lockKeys = await LoadTransferKeysAsync(keys, cancellationToken);
+        var orderedKeys = lockKeys
             .Distinct()
             .OrderBy(key => key.StoreId)
             .ThenBy(key => key.ItemId);
@@ -593,7 +595,8 @@ public sealed class InventoryCostingService(
                 continue;
             }
 
-            var currentResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            var currentResult = await fiscalYearPeriodGuard.EnsureOpenForFiscalYearAsync(
+                movement.FiscalYearId,
                 movement.MovementDate,
                 "movementDate",
                 cancellationToken);
@@ -604,7 +607,15 @@ public sealed class InventoryCostingService(
 
             if (original.MovementDate != movement.MovementDate)
             {
-                var originalResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                var originalFiscalYearId = await ResolveFiscalYearIdAsync(
+                    original.MovementDate,
+                    cancellationToken);
+                if (!originalFiscalYearId.HasValue)
+                {
+                    return FiscalYearErrors.DateNotCovered(original.MovementDate, "movementDate");
+                }
+                var originalResult = await fiscalYearPeriodGuard.EnsureOpenForFiscalYearAsync(
+                    originalFiscalYearId.Value,
                     original.MovementDate,
                     "movementDate",
                     cancellationToken);
@@ -839,6 +850,15 @@ public sealed class InventoryCostingService(
 
             case ItemMovementType.OpeningBalance:
                 {
+                    // Generated carry documents display a money-scale price, but
+                    // carry movements retain the previous year's precise cost.
+                    if (movement.UnitCost.HasValue &&
+                        StockOpeningBalanceCarryForwardRules.IsCarriedForward(
+                            movement.ReferenceNumber, notes: null))
+                    {
+                        return InboundCostResult.Success(movement.UnitCost.Value);
+                    }
+
                     var unitCost = await dbContext.StockOpeningBalanceLines
                         .AsNoTracking()
                         .Where(line =>

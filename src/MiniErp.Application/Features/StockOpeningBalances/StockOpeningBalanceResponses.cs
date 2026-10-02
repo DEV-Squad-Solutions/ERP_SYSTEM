@@ -1,4 +1,5 @@
 using MiniErp.Domain.Enums;
+using MiniErp.Domain.Entities.Inventory;
 
 namespace MiniErp.Application.Features.StockOpeningBalances;
 
@@ -43,7 +44,13 @@ public sealed record StockOpeningBalanceListResponse(
     string? Notes,
     int LineCount,
     byte[] RowVersion,
-    IReadOnlyList<StockOpeningBalanceLineResponse> Lines);
+    IReadOnlyList<StockOpeningBalanceLineResponse> Lines)
+{
+    public bool IsCarriedForward =>
+        StockOpeningBalanceCarryForwardRules.IsCarriedForward(DocumentNumber, Notes);
+
+    public bool IsReadOnly => IsCarriedForward;
+}
 
 public sealed record StockOpeningBalanceResponse(
     int Id,
@@ -56,4 +63,10 @@ public sealed record StockOpeningBalanceResponse(
     DateOnly DocumentDate,
     string? Notes,
     byte[] RowVersion,
-    IReadOnlyList<StockOpeningBalanceLineResponse> Lines);
+    IReadOnlyList<StockOpeningBalanceLineResponse> Lines)
+{
+    public bool IsCarriedForward =>
+        StockOpeningBalanceCarryForwardRules.IsCarriedForward(DocumentNumber, Notes);
+
+    public bool IsReadOnly => IsCarriedForward;
+}

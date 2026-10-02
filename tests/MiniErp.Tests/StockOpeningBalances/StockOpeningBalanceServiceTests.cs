@@ -19,6 +19,42 @@ namespace MiniErp.Tests.StockOpeningBalances;
 
 public sealed class StockOpeningBalanceServiceTests
 {
+    [Theory]
+    [InlineData("FYOB-8-1", "legacy notes edited")]
+    [InlineData("SOB-1234", "AUTO_FY_INVENTORY_CARRY:8")]
+    [InlineData("fyob-8-1", "legacy notes edited")]
+    public async Task GeneratedCarry_IsReadOnlyByNumberOrMarker(string number, string notes)
+    {
+        await using var database = await StockOpeningBalanceTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var created = (await service.AddAsync(CreateRequest())).Value;
+        await database.Context.StockOpeningBalances.Where(balance => balance.Id == created.Id)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(balance => balance.DocumentNumber, number)
+                .SetProperty(balance => balance.Notes, notes));
+        database.Context.ChangeTracker.Clear();
+
+        var response = (await service.GetByIdAsync(created.Id)).Value;
+        var list = (await service.GetAllAsync(new PaginationRequest { PageNumber = 1, PageSize = 20 })).Value;
+        var update = await service.UpdateAsync(created.Id,
+            new StockOpeningBalanceUpdateRequest(
+                StoreId: created.StoreId,
+                DocumentDate: created.DocumentDate,
+                Lines: [new StockOpeningBalanceLineRequest(ItemId: 1, Count: 1, Weight: 999m, Price: 1m, Notes: null)],
+                Notes: "remove marker",
+                RowVersion: created.RowVersion));
+        var delete = await service.DeleteAsync(created.Id);
+
+        Assert.True(response.IsCarriedForward);
+        Assert.True(response.IsReadOnly);
+        Assert.True(Assert.Single(list.Items).IsReadOnly);
+        Assert.Equal("StockOpeningBalances.CarriedForwardReadOnly", update.Error.Code);
+        Assert.Equal(MiniErp.Application.Common.Results.ErrorType.Conflict, update.Error.Type);
+        Assert.Equal("StockOpeningBalances.CarriedForwardReadOnly", delete.Error.Code);
+        Assert.Equal(MiniErp.Application.Common.Results.ErrorType.Conflict, delete.Error.Type);
+        Assert.Equal(20m, (await service.GetByIdAsync(created.Id)).Value.Lines.Single().Quantity);
+    }
+
     static StockOpeningBalanceServiceTests()
     {
         MappingConfiguration.Register(

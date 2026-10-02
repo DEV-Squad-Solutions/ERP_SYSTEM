@@ -251,6 +251,12 @@ public sealed class StockOpeningBalanceService(
             return Result<StockOpeningBalanceResponse>.Failure(NotFound(id));
         }
 
+        if (StockOpeningBalanceCarryForwardRules.IsCarriedForward(
+                openingBalance.DocumentNumber, openingBalance.Notes))
+        {
+            return Result<StockOpeningBalanceResponse>.Failure(CarriedForwardReadOnly());
+        }
+
         if (!openingBalance.RowVersion.SequenceEqual(request.RowVersion))
         {
             return Result<StockOpeningBalanceResponse>.Failure(Concurrency());
@@ -404,6 +410,12 @@ public sealed class StockOpeningBalanceService(
         if (openingBalance is null)
         {
             return Result.Failure(NotFound(id));
+        }
+
+        if (StockOpeningBalanceCarryForwardRules.IsCarriedForward(
+                openingBalance.DocumentNumber, openingBalance.Notes))
+        {
+            return Result.Failure(CarriedForwardReadOnly());
         }
 
         var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(

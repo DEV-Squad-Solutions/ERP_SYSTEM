@@ -7,6 +7,7 @@ using MiniErp.Application.Features.FiscalYears;
 using MiniErp.Application.Features.JournalEntries;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Companies;
+using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 using static MiniErp.Application.Features.CashVouchers.CashVoucherErrors;
@@ -23,8 +24,17 @@ public sealed class CashVoucherPostingService(
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
 
+    public Task<Result<AutomaticJournalEntryResult>> SynchronizeAsync(
+        CashVoucher voucher,
+        CancellationToken cancellationToken = default) =>
+        SynchronizeAsync(
+            voucher,
+            partnerReferencesChanged: HasChangedPartnerReferences(voucher),
+            cancellationToken: cancellationToken);
+
     public async Task<Result<AutomaticJournalEntryResult>> SynchronizeAsync(
         CashVoucher voucher,
+        bool partnerReferencesChanged,
         CancellationToken cancellationToken = default)
     {
         if (!voucher.IsPosted)
@@ -80,9 +90,20 @@ public sealed class CashVoucherPostingService(
                 cashboxAccountResult.Errors);
         }
 
+        var partyResult = await ResolveJournalPartyAsync(
+            voucher,
+            partnerReferencesChanged,
+            cancellationToken);
+        if (partyResult.IsFailure)
+        {
+            return Result<AutomaticJournalEntryResult>.Failure(partyResult.Errors);
+        }
+
+        var party = partyResult.Value;
         var counterpartResult = await ResolveCounterpartAccountAsync(
             voucher,
             fiscalYear.Id,
+            party.PartyType,
             cancellationToken);
         if (counterpartResult.IsFailure)
         {
@@ -97,7 +118,6 @@ public sealed class CashVoucherPostingService(
             ? ExchangeRateRules.ConvertFromBase(amount, voucher.ExchangeRate)
             : voucher.Amount;
         var isReceipt = voucher.Direction == CashDirection.Receipt;
-        var party = GetJournalParty(voucher);
         var lines = new List<JournalEntryLineRequest>
         {
             new(
@@ -147,6 +167,7 @@ public sealed class CashVoucherPostingService(
     private async Task<Result<int>> ResolveCounterpartAccountAsync(
         CashVoucher voucher,
         int fiscalYearId,
+        JournalPartyType? partyType,
         CancellationToken cancellationToken)
     {
         if (voucher.AccountId.HasValue)
@@ -157,7 +178,7 @@ public sealed class CashVoucherPostingService(
         var mappingType = voucher.PartyType switch
         {
             CashPartyType.Partner when
-                voucher.Direction == CashDirection.Receipt =>
+                partyType == JournalPartyType.Customer =>
                 AccountingMappingType.CustomerControl,
             CashPartyType.Partner => AccountingMappingType.SupplierControl,
             CashPartyType.Driver => AccountingMappingType.DriverControl,
@@ -189,18 +210,147 @@ public sealed class CashVoucherPostingService(
             ? string.Empty
             : $" - {voucher.Description.Trim()}");
 
-    private static (JournalPartyType? PartyType, int? PartyId)
-        GetJournalParty(CashVoucher voucher) => voucher.PartyType switch
+    private async Task<Result<(JournalPartyType? PartyType, int? PartyId)>>
+        ResolveJournalPartyAsync(
+            CashVoucher voucher,
+            bool partnerReferencesChanged,
+            CancellationToken cancellationToken)
+    {
+        if (voucher.PartyType != CashPartyType.Partner)
         {
-            CashPartyType.Partner when
-                voucher.Direction == CashDirection.Receipt =>
-                (JournalPartyType.Customer, voucher.BusinessPartnerId),
-            CashPartyType.Partner =>
-                (JournalPartyType.Supplier, voucher.BusinessPartnerId),
-            CashPartyType.Employee =>
-                (JournalPartyType.Employee, voucher.EmployeeId),
-            CashPartyType.Driver =>
-                (JournalPartyType.Driver, voucher.DriverId),
-            _ => (null, null)
-        };
+            return Result<(JournalPartyType? PartyType, int? PartyId)>.Success(
+                voucher.PartyType switch
+                {
+                    CashPartyType.Employee =>
+                        (JournalPartyType.Employee, voucher.EmployeeId),
+                    CashPartyType.Driver =>
+                        (JournalPartyType.Driver, voucher.DriverId),
+                    _ => (null, null)
+                });
+        }
+
+        // Partners can trade as both customers and suppliers. The document's
+        // invoice semantics determine the role, independently of cash direction.
+        var movementInvoiceTypes = new List<InvoiceType>();
+        if (voucher.CashMovementTypeId is int movementTypeId)
+        {
+            var movementType = await dbContext.CashMovementTypes
+                .AsNoTracking()
+                .Where(type => type.CompanyId == companyId && type.Id == movementTypeId)
+                .Select(type => new
+                {
+                    type.Direction,
+                    type.IsDefaultForSales,
+                    type.IsDefaultForPurchase,
+                    type.IsDefaultForSalesReturn,
+                    type.IsDefaultForPurchaseReturn
+                })
+                .SingleOrDefaultAsync(cancellationToken);
+            if (movementType is null)
+            {
+                return Result<(JournalPartyType? PartyType, int? PartyId)>.Failure(
+                    MovementTypeNotFound(movementTypeId));
+            }
+
+            if (movementType.Direction != voucher.Direction)
+            {
+                return Result<(JournalPartyType? PartyType, int? PartyId)>.Failure(
+                    MovementTypeDirectionMismatch());
+            }
+
+            if (movementType.IsDefaultForSales) movementInvoiceTypes.Add(InvoiceType.Sales);
+            if (movementType.IsDefaultForPurchase) movementInvoiceTypes.Add(InvoiceType.Purchase);
+            if (movementType.IsDefaultForSalesReturn) movementInvoiceTypes.Add(InvoiceType.SalesReturn);
+            if (movementType.IsDefaultForPurchaseReturn) movementInvoiceTypes.Add(InvoiceType.PurchaseReturn);
+        }
+
+        InvoiceType? linkedInvoiceType = null;
+        if (voucher.InvoiceId is int invoiceId)
+        {
+            var invoice = await dbContext.Invoices
+                .AsNoTracking()
+                .Where(invoice => invoice.CompanyId == companyId && invoice.Id == invoiceId)
+                .Select(invoice => new { invoice.InvoiceType, invoice.BusinessPartnerId })
+                .SingleOrDefaultAsync(cancellationToken);
+            if (invoice is null || invoice.BusinessPartnerId != voucher.BusinessPartnerId ||
+                !Enum.IsDefined(invoice.InvoiceType) ||
+                (movementInvoiceTypes.Count > 0 && !movementInvoiceTypes.Contains(invoice.InvoiceType)))
+            {
+                return Result<(JournalPartyType? PartyType, int? PartyId)>.Failure(
+                    PartnerRoleMismatch(nameof(CashVoucher.InvoiceId)));
+            }
+
+            linkedInvoiceType = invoice.InvoiceType;
+        }
+
+        if (!linkedInvoiceType.HasValue && movementInvoiceTypes.Count > 1)
+        {
+            return Result<(JournalPartyType? PartyType, int? PartyId)>.Failure(
+                PartnerRoleMismatch(nameof(CashVoucher.CashMovementTypeId)));
+        }
+
+        var invoiceType = linkedInvoiceType ??
+            (movementInvoiceTypes.Count == 1 ? movementInvoiceTypes[0] : (InvoiceType?)null);
+        if (invoiceType.HasValue &&
+            InvoiceMovementRules.GetPaymentDirection(invoiceType.Value) != voucher.Direction)
+        {
+            return Result<(JournalPartyType? PartyType, int? PartyId)>.Failure(
+                PartnerRoleMismatch(nameof(CashVoucher.Direction)));
+        }
+
+        if (!invoiceType.HasValue && !partnerReferencesChanged)
+        {
+            // Changing which movement is the default clears the old flags.
+            // Preserve an already posted role only for the same partner and
+            // cash direction; a changed voucher must resolve its role afresh.
+            var previousRoles = await dbContext.JournalEntryLines
+                .AsNoTracking()
+                .Where(line =>
+                    line.CompanyId == companyId &&
+                    line.JournalEntry.SourceType == JournalEntrySourceType.CashVoucher &&
+                    line.JournalEntry.SourceId == voucher.Id &&
+                    line.JournalEntry.EntryType == JournalEntryType.Automatic &&
+                    line.JournalEntry.Status == JournalEntryStatus.Posted &&
+                    line.JournalEntry.ReversalOfEntryId == null &&
+                    line.PartyId == voucher.BusinessPartnerId &&
+                    (line.PartyType == JournalPartyType.Customer ||
+                     line.PartyType == JournalPartyType.Supplier) &&
+                    line.JournalEntry.Lines.Any(cashboxLine =>
+                        cashboxLine.PartyType == JournalPartyType.Cashbox &&
+                        cashboxLine.PartyId == voucher.CashboxId &&
+                        (voucher.Direction == CashDirection.Receipt
+                            ? cashboxLine.Debit > 0m && cashboxLine.Credit == 0m
+                            : cashboxLine.Credit > 0m && cashboxLine.Debit == 0m)))
+                .Select(line => line.PartyType)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+            if (previousRoles.Count == 1)
+            {
+                return Result<(JournalPartyType? PartyType, int? PartyId)>.Success(
+                    (previousRoles[0], voucher.BusinessPartnerId));
+            }
+        }
+
+        var isCustomer = invoiceType.HasValue
+            ? invoiceType is InvoiceType.Sales or InvoiceType.SalesReturn
+            : voucher.Direction == CashDirection.Receipt;
+        return Result<(JournalPartyType? PartyType, int? PartyId)>.Success(
+            (isCustomer ? JournalPartyType.Customer : JournalPartyType.Supplier,
+             voucher.BusinessPartnerId));
+    }
+
+    private bool HasChangedPartnerReferences(CashVoucher voucher)
+    {
+        var entry = dbContext.Entry(voucher);
+        return entry.State != EntityState.Detached &&
+            (entry.Property(entity => entity.BusinessPartnerId).OriginalValue != voucher.BusinessPartnerId ||
+             entry.Property(entity => entity.CashMovementTypeId).OriginalValue != voucher.CashMovementTypeId ||
+             entry.Property(entity => entity.InvoiceId).OriginalValue != voucher.InvoiceId);
+    }
+
+    private static Error PartnerRoleMismatch(string fieldName) =>
+        Error.Conflict(
+            "CashVouchers.PartnerRoleMismatch",
+            "نوع الفاتورة ونوع الحركة النقدية واتجاه السند يجب أن تتوافق مع حساب العميل أو المورد.",
+            fieldName);
 }

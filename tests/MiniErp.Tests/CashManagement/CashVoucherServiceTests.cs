@@ -1346,6 +1346,61 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
+    public async Task HandoverReport_CarriedForeignCashExcludesBaseCurrencyRevaluation()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        await database.ConfigureSeparateFiscalYearsAsync();
+        await database.Context.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE Cashboxes SET OpeningBalanceDate = '2025-01-01' WHERE Id = 5;
+
+            INSERT INTO JournalEntries (
+                Id, CompanyId, FiscalYearId, EntryNumber, EntryDate,
+                Description, EntryType, SourceType, SourceId, Status,
+                PostedOn, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                900, 1, 100, 'OB-USD-2026', '2026-01-01', 'carried USD cash',
+                {(int)JournalEntryType.Opening},
+                {(int)JournalEntrySourceType.FiscalYearClosing}, 1,
+                {(int)JournalEntryStatus.Posted}, '2026-01-01',
+                'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO JournalEntryLines (
+                Id, CompanyId, JournalEntryId, AccountId, PartyType, PartyId,
+                Debit, Credit, Currency, ExchangeRate, TransactionDebit,
+                TransactionCredit, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (900, 1, 900, 100, {(int)JournalPartyType.Cashbox}, 5,
+                 5000, 0, {(int)CurrencyCode.USD}, 50, 100, 0,
+                 'test', '2026-01-01', 'test', 0),
+                (901, 1, 900, 100, {(int)JournalPartyType.Cashbox}, 5,
+                 250, 0, {(int)CurrencyCode.EGP}, 1, 250, 0,
+                 'test', '2026-01-01', 'test', 0);
+            """);
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreateVoucherService(companyId: 1);
+        var draft = await service.AddAsync(new CashVoucherRequest(
+            VoucherDate: new DateOnly(2026, 8, 3),
+            Direction: CashDirection.Receipt,
+            CashboxId: 5,
+            Amount: 10m,
+            Description: null));
+        Assert.True(draft.IsSuccess, draft.Error.Description);
+
+        var report = await service.GetHandoverReportAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashVoucherHandoverReportFilterRequest(CashboxId: 5));
+
+        Assert.True(report.IsSuccess, report.Error.Description);
+        var balance = Assert.Single(report.Value.CashboxBalances);
+        Assert.Equal(5, balance.CashboxId);
+        Assert.Equal(CurrencyCode.USD, balance.Currency);
+        Assert.Equal(100m, balance.CurrentBalance);
+        Assert.Equal(10m, balance.DraftReceipt);
+        Assert.Equal(0m, balance.DraftPayment);
+        Assert.Equal(110m, balance.ExpectedBalance);
+    }
+
+    [Fact]
     public async Task HandoverReportFiltersByCompanyDirectionDateSearchAndCurrency()
     {
         await using var database = await CashManagementTestDatabase.CreateAsync();
@@ -2479,6 +2534,120 @@ public sealed class CashVoucherServiceTests
         Assert.True(result.IsFailure);
         Assert.Equal("CashVouchers.InvoiceGeneratedReadOnly", result.Error.Code);
         Assert.Equal("Items[0]", result.Error.FieldName);
+    }
+
+    [Theory]
+    [InlineData(false, false, JournalPartyType.Customer, 1)]
+    [InlineData(false, true, JournalPartyType.Supplier, 2)]
+    [InlineData(true, false, JournalPartyType.Customer, 1)]
+    [InlineData(true, true, JournalPartyType.Supplier, 2)]
+    public async Task RefundUpdateResolvesRoleAfterSavingVoucher(
+        bool useBulkUpdate,
+        bool changeMovementType,
+        JournalPartyType expectedPartyType,
+        int expectedAccountId)
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE Accounts SET ParentAccountId = 50 WHERE Id = 2;
+
+            INSERT INTO AccountMappings (
+                CompanyId, FiscalYearId, MappingType, SourceId, AccountId,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES
+                (1, 1, 9, NULL, 1, 'test', '2026-01-01', 'test', 0),
+                (1, 1, 10, NULL, 2, 'test', '2026-01-01', 'test', 0);
+
+            INSERT INTO CashMovementTypes (
+                Id, CompanyId, Name, Direction, Classification, PartnerEffect,
+                IsActive, IsDefaultForSales, IsDefaultForPurchase,
+                IsDefaultForSalesReturn, IsDefaultForPurchaseReturn,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (
+                11, 1, 'Ordinary Partner Payment', 2, 1, 1,
+                1, 0, 0, 0, 0, 'test', '2026-01-01', 'test', 0);
+            """);
+        database.Context.ChangeTracker.Clear();
+        var service = database.CreatePostingVoucherService(companyId: 1);
+        var original = await AddVoucherAsync(
+            service,
+            CreatePartnerRequest(
+                number: "REFUND-LIFECYCLE",
+                direction: CashDirection.Payment,
+                partnerId: 1,
+                amount: 125m) with { CashMovementTypeId = 8 });
+        Assert.True(original.IsSuccess, original.Error.Description);
+        var originalPartnerLine = await database.Context.JournalEntryLines
+            .AsNoTracking()
+            .SingleAsync(line =>
+                line.JournalEntry.SourceType == JournalEntrySourceType.CashVoucher &&
+                line.JournalEntry.SourceId == original.Value.Id &&
+                line.PartyType == JournalPartyType.Customer);
+        Assert.Equal(1, originalPartnerLine.AccountId);
+        Assert.Equal(1, originalPartnerLine.PartyId);
+        Assert.Equal(125m, originalPartnerLine.Debit);
+        Assert.Equal(0m, originalPartnerLine.Credit);
+
+        // Reassigning a default clears its former movement's flags. An amount
+        // edit must retain its refund role; choosing a new movement must not.
+        await database.Context.Database.ExecuteSqlRawAsync(
+            "UPDATE CashMovementTypes SET IsDefaultForSalesReturn = 0 WHERE Id = 8;");
+        await using var updateContext = database.CreateAdditionalContext();
+        var updateService = database.CreatePostingVoucherService(1, updateContext);
+        var movementTypeId = changeMovementType ? 11 : 8;
+        CashVoucherResponse updated;
+        if (useBulkUpdate)
+        {
+            var result = await updateService.BulkAsync(
+                new CashVoucherBulkRequest(Items:
+                [
+                    new CashVoucherBulkUpdateItemRequest(
+                        Id: original.Value.Id,
+                        RowVersion: original.Value.RowVersion,
+                        Voucher: CreateBulkVoucher(
+                            direction: CashDirection.Payment,
+                            movementTypeId: movementTypeId,
+                            partnerId: 1,
+                            amount: 150m))
+                ]));
+            Assert.True(result.IsSuccess, result.Error.Description);
+            updated = Assert.Single(result.Value.Items).Voucher!;
+        }
+        else
+        {
+            var result = await updateService.UpdateAsync(
+                original.Value.Id,
+                ToUpdateRequest(original.Value, amount: 150m) with
+                {
+                    CashMovementTypeId = movementTypeId
+                });
+            Assert.True(result.IsSuccess, result.Error.Description);
+            updated = result.Value;
+        }
+
+        Assert.Equal(movementTypeId, updated.CashMovementTypeId);
+        Assert.Equal(150m, updated.Amount);
+        var lines = await updateContext.JournalEntryLines.AsNoTracking()
+            .Where(line =>
+                line.JournalEntry.SourceType == JournalEntrySourceType.CashVoucher &&
+                line.JournalEntry.SourceId == original.Value.Id &&
+                line.JournalEntry.ReversalOfEntryId == null)
+            .ToListAsync();
+        var partnerLine = Assert.Single(lines, line =>
+            line.PartyType is JournalPartyType.Customer or JournalPartyType.Supplier);
+        Assert.Equal(originalPartnerLine.JournalEntryId, partnerLine.JournalEntryId);
+        Assert.Equal(expectedPartyType, partnerLine.PartyType);
+        Assert.Equal(expectedAccountId, partnerLine.AccountId);
+        Assert.Equal(1, partnerLine.PartyId);
+        Assert.Equal(150m, partnerLine.Debit);
+        Assert.Equal(0m, partnerLine.Credit);
+        Assert.Equal(150m, partnerLine.TransactionDebit);
+        Assert.Equal(0m, partnerLine.TransactionCredit);
+        var cashboxLine = Assert.Single(lines, line =>
+            line.PartyType == JournalPartyType.Cashbox);
+        Assert.Equal(0m, cashboxLine.Debit);
+        Assert.Equal(150m, cashboxLine.Credit);
     }
 
     private static CashVoucherBulkVoucherRequest CreateBulkVoucher(

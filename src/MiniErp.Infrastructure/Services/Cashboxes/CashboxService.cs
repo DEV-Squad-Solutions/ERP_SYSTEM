@@ -505,6 +505,9 @@ public sealed class CashboxService(
                     (dbContext.JournalEntryLines
                         .Where(line =>
                             line.CompanyId == companyId &&
+                            !line.IsDeleted &&
+                            line.JournalEntry.CompanyId == companyId &&
+                            !line.JournalEntry.IsDeleted &&
                             line.JournalEntry.FiscalYearId == fiscalYear.Id &&
                             line.JournalEntry.EntryType ==
                                 JournalEntryType.Opening &&
@@ -512,8 +515,13 @@ public sealed class CashboxService(
                                 JournalEntrySourceType.FiscalYearClosing &&
                             line.JournalEntry.Status ==
                                 JournalEntryStatus.Posted &&
+                            line.JournalEntry.ReversalOfEntryId == null &&
+                            line.JournalEntry.ReversedOn == null &&
                             line.PartyType == JournalPartyType.Cashbox &&
-                            line.PartyId == cashbox.Id)
+                            line.PartyId == cashbox.Id &&
+                            // Carried base-currency revaluation deltas do not
+                            // represent additional cashbox currency units.
+                            line.Currency == cashbox.Currency)
                         .Select(line => (decimal?)
                             (line.TransactionDebit -
                              line.TransactionCredit))
