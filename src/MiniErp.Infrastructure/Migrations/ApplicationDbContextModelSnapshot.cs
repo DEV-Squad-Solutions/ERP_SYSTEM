@@ -1586,6 +1586,24 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<decimal?>("PartnerAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("PartnerBaseAmount")
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<int?>("PartnerCurrency")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("PartnerExchangeRate")
+                        .HasPrecision(28, 12)
+                        .HasColumnType("decimal(28,12)");
+
+                    b.Property<int?>("PartnerExchangeRateId")
+                        .HasColumnType("int");
+
                     b.Property<int>("PartyType")
                         .HasColumnType("int");
 
@@ -1627,6 +1645,8 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.HasIndex("CompanyId", "InvoiceId")
                         .HasFilter("[InvoiceId] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "PartnerExchangeRateId");
 
                     b.HasIndex("CompanyId", "VoucherNumber")
                         .HasFilter("[IsDeleted] = 0");
@@ -6031,6 +6051,12 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasPrincipalKey("CompanyId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("MiniErp.Domain.Entities.Companies.ExchangeRate", "PartnerExchangeRateRecord")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "PartnerExchangeRateId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Account");
 
                     b.Navigation("BusinessPartner");
@@ -6054,6 +6080,8 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("FiscalYear");
 
                     b.Navigation("Invoice");
+
+                    b.Navigation("PartnerExchangeRateRecord");
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.CashManagement.Cashbox", b =>

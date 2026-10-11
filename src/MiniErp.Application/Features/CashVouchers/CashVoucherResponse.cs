@@ -35,6 +35,11 @@ public sealed record CashVoucherResponse(
 {
     public int FiscalYearId { get; init; }
 
+    public CurrencyCode? PartnerCurrency { get; init; }
+    public decimal? PartnerAmount { get; init; }
+    public decimal? PartnerExchangeRate { get; init; }
+    public decimal? PartnerBaseAmount { get; init; }
+
     public string FiscalYearName { get; init; } = string.Empty;
 
     public bool IsDraft { get; init; }

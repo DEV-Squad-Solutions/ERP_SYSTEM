@@ -26,7 +26,8 @@ internal static class ExchangeRateReferences
             .AnyAsync(
                 voucher =>
                     voucher.CompanyId == companyId &&
-                    voucher.ExchangeRateId == exchangeRateId,
+                    (voucher.ExchangeRateId == exchangeRateId ||
+                     voucher.PartnerExchangeRateId == exchangeRateId),
                 cancellationToken) ||
         await dbContext.PartnerOpeningBalances
             .IgnoreQueryFilters()

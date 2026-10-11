@@ -8,6 +8,12 @@ public sealed class CashVoucherMappingRegister : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.ForType<CashVoucherRequest, CashVoucher>()
+            .Ignore(voucher => voucher.PartnerCurrency)
+            .Ignore(voucher => voucher.PartnerAmount)
+            .Ignore(voucher => voucher.PartnerExchangeRate)
+            .Ignore(voucher => voucher.PartnerExchangeRateId)
+            .Ignore(voucher => voucher.PartnerExchangeRateRecord)
+            .Ignore(voucher => voucher.PartnerBaseAmount)
             .Ignore(voucher => voucher.ExchangeRateRecord)
             .Ignore(voucher => voucher.ExchangeRateId)
             .Ignore(voucher => voucher.ExchangeRate)
@@ -28,6 +34,12 @@ public sealed class CashVoucherMappingRegister : IRegister
                 request => Normalize(request.Notes));
 
         config.ForType<CashVoucherUpdateRequest, CashVoucher>()
+            .Ignore(voucher => voucher.PartnerCurrency)
+            .Ignore(voucher => voucher.PartnerAmount)
+            .Ignore(voucher => voucher.PartnerExchangeRate)
+            .Ignore(voucher => voucher.PartnerExchangeRateId)
+            .Ignore(voucher => voucher.PartnerExchangeRateRecord)
+            .Ignore(voucher => voucher.PartnerBaseAmount)
             .Ignore(voucher => voucher.RowVersion)
             .Ignore(voucher => voucher.ExchangeRateRecord)
             .Ignore(voucher => voucher.ExchangeRateId)

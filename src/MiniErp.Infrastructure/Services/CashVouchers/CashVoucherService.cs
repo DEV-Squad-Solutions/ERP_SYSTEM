@@ -824,6 +824,11 @@ public sealed class CashVoucherService(
         CashVoucherRequest request,
         CancellationToken cancellationToken = default)
     {
+        if (request.PartnerExchangeRate.HasValue)
+            return Result<CashVoucherResponse>.Failure(Error.Validation(
+                "CashVouchers.PartnerRateRequiresCompletion",
+                "حدد سعر صرف الطرف عند توصيف السند وليس عند تسجيل حركة الخزينة الأولية.",
+                nameof(request.PartnerExchangeRate)));
         var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, request.CashboxId, cancellationToken);
         if (access.IsFailure) return Result<CashVoucherResponse>.Failure(access.Errors);
         await using var transaction = await dbContext.Database
@@ -1620,7 +1625,8 @@ public sealed class CashVoucherService(
             RowVersion: rowVersion,
             ExchangeRate: request.ExchangeRate,
             AccountId: request.AccountId,
-            EmployeeMovementType: request.EmployeeMovementType);
+            EmployeeMovementType: request.EmployeeMovementType,
+            PartnerExchangeRate: request.PartnerExchangeRate);
 
     private async Task<CashVoucherUpdateRequest> NormalizeEmployeeMovementTypeAsync(
         CashVoucherUpdateRequest request,
@@ -1677,6 +1683,11 @@ public sealed class CashVoucherService(
         bool enforceManualPostingTarget,
         CancellationToken cancellationToken)
     {
+        if (request.PartnerExchangeRate.HasValue && !request.BusinessPartnerId.HasValue)
+            return Result<VoucherPreparation>.Failure(Error.Validation(
+                "CashVouchers.PartnerExchangeRateNotAllowed",
+                "سعر صرف الطرف يستخدم مع سند الشريك فقط.",
+                nameof(request.PartnerExchangeRate)));
         if (!request.CashboxId.HasValue)
         {
             return Result<VoucherPreparation>.Failure(
@@ -1848,6 +1859,7 @@ public sealed class CashVoucherService(
         }
 
         BusinessPartner? partner = null;
+        ResolvedExchangeRate? partnerExchangeRate = null;
         if (partyType == CashPartyType.Partner)
         {
             partner = await dbContext.BusinessPartners
@@ -1864,10 +1876,42 @@ public sealed class CashVoucherService(
                     PartnerNotFound(request.BusinessPartnerId));
             }
 
-            if (partner.Currency != cashbox.Currency)
+            if (partner.Currency == cashbox.Currency)
             {
-                return Result<VoucherPreparation>.Failure(
-                    PartnerCurrencyMismatch());
+                if (request.PartnerExchangeRate.HasValue &&
+                    request.PartnerExchangeRate != exchangeRateResult.Value.Rate)
+                    return Result<VoucherPreparation>.Failure(Error.Validation(
+                        "CashVouchers.PartnerRateMismatch",
+                        "سعر صرف الطرف يجب أن يساوي سعر صرف الخزينة عند تطابق العملة.",
+                        nameof(request.PartnerExchangeRate)));
+                partnerExchangeRate = exchangeRateResult.Value;
+            }
+            else
+            {
+                var requestedPartnerRate = request.PartnerExchangeRate;
+                if (!requestedPartnerRate.HasValue &&
+                    currentVoucher?.BusinessPartnerId == partner.Id &&
+                    currentVoucher.PartnerExchangeRateId is null &&
+                    currentVoucher.PartnerCurrency == partner.Currency &&
+                    currentVoucher.VoucherDate == request.VoucherDate)
+                    requestedPartnerRate = currentVoucher.PartnerExchangeRate;
+                var partnerRateResult = await exchangeRateResolver.ResolveAsync(
+                    currency: partner.Currency,
+                    date: request.VoucherDate,
+                    requestedRate: requestedPartnerRate,
+                    cancellationToken: cancellationToken);
+                if (partnerRateResult.IsFailure)
+                    return Result<VoucherPreparation>.Failure(partnerRateResult.Errors
+                        .Select(error => error with { FieldName = nameof(request.PartnerExchangeRate) })
+                        .ToArray());
+                partnerExchangeRate = partnerRateResult.Value;
+                if (ExchangeRateRules.ConvertFromBase(
+                        ExchangeRateRules.ConvertToBase(request.Amount, exchangeRateResult.Value.Rate),
+                        partnerExchangeRate.Rate) <= 0m)
+                    return Result<VoucherPreparation>.Failure(Error.Validation(
+                        "CashVouchers.PartnerAmountTooSmall",
+                        "مقابل السداد بعملة الطرف أقل من أصغر قيمة قابلة للتسجيل.",
+                        nameof(request.Amount)));
             }
         }
         else if (movementType is not null &&
@@ -1936,6 +1980,7 @@ public sealed class CashVoucherService(
                 BusinessPartner: partner,
                 Driver: driver,
                 ExchangeRate: exchangeRateResult.Value,
+                PartnerExchangeRate: partnerExchangeRate,
                 Classification: account?.AccountType switch
                     {
                         AccountType.Expense =>
@@ -1950,10 +1995,10 @@ public sealed class CashVoucherService(
         CashVoucher voucher)
     {
         var debit = voucher.Direction == CashDirection.Payment
-            ? voucher.Amount
+            ? voucher.PartnerAmount ?? voucher.Amount
             : 0m;
         var credit = voucher.Direction == CashDirection.Receipt
-            ? voucher.Amount
+            ? voucher.PartnerAmount ?? voucher.Amount
             : 0m;
 
         var movement = new BusinessPartnerMovement
@@ -1966,13 +2011,13 @@ public sealed class CashVoucherService(
                 ? BusinessPartnerMovementType.CashReceipt
                 : BusinessPartnerMovementType.CashPayment,
             MovementDate = voucher.VoucherDate,
-            Currency = voucher.Currency,
+            Currency = voucher.PartnerCurrency ?? voucher.Currency,
             Debit = debit,
             Credit = credit,
             Description = voucher.Description ??
                 $"Cash voucher {voucher.VoucherNumber}"
         };
-        movement.ApplyExchangeRate(voucher.ExchangeRate);
+        movement.ApplyExchangeRate(voucher.PartnerExchangeRate ?? voucher.ExchangeRate);
         return movement;
     }
 
@@ -2011,14 +2056,14 @@ public sealed class CashVoucherService(
                 ? BusinessPartnerMovementType.CashReceipt
                 : BusinessPartnerMovementType.CashPayment;
         existing.MovementDate = voucher.VoucherDate;
-        existing.Currency = voucher.Currency;
+        existing.Currency = voucher.PartnerCurrency ?? voucher.Currency;
         existing.Debit = voucher.Direction == CashDirection.Payment
-            ? voucher.Amount
+            ? voucher.PartnerAmount ?? voucher.Amount
             : 0m;
         existing.Credit = voucher.Direction == CashDirection.Receipt
-            ? voucher.Amount
+            ? voucher.PartnerAmount ?? voucher.Amount
             : 0m;
-        existing.ApplyExchangeRate(voucher.ExchangeRate);
+        existing.ApplyExchangeRate(voucher.PartnerExchangeRate ?? voucher.ExchangeRate);
         existing.Description = voucher.Description ??
             $"Cash voucher {voucher.VoucherNumber}";
     }
@@ -2165,10 +2210,19 @@ public sealed class CashVoucherService(
             voucher.ApplyExchangeRate(
                 preparation.ExchangeRate.ExchangeRateId,
                 preparation.ExchangeRate.Rate);
+            if (preparation.BusinessPartner is not null &&
+                preparation.PartnerExchangeRate is not null)
+                voucher.ApplyPartnerSettlement(
+                    preparation.BusinessPartner.Currency,
+                    preparation.PartnerExchangeRate.ExchangeRateId,
+                    preparation.PartnerExchangeRate.Rate);
+            else
+                voucher.ClearPartnerSettlement();
             return;
         }
 
         voucher.CashboxId = null;
+        voucher.ClearPartnerSettlement();
         voucher.CashMovementTypeId = null;
         voucher.AccountId = null;
         voucher.PartyType = CashPartyType.None;
@@ -2192,6 +2246,7 @@ public sealed class CashVoucherService(
         BusinessPartner? BusinessPartner,
         Driver? Driver,
         ResolvedExchangeRate? ExchangeRate,
+        ResolvedExchangeRate? PartnerExchangeRate,
         CashMovementClassification? Classification);
 
     private static CashPartyType DerivePartyType(

@@ -83,6 +83,40 @@ public sealed class CashVoucher : AuditableEntity
 
     public decimal BaseAmount { get; private set; }
 
+    // Standalone partner settlements retain both sides of the exchange. Invoice
+    // payments already have their own allocation/currency snapshots.
+    public CurrencyCode? PartnerCurrency { get; private set; }
+    public decimal? PartnerAmount { get; private set; }
+    public decimal? PartnerExchangeRate { get; private set; }
+    public int? PartnerExchangeRateId { get; private set; }
+    public ExchangeRate? PartnerExchangeRateRecord { get; private set; }
+    public decimal? PartnerBaseAmount { get; private set; }
+
+    public void ApplyPartnerSettlement(CurrencyCode currency, int? rateId,
+        decimal rate, bool preserveAmount = false)
+    {
+        if (!ExchangeRateRules.IsValidRate(rate))
+            throw new ArgumentOutOfRangeException(nameof(rate));
+        PartnerCurrency = currency;
+        PartnerExchangeRateId = rateId;
+        PartnerExchangeRate = ExchangeRateRules.RoundRate(rate);
+        PartnerAmount = preserveAmount && PartnerAmount.HasValue
+            ? PartnerAmount.Value
+            : currency == Currency ? Amount
+            : ExchangeRateRules.ConvertFromBase(BaseAmount, PartnerExchangeRate.Value);
+        PartnerBaseAmount = ExchangeRateRules.ConvertToBase(
+            PartnerAmount.Value, PartnerExchangeRate.Value);
+    }
+
+    public void ClearPartnerSettlement()
+    {
+        PartnerCurrency = null;
+        PartnerAmount = null;
+        PartnerExchangeRate = null;
+        PartnerExchangeRateId = null;
+        PartnerBaseAmount = null;
+    }
+
     public bool IsPosted { get; set; }
 
     public string? ReferenceNumber { get; set; }
