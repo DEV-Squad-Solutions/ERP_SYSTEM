@@ -3,6 +3,7 @@ using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Enums;
+using MiniErp.Infrastructure.Services.Cashboxes;
 using static MiniErp.Application.Features.Invoices.InvoiceErrors;
 
 namespace MiniErp.Infrastructure.Services.Invoices;
@@ -41,6 +42,9 @@ public sealed partial class InvoiceQueryService
         }
 
         var fiscalYearId = fiscalYearResult.Value.FiscalYearId;
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<PagedResponse<InvoiceReturnSourceResponse>>.Failure(access.Errors);
+        var scope = access.Value;
 
         var sourceType = filters.ReturnType == InvoiceReturnType.SalesReturn
             ? InvoiceType.Sales
@@ -56,6 +60,11 @@ public sealed partial class InvoiceQueryService
 
         var query = dbContext.Invoices
             .AsNoTracking()
+            .Where(invoice => scope.HasAllCashboxes ||
+                (!invoice.PaymentVouchers.Any(voucher => !voucher.CashboxId.HasValue ||
+                    !scope.ViewCashboxIds.Contains(voucher.CashboxId.Value)) &&
+                 !invoice.Payments.Any(payment => !payment.CashVoucher.CashboxId.HasValue ||
+                    !scope.ViewCashboxIds.Contains(payment.CashVoucher.CashboxId.Value))))
             .Where(invoice =>
                 invoice.CompanyId == companyId &&
                 invoice.FiscalYearId == fiscalYearId &&

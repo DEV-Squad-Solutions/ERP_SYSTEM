@@ -98,6 +98,8 @@ public sealed class CashVoucherRequestValidator
             .Must(rate =>
                 !rate.HasValue || ExchangeRateRules.IsValidRate(rate.Value))
             .WithMessage("يجب أن يكون سعر صرف سند النقدية أكبر من صفر.");
+        RuleFor(request => request.PartnerExchangeRate).Null()
+            .WithMessage("حدد سعر صرف الطرف عند توصيف السند وليس عند تسجيل حركة الخزينة الأولية.");
     }
 
     private static bool HasAtMostOnePostingTarget(CashVoucherRequest request)
@@ -219,6 +221,12 @@ public sealed class CashVoucherUpdateRequestValidator
                 ExchangeRateRules.IsValidRate(rate.Value))
             .WithMessage("يجب أن يكون سعر صرف سند النقدية أكبر من صفر.");
 
+        RuleFor(request => request.PartnerExchangeRate)
+            .Must(rate => !rate.HasValue || ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("سعر صرف الطرف يجب أن يكون أكبر من صفر وبحد أقصى 12 منزلة عشرية.");
+        RuleFor(request => request.PartnerExchangeRate).Null()
+            .When(request => !request.BusinessPartnerId.HasValue)
+            .WithMessage("سعر صرف الطرف يستخدم مع سند الشريك فقط.");
         RuleFor(request => request.RowVersion)
             .NotNull()
             .Must(rowVersion => rowVersion is { Length: 8 })
@@ -252,6 +260,12 @@ public sealed class CashVoucherBulkVoucherRequestValidator
 {
     public CashVoucherBulkVoucherRequestValidator()
     {
+        RuleFor(request => request.PartnerExchangeRate)
+            .Must(rate => !rate.HasValue || ExchangeRateRules.IsValidRate(rate.Value))
+            .WithMessage("سعر صرف الطرف يجب أن يكون أكبر من صفر وبحد أقصى 12 منزلة عشرية.");
+        RuleFor(request => request.PartnerExchangeRate).Null()
+            .When(request => !request.BusinessPartnerId.HasValue)
+            .WithMessage("سعر صرف الطرف يستخدم مع سند الشريك فقط.");
         RuleFor(request => request.VoucherDate)
             .Must(date => date != default)
             .WithMessage("تاريخ سند النقدية مطلوب.");

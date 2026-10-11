@@ -657,6 +657,8 @@ public sealed class CompanyServiceTests
                 CREATE TABLE UserCompanies (
                     UserId TEXT NOT NULL,
                     CompanyId INTEGER NOT NULL,
+                    AllCashboxes INTEGER NOT NULL DEFAULT 0,
+                    CashboxPermissionsRevision TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
                     PRIMARY KEY (UserId, CompanyId)
                 );
 

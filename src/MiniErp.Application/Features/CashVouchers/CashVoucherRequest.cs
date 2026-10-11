@@ -18,7 +18,8 @@ public sealed record CashVoucherRequest(
     string? Notes = null,
     decimal? ExchangeRate = null,
     int? AccountId = null,
-    EmployeeMovementType? EmployeeMovementType = null)
+    EmployeeMovementType? EmployeeMovementType = null,
+    decimal? PartnerExchangeRate = null)
 {
     public const int ExternalPartyNameMaximumLength = 200;
 
@@ -46,5 +47,6 @@ public sealed record CashVoucherUpdateRequest(
     byte[]? RowVersion,
     decimal? ExchangeRate = null,
     int? AccountId = null,
-    EmployeeMovementType? EmployeeMovementType = null)
+    EmployeeMovementType? EmployeeMovementType = null,
+    decimal? PartnerExchangeRate = null)
 ;

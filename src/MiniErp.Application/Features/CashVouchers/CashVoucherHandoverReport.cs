@@ -52,7 +52,10 @@ public sealed record CashVoucherHandoverReportItemResponse(
     string? Description,
     string? Notes,
     string CreatedById,
-    DateTime CreatedOn);
+    DateTime CreatedOn,
+    CurrencyCode BaseCurrency,
+    decimal ExchangeRate,
+    decimal BaseAmount);
 
 public sealed record CashVoucherHandoverCurrencySummary(
     CurrencyCode Currency,

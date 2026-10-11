@@ -118,6 +118,10 @@ public sealed class CashVoucherPostingService(
             ? ExchangeRateRules.ConvertFromBase(amount, voucher.ExchangeRate)
             : voucher.Amount;
         var isReceipt = voucher.Direction == CashDirection.Receipt;
+        var partnerCurrency = voucher.PartnerCurrency ?? voucher.Currency;
+        var partnerRate = voucher.PartnerExchangeRate ?? voucher.ExchangeRate;
+        var partnerAmount = voucher.PartnerAmount ?? transactionAmount;
+        var partnerBaseAmount = voucher.PartnerBaseAmount ?? amount;
         var lines = new List<JournalEntryLineRequest>
         {
             new(
@@ -134,15 +138,35 @@ public sealed class CashVoucherPostingService(
             new(
                 AccountId: counterpartResult.Value,
                 Description: voucher.Description,
-                Debit: isReceipt ? 0m : amount,
-                Credit: isReceipt ? amount : 0m,
+                Debit: isReceipt ? 0m : partnerBaseAmount,
+                Credit: isReceipt ? partnerBaseAmount : 0m,
                 PartyType: party.PartyType,
                 PartyId: party.PartyId,
-                Currency: voucher.Currency,
-                ExchangeRate: voucher.ExchangeRate,
-                TransactionDebit: isReceipt ? 0m : transactionAmount,
-                TransactionCredit: isReceipt ? transactionAmount : 0m)
+                Currency: partnerCurrency,
+                ExchangeRate: partnerRate,
+                TransactionDebit: isReceipt ? 0m : partnerAmount,
+                TransactionCredit: isReceipt ? partnerAmount : 0m)
         };
+
+        // Native settlement quantities are rounded to cents and fixed. Daily
+        // rate corrections must not rewrite those quantities; balance their
+        // genuine base-value difference (including rounding) separately.
+        var difference = ExchangeRateRules.RoundBaseAmount(
+            isReceipt ? amount - partnerBaseAmount : partnerBaseAmount - amount);
+        if (difference != 0m)
+        {
+            var differenceAccount = await accountMappingResolver.ResolveAsync(
+                fiscalYear.Id,
+                difference > 0m ? AccountingMappingType.ExchangeGain : AccountingMappingType.ExchangeLoss,
+                cancellationToken: cancellationToken);
+            if (differenceAccount.IsFailure)
+                return Result<AutomaticJournalEntryResult>.Failure(differenceAccount.Errors);
+            lines.Add(new JournalEntryLineRequest(
+                AccountId: differenceAccount.Value,
+                Description: "فرق تحويل أو تقريب سداد الطرف بعملة مختلفة",
+                Debit: difference < 0m ? Math.Abs(difference) : 0m,
+                Credit: difference > 0m ? difference : 0m));
+        }
 
         return await automaticPostingService.CreateOrUpdateAsync(
             new AutomaticJournalEntryRequest(

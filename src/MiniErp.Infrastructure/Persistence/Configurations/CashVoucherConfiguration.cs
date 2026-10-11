@@ -148,6 +148,17 @@ public sealed class CashVoucherConfiguration
             .HasDefaultValue(false)
             .IsRequired();
 
+        builder.Property(voucher => voucher.PartnerCurrency).HasConversion<int>();
+        builder.Property(voucher => voucher.PartnerAmount).HasPrecision(18, 2);
+        builder.Property(voucher => voucher.PartnerExchangeRate).HasPrecision(28, 12);
+        builder.Property(voucher => voucher.PartnerBaseAmount).HasPrecision(28, 8);
+        builder.HasOne(voucher => voucher.PartnerExchangeRateRecord)
+            .WithMany()
+            .HasForeignKey(voucher => new { voucher.CompanyId, voucher.PartnerExchangeRateId })
+            .HasPrincipalKey(rate => new { rate.CompanyId, rate.Id })
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.Property(voucher => voucher.ReferenceNumber)
             .HasMaxLength(100);
 

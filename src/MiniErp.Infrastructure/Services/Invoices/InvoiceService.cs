@@ -10,6 +10,7 @@ using MiniErp.Application.Features.DriverTrips;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.Cashboxes;
 
 namespace MiniErp.Infrastructure.Services.Invoices;
 
@@ -22,7 +23,8 @@ public sealed partial class InvoiceService(
     TimeProvider timeProvider,
     IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
     IInvoicePostingService? invoicePostingService = null,
-    IDriverTripPostingService? driverTripPostingService = null)
+    IDriverTripPostingService? driverTripPostingService = null,
+    ICashboxAccessService? cashboxAccessService = null)
     : IInvoiceService, IScopedService
 {
     private static readonly ItemMovementType[] InvoiceItemMovementTypes =
@@ -35,10 +37,38 @@ public sealed partial class InvoiceService(
 
     private readonly int companyId = currentCompanyContext.CompanyId;
 
+    private async Task<Result> EnsurePaymentCashboxesExecuteAsync(int invoiceId, CancellationToken cancellationToken)
+    {
+        var ids = await dbContext.CashVouchers.AsNoTracking()
+            .Where(voucher => voucher.CompanyId == companyId &&
+                (voucher.InvoiceId == invoiceId || (voucher.InvoicePayment != null && voucher.InvoicePayment.InvoiceId == invoiceId)))
+            .Select(voucher => voucher.CashboxId).Distinct().ToListAsync(cancellationToken);
+        foreach (var cashboxId in ids)
+        {
+            if (cashboxId.HasValue)
+            {
+                var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, cashboxId.Value, cancellationToken);
+                if (access.IsFailure) return access;
+            }
+            else
+            {
+                var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+                if (access.IsFailure) return Result.Failure(access.Errors);
+                if (!access.Value.HasAllCashboxes) return Result.Failure(CashboxPermissionGuard.Forbidden());
+            }
+        }
+        return Result.Success();
+    }
+
     public async Task<Result<InvoiceResponse>> AddAsync(
         InvoiceRequest request,
         CancellationToken cancellationToken = default)
     {
+        if (request.CashboxId is int cashboxId)
+        {
+            var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, cashboxId, cancellationToken);
+            if (access.IsFailure) return Result<InvoiceResponse>.Failure(access.Errors);
+        }
         var invoice = request.Adapt<Invoice>();
 
         await using var transaction = await dbContext.Database
@@ -200,6 +230,13 @@ public sealed partial class InvoiceService(
         }
 
         var requestedValues = request.Adapt<Invoice>();
+        var access = await EnsurePaymentCashboxesExecuteAsync(id, cancellationToken);
+        if (access.IsFailure) return Result<InvoiceResponse>.Failure(access.Errors);
+        if (request.CashboxId is int cashboxId)
+        {
+            access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, cashboxId, cancellationToken);
+            if (access.IsFailure) return Result<InvoiceResponse>.Failure(access.Errors);
+        }
 
         await using var transaction = await dbContext.Database
             .BeginTransactionAsync(
@@ -245,6 +282,11 @@ public sealed partial class InvoiceService(
             cancellationToken);
         if (linkedReturns.Count > 0)
         {
+            foreach (var linkedReturn in linkedReturns)
+            {
+                access = await EnsurePaymentCashboxesExecuteAsync(linkedReturn.Id, cancellationToken);
+                if (access.IsFailure) return Result<InvoiceResponse>.Failure(access.Errors);
+            }
             var linkedReturnSourceError =
                 ValidateLinkedReturnSourceUpdate(
                     invoice,
@@ -461,6 +503,8 @@ public sealed partial class InvoiceService(
         byte[]? rowVersion,
         CancellationToken cancellationToken = default)
     {
+        var access = await EnsurePaymentCashboxesExecuteAsync(id, cancellationToken);
+        if (access.IsFailure) return access;
         if (id <= 0)
         {
             return Result.Failure(InvalidId());
@@ -528,15 +572,6 @@ public sealed partial class InvoiceService(
         if (stockError is not null)
         {
             return Result.Failure(stockError);
-        }
-
-        var paymentError = await ValidatePaymentRemovalAsync(
-            invoice.Id,
-            cancellationToken);
-        if (paymentError is not null)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            return Result.Failure(paymentError);
         }
 
         var removalResult = await RemoveSideEffectsAsync(

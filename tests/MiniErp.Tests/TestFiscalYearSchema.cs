@@ -85,6 +85,20 @@ internal static class TestFiscalYearSchema
                 cancellationToken);
         }
 
+        // Legacy hand-written SQLite schemas intentionally omit newer optional
+        // cash-voucher snapshots. Keep all fixture shapes compatible centrally.
+        if (await TableExistsAsync(context, "CashVouchers", cancellationToken))
+        {
+            foreach (var column in new[] { "PartnerCurrency", "PartnerExchangeRateId",
+                         "PartnerAmount", "PartnerExchangeRate", "PartnerBaseAmount" })
+            {
+                if (!await ColumnExistsAsync(context, "CashVouchers", column, cancellationToken))
+                    await context.Database.ExecuteSqlRawAsync(
+                        $"ALTER TABLE [CashVouchers] ADD COLUMN [{column}] NUMERIC NULL;",
+                        cancellationToken);
+            }
+        }
+
         if (await TableExistsAsync(
                 context,
                 "Companies",

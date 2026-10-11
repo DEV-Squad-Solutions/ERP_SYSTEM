@@ -12,6 +12,7 @@ using MiniErp.Api.Features.Invoices.Jobs;
 using MiniErp.Api.Features.Users.Jobs;
 using MiniErp.Api.Realtime;
 using MiniErp.Application.Common.Realtime;
+using MiniErp.Application.Common.Abstractions;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Tests.Realtime;
@@ -154,7 +155,8 @@ public sealed class RealtimeHangfireTests
         var clients = new RecordingHubClients();
         var job = new InvoicesRealtimeJob(
             new RecordingHubContext(clients),
-            TimeProvider.System);
+            TimeProvider.System,
+            new FixedCashboxAudience([Guid.Parse("11111111-1111-1111-1111-111111111111")]));
 
         await job.ExecuteAsync(new RealtimeJobRequest(
             OperationId: Guid.NewGuid(),
@@ -185,6 +187,35 @@ public sealed class RealtimeHangfireTests
         Assert.All(
             payload.Changes.Where(change => change.Resource != "Invoice"),
             change => Assert.Null(change.EntityId));
+        Assert.Equal(["company:42:user:11111111-1111-1111-1111-111111111111"], clients.TargetedGroups);
+    }
+
+    [Fact]
+    public async Task SensitiveJob_WithoutAudience_FailsClosed()
+    {
+        var clients = new RecordingHubClients();
+        var job = new InvoicesRealtimeJob(new RecordingHubContext(clients), TimeProvider.System);
+        await job.ExecuteAsync(new RealtimeJobRequest(
+            OperationId: Guid.NewGuid(), Action: "Updated", EntityId: "73", ActorUserId: null, CompanyId: 42));
+        Assert.Empty(clients.TargetedGroups);
+        Assert.Empty(clients.Proxy.Messages);
+    }
+
+    [Fact]
+    public async Task SensitiveJob_EmptyAudience_DoesNotBroadcastToCompany()
+    {
+        var clients = new RecordingHubClients();
+        var job = new InvoicesRealtimeJob(new RecordingHubContext(clients), TimeProvider.System, new FixedCashboxAudience([]));
+        await job.ExecuteAsync(new RealtimeJobRequest(
+            OperationId: Guid.NewGuid(), Action: "Updated", EntityId: "73", ActorUserId: null, CompanyId: 42));
+        Assert.Empty(clients.TargetedGroups);
+        Assert.Empty(clients.Proxy.Messages);
+    }
+
+    private sealed class FixedCashboxAudience(Guid[] recipients) : ICashboxRealtimeAudience
+    {
+        public Task<Guid[]> ResolveAsync(string resource, RealtimeJobRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(recipients);
     }
 
     [Fact]

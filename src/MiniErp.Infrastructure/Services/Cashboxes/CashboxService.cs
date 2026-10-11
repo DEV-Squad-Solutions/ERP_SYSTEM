@@ -25,7 +25,8 @@ public sealed class CashboxService(
     TimeProvider timeProvider,
     IOpeningBalancePostingService? openingBalancePostingService = null,
     IExchangeRatePostingSynchronizer? exchangeRatePostingSynchronizer = null,
-    IDefaultAccountingSetupService? defaultAccountingSetupService = null)
+    IDefaultAccountingSetupService? defaultAccountingSetupService = null,
+    ICashboxAccessService? cashboxAccessService = null)
     : ICashboxService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -36,6 +37,9 @@ public sealed class CashboxService(
         CancellationToken cancellationToken = default)
     {
         filters ??= new CashboxFilterRequest();
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<PagedResponse<CashboxResponse>>.Failure(access.Errors);
+        var scope = access.Value;
         var search = filters.Search?.Trim();
         var code = filters.Code?.Trim();
         var name = filters.Name?.Trim();
@@ -43,6 +47,7 @@ public sealed class CashboxService(
         var query = dbContext.Cashboxes
             .AsNoTracking()
             .Where(cashbox => cashbox.CompanyId == companyId)
+            .Where(cashbox => scope.HasAllCashboxes || scope.ViewCashboxIds.Contains(cashbox.Id))
             .Where(cashbox =>
                 string.IsNullOrEmpty(search) ||
                 cashbox.Code.Contains(search) ||
@@ -91,8 +96,12 @@ public sealed class CashboxService(
     public async Task<Result<IReadOnlyList<CashboxSelectResponse>>>
         GetSelectAsync(CancellationToken cancellationToken = default)
     {
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<IReadOnlyList<CashboxSelectResponse>>.Failure(access.Errors);
+        var scope = access.Value;
         var response = await dbContext.Cashboxes
             .AsNoTracking()
+            .Where(cashbox => scope.HasAllCashboxes || scope.ViewCashboxIds.Contains(cashbox.Id))
             .Where(cashbox =>
                 cashbox.CompanyId == companyId &&
                 cashbox.IsActive)
@@ -123,6 +132,8 @@ public sealed class CashboxService(
             return Result<CashboxResponse>.Failure(InvalidId());
         }
 
+        var access = await CashboxPermissionGuard.ViewAsync(cashboxAccessService, id, cancellationToken);
+        if (access.IsFailure) return Result<CashboxResponse>.Failure(access.Errors);
         var response = await ProjectResponseQuery(id)
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
@@ -142,6 +153,9 @@ public sealed class CashboxService(
         CashboxRequest request,
         CancellationToken cancellationToken = default)
     {
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<CashboxResponse>.Failure(access.Errors);
+        if (!access.Value.HasAllCashboxes) return Result<CashboxResponse>.Failure(CashboxPermissionGuard.Forbidden());
         await using var transaction = await dbContext.Database
             .BeginTransactionAsync(
                 IsolationLevel.Serializable,
@@ -232,6 +246,15 @@ public sealed class CashboxService(
         if (request.RowVersion is not { Length: 8 })
         {
             return Result<CashboxResponse>.Failure(RowVersionRequired());
+        }
+
+        var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, id, cancellationToken);
+        if (access.IsFailure) return Result<CashboxResponse>.Failure(access.Errors);
+        if (request.UpdateLinkedTransactions)
+        {
+            var scope = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+            if (scope.IsFailure) return Result<CashboxResponse>.Failure(scope.Errors);
+            if (!scope.Value.HasAllCashboxes) return Result<CashboxResponse>.Failure(CashboxPermissionGuard.Forbidden());
         }
 
         await using var transaction = await dbContext.Database
@@ -394,6 +417,8 @@ public sealed class CashboxService(
         int id,
         CancellationToken cancellationToken = default)
     {
+        var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, id, cancellationToken);
+        if (access.IsFailure) return access;
         if (id <= 0)
         {
             return Result.Failure(InvalidId());

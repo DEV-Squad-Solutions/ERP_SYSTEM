@@ -66,15 +66,14 @@ public class DatabaseRecoveryService(
             false);
         return initializer.InitializeAsync(
             applyMigrations: applyMigrations,
-            seedEnabled: configuration.GetValue("Seed:Enabled", false),
+            // Automatic seeding is disabled for startup and every recovery attempt,
+            // regardless of configuration overrides. Existing data is untouched.
+            seedEnabled: false,
             canConnectAsync: CanConnectAsync,
             applyMigrationsAsync: token => PrepareDatabaseAsync(
                 applyMigrations,
                 token),
-            seedAsync: token => DevelopmentDataSeeder.SeedAsync(
-                services,
-                configuration,
-                token),
+            seedAsync: _ => Task.CompletedTask,
             status: status,
             logger: logger,
             cancellationToken: cancellationToken);

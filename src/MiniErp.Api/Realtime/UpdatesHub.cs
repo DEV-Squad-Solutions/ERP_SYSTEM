@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 using Microsoft.AspNetCore.SignalR;
 using MiniErp.Application.Common.Authentication;
 
@@ -20,6 +21,8 @@ public sealed class UpdatesHub : Hub
         await Groups.AddToGroupAsync(
             Context.ConnectionId,
             RealtimeHubGroups.Company(companyId));
+        if (Guid.TryParse(Context.User?.FindFirstValue("sub") ?? Context.User?.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+            await Groups.AddToGroupAsync(Context.ConnectionId, RealtimeHubGroups.CompanyUser(companyId, userId));
 
         foreach (var role in ApplicationRoles.All)
         {

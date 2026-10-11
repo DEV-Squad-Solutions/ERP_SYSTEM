@@ -10,6 +10,7 @@ using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.Cashboxes;
 using static MiniErp.Application.Features.CashboxRevaluations.CashboxRevaluationErrors;
 
 namespace MiniErp.Infrastructure.Services.CashboxRevaluations;
@@ -20,7 +21,8 @@ public sealed class CashboxRevaluationService(
     IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
     IAccountMappingResolver accountMappingResolver,
     IAutomaticPostingService automaticPostingService,
-    TimeProvider timeProvider) : ICashboxRevaluationService
+    TimeProvider timeProvider,
+    ICashboxAccessService? cashboxAccessService = null) : ICashboxRevaluationService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
 
@@ -38,6 +40,9 @@ public sealed class CashboxRevaluationService(
         {
             return Result<CashboxRevaluationResponse>.Failure(RateInvalid());
         }
+
+        var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, request.CashboxId, cancellationToken);
+        if (access.IsFailure) return Result<CashboxRevaluationResponse>.Failure(access.Errors);
 
         await using var transaction = await dbContext.Database.BeginTransactionAsync(
             IsolationLevel.Serializable, cancellationToken);
@@ -115,15 +120,6 @@ public sealed class CashboxRevaluationService(
             .Sum(line => line.TransactionDebit - line.TransactionCredit));
         var carryingBaseAmount = ExchangeRateRules.RoundBaseAmount(lines
             .Sum(line => line.Debit - line.Credit));
-        // Physical cash cannot be negative, but the carrying amount can be:
-        // receiving at a low rate and paying at a higher rate may leave a
-        // credit base balance that the revaluation must still correct.
-        if (foreignAmount < 0m)
-        {
-            return Result<CashboxRevaluationResponse>.Failure(
-                NegativeBalance());
-        }
-
         // Ledger lines are stored at four decimal places.  Keep the reported
         // carrying amount precise, but round the target and posted delta to
         // the same journal precision so the next period starts from exactly
@@ -227,6 +223,14 @@ public sealed class CashboxRevaluationService(
         int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<IReadOnlyList<CashboxRevaluationResponse>>.Failure(access.Errors);
+        var scope = access.Value;
+        if (cashboxId.HasValue)
+        {
+            var permission = await CashboxPermissionGuard.ViewAsync(cashboxAccessService, cashboxId.Value, cancellationToken);
+            if (permission.IsFailure) return Result<IReadOnlyList<CashboxRevaluationResponse>>.Failure(permission.Errors);
+        }
         var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
             fiscalYearId,
             fromDate,
@@ -240,6 +244,7 @@ public sealed class CashboxRevaluationService(
 
         var rows = await dbContext.CashboxRevaluations
             .AsNoTracking()
+            .Where(row => scope.HasAllCashboxes || scope.ViewCashboxIds.Contains(row.CashboxId))
             .Where(row => row.CompanyId == companyId && !row.IsDeleted &&
                 row.FiscalYearId == fiscalYear.Value.FiscalYearId &&
                 (!cashboxId.HasValue || row.CashboxId == cashboxId.Value) &&

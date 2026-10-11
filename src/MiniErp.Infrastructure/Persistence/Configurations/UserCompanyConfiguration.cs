@@ -17,6 +17,12 @@ public sealed class UserCompanyConfiguration : IEntityTypeConfiguration<UserComp
 
         builder.HasQueryFilter(userCompany => !userCompany.Company.IsDeleted);
 
+        builder.Property(userCompany => userCompany.AllCashboxes)
+            .HasDefaultValue(false);
+
+        builder.Property(userCompany => userCompany.CashboxPermissionsRevision)
+            .IsConcurrencyToken();
+
         builder.HasOne(userCompany => userCompany.User)
             .WithMany(user => user.UserCompanies)
             .HasForeignKey(userCompany => userCompany.UserId)

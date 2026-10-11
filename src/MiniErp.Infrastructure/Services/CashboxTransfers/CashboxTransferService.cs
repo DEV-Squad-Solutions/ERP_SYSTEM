@@ -9,6 +9,7 @@ using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.Cashboxes;
 using static MiniErp.Application.Features.CashboxTransfers.CashboxTransferErrors;
 
 namespace MiniErp.Infrastructure.Services.CashboxTransfers;
@@ -21,7 +22,8 @@ public sealed class CashboxTransferService(
     TimeProvider timeProvider,
     IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
     IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
-    ICashboxTransferPostingService? cashboxTransferPostingService = null)
+    ICashboxTransferPostingService? cashboxTransferPostingService = null,
+    ICashboxAccessService? cashboxAccessService = null)
     : ICashboxTransferService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -32,6 +34,17 @@ public sealed class CashboxTransferService(
             CashboxTransferFilterRequest filters,
             CancellationToken cancellationToken = default)
     {
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<PagedResponse<CashboxTransferListResponse>>.Failure(access.Errors);
+        var scope = access.Value;
+        foreach (var cashboxId in new[] { filters.SourceCashboxId, filters.DestinationCashboxId })
+        {
+            if (cashboxId.HasValue)
+            {
+                var permission = await CashboxPermissionGuard.ViewAsync(cashboxAccessService, cashboxId.Value, cancellationToken);
+                if (permission.IsFailure) return Result<PagedResponse<CashboxTransferListResponse>>.Failure(permission.Errors);
+            }
+        }
         if (ValidateFilters(filters) is { } filterError)
         {
             return Result<PagedResponse<CashboxTransferListResponse>>.Failure(
@@ -52,6 +65,9 @@ public sealed class CashboxTransferService(
         var search = filters.Search?.Trim();
         var query = dbContext.CashboxTransfers
             .AsNoTracking()
+            .Where(transfer => scope.HasAllCashboxes ||
+                (scope.ViewCashboxIds.Contains(transfer.SourceCashboxId) &&
+                 scope.ViewCashboxIds.Contains(transfer.DestinationCashboxId)))
             .Where(transfer =>
                 transfer.CompanyId == companyId &&
                 transfer.FiscalYearId == fiscalYear.Value.FiscalYearId)
@@ -109,6 +125,14 @@ public sealed class CashboxTransferService(
             id,
             cancellationToken,
             fiscalYear.Value.FiscalYearId);
+        if (response is not null)
+        {
+            foreach (var cashboxId in new[] { response.SourceCashboxId, response.DestinationCashboxId })
+            {
+                var access = await CashboxPermissionGuard.ViewAsync(cashboxAccessService, cashboxId, cancellationToken);
+                if (access.IsFailure) return Result<CashboxTransferResponse>.Failure(access.Errors);
+            }
+        }
         return response is null
             ? Result<CashboxTransferResponse>.Failure(NotFound(id))
             : Result<CashboxTransferResponse>.Success(response);
@@ -168,24 +192,6 @@ public sealed class CashboxTransferService(
                 preparation.Error);
         }
 
-        var balanceError = await ValidateFinalBalancesAsync(
-            excludedVouchers: [],
-            proposals:
-            [
-                new CashboxBalanceProposal(
-                    CashboxId: request.SourceCashboxId,
-                    Direction: CashDirection.Payment,
-                    Amount: request.Amount),
-                new CashboxBalanceProposal(
-                    CashboxId: request.DestinationCashboxId,
-                    Direction: CashDirection.Receipt,
-                    Amount: preparation.Value.DestinationAmount)
-            ],
-            cancellationToken);
-        if (balanceError is not null)
-        {
-            return Result<CashboxTransferResponse>.Failure(balanceError);
-        }
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var transferNumber = await GenerateIdentifierAsync(
@@ -314,6 +320,12 @@ public sealed class CashboxTransferService(
             return Result<CashboxTransferResponse>.Failure(Concurrency());
         }
 
+        foreach (var cashboxId in new[] { transfer.SourceCashboxId, transfer.DestinationCashboxId })
+        {
+            var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, cashboxId, cancellationToken);
+            if (access.IsFailure) return Result<CashboxTransferResponse>.Failure(access.Errors);
+        }
+
         var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
             fiscalYearId: transfer.FiscalYearId,
             fromDate: request.TransferDate,
@@ -373,24 +385,6 @@ public sealed class CashboxTransferService(
                 preparation.Error);
         }
 
-        var balanceError = await ValidateFinalBalancesAsync(
-            excludedVouchers: [paymentVoucher, receiptVoucher],
-            proposals:
-            [
-                new CashboxBalanceProposal(
-                    CashboxId: request.SourceCashboxId,
-                    Direction: CashDirection.Payment,
-                    Amount: request.Amount),
-                new CashboxBalanceProposal(
-                    CashboxId: request.DestinationCashboxId,
-                    Direction: CashDirection.Receipt,
-                    Amount: preparation.Value.DestinationAmount)
-            ],
-            cancellationToken);
-        if (balanceError is not null)
-        {
-            return Result<CashboxTransferResponse>.Failure(balanceError);
-        }
 
         var entry = dbContext.Entry(transfer);
         entry.Property(entity => entity.RowVersion).OriginalValue =
@@ -477,6 +471,12 @@ public sealed class CashboxTransferService(
             return Result.Failure(NotFound(id));
         }
 
+        foreach (var cashboxId in new[] { transfer.SourceCashboxId, transfer.DestinationCashboxId })
+        {
+            var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, cashboxId, cancellationToken);
+            if (access.IsFailure) return access;
+        }
+
         var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
             fiscalYearId: transfer.FiscalYearId,
             fromDate: transfer.TransferDate,
@@ -506,14 +506,6 @@ public sealed class CashboxTransferService(
             return Result.Failure(InvalidVoucherPair());
         }
 
-        var balanceError = await ValidateFinalBalancesAsync(
-            excludedVouchers: [paymentVoucher, receiptVoucher],
-            proposals: [],
-            cancellationToken);
-        if (balanceError is not null)
-        {
-            return Result.Failure(balanceError);
-        }
 
         try
         {
@@ -562,6 +554,12 @@ public sealed class CashboxTransferService(
         {
             return Result<TransferPreparation>.Failure(
                 CashboxesMustDiffer());
+        }
+
+        foreach (var cashboxId in new[] { sourceCashboxId, destinationCashboxId })
+        {
+            var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, cashboxId, cancellationToken);
+            if (access.IsFailure) return Result<TransferPreparation>.Failure(access.Errors);
         }
 
         var cashboxes = await dbContext.Cashboxes
@@ -875,64 +873,6 @@ public sealed class CashboxTransferService(
         }
     }
 
-    private async Task<Error?> ValidateFinalBalancesAsync(
-        IReadOnlyCollection<CashVoucher> excludedVouchers,
-        IReadOnlyCollection<CashboxBalanceProposal> proposals,
-        CancellationToken cancellationToken)
-    {
-        var excludedVoucherIds = excludedVouchers
-            .Select(voucher => voucher.Id)
-            .ToArray();
-        var affectedCashboxIds = excludedVouchers
-            .Where(voucher => voucher.CashboxId.HasValue)
-            .Select(voucher => voucher.CashboxId!.Value)
-            .Concat(proposals.Select(proposal => proposal.CashboxId))
-            .Distinct()
-            .ToArray();
-
-        var balances = await dbContext.Cashboxes
-            .AsNoTracking()
-            .Where(cashbox =>
-                cashbox.CompanyId == companyId &&
-                affectedCashboxIds.Contains(cashbox.Id))
-            .Select(cashbox => new
-            {
-                cashbox.Id,
-                Balance = cashbox.OpeningBalance +
-                    (cashbox.Vouchers
-                        .Where(voucher =>
-                            voucher.IsPosted &&
-                            !excludedVoucherIds.Contains(voucher.Id))
-                        .Sum(voucher =>
-                            (decimal?)(voucher.Direction ==
-                                CashDirection.Receipt
-                                ? voucher.Amount
-                                : -voucher.Amount)) ?? 0m)
-            })
-            .ToDictionaryAsync(
-                cashbox => cashbox.Id,
-                cashbox => cashbox.Balance,
-                cancellationToken);
-
-        foreach (var proposal in proposals)
-        {
-            balances[proposal.CashboxId] +=
-                proposal.Direction == CashDirection.Receipt
-                    ? proposal.Amount
-                    : -proposal.Amount;
-        }
-
-        foreach (var (cashboxId, balance) in balances)
-        {
-            if (balance < 0m)
-            {
-                return InsufficientCashboxBalance(cashboxId);
-            }
-        }
-
-        return null;
-    }
-
     private CashVoucher CreateVoucher(
         CashboxTransfer transfer,
         Cashbox cashbox,
@@ -1193,9 +1133,4 @@ public sealed class CashboxTransferService(
         decimal DestinationAmount,
         ResolvedExchangeRate SourceExchangeRate,
         ResolvedExchangeRate DestinationExchangeRate);
-
-    private sealed record CashboxBalanceProposal(
-        int CashboxId,
-        CashDirection Direction,
-        decimal Amount);
 }

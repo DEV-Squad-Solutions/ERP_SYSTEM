@@ -28,6 +28,7 @@ using MiniErp.Infrastructure.Services.Invoices;
 using MiniErp.Infrastructure.Services.Pagination;
 using MiniErp.Infrastructure.Services.PartnerItemReports;
 using MiniErp.Infrastructure.Services.ProfitabilityReports;
+using MiniErp.Tests.CashManagement;
 
 namespace MiniErp.Tests.Invoices;
 
@@ -37,6 +38,38 @@ public sealed class InvoiceServiceTests
     {
         MappingConfiguration.Register(
             typeof(InfrastructureAssemblyMarker).Assembly);
+    }
+
+    [Fact]
+    public async Task CashboxPermissions_HideInvoiceAndDenyOldPaymentMutationWithoutSideEffects()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var request = CreateRequest(InvoiceType.Sales);
+        var created = await database.CreateService().AddAsync(request);
+        Assert.True(created.IsSuccess);
+        var noAccess = new RestrictedCashboxAccess(view: [], execute: []);
+        var restrictedQueries = database.CreateQueryService(noAccess);
+        var list = await restrictedQueries.GetAllAsync(new PaginationRequest());
+        Assert.True(list.IsSuccess);
+        Assert.Equal(0, list.Value.TotalCount);
+        Assert.Equal(ErrorType.Forbidden, (await restrictedQueries.GetByIdAsync(created.Value.Id)).Error.Type);
+
+        var viewOnly = new RestrictedCashboxAccess(view: [1], execute: []);
+        var service = database.CreateService(cashboxAccessService: viewOnly);
+        Assert.Equal(ErrorType.Forbidden, (await service.AddAsync(request with { InvoiceNumber = "DENIED-PAYMENT" })).Error.Type);
+        var update = created.Value.Adapt<InvoiceUpdateRequest>() with
+        {
+            CashboxId = null, PaymentTerm = PaymentTerm.Credit, PaidAmount = 0m,
+            RowVersion = created.Value.RowVersion
+        };
+        Assert.Equal(ErrorType.Forbidden, (await service.UpdateAsync(created.Value.Id, update)).Error.Type);
+        Assert.Equal(ErrorType.Forbidden, (await service.DeleteAsync(created.Value.Id, created.Value.RowVersion)).Error.Type);
+        database.Context.ChangeTracker.Clear();
+        Assert.Equal(1, await database.Context.Invoices.CountAsync());
+        var voucher = await database.Context.CashVouchers.SingleAsync();
+        Assert.Equal(1, voucher.CashboxId);
+        Assert.Equal(created.Value.PaidAmount, voucher.Amount);
+        Assert.Equal(1, await database.Context.InvoicePayments.CountAsync());
     }
 
     [Fact]
@@ -1292,6 +1325,85 @@ public sealed class InvoiceServiceTests
         Assert.Equal(30m, returnLine.SourceUnitPriceSnapshot);
         Assert.Equal(ReturnPriceMode.ManualPrice, returnLine.ReturnPriceMode);
         Assert.Equal("اتفاق تجاري", returnLine.ReturnPriceDifferenceReason);
+    }
+
+    [Fact]
+    public async Task CashboxPermissions_SourcePriceUpdateCannotMutateHiddenLinkedReturnPayment()
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        var service = database.CreateService();
+        var stock = await service.AddAsync(CreateRequest(
+            InvoiceType.Purchase, PaymentTerm.Credit, storeId: 2,
+            lines: [new InvoiceLineRequest(ItemId: 1, Count: 10, Weight: 1m, Price: 12m, Notes: null)]));
+        Assert.True(stock.IsSuccess, stock.Error.Description);
+        var source = await service.AddAsync(CreateRequest(
+            InvoiceType.Sales, PaymentTerm.Credit, storeId: 2,
+            lines: [new InvoiceLineRequest(ItemId: 1, Count: 2, Weight: 1m, Price: 10m, Notes: null)]));
+        Assert.True(source.IsSuccess, source.Error.Description);
+        var sourceLine = Assert.Single(source.Value.Lines);
+        var linkedReturn = await service.AddAsync(CreateRequest(
+            InvoiceType.SalesReturn, PaymentTerm.Cash, storeId: 2,
+            lines: [new InvoiceLineRequest(ItemId: 1, Count: 1, Weight: 1m, Price: 10m,
+                Notes: null, SourceInvoiceLineId: sourceLine.Id)]));
+        Assert.True(linkedReturn.IsSuccess, linkedReturn.Error.Description);
+
+        var partnerLedgerBefore = await database.Context.BusinessPartnerMovements.AsNoTracking()
+            .OrderBy(movement => movement.Id)
+            .Select(movement => new { movement.Id, movement.InvoiceId, movement.CashVoucherId,
+                movement.Debit, movement.Credit, movement.BaseDebit, movement.BaseCredit }).ToArrayAsync();
+        var inventoryLedgerBefore = await database.Context.ItemMovements.AsNoTracking()
+            .OrderBy(movement => movement.Id)
+            .Select(movement => new { movement.Id, movement.ReferenceId, movement.QuantityIn,
+                movement.QuantityOut, movement.TotalCost, movement.InventoryValueAfter }).ToArrayAsync();
+        var paymentsBefore = await database.Context.InvoicePayments.AsNoTracking()
+            .OrderBy(payment => payment.Id)
+            .Select(payment => new { payment.Id, payment.InvoiceId, payment.CashVoucherId,
+                payment.AppliedAmount, payment.CashboxAmount, payment.AppliedBaseAmount }).ToArrayAsync();
+        var vouchersBefore = await database.Context.CashVouchers.AsNoTracking()
+            .OrderBy(voucher => voucher.Id)
+            .Select(voucher => new { voucher.Id, voucher.InvoiceId, voucher.CashboxId,
+                voucher.Amount, voucher.BaseAmount }).ToArrayAsync();
+        Assert.Equal(linkedReturn.Value.Id, Assert.Single(paymentsBefore).InvoiceId);
+        Assert.Equal(1, Assert.Single(vouchersBefore).CashboxId);
+
+        // The source is credit with no payment, so only the linked cash refund
+        // exercises the execute guard for the otherwise permissible update.
+        var restricted = database.CreateService(cashboxAccessService:
+            new RestrictedCashboxAccess(view: [], execute: []));
+        var result = await restricted.UpdateAsync(source.Value.Id, CreateUpdateRequest(
+            source.Value,
+            [new InvoiceLineRequest(ItemId: 1, Count: 2, Weight: 1m, Price: 20m, Notes: null)]));
+
+        Assert.Equal(ErrorType.Forbidden, result.Error.Type);
+        database.Context.ChangeTracker.Clear();
+        var persistedSource = await database.Context.Invoices.AsNoTracking().Include(invoice => invoice.Lines)
+            .SingleAsync(invoice => invoice.Id == source.Value.Id);
+        var persistedReturn = await database.Context.Invoices.AsNoTracking().Include(invoice => invoice.Lines)
+            .SingleAsync(invoice => invoice.Id == linkedReturn.Value.Id);
+        Assert.Equal(20m, persistedSource.Total);
+        Assert.Equal(0m, persistedSource.PaidAmount);
+        Assert.Equal(10m, Assert.Single(persistedSource.Lines).Price);
+        Assert.Equal(source.Value.RowVersion, persistedSource.RowVersion);
+        Assert.Equal(10m, persistedReturn.Total);
+        Assert.Equal(10m, persistedReturn.PaidAmount);
+        Assert.Equal(10m, Assert.Single(persistedReturn.Lines).Price);
+        Assert.Equal(linkedReturn.Value.RowVersion, persistedReturn.RowVersion);
+        Assert.Equal(partnerLedgerBefore, await database.Context.BusinessPartnerMovements.AsNoTracking()
+            .OrderBy(movement => movement.Id)
+            .Select(movement => new { movement.Id, movement.InvoiceId, movement.CashVoucherId,
+                movement.Debit, movement.Credit, movement.BaseDebit, movement.BaseCredit }).ToArrayAsync());
+        Assert.Equal(inventoryLedgerBefore, await database.Context.ItemMovements.AsNoTracking()
+            .OrderBy(movement => movement.Id)
+            .Select(movement => new { movement.Id, movement.ReferenceId, movement.QuantityIn,
+                movement.QuantityOut, movement.TotalCost, movement.InventoryValueAfter }).ToArrayAsync());
+        Assert.Equal(paymentsBefore, await database.Context.InvoicePayments.AsNoTracking()
+            .OrderBy(payment => payment.Id)
+            .Select(payment => new { payment.Id, payment.InvoiceId, payment.CashVoucherId,
+                payment.AppliedAmount, payment.CashboxAmount, payment.AppliedBaseAmount }).ToArrayAsync());
+        Assert.Equal(vouchersBefore, await database.Context.CashVouchers.AsNoTracking()
+            .OrderBy(voucher => voucher.Id)
+            .Select(voucher => new { voucher.Id, voucher.InvoiceId, voucher.CashboxId,
+                voucher.Amount, voucher.BaseAmount }).ToArrayAsync());
     }
 
     [Fact]
@@ -4871,6 +4983,102 @@ public sealed class InvoiceServiceTests
             voucher.VoucherNumber);
     }
 
+    [Theory]
+    [InlineData(InvoiceType.Purchase, 0)]
+    [InlineData(InvoiceType.Purchase, 10)]
+    [InlineData(InvoiceType.SalesReturn, 0)]
+    [InlineData(InvoiceType.SalesReturn, 10)]
+    public async Task CashPaymentsCreateAndUpdateNegativeCashboxBalances(
+        InvoiceType invoiceType,
+        decimal openingBalance)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Cashboxes.ExecuteUpdateAsync(setters =>
+            setters.SetProperty(cashbox => cashbox.OpeningBalance, openingBalance));
+        var service = database.CreateService();
+        var created = await service.AddAsync(CreateRequest(invoiceType));
+        Assert.True(created.IsSuccess, created.Error.Description);
+        Assert.Equal(20m, created.Value.Total);
+        Assert.Equal(20m, created.Value.PaidAmount);
+        var voucher = await database.Context.CashVouchers.AsNoTracking().SingleAsync();
+        Assert.True(voucher.IsPosted);
+        Assert.Equal(CashDirection.Payment, voucher.Direction);
+        Assert.Equal(20m, voucher.Amount);
+        Assert.Equal(20m, voucher.BaseAmount);
+        await AssertInvoiceCashboxBalanceAsync(database, openingBalance - 20m);
+
+        database.Context.ChangeTracker.Clear();
+        var updated = await service.UpdateAsync(created.Value.Id,
+            CreateUpdateRequest(created.Value,
+            [new InvoiceLineRequest(ItemId: 1, Count: 2, Weight: 1m, Price: 15m, Notes: null)]));
+        Assert.True(updated.IsSuccess, updated.Error.Description);
+        Assert.Equal(30m, updated.Value.Total);
+        Assert.Equal(30m, updated.Value.PaidAmount);
+        var updatedVoucher = await database.Context.CashVouchers.AsNoTracking().SingleAsync();
+        Assert.Equal(voucher.Id, updatedVoucher.Id);
+        Assert.Equal(30m, updatedVoucher.Amount);
+        Assert.Equal(30m, updatedVoucher.BaseAmount);
+        var paymentMovement = await database.Context.BusinessPartnerMovements.AsNoTracking()
+            .SingleAsync(movement => movement.CashVoucherId == updatedVoucher.Id);
+        Assert.Equal(30m, paymentMovement.Debit);
+        Assert.Equal(0m, paymentMovement.Credit);
+        await AssertInvoiceCashboxBalanceAsync(database, openingBalance - 30m);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RemovingInvoiceReceiptAllowsCashboxToRemainNegative(bool deleteInvoice)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Cashboxes.ExecuteUpdateAsync(setters =>
+            setters.SetProperty(cashbox => cashbox.OpeningBalance, 0m));
+        var service = database.CreateService();
+        var receipt = await service.AddAsync(CreateRequest(InvoiceType.PurchaseReturn));
+        var payment = await service.AddAsync(CreateRequest(InvoiceType.Purchase,
+            lines: [new InvoiceLineRequest(ItemId: 1, Count: 2, Weight: 1m, Price: 15m, Notes: null)]));
+        Assert.True(receipt.IsSuccess, receipt.Error.Description);
+        Assert.True(payment.IsSuccess, payment.Error.Description);
+        await AssertInvoiceCashboxBalanceAsync(database, -10m);
+        database.Context.ChangeTracker.Clear();
+
+        if (deleteInvoice)
+        {
+            var deleted = await service.DeleteAsync(receipt.Value.Id, receipt.Value.RowVersion);
+            Assert.True(deleted.IsSuccess, deleted.Error.Description);
+        }
+        else
+        {
+            var updated = await service.UpdateAsync(receipt.Value.Id,
+                CreateUpdateRequest(receipt.Value,
+                    [new InvoiceLineRequest(ItemId: 1, Count: 2, Weight: 1m, Price: 10m, Notes: null)],
+                    paymentTerm: PaymentTerm.Credit,
+                    paidAmount: 0m));
+            Assert.True(updated.IsSuccess, updated.Error.Description);
+            Assert.Equal(0m, updated.Value.PaidAmount);
+            Assert.Null(updated.Value.PaymentVoucherId);
+        }
+        Assert.False(await database.Context.CashVouchers.AnyAsync(voucher =>
+            voucher.InvoiceId == receipt.Value.Id));
+        var remainingVoucher = await database.Context.CashVouchers.AsNoTracking().SingleAsync();
+        Assert.Equal(payment.Value.Id, remainingVoucher.InvoiceId);
+        Assert.Equal(30m, remainingVoucher.Amount);
+        Assert.Equal(30m, remainingVoucher.BaseAmount);
+        await AssertInvoiceCashboxBalanceAsync(database, -30m);
+    }
+
+    private static async Task AssertInvoiceCashboxBalanceAsync(
+        InvoiceTestDatabase database,
+        decimal expectedBalance)
+    {
+        var openingBalance = await database.Context.Cashboxes.AsNoTracking()
+            .Where(cashbox => cashbox.Id == 1).Select(cashbox => cashbox.OpeningBalance).SingleAsync();
+        var vouchers = await database.Context.CashVouchers.AsNoTracking()
+            .Where(voucher => voucher.CashboxId == 1 && voucher.IsPosted).ToListAsync();
+        Assert.Equal(expectedBalance, openingBalance + vouchers.Sum(voucher =>
+            voucher.Direction == CashDirection.Receipt ? voucher.Amount : -voucher.Amount));
+    }
+
     [Fact]
     public async Task Add_PaymentRequiresConfiguredDefaultMovementType()
     {
@@ -7469,7 +7677,8 @@ public sealed class InvoiceServiceTests
 
         public InvoiceService CreateService(
             IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
-            IDriverTripPostingService? driverTripPostingService = null)
+            IDriverTripPostingService? driverTripPostingService = null,
+            ICashboxAccessService? cashboxAccessService = null)
         {
             var companyContext = new TestCurrentCompanyContext(1);
             var invoiceInventoryService = CreateInvoiceInventoryService(
@@ -7480,7 +7689,8 @@ public sealed class InvoiceServiceTests
                 new PaginationService(),
                 companyContext,
                 invoiceInventoryService,
-                new FiscalYearQueryScopeResolver(Context, companyContext));
+                new FiscalYearQueryScopeResolver(Context, companyContext),
+                cashboxAccessService: cashboxAccessService);
 
             return new InvoiceService(
                 Context,
@@ -7490,10 +7700,11 @@ public sealed class InvoiceServiceTests
                 invoiceInventoryService,
                 TimeProvider.System,
                 fiscalYearPeriodGuard,
-                driverTripPostingService: driverTripPostingService);
+                driverTripPostingService: driverTripPostingService,
+                cashboxAccessService: cashboxAccessService);
         }
 
-        public InvoiceQueryService CreateQueryService()
+        public InvoiceQueryService CreateQueryService(ICashboxAccessService? cashboxAccessService = null)
         {
             var companyContext = new TestCurrentCompanyContext(1);
             return new InvoiceQueryService(
@@ -7501,7 +7712,8 @@ public sealed class InvoiceServiceTests
                 new PaginationService(),
                 companyContext,
                 CreateInvoiceInventoryService(companyContext),
-                new FiscalYearQueryScopeResolver(Context, companyContext));
+                new FiscalYearQueryScopeResolver(Context, companyContext),
+                cashboxAccessService: cashboxAccessService);
         }
 
         private InvoiceInventoryService CreateInvoiceInventoryService(

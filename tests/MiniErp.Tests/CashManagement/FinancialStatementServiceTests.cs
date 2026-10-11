@@ -95,6 +95,123 @@ public sealed class FinancialStatementServiceTests
             item => item.JournalEntryId == 7001);
     }
 
+    [Theory]
+    [InlineData(700, "مبلغ مطلوب من السائق")]
+    [InlineData(-700, "مبلغ مطلوب دفعه للسائق")]
+    public async Task DriverCarriedOpeningIsReadOnlyFirstRowAndDoesNotInflateMovementTotals(
+        int signedOpening,
+        string openingDescription)
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO FiscalYears (Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent)
+            VALUES (3, 1, '2027', '2027-01-01', '2027-12-31', 1, 0);
+            """);
+        await SeedDriverLineAsync(
+            database, journalEntryId: 7100, entryDate: new DateOnly(2027, 1, 1),
+            signedAmount: signedOpening, isOpening: true);
+        var statements = database.CreateStatementService(1);
+        var filters = new DriverStatementFilterRequest(DriverId: 1, FiscalYearId: 3);
+        var onlyOpening = await statements.GetDriverStatementAsync(Page(), filters);
+        Assert.True(onlyOpening.IsSuccess);
+        var anchor = Assert.Single(onlyOpening.Value.Items);
+        Assert.True(anchor.IsOpeningBalance);
+        Assert.True(anchor.IsReadOnly);
+        Assert.Equal(0, anchor.SourceId);
+        Assert.Equal(DriverStatementSourceType.OpeningBalance, anchor.SourceType);
+        Assert.Equal("رصيد افتتاحي مرحل", anchor.MovementName);
+        Assert.Equal(new DateOnly(2027, 1, 1), anchor.Date);
+        Assert.Equal(Math.Abs(signedOpening), anchor.BalanceAmount);
+        Assert.Equal(openingDescription, anchor.BalanceDescription);
+        Assert.Equal(0m, anchor.DebitAmount);
+        Assert.Equal(0m, anchor.CreditAmount);
+        Assert.Equal(0m, anchor.AmountPaidToDriver);
+        Assert.Equal(0m, anchor.AmountReceivedFromDriver);
+        Assert.Equal(0m, anchor.TripCost);
+        Assert.Null(anchor.DriverTripId);
+        Assert.Null(anchor.JournalEntryId);
+        Assert.Equal(1, onlyOpening.Value.TotalCount);
+        Assert.Equal(0m, onlyOpening.Value.Summary.TotalDebits);
+        Assert.Equal(0m, onlyOpening.Value.Summary.TotalCredits);
+
+        await SeedDriverLineAsync(
+            database, journalEntryId: 7101, entryDate: new DateOnly(2027, 2, 1),
+            signedAmount: 100m, isOpening: false);
+        await SeedDriverLineAsync(
+            database, journalEntryId: 7102, entryDate: new DateOnly(2027, 3, 1),
+            signedAmount: -50m, isOpening: false);
+        var first = await statements.GetDriverStatementAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 1 }, filters);
+        var second = await statements.GetDriverStatementAsync(
+            new PaginationRequest { PageNumber = 2, PageSize = 1 }, filters);
+        var third = await statements.GetDriverStatementAsync(
+            new PaginationRequest { PageNumber = 3, PageSize = 1 }, filters);
+        var beyond = await statements.GetDriverStatementAsync(
+            new PaginationRequest { PageNumber = int.MaxValue, PageSize = 1 }, filters);
+        Assert.True(first.IsSuccess);
+        Assert.True(second.IsSuccess);
+        Assert.True(third.IsSuccess);
+        Assert.True(beyond.IsSuccess);
+        Assert.True(Assert.Single(first.Value.Items).IsOpeningBalance);
+        Assert.Equal(3, first.Value.TotalCount);
+        Assert.Equal(3, first.Value.TotalPages);
+        Assert.Equal(Math.Abs(signedOpening + 100m), Assert.Single(second.Value.Items).BalanceAmount);
+        Assert.Equal(Math.Abs(signedOpening + 50m), Assert.Single(third.Value.Items).BalanceAmount);
+        Assert.Equal(100m, third.Value.Summary.TotalDebits);
+        Assert.Equal(50m, third.Value.Summary.TotalCredits);
+        Assert.Equal(Math.Abs(signedOpening + 50m), third.Value.Summary.ClosingBalanceAmount);
+        Assert.Empty(beyond.Value.Items);
+
+        var later = await statements.GetDriverStatementAsync(Page(), filters with
+        {
+            FromDate = new DateOnly(2027, 3, 1),
+            ToDate = new DateOnly(2027, 3, 1)
+        });
+        Assert.True(later.IsSuccess);
+        Assert.Equal("رصيد افتتاحي للفترة", later.Value.Items[0].MovementName);
+        Assert.Equal(new DateOnly(2027, 3, 1), later.Value.Items[0].Date);
+        Assert.Equal(Math.Abs(signedOpening + 100m), later.Value.Items[0].BalanceAmount);
+        Assert.Equal(50m, later.Value.Summary.TotalCredits);
+        var searched = await statements.GetDriverStatementAsync(Page(), filters with
+        {
+            Search = "no matching movement",
+            DriverTripId = 1
+        });
+        Assert.True(searched.IsSuccess);
+        Assert.True(Assert.Single(searched.Value.Items).IsOpeningBalance);
+        Assert.Equal(Math.Abs(signedOpening), searched.Value.Summary.ClosingBalanceAmount);
+        Assert.Equal(0m, searched.Value.Summary.TotalTripCost);
+    }
+
+    private static Task SeedDriverLineAsync(
+        CashManagementTestDatabase database,
+        int journalEntryId,
+        DateOnly entryDate,
+        decimal signedAmount,
+        bool isOpening) => database.SeedPostedJournalEntryAsync(
+            journalEntryId: journalEntryId,
+            entryNumber: $"DRIVER-{journalEntryId}",
+            entryDate: entryDate,
+            entryType: isOpening ? JournalEntryType.Opening : JournalEntryType.Manual,
+            sourceType: isOpening ? JournalEntrySourceType.FiscalYearClosing : null,
+            sourceId: isOpening ? 1 : null,
+            sourceNumber: null,
+            lines:
+            [
+                new CashManagementTestDatabase.JournalEntryLineSeed(
+                    AccountId: 2,
+                    PartyType: JournalPartyType.Driver,
+                    PartyId: 1,
+                    Debit: Math.Max(signedAmount, 0m),
+                    Credit: Math.Max(-signedAmount, 0m),
+                    Currency: CurrencyCode.EGP,
+                    ExchangeRate: 1m,
+                    TransactionDebit: Math.Max(signedAmount, 0m),
+                    TransactionCredit: Math.Max(-signedAmount, 0m))
+            ],
+            fiscalYearId: 3);
+
     [Fact]
     public async Task CashboxStatementCalculatesPeriodOpeningAndClosingBalances()
     {
@@ -441,7 +558,8 @@ public sealed class FinancialStatementServiceTests
         Assert.Equal(1, result.Value.BusinessPartnerId);
         Assert.Equal("Customer One", result.Value.BusinessPartnerName);
         Assert.Equal(CurrencyCode.EGP, result.Value.Currency);
-        Assert.Equal(3, result.Value.TotalCount);
+        Assert.Equal(4, result.Value.TotalCount);
+        Assert.True(result.Value.Items[0].IsOpeningBalance);
         Assert.Single(
             result.Value.Items,
             item =>
@@ -543,7 +661,7 @@ public sealed class FinancialStatementServiceTests
         Assert.Equal(CurrencyCode.USD, result.Value.Currency);
         Assert.Equal(CurrencyCode.EGP, result.Value.BaseCurrency);
         Assert.Collection(
-            result.Value.Items,
+            result.Value.Items.Where(item => !item.IsOpeningBalance),
             opening =>
             {
                 Assert.Equal(100m, opening.DebitAmount);
@@ -638,7 +756,7 @@ public sealed class FinancialStatementServiceTests
         Assert.True(overall.IsSuccess);
         Assert.Equal(1, overall.Value.DriverId);
         Assert.Equal("Driver One", overall.Value.DriverName);
-        Assert.Equal(3, overall.Value.TotalCount);
+        Assert.Equal(4, overall.Value.TotalCount);
         Assert.Equal(100m, overall.Value.Summary.TotalPaidToDriver);
         Assert.Equal(20m, overall.Value.Summary.TotalReceivedFromDriver);
         Assert.Equal(60m, overall.Value.Summary.TotalTripCost);
@@ -647,7 +765,7 @@ public sealed class FinancialStatementServiceTests
             "مبلغ مطلوب من السائق",
             overall.Value.Summary.ClosingBalanceDescription);
 
-        Assert.Equal(2, tripSpecific.Value.TotalCount);
+        Assert.Equal(3, tripSpecific.Value.TotalCount);
         Assert.Equal(0m, tripSpecific.Value.Summary.TotalPaidToDriver);
         Assert.Equal(20m, tripSpecific.Value.Summary.TotalReceivedFromDriver);
         Assert.Equal(60m, tripSpecific.Value.Summary.TotalTripCost);
@@ -663,7 +781,7 @@ public sealed class FinancialStatementServiceTests
         Assert.Null(generalVoucher.BusinessPartnerName);
         Assert.Null(generalVoucher.CountryName);
         Assert.All(
-            tripSpecific.Value.Items,
+            tripSpecific.Value.Items.Where(item => !item.IsOpeningBalance),
             item =>
             {
                 Assert.Equal(1, item.BusinessPartnerId);
@@ -713,7 +831,7 @@ public sealed class FinancialStatementServiceTests
         Assert.Null(opening.CashVoucherId);
         Assert.Equal("رصيد افتتاحي", opening.MovementName);
         Assert.Equal(1, cashbox.Value.TotalCount);
-        Assert.Empty(driver.Value.Items);
+        Assert.True(Assert.Single(driver.Value.Items).IsOpeningBalance);
         Assert.Equal(1000m, cashbox.Value.Summary.ClosingBalance);
     }
 

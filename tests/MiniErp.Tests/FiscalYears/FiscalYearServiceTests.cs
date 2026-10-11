@@ -1555,6 +1555,11 @@ public sealed class FiscalYearServiceTests
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     CompanyId INTEGER NOT NULL,
                     ExchangeRateId INTEGER NULL,
+                    PartnerExchangeRateId INTEGER NULL,
+                    PartnerCurrency INTEGER NULL,
+                    PartnerAmount NUMERIC NULL,
+                    PartnerExchangeRate NUMERIC NULL,
+                    PartnerBaseAmount NUMERIC NULL,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 

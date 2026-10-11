@@ -8,6 +8,7 @@ using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
+using MiniErp.Infrastructure.Services.Cashboxes;
 
 namespace MiniErp.Infrastructure.Services.Invoices;
 
@@ -547,12 +548,20 @@ public sealed partial class InvoiceService
             .Select(line => line.SourceInvoiceLineId!.Value)
             .Distinct()
             .ToArray();
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<PreparedReturnSources>.Failure(access.Errors);
+        var scope = access.Value;
         var sourceType = invoice.InvoiceType == InvoiceType.SalesReturn
             ? InvoiceType.Sales
             : InvoiceType.Purchase;
         var returnType = invoice.InvoiceType;
         var sourceLines = await dbContext.InvoiceLines
             .AsNoTracking()
+            .Where(source => scope.HasAllCashboxes ||
+                (!source.Invoice.PaymentVouchers.Any(voucher => !voucher.CashboxId.HasValue ||
+                    !scope.ViewCashboxIds.Contains(voucher.CashboxId.Value)) &&
+                 !source.Invoice.Payments.Any(payment => !payment.CashVoucher.CashboxId.HasValue ||
+                    !scope.ViewCashboxIds.Contains(payment.CashVoucher.CashboxId.Value))))
             .Where(source =>
                 source.CompanyId == companyId &&
                 linkedLineIds.Contains(source.Id) &&
@@ -754,6 +763,16 @@ public sealed partial class InvoiceService
         int? currentInvoiceId,
         CancellationToken cancellationToken)
     {
+        if (currentInvoiceId.HasValue)
+        {
+            var access = await EnsurePaymentCashboxesExecuteAsync(currentInvoiceId.Value, cancellationToken);
+            if (access.IsFailure) return Result<PaymentPreparation?>.Failure(access.Errors);
+        }
+        if (cashboxId.HasValue)
+        {
+            var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, cashboxId.Value, cancellationToken);
+            if (access.IsFailure) return Result<PaymentPreparation?>.Failure(access.Errors);
+        }
         var currentVoucher = currentInvoiceId is int invoiceId
             ? await dbContext.CashVouchers
                 .FirstOrDefaultAsync(voucher =>
@@ -785,15 +804,7 @@ public sealed partial class InvoiceService
                     PaymentReferencesNotAllowed());
             }
 
-            var balanceError = await ValidateFinalCashboxBalanceAsync(
-                currentVoucher,
-                proposedCashboxId: null,
-                proposedDirection: null,
-                proposedAmount: null,
-                cancellationToken);
-            return balanceError is null
-                ? Result<PaymentPreparation?>.Success(null)
-                : Result<PaymentPreparation?>.Failure(balanceError);
+            return Result<PaymentPreparation?>.Success(null);
         }
 
         if (!cashboxId.HasValue)
@@ -888,102 +899,14 @@ public sealed partial class InvoiceService
                 CashboxAmountTooSmall());
         }
 
-        var finalBalanceError = await ValidateFinalCashboxBalanceAsync(
-            currentVoucher,
-            cashbox.Id,
-            expectedDirection,
-            cashboxAmount,
-            cancellationToken);
-        if (finalBalanceError is not null)
-        {
-            return Result<PaymentPreparation?>.Failure(
-                finalBalanceError);
-        }
-
         return Result<PaymentPreparation?>.Success(
             new PaymentPreparation(
-                cashbox.Id,
-                movementType.Id,
-                cashbox.Currency,
-                exchangeRateResult.Value.ExchangeRateId,
-                exchangeRateResult.Value.Rate,
-                cashboxAmount));
-    }
-
-    private async Task<Error?> ValidateFinalCashboxBalanceAsync(
-        CashVoucher? currentVoucher,
-        int? proposedCashboxId,
-        CashDirection? proposedDirection,
-        decimal? proposedAmount,
-        CancellationToken cancellationToken)
-    {
-        var affectedCashboxIds = new HashSet<int>();
-        if (currentVoucher?.CashboxId is int currentCashboxId)
-        {
-            affectedCashboxIds.Add(currentCashboxId);
-        }
-
-        if (proposedCashboxId.HasValue)
-        {
-            affectedCashboxIds.Add(proposedCashboxId.Value);
-        }
-
-        foreach (var cashboxId in affectedCashboxIds)
-        {
-            var excludedVoucherId = currentVoucher?.Id;
-            var balance = await dbContext.Cashboxes
-                .AsNoTracking()
-                .Where(cashbox =>
-                    cashbox.CompanyId == companyId &&
-                    cashbox.Id == cashboxId)
-                .Select(cashbox =>
-                    cashbox.OpeningBalance +
-                    (cashbox.Vouchers
-                        .Where(voucher =>
-                            voucher.IsPosted &&
-                            (!excludedVoucherId.HasValue ||
-                             voucher.Id != excludedVoucherId.Value))
-                        .Sum(voucher =>
-                            (decimal?)(voucher.Direction ==
-                                CashDirection.Receipt
-                                ? voucher.Amount
-                                : -voucher.Amount)) ?? 0m))
-                .SingleAsync(cancellationToken);
-
-            if (proposedCashboxId == cashboxId &&
-                proposedDirection.HasValue &&
-                proposedAmount.HasValue)
-            {
-                balance += proposedDirection == CashDirection.Receipt
-                    ? proposedAmount.Value
-                    : -proposedAmount.Value;
-            }
-
-            if (balance < 0m)
-            {
-                return InsufficientCashboxBalance(cashboxId);
-            }
-        }
-
-        return null;
-    }
-
-    private async Task<Error?> ValidatePaymentRemovalAsync(
-        int invoiceId,
-        CancellationToken cancellationToken)
-    {
-        var currentVoucher = await dbContext.CashVouchers
-            .FirstOrDefaultAsync(voucher =>
-                voucher.CompanyId == companyId &&
-                voucher.InvoiceId == invoiceId,
-                cancellationToken);
-
-        return await ValidateFinalCashboxBalanceAsync(
-            currentVoucher,
-            proposedCashboxId: null,
-            proposedDirection: null,
-            proposedAmount: null,
-            cancellationToken);
+                CashboxId: cashbox.Id,
+                CashMovementTypeId: movementType.Id,
+                CashboxCurrency: cashbox.Currency,
+                ExchangeRateId: exchangeRateResult.Value.ExchangeRateId,
+                ExchangeRate: exchangeRateResult.Value.Rate,
+                CashboxAmount: cashboxAmount));
     }
 
     private async Task<Error?> ValidateStockAsync(

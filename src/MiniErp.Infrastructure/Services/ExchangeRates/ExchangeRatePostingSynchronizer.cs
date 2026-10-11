@@ -45,7 +45,8 @@ public sealed class ExchangeRatePostingSynchronizer(
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
                 voucher.IsPosted &&
-                voucher.ExchangeRateId == exchangeRateId &&
+                (voucher.ExchangeRateId == exchangeRateId ||
+                 voucher.PartnerExchangeRateId == exchangeRateId) &&
                 !voucher.InvoiceId.HasValue &&
                 !voucher.CashboxTransferId.HasValue)
             .ToListAsync(cancellationToken);

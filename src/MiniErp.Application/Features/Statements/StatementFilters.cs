@@ -81,7 +81,8 @@ public enum DriverStatementSourceType
 {
     CashVoucher = 1,
     DriverTrip = 2,
-    JournalEntry = 3
+    JournalEntry = 3,
+    OpeningBalance = 4
 }
 
 public enum EmployeeStatementSourceType

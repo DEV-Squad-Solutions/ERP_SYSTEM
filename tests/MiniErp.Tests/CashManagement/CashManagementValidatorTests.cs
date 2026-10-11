@@ -393,7 +393,7 @@ public sealed class CashManagementValidatorTests
                 "AccountId", "Amount", "BusinessPartnerId", "CashboxId",
                 "CashMovementTypeId", "Description", "Direction", "DriverId",
                 "DriverTripId", "EmployeeId", "EmployeeMovementType",
-                "ExchangeRate", "ExternalPartyName", "Notes", "ReferenceNumber",
+                "ExchangeRate", "ExternalPartyName", "Notes", "PartnerExchangeRate", "ReferenceNumber",
                 "VoucherDate"
             ],
             typeof(CashVoucherRequest)
@@ -430,6 +430,28 @@ public sealed class CashManagementValidatorTests
             result.Errors,
             error => error.PropertyName ==
                 nameof(CashVoucherRequest.CashboxId));
+    }
+
+    [Fact]
+    public void PartnerExchangeRateIsOnlyAcceptedForCompletedPartnerVouchers()
+    {
+        var request = CreateVoucher(employeeId: null, partnerId: 1,
+            driverId: null, tripId: null, externalPartyName: null) with
+        {
+            PartnerExchangeRate = 50m
+        };
+        var validator = new CashVoucherUpdateRequestValidator();
+        Assert.True(validator.Validate(request).IsValid);
+        foreach (var rate in new[] { 0m, -1m, 0.0000000000001m })
+            Assert.Contains(validator.Validate(request with { PartnerExchangeRate = rate }).Errors,
+                error => error.PropertyName == nameof(CashVoucherUpdateRequest.PartnerExchangeRate));
+        Assert.Contains(validator.Validate(request with { BusinessPartnerId = null, AccountId = 1 }).Errors,
+            error => error.PropertyName == nameof(CashVoucherUpdateRequest.PartnerExchangeRate));
+        var draft = new CashVoucherRequest(VoucherDate: request.VoucherDate,
+            Direction: request.Direction, CashboxId: 1, Amount: 10m,
+            Description: null, BusinessPartnerId: 1, PartnerExchangeRate: 50m);
+        Assert.Contains(new CashVoucherRequestValidator().Validate(draft).Errors,
+            error => error.PropertyName == nameof(CashVoucherRequest.PartnerExchangeRate));
     }
 
     [Fact]

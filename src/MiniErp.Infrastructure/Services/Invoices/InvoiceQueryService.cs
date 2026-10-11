@@ -8,6 +8,7 @@ using MiniErp.Application.Features.Invoices;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.Cashboxes;
 
 namespace MiniErp.Infrastructure.Services.Invoices;
 
@@ -16,7 +17,8 @@ public sealed partial class InvoiceQueryService(
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
     IInvoiceInventoryService invoiceInventoryService,
-    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver)
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
+    ICashboxAccessService? cashboxAccessService = null)
     : IInvoiceQueryService, IScopedService
 {
     private static readonly ItemMovementType[] InvoiceItemMovementTypes =
@@ -53,9 +55,17 @@ public sealed partial class InvoiceQueryService(
         }
 
         var fiscalYearId = fiscalYearResult.Value.FiscalYearId;
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<InvoicePagedResponse>.Failure(access.Errors);
+        var scope = access.Value;
 
         var query = dbContext.Invoices
             .AsNoTracking()
+            .Where(invoice => scope.HasAllCashboxes ||
+                (!invoice.PaymentVouchers.Any(voucher => !voucher.CashboxId.HasValue ||
+                    !scope.ViewCashboxIds.Contains(voucher.CashboxId.Value)) &&
+                 !invoice.Payments.Any(payment => !payment.CashVoucher.CashboxId.HasValue ||
+                    !scope.ViewCashboxIds.Contains(payment.CashVoucher.CashboxId.Value))))
             .Where(invoice =>
                 invoice.CompanyId == companyId &&
                 invoice.FiscalYearId == fiscalYearId);
@@ -113,6 +123,8 @@ public sealed partial class InvoiceQueryService(
             return Result<InvoiceResponse>.Failure(fiscalYearResult.Errors);
         }
 
+        var access = await EnsureInvoiceCashboxAccessAsync(id, cancellationToken);
+        if (access.IsFailure) return Result<InvoiceResponse>.Failure(access.Errors);
         var response = await GetResponseAsync(
             id,
             fiscalYearResult.Value.FiscalYearId,
@@ -121,6 +133,29 @@ public sealed partial class InvoiceQueryService(
         return response is null
             ? Result<InvoiceResponse>.Failure(NotFound(id))
             : Result<InvoiceResponse>.Success(response);
+    }
+
+    private async Task<Result> EnsureInvoiceCashboxAccessAsync(int id, CancellationToken cancellationToken)
+    {
+        var ids = await dbContext.CashVouchers.AsNoTracking()
+            .Where(voucher => voucher.CompanyId == companyId &&
+                (voucher.InvoiceId == id || (voucher.InvoicePayment != null && voucher.InvoicePayment.InvoiceId == id)))
+            .Select(voucher => voucher.CashboxId).Distinct().ToListAsync(cancellationToken);
+        foreach (var cashboxId in ids)
+        {
+            if (cashboxId.HasValue)
+            {
+                var access = await CashboxPermissionGuard.ViewAsync(cashboxAccessService, cashboxId.Value, cancellationToken);
+                if (access.IsFailure) return access;
+            }
+            else
+            {
+                var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+                if (access.IsFailure) return Result.Failure(access.Errors);
+                if (!access.Value.HasAllCashboxes) return Result.Failure(CashboxPermissionGuard.Forbidden());
+            }
+        }
+        return Result.Success();
     }
 
     private static Error? ValidateFilters(InvoiceFilterRequest filters)

@@ -1586,6 +1586,24 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<decimal?>("PartnerAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("PartnerBaseAmount")
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<int?>("PartnerCurrency")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("PartnerExchangeRate")
+                        .HasPrecision(28, 12)
+                        .HasColumnType("decimal(28,12)");
+
+                    b.Property<int?>("PartnerExchangeRateId")
+                        .HasColumnType("int");
+
                     b.Property<int>("PartyType")
                         .HasColumnType("int");
 
@@ -1627,6 +1645,8 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.HasIndex("CompanyId", "InvoiceId")
                         .HasFilter("[InvoiceId] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.HasIndex("CompanyId", "PartnerExchangeRateId");
 
                     b.HasIndex("CompanyId", "VoucherNumber")
                         .HasFilter("[IsDeleted] = 0");
@@ -5515,6 +5535,33 @@ namespace MiniErp.Infrastructure.Migrations
                     b.ToTable("RefreshTokens", (string)null);
                 });
 
+            modelBuilder.Entity("MiniErp.Infrastructure.Identity.UserCashboxPermission", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CashboxId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("CanExecute")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("CanView")
+                        .HasColumnType("bit");
+
+                    b.HasKey("UserId", "CompanyId", "CashboxId");
+
+                    b.HasIndex("CompanyId", "CashboxId");
+
+                    b.ToTable("UserCashboxPermissions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_UserCashboxPermissions_ExecuteIncludesView", "[CanExecute] = 0 OR [CanView] = 1");
+                        });
+                });
+
             modelBuilder.Entity("MiniErp.Infrastructure.Identity.UserCompany", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -5522,6 +5569,15 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.Property<int>("CompanyId")
                         .HasColumnType("int");
+
+                    b.Property<bool>("AllCashboxes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<Guid>("CashboxPermissionsRevision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uniqueidentifier");
 
                     b.HasKey("UserId", "CompanyId");
 
@@ -5995,6 +6051,12 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasPrincipalKey("CompanyId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("MiniErp.Domain.Entities.Companies.ExchangeRate", "PartnerExchangeRateRecord")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "PartnerExchangeRateId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Account");
 
                     b.Navigation("BusinessPartner");
@@ -6018,6 +6080,8 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("FiscalYear");
 
                     b.Navigation("Invoice");
+
+                    b.Navigation("PartnerExchangeRateRecord");
                 });
 
             modelBuilder.Entity("MiniErp.Domain.Entities.CashManagement.Cashbox", b =>
@@ -7143,6 +7207,26 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("MiniErp.Infrastructure.Identity.UserCashboxPermission", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.CashManagement.Cashbox", "Cashbox")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "CashboxId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Infrastructure.Identity.UserCompany", "UserCompany")
+                        .WithMany("CashboxPermissions")
+                        .HasForeignKey("UserId", "CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Cashbox");
+
+                    b.Navigation("UserCompany");
+                });
+
             modelBuilder.Entity("MiniErp.Infrastructure.Identity.UserCompany", b =>
                 {
                     b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
@@ -7293,6 +7377,11 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("RefreshTokens");
 
                     b.Navigation("UserCompanies");
+                });
+
+            modelBuilder.Entity("MiniErp.Infrastructure.Identity.UserCompany", b =>
+                {
+                    b.Navigation("CashboxPermissions");
                 });
 #pragma warning restore 612, 618
         }

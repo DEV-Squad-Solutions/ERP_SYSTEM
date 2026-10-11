@@ -115,31 +115,34 @@ public sealed class EmployeeFinancialStatementTests
         var response = statementResult.Value;
 
         Assert.Equal(1, response.EmployeeId);
-        Assert.Equal(4, response.Items.Count);
+        Assert.Equal(5, response.Items.Count);
+        Assert.Equal(5, response.TotalCount);
+        AssertOpeningAnchor(response.Items[0], expectedBalance: 0m);
+        var transactions = response.Items.Where(item => !item.IsOpeningBalance).ToArray();
 
         // Item 1: Opening Balance (+5000) -> Running Balance = 5,000
-        Assert.Equal(EmployeeStatementSourceType.OpeningBalance, response.Items[0].SourceType);
-        Assert.Equal(0m, response.Items[0].DebitAmount);
-        Assert.Equal(5000m, response.Items[0].CreditAmount);
-        Assert.Equal(5000m, response.Items[0].BalanceAmount);
+        Assert.Equal(EmployeeStatementSourceType.OpeningBalance, transactions[0].SourceType);
+        Assert.Equal(0m, transactions[0].DebitAmount);
+        Assert.Equal(5000m, transactions[0].CreditAmount);
+        Assert.Equal(5000m, transactions[0].BalanceAmount);
 
         // Item 2: Salary Transfer (+2000) -> Running Balance = 7,000
-        Assert.Equal(EmployeeStatementSourceType.SalaryTransfer, response.Items[1].SourceType);
-        Assert.Equal(0m, response.Items[1].DebitAmount);
-        Assert.Equal(2000m, response.Items[1].CreditAmount);
-        Assert.Equal(7000m, response.Items[1].BalanceAmount);
+        Assert.Equal(EmployeeStatementSourceType.SalaryTransfer, transactions[1].SourceType);
+        Assert.Equal(0m, transactions[1].DebitAmount);
+        Assert.Equal(2000m, transactions[1].CreditAmount);
+        Assert.Equal(7000m, transactions[1].BalanceAmount);
 
         // Item 3: Debit (-500) -> Running Balance = 6,500
-        Assert.Equal(EmployeeStatementSourceType.Movement, response.Items[2].SourceType);
-        Assert.Equal(500m, response.Items[2].DebitAmount);
-        Assert.Equal(0m, response.Items[2].CreditAmount);
-        Assert.Equal(6500m, response.Items[2].BalanceAmount);
+        Assert.Equal(EmployeeStatementSourceType.Movement, transactions[2].SourceType);
+        Assert.Equal(500m, transactions[2].DebitAmount);
+        Assert.Equal(0m, transactions[2].CreditAmount);
+        Assert.Equal(6500m, transactions[2].BalanceAmount);
 
         // Item 4: Bonus (+1000) -> Running Balance = 7,500
-        Assert.Equal(EmployeeStatementSourceType.Movement, response.Items[3].SourceType);
-        Assert.Equal(0m, response.Items[3].DebitAmount);
-        Assert.Equal(1000m, response.Items[3].CreditAmount);
-        Assert.Equal(7500m, response.Items[3].BalanceAmount);
+        Assert.Equal(EmployeeStatementSourceType.Movement, transactions[3].SourceType);
+        Assert.Equal(0m, transactions[3].DebitAmount);
+        Assert.Equal(1000m, transactions[3].CreditAmount);
+        Assert.Equal(7500m, transactions[3].BalanceAmount);
 
         // Summary Assertions
         Assert.Equal(8000m, response.Summary.TotalCredits); // 5000 + 2000 + 1000
@@ -357,35 +360,38 @@ public sealed class EmployeeFinancialStatementTests
         // Assert
         Assert.True(statementResult.IsSuccess);
         var response = statementResult.Value;
-        Assert.Equal(4, response.Items.Count);
+        Assert.Equal(5, response.Items.Count);
+        Assert.Equal(5, response.TotalCount);
+        AssertOpeningAnchor(response.Items[0], expectedBalance: 0m);
+        var transactions = response.Items.Where(item => !item.IsOpeningBalance).ToArray();
 
         // Item 0: Debit (-300)
-        Assert.Equal(EmployeeStatementSourceType.Movement, response.Items[0].SourceType);
-        Assert.Equal(300m, response.Items[0].DebitAmount);
-        Assert.Equal(0m, response.Items[0].CreditAmount);
-        Assert.Equal(-300m, response.Items[0].RunningBalance);
-        Assert.Equal(300m, response.Items[0].BalanceAmount);
+        Assert.Equal(EmployeeStatementSourceType.Movement, transactions[0].SourceType);
+        Assert.Equal(300m, transactions[0].DebitAmount);
+        Assert.Equal(0m, transactions[0].CreditAmount);
+        Assert.Equal(-300m, transactions[0].RunningBalance);
+        Assert.Equal(300m, transactions[0].BalanceAmount);
 
         // Item 1: Credit (+500) -> Running Balance = -300 + 500 = +200
-        Assert.Equal(EmployeeStatementSourceType.Movement, response.Items[1].SourceType);
-        Assert.Equal(0m, response.Items[1].DebitAmount);
-        Assert.Equal(500m, response.Items[1].CreditAmount);
-        Assert.Equal(200m, response.Items[1].RunningBalance);
-        Assert.Equal(200m, response.Items[1].BalanceAmount);
+        Assert.Equal(EmployeeStatementSourceType.Movement, transactions[1].SourceType);
+        Assert.Equal(0m, transactions[1].DebitAmount);
+        Assert.Equal(500m, transactions[1].CreditAmount);
+        Assert.Equal(200m, transactions[1].RunningBalance);
+        Assert.Equal(200m, transactions[1].BalanceAmount);
 
         // Item 2: Deduction (-150) -> Running Balance = 200 - 150 = +50
-        Assert.Equal(EmployeeStatementSourceType.Movement, response.Items[2].SourceType);
-        Assert.Equal(150m, response.Items[2].DebitAmount);
-        Assert.Equal(0m, response.Items[2].CreditAmount);
-        Assert.Equal(50m, response.Items[2].RunningBalance);
-        Assert.Equal(50m, response.Items[2].BalanceAmount);
+        Assert.Equal(EmployeeStatementSourceType.Movement, transactions[2].SourceType);
+        Assert.Equal(150m, transactions[2].DebitAmount);
+        Assert.Equal(0m, transactions[2].CreditAmount);
+        Assert.Equal(50m, transactions[2].RunningBalance);
+        Assert.Equal(50m, transactions[2].BalanceAmount);
 
         // Item 3: Bonus (+250) -> Running Balance = 50 + 250 = +300
-        Assert.Equal(EmployeeStatementSourceType.Movement, response.Items[3].SourceType);
-        Assert.Equal(0m, response.Items[3].DebitAmount);
-        Assert.Equal(250m, response.Items[3].CreditAmount);
-        Assert.Equal(300m, response.Items[3].RunningBalance);
-        Assert.Equal(300m, response.Items[3].BalanceAmount);
+        Assert.Equal(EmployeeStatementSourceType.Movement, transactions[3].SourceType);
+        Assert.Equal(0m, transactions[3].DebitAmount);
+        Assert.Equal(250m, transactions[3].CreditAmount);
+        Assert.Equal(300m, transactions[3].RunningBalance);
+        Assert.Equal(300m, transactions[3].BalanceAmount);
 
         // Totals: TotalDebits = 300 + 150 = 450, TotalCredits = 500 + 250 = 750
         Assert.Equal(450m, response.Summary.TotalDebits);
@@ -433,7 +439,7 @@ public sealed class EmployeeFinancialStatementTests
             new EmployeeStatementFilterRequest(EmployeeId: 1));
 
         Assert.True(statementBefore.IsSuccess);
-        Assert.Empty(statementBefore.Value.Items);
+        AssertOpeningAnchor(Assert.Single(statementBefore.Value.Items), expectedBalance: 0m);
         Assert.Equal(0m, statementBefore.Value.Summary.ClosingBalanceAmount);
 
         // Act 2: Move salary
@@ -451,8 +457,9 @@ public sealed class EmployeeFinancialStatementTests
             new EmployeeStatementFilterRequest(EmployeeId: 1));
 
         Assert.True(statementAfter.IsSuccess);
-        Assert.Single(statementAfter.Value.Items);
-        var item = statementAfter.Value.Items[0];
+        Assert.Equal(2, statementAfter.Value.Items.Count);
+        AssertOpeningAnchor(statementAfter.Value.Items[0], expectedBalance: 0m);
+        var item = Assert.Single(statementAfter.Value.Items, item => !item.IsOpeningBalance);
         Assert.Equal(EmployeeStatementSourceType.SalaryTransfer, item.SourceType);
         Assert.Equal(0m, item.DebitAmount);
         Assert.Equal(2000m, item.CreditAmount);
@@ -509,10 +516,11 @@ public sealed class EmployeeFinancialStatementTests
             new EmployeeStatementFilterRequest(EmployeeId: 1));
 
         Assert.True(allStatementResult.IsSuccess);
-        Assert.Equal(2, allStatementResult.Value.Items.Count);
+        Assert.Equal(3, allStatementResult.Value.Items.Count);
+        AssertOpeningAnchor(allStatementResult.Value.Items[0], expectedBalance: 0m);
 
         // Payment item
-        var payItem = allStatementResult.Value.Items[0];
+        var payItem = allStatementResult.Value.Items[1];
         Assert.Equal(EmployeeStatementSourceType.CashVoucher, payItem.SourceType);
         Assert.Equal(600m, payItem.DebitAmount);
         Assert.Equal(0m, payItem.CreditAmount);
@@ -523,7 +531,7 @@ public sealed class EmployeeFinancialStatementTests
         Assert.Equal("ADV-001", payItem.ReferenceNumber);
 
         // Receipt item
-        var recItem = allStatementResult.Value.Items[1];
+        var recItem = allStatementResult.Value.Items[2];
         Assert.Equal(EmployeeStatementSourceType.CashVoucher, recItem.SourceType);
         Assert.Equal(0m, recItem.DebitAmount);
         Assert.Equal(200m, recItem.CreditAmount);
@@ -540,9 +548,12 @@ public sealed class EmployeeFinancialStatementTests
                 SourceType: EmployeeStatementSourceType.CashVoucher));
 
         Assert.True(cashFilterResult.IsSuccess);
-        Assert.Equal(2, cashFilterResult.Value.Items.Count);
+        Assert.Equal(3, cashFilterResult.Value.Items.Count);
+        AssertOpeningAnchor(cashFilterResult.Value.Items[0], expectedBalance: 0m);
+        Assert.All(cashFilterResult.Value.Items.Skip(1), item =>
+            Assert.Equal(EmployeeStatementSourceType.CashVoucher, item.SourceType));
 
-        // Act 3: Filter by Movement SourceType -> should return 0 (since both are CashVouchers)
+        // Act 3: No Movement transactions; retain the report's opening anchor.
         var movFilterResult = await statementService.GetEmployeeStatementAsync(
             new PaginationRequest { PageNumber = 1, PageSize = 10 },
             new EmployeeStatementFilterRequest(
@@ -550,7 +561,7 @@ public sealed class EmployeeFinancialStatementTests
                 SourceType: EmployeeStatementSourceType.Movement));
 
         Assert.True(movFilterResult.IsSuccess);
-        Assert.Empty(movFilterResult.Value.Items);
+        AssertOpeningAnchor(Assert.Single(movFilterResult.Value.Items), expectedBalance: 0m);
     }
 
     [Fact]
@@ -593,7 +604,7 @@ public sealed class EmployeeFinancialStatementTests
 
         // Assert
         Assert.True(statementResult.IsSuccess);
-        Assert.Empty(statementResult.Value.Items);
+        AssertOpeningAnchor(Assert.Single(statementResult.Value.Items), expectedBalance: 0m);
         Assert.Equal(0m, statementResult.Value.Summary.ClosingBalanceAmount);
 
         Assert.True(balanceResult.IsSuccess);
@@ -682,9 +693,11 @@ public sealed class EmployeeFinancialStatementTests
         // Act 3: Account summary
         var summaryResult = await statementService.GetEmployeeAccountSummaryAsync(1);
 
-        // Assert 1: Exactly 4 transactions (no double counting)
+        // Assert 1: Exactly 4 transactions and one report anchor (no double counting)
         Assert.True(statementResult.IsSuccess);
-        Assert.Equal(4, statementResult.Value.Items.Count);
+        Assert.Equal(5, statementResult.Value.Items.Count);
+        AssertOpeningAnchor(statementResult.Value.Items[0], expectedBalance: 0m);
+        Assert.Equal(4, statementResult.Value.Items.Count(item => !item.IsOpeningBalance));
 
         // Total Credits = 1000 + 2000 + 300 = 3300
         // Total Debits = 500
@@ -735,20 +748,26 @@ public sealed class EmployeeFinancialStatementTests
             new PaginationRequest { PageNumber = 1, PageSize = 10 },
             new EmployeeStatementFilterRequest(EmployeeId: 1));
 
-        // Assert - Company 1 should see 0 items
+        // Assert - Company 1 should see only its zero opening anchor.
         Assert.True(statementResult1.IsSuccess);
-        Assert.Empty(statementResult1.Value.Items);
+        AssertOpeningAnchor(Assert.Single(statementResult1.Value.Items), expectedBalance: 0m);
         Assert.Equal(0m, statementResult1.Value.Summary.ClosingBalanceAmount);
     }
 
-    [Fact]
-    public async Task EmployeeStatement_DefaultsToCurrentYearAndUsesCarriedOpeningBalance()
+    [Theory]
+    [InlineData(700)]
+    [InlineData(-700)]
+    public async Task EmployeeStatement_DefaultsToCurrentYearAndUsesCarriedOpeningBalance(int carriedBalance)
     {
         await using var database =
             await PayrollEntryTestDatabase.CreateAsync(companyId: 1);
         await EnsureFinancialLedgerSchemaAsync(database.Context);
         await database.Context.Database.ExecuteSqlRawAsync(
             """
+            UPDATE FiscalYears
+            SET Name = '2026', StartDate = '2026-01-01', EndDate = '2026-12-31'
+            WHERE Id = 1 AND CompanyId = 1;
+
             INSERT INTO FiscalYears (
                 Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent,
                 RowVersion, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
@@ -775,7 +794,9 @@ public sealed class EmployeeFinancialStatementTests
                 TransactionDebit, TransactionCredit, IsDeleted)
             VALUES (
                 1, 9001, 1, {(int)JournalPartyType.Employee}, 1,
-                'Carried employee balance', 0, 700, 1, 1, 0, 700, 0);
+                'Carried employee balance', {Math.Max(-carriedBalance, 0)},
+                {Math.Max(carriedBalance, 0)}, 1, 1,
+                {Math.Max(-carriedBalance, 0)}, {Math.Max(carriedBalance, 0)}, 0);
             """);
         var currentMovement = new EmployeeMovement
         {
@@ -789,6 +810,18 @@ public sealed class EmployeeFinancialStatementTests
         };
         currentMovement.ApplyAmounts(EmployeeMovementType.Credit, 100m);
         currentMovement.ApplyExchangeRate(1m);
+        var currentDebit = new EmployeeMovement
+        {
+            CompanyId = 1,
+            FiscalYearId = 1,
+            EmployeeId = 1,
+            Type = EmployeeMovementType.Debit,
+            MovementDate = new DateOnly(2026, 3, 1),
+            Currency = CurrencyCode.EGP,
+            Notes = "Current year debit"
+        };
+        currentDebit.ApplyAmounts(EmployeeMovementType.Debit, 150m);
+        currentDebit.ApplyExchangeRate(1m);
         var oldMovement = new EmployeeMovement
         {
             CompanyId = 1,
@@ -803,6 +836,7 @@ public sealed class EmployeeFinancialStatementTests
         oldMovement.ApplyExchangeRate(1m);
         database.Context.EmployeeMovements.AddRange(
             currentMovement,
+            currentDebit,
             oldMovement);
         await database.Context.SaveChangesAsync();
         var statements = database.CreateStatementService();
@@ -815,6 +849,20 @@ public sealed class EmployeeFinancialStatementTests
             new EmployeeStatementFilterRequest(
                 EmployeeId: 1,
                 FiscalYearId: 3));
+        var firstPage = await statements.GetEmployeeStatementAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 1 },
+            new EmployeeStatementFilterRequest(EmployeeId: 1));
+        var secondPage = await statements.GetEmployeeStatementAsync(
+            new PaginationRequest { PageNumber = 2, PageSize = 1 },
+            new EmployeeStatementFilterRequest(EmployeeId: 1));
+        var thirdPage = await statements.GetEmployeeStatementAsync(
+            new PaginationRequest { PageNumber = 3, PageSize = 1 },
+            new EmployeeStatementFilterRequest(EmployeeId: 1));
+        var period = await statements.GetEmployeeStatementAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new EmployeeStatementFilterRequest(
+                EmployeeId: 1,
+                FromDate: new DateOnly(2026, 3, 1)));
         var balance = await statements.GetEmployeeBalanceAsync(1);
         var summary = await statements.GetEmployeeAccountSummaryAsync(1);
         var historicalBalance = await statements.GetEmployeeBalanceAsync(
@@ -825,21 +873,56 @@ public sealed class EmployeeFinancialStatementTests
             fiscalYearId: 3);
 
         Assert.True(current.IsSuccess);
-        Assert.Equal(700m, current.Value.Summary.OpeningBalanceAmount);
-        Assert.Equal(800m, current.Value.Summary.ClosingBalanceAmount);
-        Assert.Equal(
-            "Current year movement",
-            Assert.Single(current.Value.Items).Description);
+        Assert.Equal(Math.Abs(carriedBalance), current.Value.Summary.OpeningBalanceAmount);
+        Assert.Equal(Math.Abs(carriedBalance - 50m), current.Value.Summary.ClosingBalanceAmount);
+        Assert.Equal(150m, current.Value.Summary.TotalDebits);
+        Assert.Equal(100m, current.Value.Summary.TotalCredits);
+        Assert.Equal(3, current.Value.TotalCount);
+        Assert.Equal(3, current.Value.Items.Count);
+        AssertOpeningAnchor(current.Value.Items[0], expectedBalance: carriedBalance);
+        Assert.Equal("رصيد افتتاحي مرحل", current.Value.Items[0].MovementName);
+        Assert.Equal(new DateOnly(2026, 1, 1), current.Value.Items[0].Date);
+        Assert.Equal("Current year movement", current.Value.Items[1].Description);
+        Assert.Equal(carriedBalance + 100m, current.Value.Items[1].RunningBalance);
+        Assert.Equal("Current year debit", current.Value.Items[2].Description);
+        Assert.Equal(carriedBalance - 50m, current.Value.Items[2].RunningBalance);
+
+        Assert.True(firstPage.IsSuccess);
+        Assert.Equal(3, firstPage.Value.TotalCount);
+        Assert.Equal(3, firstPage.Value.TotalPages);
+        AssertOpeningAnchor(Assert.Single(firstPage.Value.Items), expectedBalance: carriedBalance);
+        Assert.True(secondPage.IsSuccess);
+        var secondPageItem = Assert.Single(secondPage.Value.Items);
+        Assert.False(secondPageItem.IsOpeningBalance);
+        Assert.Equal("Current year movement", secondPageItem.Description);
+        Assert.Equal(carriedBalance + 100m, secondPageItem.RunningBalance);
+        Assert.True(thirdPage.IsSuccess);
+        var thirdPageItem = Assert.Single(thirdPage.Value.Items);
+        Assert.False(thirdPageItem.IsOpeningBalance);
+        Assert.Equal("Current year debit", thirdPageItem.Description);
+        Assert.Equal(carriedBalance - 50m, thirdPageItem.RunningBalance);
+
+        Assert.True(period.IsSuccess);
+        Assert.Equal(2, period.Value.Items.Count);
+        AssertOpeningAnchor(period.Value.Items[0], expectedBalance: carriedBalance + 100m);
+        Assert.Equal("رصيد افتتاحي للفترة", period.Value.Items[0].MovementName);
+        Assert.Equal(new DateOnly(2026, 3, 1), period.Value.Items[0].Date);
+        Assert.Equal(150m, period.Value.Summary.TotalDebits);
+        Assert.Equal(0m, period.Value.Summary.TotalCredits);
+        Assert.Equal(Math.Abs(carriedBalance - 50m), period.Value.Summary.ClosingBalanceAmount);
+        Assert.Equal(carriedBalance - 50m, period.Value.Items[1].RunningBalance);
         Assert.True(historical.IsSuccess);
+        Assert.Equal(2, historical.Value.Items.Count);
+        AssertOpeningAnchor(historical.Value.Items[0], expectedBalance: 0m);
         Assert.Equal(
             "Old year movement",
-            Assert.Single(historical.Value.Items).Description);
+            Assert.Single(historical.Value.Items, item => !item.IsOpeningBalance).Description);
         Assert.True(balance.IsSuccess);
-        Assert.Equal(800m, balance.Value.BalanceAmount);
+        Assert.Equal(Math.Abs(carriedBalance - 50m), balance.Value.BalanceAmount);
         Assert.Equal(1, balance.Value.FiscalYearId);
         Assert.True(summary.IsSuccess);
-        Assert.Equal(700m, summary.Value.OpeningBalance);
-        Assert.Equal(800m, summary.Value.CurrentBalance);
+        Assert.Equal(carriedBalance, summary.Value.OpeningBalance);
+        Assert.Equal(carriedBalance - 50m, summary.Value.CurrentBalance);
         Assert.Equal(1, summary.Value.FiscalYearId);
         Assert.True(historicalBalance.IsSuccess);
         Assert.Equal(50m, historicalBalance.Value.BalanceAmount);
@@ -847,6 +930,25 @@ public sealed class EmployeeFinancialStatementTests
         Assert.True(historicalSummary.IsSuccess);
         Assert.Equal(-50m, historicalSummary.Value.CurrentBalance);
         Assert.Equal(3, historicalSummary.Value.FiscalYearId);
+    }
+
+    private static void AssertOpeningAnchor(
+        EmployeeStatementItemResponse item,
+        decimal expectedBalance)
+    {
+        Assert.True(item.IsOpeningBalance);
+        Assert.True(item.IsReadOnly);
+        Assert.Equal(EmployeeStatementSourceType.OpeningBalance, item.SourceType);
+        Assert.Equal(0, item.SourceId);
+        Assert.Equal(0m, item.DebitAmount);
+        Assert.Equal(0m, item.CreditAmount);
+        Assert.Equal(0m, item.BaseDebitAmount);
+        Assert.Equal(0m, item.BaseCreditAmount);
+        Assert.Equal(expectedBalance, item.RunningBalance);
+        Assert.Equal(Math.Abs(expectedBalance), item.BalanceAmount);
+        Assert.Equal(Math.Abs(expectedBalance), item.BaseBalanceAmount);
+        Assert.Null(item.JournalEntryId);
+        Assert.Null(item.JournalEntryLineId);
     }
 
     private static async Task<Result<CashVoucherResponse>> AddPostedVoucherAsync(

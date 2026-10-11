@@ -11,4 +11,10 @@ public sealed class UserCompany
     public int CompanyId { get; set; }
 
     public Company Company { get; set; } = null!;
+
+    public bool AllCashboxes { get; set; }
+
+    public Guid CashboxPermissionsRevision { get; set; }
+
+    public ICollection<UserCashboxPermission> CashboxPermissions { get; set; } = [];
 }

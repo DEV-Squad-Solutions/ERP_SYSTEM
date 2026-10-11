@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Models;
 using MiniErp.Application.Features.CashboxRevaluations;
+using MiniErp.Application.Features.CashVouchers;
 using MiniErp.Application.Features.Statements;
 using MiniErp.Domain.Enums;
 
@@ -233,6 +234,80 @@ public sealed class CashboxRevaluationServiceTests
         Assert.Equal(600m, result.Value.TargetBaseAmount);
         Assert.Equal(1_000m, result.Value.DeltaBaseAmount);
         Assert.NotNull(result.Value.JournalEntryId);
+    }
+
+    [Fact]
+    public async Task Revaluation_PostsLossOnNegativeForeignCashWithoutChangingQuantity()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        await database.ConfigurePaymentPostingAsync();
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE Cashboxes SET OpeningExchangeRate = 50, BaseOpeningBalance = 5000 WHERE Id = 6;
+            UPDATE JournalEntryLines SET Debit = 5000, ExchangeRate = 50 WHERE Id = 1006;
+            """);
+        var voucherService = database.CreatePostingVoucherService(1);
+        var draft = await voucherService.AddAsync(
+            new CashVoucherRequest(
+                VoucherDate: new DateOnly(2026, 1, 20),
+                Direction: CashDirection.Payment,
+                CashboxId: 6,
+                Amount: 110m,
+                Description: "EUR payment"));
+        Assert.True(draft.IsSuccess, draft.Error.Description);
+        var payment = await voucherService.UpdateAsync(draft.Value.Id,
+            new CashVoucherUpdateRequest(
+                VoucherDate: draft.Value.VoucherDate,
+                Direction: CashDirection.Payment,
+                CashboxId: 6,
+                CashMovementTypeId: 10,
+                EmployeeId: null,
+                BusinessPartnerId: null,
+                DriverId: null,
+                DriverTripId: null,
+                ExternalPartyName: null,
+                Amount: 110m,
+                ReferenceNumber: null,
+                Description: draft.Value.Description,
+                Notes: null,
+                RowVersion: draft.Value.RowVersion,
+                ExchangeRate: 50m,
+                AccountId: 2));
+        Assert.True(payment.IsSuccess, payment.Error.Description);
+        Assert.Equal(110m, payment.Value.Amount);
+        Assert.Equal(5500m, payment.Value.BaseAmount);
+        Assert.Equal(-10m, payment.Value.CashboxBalance);
+
+        var result = await database.CreateCashboxRevaluationService(1).CreateAsync(
+            new CashboxRevaluationRequest(
+                CashboxId: 6,
+                RevaluationDate: new DateOnly(2026, 1, 31),
+                ClosingRate: 60m));
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(-10m, result.Value.ForeignAmount);
+        Assert.Equal(-500m, result.Value.CarryingBaseAmount);
+        Assert.Equal(-600m, result.Value.TargetBaseAmount);
+        Assert.Equal(-100m, result.Value.DeltaBaseAmount);
+        var lines = await database.Context.JournalEntryLines.AsNoTracking()
+            .Where(line => line.JournalEntryId == result.Value.JournalEntryId)
+            .ToListAsync();
+        var cashboxLine = Assert.Single(lines, line => line.PartyType == JournalPartyType.Cashbox);
+        Assert.Equal(0m, cashboxLine.Debit);
+        Assert.Equal(100m, cashboxLine.Credit);
+        var lossLine = Assert.Single(lines, line => line.PartyType is null);
+        Assert.Equal(100m, lossLine.Debit);
+        Assert.Equal(0m, lossLine.Credit);
+        var statement = await database.CreateStatementService(1).GetCashboxStatementAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new CashboxStatementFilterRequest(CashboxId: 6));
+        Assert.True(statement.IsSuccess, statement.Error.Description);
+        Assert.Equal(-10m, statement.Value.Summary.ClosingBalance);
+        Assert.Equal(-600m, statement.Value.Summary.BaseClosingBalance);
+        var adjustment = Assert.Single(statement.Value.Items,
+            row => row.SourceType == JournalEntrySourceType.CashboxRevaluation);
+        Assert.Equal(0m, adjustment.PaymentAmount);
+        Assert.Equal(0m, adjustment.ReceiptAmount);
+        Assert.Equal(100m, adjustment.BasePaymentAmount);
     }
 
     [Fact]

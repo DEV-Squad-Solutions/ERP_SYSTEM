@@ -21,7 +21,8 @@ public sealed class DashboardService(
     IProfitabilityReportService profitabilityReportService,
     IAccountingReadinessService accountingReadinessService,
     TimeProvider timeProvider,
-    ILogger<DashboardService>? logger = null)
+    ILogger<DashboardService>? logger = null,
+    ICashboxAccessService? cashboxAccessService = null)
     : IDashboardService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -31,6 +32,11 @@ public sealed class DashboardService(
         CancellationToken cancellationToken = default)
     {
         var startedAt = Stopwatch.GetTimestamp();
+        if (cashboxAccessService is not null)
+        {
+            var scope = await cashboxAccessService.GetScopeAsync(cancellationToken);
+            if (scope.IsFailure) return Result<DashboardResponse>.Failure(scope.Errors);
+        }
         var result = await BuildDashboardAsync(filters, cancellationToken);
         var elapsed = Stopwatch.GetElapsedTime(startedAt);
         ReportingMetrics.DashboardDuration.Record(
@@ -361,6 +367,11 @@ public sealed class DashboardService(
             DateOnly toDate,
             CancellationToken cancellationToken)
     {
+        var scope = cashboxAccessService is null ? null
+            : await cashboxAccessService.GetScopeAsync(cancellationToken);
+        if (scope?.IsFailure == true) return [];
+        var allCashboxes = scope is null || scope.Value.HasAllCashboxes;
+        var visibleIds = scope?.Value.ViewCashboxIds ?? [];
         var cashboxTotals = PostedJournalLedgerLines
             .Create(dbContext, companyId)
             .Where(line => line.PartyType == JournalPartyType.Cashbox &&
@@ -377,7 +388,8 @@ public sealed class DashboardService(
 
         var balances = await (
                 from cashbox in dbContext.Cashboxes.AsNoTracking()
-                where cashbox.CompanyId == companyId
+                where cashbox.CompanyId == companyId &&
+                    (allCashboxes || visibleIds.Contains(cashbox.Id))
                 join cashboxTotal in cashboxTotals
                     on cashbox.Id equals cashboxTotal.CashboxId
                     into matchingTotals

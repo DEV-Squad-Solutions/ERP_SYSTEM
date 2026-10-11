@@ -10,6 +10,7 @@ using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.Cashboxes;
 using static MiniErp.Application.Features.MonetaryAccountRevaluations.MonetaryAccountRevaluationErrors;
 
 namespace MiniErp.Infrastructure.Services.MonetaryAccountRevaluations;
@@ -20,7 +21,8 @@ public sealed class MonetaryAccountRevaluationService(
     IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
     IAccountMappingResolver accountMappingResolver,
     IAutomaticPostingService automaticPostingService,
-    TimeProvider timeProvider) : IMonetaryAccountRevaluationService, IScopedService
+    TimeProvider timeProvider,
+    ICashboxAccessService? cashboxAccessService = null) : IMonetaryAccountRevaluationService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
 
@@ -28,6 +30,9 @@ public sealed class MonetaryAccountRevaluationService(
         int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<IReadOnlyList<MonetaryAccountRevaluationOption>>.Failure(access.Errors);
+        var scope = access.Value;
         var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
             fiscalYearId,
             cancellationToken: cancellationToken);
@@ -40,6 +45,12 @@ public sealed class MonetaryAccountRevaluationService(
         var baseCurrency = await GetBaseCurrencyAsync(cancellationToken);
         var rows = await dbContext.JournalEntryLines
             .AsNoTracking()
+            .Where(line => scope.HasAllCashboxes || !dbContext.AccountMappings.Any(mapping =>
+                mapping.CompanyId == companyId && mapping.FiscalYearId == line.JournalEntry.FiscalYearId &&
+                mapping.MappingType == AccountingMappingType.Cashbox && mapping.AccountId == line.AccountId &&
+                (!mapping.SourceId.HasValue || !scope.ViewCashboxIds.Contains(mapping.SourceId.Value))))
+            .Where(line => scope.HasAllCashboxes || line.PartyType != JournalPartyType.Cashbox ||
+                (line.PartyId.HasValue && scope.ViewCashboxIds.Contains(line.PartyId.Value)))
             .Where(line => line.CompanyId == companyId &&
                 line.JournalEntry.FiscalYearId == fiscalYear.Value.FiscalYearId &&
                 line.Currency != baseCurrency &&
@@ -108,6 +119,12 @@ public sealed class MonetaryAccountRevaluationService(
             request.PartyType is not (JournalPartyType.Customer or JournalPartyType.Supplier or JournalPartyType.Cashbox))
             return Result<MonetaryAccountRevaluationResponse>.Failure(UnsupportedParty());
 
+        if (request.PartyType == JournalPartyType.Cashbox && request.PartyId.HasValue)
+        {
+            var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, request.PartyId.Value, cancellationToken);
+            if (access.IsFailure) return Result<MonetaryAccountRevaluationResponse>.Failure(access.Errors);
+        }
+
         await using var transaction = await dbContext.Database.BeginTransactionAsync(
             IsolationLevel.Serializable, cancellationToken);
 
@@ -123,6 +140,19 @@ public sealed class MonetaryAccountRevaluationService(
             .SingleOrDefaultAsync(cancellationToken);
         if (account is null)
             return Result<MonetaryAccountRevaluationResponse>.Failure(AccountNotFound(request.AccountId));
+
+        // Cash accounts remain protected when older/manual lines lack a
+        // Cashbox party reference. An account may map to multiple cashboxes.
+        var mappedCashboxes = await dbContext.AccountMappings.AsNoTracking()
+            .Where(mapping => mapping.CompanyId == companyId && mapping.AccountId == request.AccountId &&
+                mapping.MappingType == AccountingMappingType.Cashbox)
+            .Select(mapping => mapping.SourceId).Distinct().ToListAsync(cancellationToken);
+        foreach (var mappedCashboxId in mappedCashboxes)
+        {
+            if (!mappedCashboxId.HasValue) continue;
+            var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, mappedCashboxId.Value, cancellationToken);
+            if (access.IsFailure) return Result<MonetaryAccountRevaluationResponse>.Failure(access.Errors);
+        }
 
         var party = await ResolvePartyAsync(request.PartyType, request.PartyId, request.Currency, cancellationToken);
         if (party.IsFailure)
@@ -330,6 +360,14 @@ public sealed class MonetaryAccountRevaluationService(
         int? fiscalYearId = null,
         CancellationToken cancellationToken = default)
     {
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<IReadOnlyList<MonetaryAccountRevaluationResponse>>.Failure(access.Errors);
+        var scope = access.Value;
+        if (partyType == JournalPartyType.Cashbox && partyId.HasValue)
+        {
+            var permission = await CashboxPermissionGuard.ViewAsync(cashboxAccessService, partyId.Value, cancellationToken);
+            if (permission.IsFailure) return Result<IReadOnlyList<MonetaryAccountRevaluationResponse>>.Failure(permission.Errors);
+        }
         var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
             fiscalYearId,
             fromDate,
@@ -343,6 +381,12 @@ public sealed class MonetaryAccountRevaluationService(
 
         var rows = await dbContext.MonetaryAccountRevaluations
             .AsNoTracking()
+            .Where(row => scope.HasAllCashboxes || !dbContext.AccountMappings.Any(mapping =>
+                mapping.CompanyId == companyId && mapping.FiscalYearId == row.FiscalYearId &&
+                mapping.MappingType == AccountingMappingType.Cashbox && mapping.AccountId == row.AccountId &&
+                (!mapping.SourceId.HasValue || !scope.ViewCashboxIds.Contains(mapping.SourceId.Value))))
+            .Where(row => scope.HasAllCashboxes || row.PartyType != JournalPartyType.Cashbox ||
+                (row.PartyId.HasValue && scope.ViewCashboxIds.Contains(row.PartyId.Value)))
             .Where(row => row.CompanyId == companyId && !row.IsDeleted &&
                 row.FiscalYearId == fiscalYear.Value.FiscalYearId &&
                 (!accountId.HasValue || row.AccountId == accountId.Value) &&

@@ -55,7 +55,8 @@ internal static class ExchangeRateCascadeUpdater
             .IgnoreQueryFilters()
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
-                voucher.ExchangeRateId == exchangeRateId)
+                (voucher.ExchangeRateId == exchangeRateId ||
+                 voucher.PartnerExchangeRateId == exchangeRateId))
             .ToListAsync(cancellationToken);
         var transferIds = linkedVouchers
             .Where(voucher => voucher.CashboxTransferId.HasValue)
@@ -110,7 +111,15 @@ internal static class ExchangeRateCascadeUpdater
         foreach (var voucher in linkedVouchers.Where(voucher =>
                      !voucher.CashboxTransferId.HasValue))
         {
-            voucher.ApplyExchangeRate(exchangeRateId, roundedRate);
+            if (voucher.ExchangeRateId == exchangeRateId)
+                voucher.ApplyExchangeRate(exchangeRateId, roundedRate);
+            if (voucher.PartnerCurrency.HasValue)
+                voucher.ApplyPartnerSettlement(
+                    voucher.PartnerCurrency.Value,
+                    voucher.PartnerExchangeRateId,
+                    voucher.PartnerExchangeRateId == exchangeRateId
+                        ? roundedRate : voucher.PartnerExchangeRate!.Value,
+                    preserveAmount: true);
         }
 
         foreach (var transferVoucherGroup in transferVoucherGroups)
@@ -196,6 +205,9 @@ internal static class ExchangeRateCascadeUpdater
         var affectedVoucherRates = affectedVouchers.ToDictionary(
             voucher => voucher.Id,
             voucher => voucher.ExchangeRate);
+        var affectedPartnerRates = affectedVouchers.ToDictionary(
+            voucher => voucher.Id,
+            voucher => voucher.PartnerExchangeRate ?? voucher.ExchangeRate);
         var invoicePaymentVoucherIds = invoicePaymentRates.Keys.ToArray();
 
         var partnerMovements = await dbContext.BusinessPartnerMovements
@@ -233,7 +245,7 @@ internal static class ExchangeRateCascadeUpdater
                 continue;
             }
 
-            if (affectedVoucherRates.TryGetValue(
+            if (affectedPartnerRates.TryGetValue(
                     voucherId,
                     out var voucherRate))
             {

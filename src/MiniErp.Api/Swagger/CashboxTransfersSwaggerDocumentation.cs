@@ -37,22 +37,22 @@ public sealed class CashboxTransfersSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Admin only. Atomically creates a payment in the source cashbox and a receipt in the destination cashbox.",
                     "Requires two different active company-owned cashboxes and a positive source amount. When their currencies differ, the API resolves both currencies against the company base currency and calculates the destination amount automatically. Optional `exchangeRate` and `destinationExchangeRate` values override the dated rates and are persisted for the transfer date when that company/currency/date rate does not already exist. `conversionRate` and `destinationAmount` remain supported as manual inputs; when supplied, they are verified against the resolved rates, or are used to derive and persist a missing destination rate.",
-                    "The source cashbox balance cannot become negative. Generated vouchers cannot be edited independently.",
+                    "The source cashbox balance may become negative. Generated vouchers cannot be edited independently.",
                     "The source amount and destination amount are kept in their respective cashbox currencies.")),
             nameof(CashboxTransfersController.Update) => (
                 "Update a cashbox transfer",
                 SwaggerOperationDescription.Create(
                     "Admin only. Atomically updates the transfer and both generated vouchers.",
                     "Requires the current 8-byte rowVersion and the complete desired transfer values.",
-                    "Currency conversion follows the same automatic and optional manual-rate rules as create. All affected cashbox balances must remain non-negative.",
-                    "Stale versions and balance conflicts return 409.")),
+                    "Currency conversion follows the same automatic and optional manual-rate rules as create. Affected cashbox balances may be negative.",
+                    "Stale versions return 409.")),
             nameof(CashboxTransfersController.Delete) => (
                 "Delete a cashbox transfer",
                 SwaggerOperationDescription.Create(
                     "Admin only. Soft-deletes the transfer and both generated vouchers atomically.",
                     "Requires a positive transfer ID.",
-                    "Removing the destination receipt must not make its balance negative.",
-                    "Missing records return 404; balance conflicts return 409.")),
+                    "Removing the destination receipt may leave its balance negative.",
+                    "Missing records return 404.")),
             _ => default
         };
 

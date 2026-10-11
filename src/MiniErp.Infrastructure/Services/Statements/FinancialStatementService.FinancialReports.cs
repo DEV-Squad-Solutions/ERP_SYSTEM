@@ -14,6 +14,8 @@ public sealed partial class FinancialStatementService
             FinancialStatementReportRequest request,
             CancellationToken cancellationToken = default)
     {
+        var access = await EnsureFullCashboxAccessAsync(cancellationToken);
+        if (access.IsFailure) return Result<FinancialStatementReportResponse>.Failure(access.Errors);
         if (!Enum.IsDefined(statementType))
         {
             return Result<FinancialStatementReportResponse>.Failure(
