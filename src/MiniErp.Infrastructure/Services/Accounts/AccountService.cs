@@ -16,7 +16,8 @@ namespace MiniErp.Infrastructure.Services.Accounts;
 public sealed class AccountService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    ICashboxAccessService? cashboxAccessService = null)
     : IAccountService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -159,6 +160,12 @@ public sealed class AccountService(
         int fiscalYearId,
         CancellationToken cancellationToken = default)
     {
+        var scope = cashboxAccessService is null ? null
+            : await cashboxAccessService.GetScopeAsync(cancellationToken);
+        if (scope?.IsFailure == true)
+            return Result<IReadOnlyList<JournalAccountSelectResponse>>.Failure(scope.Errors);
+        var allCashboxes = scope is null || scope.Value.HasAllCashboxes;
+        var visibleCashboxIds = scope?.Value.ViewCashboxIds ?? [];
         if (fiscalYearId <= 0)
         {
             return Result<IReadOnlyList<JournalAccountSelectResponse>>.Failure(
@@ -323,6 +330,7 @@ public sealed class AccountService(
                 .Where(cashbox =>
                     cashbox.CompanyId == companyId &&
                     cashbox.IsActive &&
+                    (allCashboxes || visibleCashboxIds.Contains(cashbox.Id)) &&
                     cashboxIds.Contains(cashbox.Id))
                 .OrderBy(cashbox => cashbox.Name)
                 .ThenBy(cashbox => cashbox.Id)

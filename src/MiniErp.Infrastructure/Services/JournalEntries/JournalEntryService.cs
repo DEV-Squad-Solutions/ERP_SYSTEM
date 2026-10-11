@@ -16,7 +16,8 @@ public sealed class JournalEntryService(
     ApplicationDbContext dbContext,
     ICurrentCompanyContext currentCompanyContext,
     TimeProvider timeProvider,
-    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver)
+    IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
+    ICashboxAccessService? cashboxAccessService = null)
     : IJournalEntryService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -46,11 +47,24 @@ public sealed class JournalEntryService(
         }
 
         var search = filters.Search?.Trim();
+        var scope = cashboxAccessService is null ? null
+            : await cashboxAccessService.GetScopeAsync(cancellationToken);
+        if (scope?.IsFailure == true)
+            return Result<PagedResponse<JournalEntryResponse>>.Failure(scope.Errors);
+        var allCashboxes = scope is null || scope.Value.HasAllCashboxes;
+        var visibleIds = scope?.Value.ViewCashboxIds ?? [];
         var query = dbContext.JournalEntries
             .AsNoTracking()
             .Where(entry =>
                 entry.CompanyId == companyId &&
                 entry.FiscalYearId == fiscalYear.Value.FiscalYearId);
+        if (!allCashboxes)
+            query = query.Where(entry => !entry.Lines.Any(line =>
+                (line.PartyType == JournalPartyType.Cashbox &&
+                    (!line.PartyId.HasValue || !visibleIds.Contains(line.PartyId.Value))) ||
+                (line.PartyType != JournalPartyType.Cashbox && dbContext.AccountMappings.Any(mapping =>
+                    mapping.CompanyId == companyId && mapping.FiscalYearId == entry.FiscalYearId &&
+                    mapping.MappingType == AccountingMappingType.Cashbox && mapping.AccountId == line.AccountId))));
 
         query = query
             .Where(entry =>
@@ -117,6 +131,9 @@ public sealed class JournalEntryService(
         {
             return Result<JournalEntryResponse>.Failure(fiscalYear.Errors);
         }
+
+        var access = await EnsureEntryCashboxesAsync(id, execute: false, cancellationToken);
+        if (access.IsFailure) return Result<JournalEntryResponse>.Failure(access.Errors);
 
         var response = (await LoadResponsesAsync(
                 [id],
@@ -288,6 +305,8 @@ public sealed class JournalEntryService(
         {
             return Result<JournalEntryResponse>.Failure(Concurrency());
         }
+        var oldAccess = await EnsureEntryCashboxesAsync(id, execute: true, cancellationToken);
+        if (oldAccess.IsFailure) return Result<JournalEntryResponse>.Failure(oldAccess.Errors);
 
         if (entry.EntryType == JournalEntryType.Automatic)
         {
@@ -433,6 +452,8 @@ public sealed class JournalEntryService(
         {
             return Result.Failure(Concurrency());
         }
+        var access = await EnsureEntryCashboxesAsync(id, execute: true, cancellationToken);
+        if (access.IsFailure) return access;
 
         if (entry.EntryType == JournalEntryType.Automatic)
         {
@@ -620,6 +641,14 @@ public sealed class JournalEntryService(
             .OfType<int>()
             .Distinct()
             .ToArray();
+        if (cashboxAccessService is not null)
+        {
+            foreach (var cashboxId in cashboxIds)
+            {
+                var access = await cashboxAccessService.EnsureExecuteAsync(cashboxId, cancellationToken);
+                if (access.IsFailure) return access;
+            }
+        }
         var cashboxes = await dbContext.Cashboxes
             .AsNoTracking()
             .Where(cashbox =>
@@ -960,6 +989,37 @@ public sealed class JournalEntryService(
                     Lines: lines);
             })
             .ToArray();
+    }
+
+    private async Task<Result> EnsureEntryCashboxesAsync(int id, bool execute, CancellationToken cancellationToken)
+    {
+        if (cashboxAccessService is null) return Result.Success();
+        var hasUnresolvedCashboxLine = await dbContext.JournalEntryLines.AsNoTracking()
+            .AnyAsync(line => line.CompanyId == companyId && line.JournalEntryId == id &&
+                ((line.PartyType == JournalPartyType.Cashbox && !line.PartyId.HasValue) ||
+                 (line.PartyType != JournalPartyType.Cashbox && dbContext.AccountMappings.Any(mapping =>
+                     mapping.CompanyId == companyId && mapping.FiscalYearId == line.JournalEntry.FiscalYearId &&
+                     mapping.MappingType == AccountingMappingType.Cashbox && mapping.AccountId == line.AccountId))), cancellationToken);
+        if (hasUnresolvedCashboxLine)
+        {
+            var scope = await cashboxAccessService.GetScopeAsync(cancellationToken);
+            if (scope.IsFailure) return Result.Failure(scope.Errors);
+            if (!scope.Value.HasAllCashboxes)
+                return Result.Failure(Error.Forbidden("CashboxPermissions.FullCompanyRequired",
+                    "Legacy cashbox account lines without an identifiable cashbox require full-company access."));
+        }
+        var cashboxIds = await dbContext.JournalEntryLines.AsNoTracking()
+            .Where(line => line.CompanyId == companyId && line.JournalEntryId == id &&
+                line.PartyType == JournalPartyType.Cashbox && line.PartyId.HasValue)
+            .Select(line => line.PartyId!.Value).Distinct().ToArrayAsync(cancellationToken);
+        foreach (var cashboxId in cashboxIds)
+        {
+            var access = execute
+                ? await cashboxAccessService.EnsureExecuteAsync(cashboxId, cancellationToken)
+                : await cashboxAccessService.EnsureViewAsync(cashboxId, cancellationToken);
+            if (access.IsFailure) return access;
+        }
+        return Result.Success();
     }
 
     private static string? NormalizeOptional(string? value) =>

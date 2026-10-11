@@ -15,6 +15,7 @@ using MiniErp.Domain.Entities.Employees;
 using MiniErp.Domain.Entities.Logistics;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.Cashboxes;
 
 namespace MiniErp.Infrastructure.Services.CashVouchers;
 
@@ -26,7 +27,8 @@ public sealed class CashVoucherService(
     TimeProvider timeProvider,
     ICashVoucherPostingService cashVoucherPostingService,
     IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
-    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null)
+    IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
+    ICashboxAccessService? cashboxAccessService = null)
     : ICashVoucherService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -46,6 +48,14 @@ public sealed class CashVoucherService(
         }
 
         filters ??= new CashVoucherFilterRequest();
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<PagedResponse<CashVoucherResponse>>.Failure(access.Errors);
+        var scope = access.Value;
+        if (filters.CashboxId is int selectedCashboxId)
+        {
+            var permission = await CashboxPermissionGuard.ViewAsync(cashboxAccessService, selectedCashboxId, cancellationToken);
+            if (permission.IsFailure) return Result<PagedResponse<CashVoucherResponse>>.Failure(permission.Errors);
+        }
         var fiscalYearResult = await fiscalYearQueryScopeResolver.ResolveAsync(
             fiscalYearId: filters.FiscalYearId,
             fromDate: filters.FromDate,
@@ -109,6 +119,11 @@ public sealed class CashVoucherService(
 
         var query = dbContext.CashVouchers
             .AsNoTracking()
+            .Where(voucher => scope.HasAllCashboxes ||
+                (voucher.CashboxId.HasValue && scope.ViewCashboxIds.Contains(voucher.CashboxId.Value) &&
+                 (!voucher.CashboxTransferId.HasValue ||
+                  (scope.ViewCashboxIds.Contains(voucher.CashboxTransfer!.SourceCashboxId) &&
+                   scope.ViewCashboxIds.Contains(voucher.CashboxTransfer.DestinationCashboxId)))))
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
                 voucher.FiscalYearId == fiscalYear.FiscalYearId)
@@ -229,6 +244,7 @@ public sealed class CashVoucherService(
 
         var openingQuery = dbContext.Cashboxes
             .AsNoTracking()
+            .Where(cashbox => scope.HasAllCashboxes || scope.ViewCashboxIds.Contains(cashbox.Id))
             .Where(cashbox =>
                 canIncludeOpeningBalances &&
                 cashbox.CompanyId == companyId &&
@@ -362,6 +378,14 @@ public sealed class CashVoucherService(
             CancellationToken cancellationToken = default)
     {
         filters ??= new CashVoucherHandoverReportFilterRequest();
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<CashVoucherHandoverReportResponse>.Failure(access.Errors);
+        var scope = access.Value;
+        if (filters.CashboxId is int selectedCashboxId)
+        {
+            var permission = await CashboxPermissionGuard.ViewAsync(cashboxAccessService, selectedCashboxId, cancellationToken);
+            if (permission.IsFailure) return Result<CashVoucherHandoverReportResponse>.Failure(permission.Errors);
+        }
         var validation = new CashVoucherHandoverReportFilterRequestValidator()
             .Validate(filters);
         if (!validation.IsValid ||
@@ -406,7 +430,8 @@ public sealed class CashVoucherService(
                 !voucher.IsPosted &&
                 voucher.CashboxId.HasValue &&
                 !voucher.InvoiceId.HasValue &&
-                !voucher.CashboxTransferId.HasValue);
+                !voucher.CashboxTransferId.HasValue)
+            .Where(voucher => scope.HasAllCashboxes || scope.ViewCashboxIds.Contains(voucher.CashboxId!.Value));
 
         // The official balance is always based on posted vouchers, while the
         // handover amounts are shown separately as an operational expectation.
@@ -415,6 +440,7 @@ public sealed class CashVoucherService(
         // employee's hands. A selected cashbox only narrows the cards shown.
         var balanceRows = await dbContext.Cashboxes
             .AsNoTracking()
+            .Where(cashbox => scope.HasAllCashboxes || scope.ViewCashboxIds.Contains(cashbox.Id))
             .Where(cashbox =>
                 cashbox.CompanyId == companyId &&
                 (!filters.CashboxId.HasValue ||
@@ -654,6 +680,30 @@ public sealed class CashVoucherService(
             return Result<CashVoucherResponse>.Failure(fiscalYear.Errors);
         }
 
+        var reference = await dbContext.CashVouchers.AsNoTracking()
+            .Where(voucher => voucher.CompanyId == companyId && voucher.Id == id &&
+                voucher.FiscalYearId == fiscalYear.Value.FiscalYearId)
+            .Select(voucher => new
+            {
+                voucher.CashboxId,
+                SourceCashboxId = voucher.CashboxTransfer == null ? (int?)null : voucher.CashboxTransfer.SourceCashboxId,
+                DestinationCashboxId = voucher.CashboxTransfer == null ? (int?)null : voucher.CashboxTransfer.DestinationCashboxId
+            }).FirstOrDefaultAsync(cancellationToken);
+        if (reference is not null)
+        {
+            if (reference.CashboxId is null)
+            {
+                var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+                if (access.IsFailure) return Result<CashVoucherResponse>.Failure(access.Errors);
+                if (!access.Value.HasAllCashboxes) return Result<CashVoucherResponse>.Failure(CashboxPermissionGuard.Forbidden());
+            }
+            foreach (var cashboxId in new[] { reference.CashboxId, reference.SourceCashboxId, reference.DestinationCashboxId })
+            {
+                if (!cashboxId.HasValue) continue;
+                var access = await CashboxPermissionGuard.ViewAsync(cashboxAccessService, cashboxId.Value, cancellationToken);
+                if (access.IsFailure) return Result<CashVoucherResponse>.Failure(access.Errors);
+            }
+        }
         var response = await ProjectResponseQuery(
                 id,
                 fiscalYear.Value.FiscalYearId)
@@ -774,6 +824,8 @@ public sealed class CashVoucherService(
         CashVoucherRequest request,
         CancellationToken cancellationToken = default)
     {
+        var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, request.CashboxId, cancellationToken);
+        if (access.IsFailure) return Result<CashVoucherResponse>.Failure(access.Errors);
         await using var transaction = await dbContext.Database
             .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
@@ -986,6 +1038,9 @@ public sealed class CashVoucherService(
             return Result<CashVoucherResponse>.Failure(Concurrency());
         }
 
+        var access = await EnsureVoucherExecuteAsync(voucher, cancellationToken);
+        if (access.IsFailure) return Result<CashVoucherResponse>.Failure(access.Errors);
+
         var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
             fiscalYearId: voucher.FiscalYearId,
             fromDate: request.VoucherDate,
@@ -1129,6 +1184,9 @@ public sealed class CashVoucherService(
         {
             return Result.Failure(NotFound(id));
         }
+
+        var access = await EnsureVoucherExecuteAsync(voucher, cancellationToken);
+        if (access.IsFailure) return access;
 
         var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
             fiscalYearId: voucher.FiscalYearId,
@@ -1300,6 +1358,9 @@ public sealed class CashVoucherService(
             return Result<CashVoucherBulkItemResponse>.Failure(Concurrency());
         }
 
+        var access = await EnsureVoucherExecuteAsync(voucher, cancellationToken);
+        if (access.IsFailure) return Result<CashVoucherBulkItemResponse>.Failure(access.Errors);
+
         var request = ToUpdateRequest(item.Voucher!, item.RowVersion);
         var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
             fiscalYearId: voucher.FiscalYearId,
@@ -1436,6 +1497,9 @@ public sealed class CashVoucherService(
             return Result<CashVoucherBulkItemResponse>.Failure(
                 NotFound(id));
         }
+
+        var access = await EnsureVoucherExecuteAsync(voucher, cancellationToken);
+        if (access.IsFailure) return Result<CashVoucherBulkItemResponse>.Failure(access.Errors);
 
         if (!voucher.RowVersion.SequenceEqual(item.RowVersion!))
         {
@@ -1591,6 +1655,16 @@ public sealed class CashVoucherService(
         return request with { EmployeeMovementType = effectiveType };
     }
 
+    private async Task<Result> EnsureVoucherExecuteAsync(CashVoucher voucher, CancellationToken cancellationToken)
+    {
+        if (voucher.CashboxId is int cashboxId)
+            return await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, cashboxId, cancellationToken);
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        return access.IsFailure ? Result.Failure(access.Errors)
+            : access.Value.HasAllCashboxes ? Result.Success()
+            : Result.Failure(CashboxPermissionGuard.Forbidden());
+    }
+
     private static EmployeeMovementType GetDefaultEmployeeMovementType(
         CashDirection direction) =>
         direction == CashDirection.Receipt
@@ -1610,6 +1684,8 @@ public sealed class CashVoucherService(
         }
 
         var cashboxId = request.CashboxId.Value;
+        var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, cashboxId, cancellationToken);
+        if (access.IsFailure) return Result<VoucherPreparation>.Failure(access.Errors);
         if (enforceManualPostingTarget &&
             !HasExactlyOnePostingTarget(request))
         {

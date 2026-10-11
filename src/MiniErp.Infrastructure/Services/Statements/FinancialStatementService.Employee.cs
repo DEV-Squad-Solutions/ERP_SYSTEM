@@ -15,6 +15,9 @@ public sealed partial class FinancialStatementService
         EmployeeStatementFilterRequest filters,
         CancellationToken cancellationToken = default)
     {
+        var accessScope = cashboxAccessService is null ? null
+            : await cashboxAccessService.GetScopeAsync(cancellationToken);
+        if (accessScope?.IsFailure == true) return Result<EmployeeStatementResponse>.Failure(accessScope.Errors);
         var paginationError = ValidatePagination(pagination);
         if (paginationError is not null)
         {
@@ -160,7 +163,7 @@ public sealed partial class FinancialStatementService
                 BalanceDescription: EmployeeAccountRules.GetBalanceDescription(runningBalance),
                 ReferenceNumber: row.ReferenceNumber)
             {
-                JournalEntryId = row.JournalEntryId,
+                JournalEntryId = accessScope is null || accessScope.Value.HasAllCashboxes ? row.JournalEntryId : null,
                 JournalEntryLineId = row.JournalEntryLineId,
                 Currency = row.Currency,
                 OriginalAmount = row.OriginalAmount,

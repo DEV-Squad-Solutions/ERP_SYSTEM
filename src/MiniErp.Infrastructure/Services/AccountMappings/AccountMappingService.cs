@@ -12,7 +12,8 @@ namespace MiniErp.Infrastructure.Services.AccountMappings;
 
 public sealed class AccountMappingService(
     ApplicationDbContext dbContext,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    ICashboxAccessService? cashboxAccessService = null)
     : IAccountMappingService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -31,8 +32,14 @@ public sealed class AccountMappingService(
                 fiscalYearValidation.Errors);
         }
 
-        return Result<IReadOnlyList<AccountMappingResponse>>.Success(
-            await LoadResponsesAsync(fiscalYearId, cancellationToken));
+        var scope = cashboxAccessService is null ? null
+            : await cashboxAccessService.GetScopeAsync(cancellationToken);
+        if (scope?.IsFailure == true)
+            return Result<IReadOnlyList<AccountMappingResponse>>.Failure(scope.Errors);
+        var rows = await LoadResponsesAsync(fiscalYearId, cancellationToken);
+        return Result<IReadOnlyList<AccountMappingResponse>>.Success(rows.Where(row =>
+            row.MappingType != AccountingMappingType.Cashbox || scope is null ||
+            scope.Value.HasAllCashboxes || (row.SourceId.HasValue && scope.Value.CanView(row.SourceId.Value))).ToArray());
     }
 
     public async Task<Result<IReadOnlyList<AccountMappingResponse>>> ReplaceAsync(

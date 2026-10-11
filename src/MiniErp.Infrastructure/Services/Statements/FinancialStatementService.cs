@@ -11,7 +11,8 @@ namespace MiniErp.Infrastructure.Services.Statements;
 
 public sealed partial class FinancialStatementService(
     ApplicationDbContext dbContext,
-    ICurrentCompanyContext currentCompanyContext)
+    ICurrentCompanyContext currentCompanyContext,
+    ICashboxAccessService? cashboxAccessService = null)
     : IFinancialStatementService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -21,6 +22,12 @@ public sealed partial class FinancialStatementService(
         CashboxStatementFilterRequest filters,
         CancellationToken cancellationToken = default)
     {
+        if (cashboxAccessService is not null)
+        {
+            var access = await cashboxAccessService.EnsureViewAsync(filters.CashboxId, cancellationToken);
+            if (access.IsFailure)
+                return Result<CashboxStatementResponse>.Failure(access.Errors);
+        }
         var paginationError = ValidatePagination(pagination);
         if (paginationError is not null)
         {
@@ -290,6 +297,9 @@ public sealed partial class FinancialStatementService(
         PartnerStatementFilterRequest filters,
         CancellationToken cancellationToken = default)
     {
+        var accessScope = cashboxAccessService is null ? null
+            : await cashboxAccessService.GetScopeAsync(cancellationToken);
+        if (accessScope?.IsFailure == true) return Result<PartnerStatementResponse>.Failure(accessScope.Errors);
         var paginationError = ValidatePagination(pagination);
         if (paginationError is not null)
         {
@@ -460,7 +470,7 @@ public sealed partial class FinancialStatementService(
                 BaseDebitAmount = row.BaseDebit,
                 BaseCreditAmount = row.BaseCredit,
                 BaseBalanceAmount = Math.Abs(runningBaseBalance),
-                JournalEntryId = row.JournalEntryId,
+                JournalEntryId = accessScope is null || accessScope.Value.HasAllCashboxes ? row.JournalEntryId : null,
                 JournalEntryLineId = row.JournalEntryLineId,
                 SourceType = row.SourceType
             };
@@ -500,6 +510,9 @@ public sealed partial class FinancialStatementService(
         DriverStatementFilterRequest filters,
         CancellationToken cancellationToken = default)
     {
+        var accessScope = cashboxAccessService is null ? null
+            : await cashboxAccessService.GetScopeAsync(cancellationToken);
+        if (accessScope?.IsFailure == true) return Result<DriverStatementResponse>.Failure(accessScope.Errors);
         var paginationError = ValidatePagination(pagination);
         if (paginationError is not null)
         {
@@ -676,7 +689,8 @@ public sealed partial class FinancialStatementService(
                 TripCost: row.TripCost,
                 BalanceAmount: Math.Abs(runningBalance),
                 BalanceDescription: DriverBalanceDescription(runningBalance),
-                CashboxName: row.CashboxName,
+                CashboxName: accessScope is null || accessScope.Value.HasAllCashboxes ||
+                    (row.CashboxId.HasValue && accessScope.Value.CanView(row.CashboxId.Value)) ? row.CashboxName : null,
                 ReferenceNumber: row.ReferenceNumber)
             {
                 BusinessPartnerId = row.BusinessPartnerId,
@@ -684,7 +698,7 @@ public sealed partial class FinancialStatementService(
                 CountryName = row.CountryName,
                 DebitAmount = row.Debit,
                 CreditAmount = row.Credit,
-                JournalEntryId = row.JournalEntryId,
+                JournalEntryId = accessScope is null || accessScope.Value.HasAllCashboxes ? row.JournalEntryId : null,
                 JournalEntryLineId = row.JournalEntryLineId,
                 SourceType = row.SourceType
             };
@@ -1128,6 +1142,7 @@ public sealed partial class FinancialStatementService(
                 CashPaid = voucher == null ? 0m : line.Debit,
                 CashReceived = voucher == null ? 0m : line.Credit,
                 TripCost = trip == null ? 0m : line.Credit - line.Debit,
+                CashboxId = voucher == null ? null : (int?)voucher.CashboxId,
                 CashboxName = voucher != null && voucher.Cashbox != null
                     ? voucher.Cashbox.Name
                     : null,
@@ -1287,6 +1302,7 @@ public sealed partial class FinancialStatementService(
         public decimal CashReceived { get; init; }
         public decimal TripCost { get; init; }
         public string? CashboxName { get; init; }
+        public int? CashboxId { get; init; }
         public string? ReferenceNumber { get; init; }
         public CashDirection? Direction { get; init; }
         public int? CashMovementTypeId { get; init; }

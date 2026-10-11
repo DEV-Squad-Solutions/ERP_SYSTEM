@@ -8,6 +8,7 @@ using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Invoicing;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Enums;
+using MiniErp.Infrastructure.Services.Cashboxes;
 
 namespace MiniErp.Infrastructure.Services.Invoices;
 
@@ -547,12 +548,20 @@ public sealed partial class InvoiceService
             .Select(line => line.SourceInvoiceLineId!.Value)
             .Distinct()
             .ToArray();
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<PreparedReturnSources>.Failure(access.Errors);
+        var scope = access.Value;
         var sourceType = invoice.InvoiceType == InvoiceType.SalesReturn
             ? InvoiceType.Sales
             : InvoiceType.Purchase;
         var returnType = invoice.InvoiceType;
         var sourceLines = await dbContext.InvoiceLines
             .AsNoTracking()
+            .Where(source => scope.HasAllCashboxes ||
+                (!source.Invoice.PaymentVouchers.Any(voucher => !voucher.CashboxId.HasValue ||
+                    !scope.ViewCashboxIds.Contains(voucher.CashboxId.Value)) &&
+                 !source.Invoice.Payments.Any(payment => !payment.CashVoucher.CashboxId.HasValue ||
+                    !scope.ViewCashboxIds.Contains(payment.CashVoucher.CashboxId.Value))))
             .Where(source =>
                 source.CompanyId == companyId &&
                 linkedLineIds.Contains(source.Id) &&
@@ -754,6 +763,16 @@ public sealed partial class InvoiceService
         int? currentInvoiceId,
         CancellationToken cancellationToken)
     {
+        if (currentInvoiceId.HasValue)
+        {
+            var access = await EnsurePaymentCashboxesExecuteAsync(currentInvoiceId.Value, cancellationToken);
+            if (access.IsFailure) return Result<PaymentPreparation?>.Failure(access.Errors);
+        }
+        if (cashboxId.HasValue)
+        {
+            var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, cashboxId.Value, cancellationToken);
+            if (access.IsFailure) return Result<PaymentPreparation?>.Failure(access.Errors);
+        }
         var currentVoucher = currentInvoiceId is int invoiceId
             ? await dbContext.CashVouchers
                 .FirstOrDefaultAsync(voucher =>

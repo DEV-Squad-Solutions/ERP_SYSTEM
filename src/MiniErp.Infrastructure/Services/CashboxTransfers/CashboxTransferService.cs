@@ -9,6 +9,7 @@ using MiniErp.Domain.Entities.CashManagement;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.Cashboxes;
 using static MiniErp.Application.Features.CashboxTransfers.CashboxTransferErrors;
 
 namespace MiniErp.Infrastructure.Services.CashboxTransfers;
@@ -21,7 +22,8 @@ public sealed class CashboxTransferService(
     TimeProvider timeProvider,
     IFiscalYearQueryScopeResolver fiscalYearQueryScopeResolver,
     IFiscalYearPeriodGuard? fiscalYearPeriodGuard = null,
-    ICashboxTransferPostingService? cashboxTransferPostingService = null)
+    ICashboxTransferPostingService? cashboxTransferPostingService = null,
+    ICashboxAccessService? cashboxAccessService = null)
     : ICashboxTransferService, IScopedService
 {
     private readonly int companyId = currentCompanyContext.CompanyId;
@@ -32,6 +34,17 @@ public sealed class CashboxTransferService(
             CashboxTransferFilterRequest filters,
             CancellationToken cancellationToken = default)
     {
+        var access = await CashboxPermissionGuard.ScopeAsync(cashboxAccessService, cancellationToken);
+        if (access.IsFailure) return Result<PagedResponse<CashboxTransferListResponse>>.Failure(access.Errors);
+        var scope = access.Value;
+        foreach (var cashboxId in new[] { filters.SourceCashboxId, filters.DestinationCashboxId })
+        {
+            if (cashboxId.HasValue)
+            {
+                var permission = await CashboxPermissionGuard.ViewAsync(cashboxAccessService, cashboxId.Value, cancellationToken);
+                if (permission.IsFailure) return Result<PagedResponse<CashboxTransferListResponse>>.Failure(permission.Errors);
+            }
+        }
         if (ValidateFilters(filters) is { } filterError)
         {
             return Result<PagedResponse<CashboxTransferListResponse>>.Failure(
@@ -52,6 +65,9 @@ public sealed class CashboxTransferService(
         var search = filters.Search?.Trim();
         var query = dbContext.CashboxTransfers
             .AsNoTracking()
+            .Where(transfer => scope.HasAllCashboxes ||
+                (scope.ViewCashboxIds.Contains(transfer.SourceCashboxId) &&
+                 scope.ViewCashboxIds.Contains(transfer.DestinationCashboxId)))
             .Where(transfer =>
                 transfer.CompanyId == companyId &&
                 transfer.FiscalYearId == fiscalYear.Value.FiscalYearId)
@@ -109,6 +125,14 @@ public sealed class CashboxTransferService(
             id,
             cancellationToken,
             fiscalYear.Value.FiscalYearId);
+        if (response is not null)
+        {
+            foreach (var cashboxId in new[] { response.SourceCashboxId, response.DestinationCashboxId })
+            {
+                var access = await CashboxPermissionGuard.ViewAsync(cashboxAccessService, cashboxId, cancellationToken);
+                if (access.IsFailure) return Result<CashboxTransferResponse>.Failure(access.Errors);
+            }
+        }
         return response is null
             ? Result<CashboxTransferResponse>.Failure(NotFound(id))
             : Result<CashboxTransferResponse>.Success(response);
@@ -296,6 +320,12 @@ public sealed class CashboxTransferService(
             return Result<CashboxTransferResponse>.Failure(Concurrency());
         }
 
+        foreach (var cashboxId in new[] { transfer.SourceCashboxId, transfer.DestinationCashboxId })
+        {
+            var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, cashboxId, cancellationToken);
+            if (access.IsFailure) return Result<CashboxTransferResponse>.Failure(access.Errors);
+        }
+
         var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
             fiscalYearId: transfer.FiscalYearId,
             fromDate: request.TransferDate,
@@ -441,6 +471,12 @@ public sealed class CashboxTransferService(
             return Result.Failure(NotFound(id));
         }
 
+        foreach (var cashboxId in new[] { transfer.SourceCashboxId, transfer.DestinationCashboxId })
+        {
+            var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, cashboxId, cancellationToken);
+            if (access.IsFailure) return access;
+        }
+
         var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
             fiscalYearId: transfer.FiscalYearId,
             fromDate: transfer.TransferDate,
@@ -518,6 +554,12 @@ public sealed class CashboxTransferService(
         {
             return Result<TransferPreparation>.Failure(
                 CashboxesMustDiffer());
+        }
+
+        foreach (var cashboxId in new[] { sourceCashboxId, destinationCashboxId })
+        {
+            var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, cashboxId, cancellationToken);
+            if (access.IsFailure) return Result<TransferPreparation>.Failure(access.Errors);
         }
 
         var cashboxes = await dbContext.Cashboxes

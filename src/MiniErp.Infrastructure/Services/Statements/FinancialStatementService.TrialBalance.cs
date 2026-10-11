@@ -12,6 +12,8 @@ public sealed partial class FinancialStatementService
         TrialBalanceFilterRequest filters,
         CancellationToken cancellationToken = default)
     {
+        var access = await EnsureFullCashboxAccessAsync(cancellationToken);
+        if (access.IsFailure) return Result<TrialBalanceResponse>.Failure(access.Errors);
         var fiscalYear = await dbContext.FiscalYears
             .AsNoTracking()
             .Where(year =>

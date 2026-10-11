@@ -140,6 +140,8 @@ public sealed partial class ApplicationDbContext
 
     public DbSet<UserCompany> UserCompanies => Set<UserCompany>();
 
+    public DbSet<UserCashboxPermission> UserCashboxPermissions => Set<UserCashboxPermission>();
+
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PayrollEntry> PayrollEntries => Set<PayrollEntry>();
     public DbSet<Employee> Employees => Set<Employee>();

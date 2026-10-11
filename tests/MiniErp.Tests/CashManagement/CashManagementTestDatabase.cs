@@ -114,13 +114,15 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
 
     public CashboxService CreateCashboxService(
         int companyId,
-        ApplicationDbContext? context = null) =>
+        ApplicationDbContext? context = null,
+        ICashboxAccessService? cashboxAccessService = null) =>
         new(
             context ?? Context,
             new PaginationService(),
             new TestCurrentCompanyContext(companyId),
             new MiniErp.Tests.TestExchangeRateResolver(),
-            TimeProvider.System);
+            TimeProvider.System,
+            cashboxAccessService: cashboxAccessService);
 
     public CashMovementTypeService CreateMovementTypeService(
         int companyId,
@@ -133,7 +135,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
     public CashboxTransferService CreateCashboxTransferService(
         int companyId,
         ApplicationDbContext? context = null,
-        bool postToLedger = false)
+        bool postToLedger = false,
+        ICashboxAccessService? cashboxAccessService = null)
     {
         var serviceContext = context ?? Context;
         var companyContext = new TestCurrentCompanyContext(companyId);
@@ -159,14 +162,16 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                         companyContext,
                         TimeProvider.System,
                         NullLogger<AutomaticPostingService>.Instance))
-                : null);
+                : null,
+            cashboxAccessService: cashboxAccessService);
     }
 
     public CashVoucherService CreateVoucherService(
         int companyId,
         ApplicationDbContext? context = null,
         ICashVoucherPostingService? postingService = null,
-        IExchangeRateResolver? exchangeRateResolver = null)
+        IExchangeRateResolver? exchangeRateResolver = null,
+        ICashboxAccessService? cashboxAccessService = null)
     {
         var serviceContext = context ?? Context;
         var companyContext = new TestCurrentCompanyContext(companyId);
@@ -182,7 +187,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 companyContext),
             new FiscalYearPeriodGuard(
                 serviceContext,
-                companyContext));
+                companyContext),
+            cashboxAccessService: cashboxAccessService);
     }
 
     public CashVoucherService CreatePostingVoucherService(
@@ -248,7 +254,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
 
     public CashboxRevaluationService CreateCashboxRevaluationService(
         int companyId,
-        ApplicationDbContext? context = null)
+        ApplicationDbContext? context = null,
+        ICashboxAccessService? cashboxAccessService = null)
     {
         var serviceContext = context ?? Context;
         var companyContext = new TestCurrentCompanyContext(companyId);
@@ -264,12 +271,14 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             new FiscalYearQueryScopeResolver(serviceContext, companyContext),
             resolver,
             posting,
-            TimeProvider.System);
+            TimeProvider.System,
+            cashboxAccessService: cashboxAccessService);
     }
 
     public MonetaryAccountRevaluationService CreateMonetaryAccountRevaluationService(
         int companyId,
-        ApplicationDbContext? context = null)
+        ApplicationDbContext? context = null,
+        ICashboxAccessService? cashboxAccessService = null)
     {
         var serviceContext = context ?? Context;
         var companyContext = new TestCurrentCompanyContext(companyId);
@@ -285,7 +294,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             new FiscalYearQueryScopeResolver(serviceContext, companyContext),
             resolver,
             posting,
-            TimeProvider.System);
+            TimeProvider.System,
+            cashboxAccessService: cashboxAccessService);
     }
 
     public async Task SeedPostedJournalEntryAsync(
