@@ -94,6 +94,7 @@ public static class SwaggerExtensions
                 "/swagger/v1/swagger.json",
                 $"{title} {version}");
             options.DocumentTitle = $"{title} documentation";
+            options.EnableFilter();
             options.DisplayRequestDuration();
             options.EnableDeepLinking();
             options.EnablePersistAuthorization();
