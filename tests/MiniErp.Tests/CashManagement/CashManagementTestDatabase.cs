@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Features.CashVouchers;
+using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Persistence.Interceptors;
 using MiniErp.Infrastructure.Services.Cashboxes;
@@ -164,7 +165,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
     public CashVoucherService CreateVoucherService(
         int companyId,
         ApplicationDbContext? context = null,
-        ICashVoucherPostingService? postingService = null)
+        ICashVoucherPostingService? postingService = null,
+        IExchangeRateResolver? exchangeRateResolver = null)
     {
         var serviceContext = context ?? Context;
         var companyContext = new TestCurrentCompanyContext(companyId);
@@ -172,7 +174,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             serviceContext,
             new PaginationService(),
             companyContext,
-            new MiniErp.Tests.TestExchangeRateResolver(),
+            exchangeRateResolver ?? new MiniErp.Tests.TestExchangeRateResolver(),
             TimeProvider.System,
             postingService ?? new NoOpCashVoucherPostingService(),
             new FiscalYearQueryScopeResolver(
@@ -185,7 +187,8 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
 
     public CashVoucherService CreatePostingVoucherService(
         int companyId,
-        ApplicationDbContext? context = null)
+        ApplicationDbContext? context = null,
+        IExchangeRateResolver? exchangeRateResolver = null)
     {
         var serviceContext = context ?? Context;
         var companyContext = new TestCurrentCompanyContext(companyId);
@@ -207,7 +210,7 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
             serviceContext,
             new PaginationService(),
             companyContext,
-            new MiniErp.Tests.TestExchangeRateResolver(),
+            exchangeRateResolver ?? new MiniErp.Tests.TestExchangeRateResolver(),
             TimeProvider.System,
             postingService,
             new FiscalYearQueryScopeResolver(

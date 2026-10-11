@@ -560,6 +560,11 @@ public sealed class CashVoucherService(
             .OrderBy(row => row.Currency)
             .ToListAsync(cancellationToken);
 
+        var baseCurrency = await dbContext.CompanySettings
+            .AsNoTracking()
+            .Where(settings => settings.CompanyId == companyId)
+            .Select(settings => (CurrencyCode?)settings.BaseCurrency)
+            .SingleOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP;
         var offset = (long)(pagination.PageNumber - 1) * pagination.PageSize;
         var rows = offset >= totalCount
             ? []
@@ -578,6 +583,8 @@ public sealed class CashVoucherService(
                     CashboxName = voucher.Cashbox!.Name,
                     voucher.Amount,
                     voucher.Currency,
+                    voucher.ExchangeRate,
+                    voucher.BaseAmount,
                     voucher.Description,
                     voucher.Notes,
                     voucher.CreatedById,
@@ -598,7 +605,10 @@ public sealed class CashVoucherService(
                 Description: row.Description,
                 Notes: row.Notes,
                 CreatedById: row.CreatedById,
-                CreatedOn: row.CreatedOn))
+                CreatedOn: row.CreatedOn,
+                BaseCurrency: baseCurrency,
+                ExchangeRate: row.ExchangeRate,
+                BaseAmount: row.BaseAmount))
             .ToList();
         var summaries = summaryRows
             .Select(row => new CashVoucherHandoverCurrencySummary(
@@ -836,6 +846,23 @@ public sealed class CashVoucherService(
             IsPosted = false
         };
         voucher.InitializeDraft(cashbox.Currency);
+        if (request.ExchangeRate.HasValue)
+        {
+            var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
+                currency: cashbox.Currency,
+                date: request.VoucherDate,
+                requestedRate: request.ExchangeRate,
+                cancellationToken: cancellationToken);
+            if (exchangeRateResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Result<CashVoucherResponse>.Failure(exchangeRateResult.Errors);
+            }
+
+            voucher.ApplyExchangeRate(
+                exchangeRateId: exchangeRateResult.Value.ExchangeRateId,
+                exchangeRate: exchangeRateResult.Value.Rate);
+        }
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
 
         dbContext.CashVouchers.Add(voucher);
@@ -1651,11 +1678,27 @@ public sealed class CashVoucherService(
             return Result<VoucherPreparation>.Failure(CashboxInactive());
         }
 
+        // A draft may already contain the manual rate agreed at cash handover.
+        // Preserve that snapshot only for the same currency and voucher date;
+        // completed vouchers and changed currency/date resolve afresh. The
+        // legacy draft placeholder is rate 1 with no base amount or rate id.
+        var requestedRate = request.ExchangeRate;
+        if (!requestedRate.HasValue &&
+            currentVoucher is { IsPosted: false } &&
+            currentVoucher.Currency == cashbox.Currency &&
+            currentVoucher.VoucherDate == request.VoucherDate &&
+            (currentVoucher.ExchangeRate != 1m ||
+             currentVoucher.BaseAmount != 0m ||
+             currentVoucher.ExchangeRateId.HasValue))
+        {
+            requestedRate = currentVoucher.ExchangeRate;
+        }
+
         var exchangeRateResult = await exchangeRateResolver.ResolveAsync(
-            cashbox.Currency,
-            request.VoucherDate,
-            request.ExchangeRate,
-            cancellationToken);
+            currency: cashbox.Currency,
+            date: request.VoucherDate,
+            requestedRate: requestedRate,
+            cancellationToken: cancellationToken);
         if (exchangeRateResult.IsFailure)
         {
             return Result<VoucherPreparation>.Failure(
