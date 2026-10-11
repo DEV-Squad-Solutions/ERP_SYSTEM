@@ -530,15 +530,6 @@ public sealed partial class InvoiceService(
             return Result.Failure(stockError);
         }
 
-        var paymentError = await ValidatePaymentRemovalAsync(
-            invoice.Id,
-            cancellationToken);
-        if (paymentError is not null)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            return Result.Failure(paymentError);
-        }
-
         var removalResult = await RemoveSideEffectsAsync(
             invoice,
             removeItemMovements: true,

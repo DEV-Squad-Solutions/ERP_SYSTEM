@@ -71,8 +71,8 @@ public sealed class CashVouchersSwaggerDocumentation : IOperationFilter
                 SwaggerOperationDescription.Create(
                     "Admin only. Soft-deletes a manual voucher and its derived partner or employee movement atomically.",
                     "A positive route id.",
-                    "Deleting a receipt is rejected when it would leave its cashbox negative.",
-                    "Missing records return 404; concurrency and balance conflicts return 409. Invoice-generated vouchers are read-only and return CashVouchers.InvoiceGeneratedReadOnly.")),
+                    "Deleting a receipt may leave its cashbox negative.",
+                    "Missing records return 404; concurrency conflicts return 409. Invoice-generated vouchers are read-only and return CashVouchers.InvoiceGeneratedReadOnly.")),
             _ => default
         };
 

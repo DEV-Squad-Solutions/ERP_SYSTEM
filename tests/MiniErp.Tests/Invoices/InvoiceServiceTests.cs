@@ -4871,6 +4871,102 @@ public sealed class InvoiceServiceTests
             voucher.VoucherNumber);
     }
 
+    [Theory]
+    [InlineData(InvoiceType.Purchase, 0)]
+    [InlineData(InvoiceType.Purchase, 10)]
+    [InlineData(InvoiceType.SalesReturn, 0)]
+    [InlineData(InvoiceType.SalesReturn, 10)]
+    public async Task CashPaymentsCreateAndUpdateNegativeCashboxBalances(
+        InvoiceType invoiceType,
+        decimal openingBalance)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Cashboxes.ExecuteUpdateAsync(setters =>
+            setters.SetProperty(cashbox => cashbox.OpeningBalance, openingBalance));
+        var service = database.CreateService();
+        var created = await service.AddAsync(CreateRequest(invoiceType));
+        Assert.True(created.IsSuccess, created.Error.Description);
+        Assert.Equal(20m, created.Value.Total);
+        Assert.Equal(20m, created.Value.PaidAmount);
+        var voucher = await database.Context.CashVouchers.AsNoTracking().SingleAsync();
+        Assert.True(voucher.IsPosted);
+        Assert.Equal(CashDirection.Payment, voucher.Direction);
+        Assert.Equal(20m, voucher.Amount);
+        Assert.Equal(20m, voucher.BaseAmount);
+        await AssertInvoiceCashboxBalanceAsync(database, openingBalance - 20m);
+
+        database.Context.ChangeTracker.Clear();
+        var updated = await service.UpdateAsync(created.Value.Id,
+            CreateUpdateRequest(created.Value,
+            [new InvoiceLineRequest(ItemId: 1, Count: 2, Weight: 1m, Price: 15m, Notes: null)]));
+        Assert.True(updated.IsSuccess, updated.Error.Description);
+        Assert.Equal(30m, updated.Value.Total);
+        Assert.Equal(30m, updated.Value.PaidAmount);
+        var updatedVoucher = await database.Context.CashVouchers.AsNoTracking().SingleAsync();
+        Assert.Equal(voucher.Id, updatedVoucher.Id);
+        Assert.Equal(30m, updatedVoucher.Amount);
+        Assert.Equal(30m, updatedVoucher.BaseAmount);
+        var paymentMovement = await database.Context.BusinessPartnerMovements.AsNoTracking()
+            .SingleAsync(movement => movement.CashVoucherId == updatedVoucher.Id);
+        Assert.Equal(30m, paymentMovement.Debit);
+        Assert.Equal(0m, paymentMovement.Credit);
+        await AssertInvoiceCashboxBalanceAsync(database, openingBalance - 30m);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RemovingInvoiceReceiptAllowsCashboxToRemainNegative(bool deleteInvoice)
+    {
+        await using var database = await InvoiceTestDatabase.CreateAsync();
+        await database.Context.Cashboxes.ExecuteUpdateAsync(setters =>
+            setters.SetProperty(cashbox => cashbox.OpeningBalance, 0m));
+        var service = database.CreateService();
+        var receipt = await service.AddAsync(CreateRequest(InvoiceType.PurchaseReturn));
+        var payment = await service.AddAsync(CreateRequest(InvoiceType.Purchase,
+            lines: [new InvoiceLineRequest(ItemId: 1, Count: 2, Weight: 1m, Price: 15m, Notes: null)]));
+        Assert.True(receipt.IsSuccess, receipt.Error.Description);
+        Assert.True(payment.IsSuccess, payment.Error.Description);
+        await AssertInvoiceCashboxBalanceAsync(database, -10m);
+        database.Context.ChangeTracker.Clear();
+
+        if (deleteInvoice)
+        {
+            var deleted = await service.DeleteAsync(receipt.Value.Id, receipt.Value.RowVersion);
+            Assert.True(deleted.IsSuccess, deleted.Error.Description);
+        }
+        else
+        {
+            var updated = await service.UpdateAsync(receipt.Value.Id,
+                CreateUpdateRequest(receipt.Value,
+                    [new InvoiceLineRequest(ItemId: 1, Count: 2, Weight: 1m, Price: 10m, Notes: null)],
+                    paymentTerm: PaymentTerm.Credit,
+                    paidAmount: 0m));
+            Assert.True(updated.IsSuccess, updated.Error.Description);
+            Assert.Equal(0m, updated.Value.PaidAmount);
+            Assert.Null(updated.Value.PaymentVoucherId);
+        }
+        Assert.False(await database.Context.CashVouchers.AnyAsync(voucher =>
+            voucher.InvoiceId == receipt.Value.Id));
+        var remainingVoucher = await database.Context.CashVouchers.AsNoTracking().SingleAsync();
+        Assert.Equal(payment.Value.Id, remainingVoucher.InvoiceId);
+        Assert.Equal(30m, remainingVoucher.Amount);
+        Assert.Equal(30m, remainingVoucher.BaseAmount);
+        await AssertInvoiceCashboxBalanceAsync(database, -30m);
+    }
+
+    private static async Task AssertInvoiceCashboxBalanceAsync(
+        InvoiceTestDatabase database,
+        decimal expectedBalance)
+    {
+        var openingBalance = await database.Context.Cashboxes.AsNoTracking()
+            .Where(cashbox => cashbox.Id == 1).Select(cashbox => cashbox.OpeningBalance).SingleAsync();
+        var vouchers = await database.Context.CashVouchers.AsNoTracking()
+            .Where(voucher => voucher.CashboxId == 1 && voucher.IsPosted).ToListAsync();
+        Assert.Equal(expectedBalance, openingBalance + vouchers.Sum(voucher =>
+            voucher.Direction == CashDirection.Receipt ? voucher.Amount : -voucher.Amount));
+    }
+
     [Fact]
     public async Task Add_PaymentRequiresConfiguredDefaultMovementType()
     {

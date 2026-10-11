@@ -885,11 +885,12 @@ public sealed class CashVoucherServiceTests
     }
 
     [Fact]
-    public async Task CompletingPaymentCannotMakeCashboxNegative()
+    public async Task CompletingPaymentsAllowsCashboxToBecomeAndRemainNegative()
     {
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
-        var service = database.CreateVoucherService(companyId: 1);
+        await database.ConfigurePaymentPostingAsync();
+        var service = database.CreatePostingVoucherService(companyId: 1);
 
         var result = await AddVoucherAsync(service,
             CreateRequest(
@@ -897,17 +898,81 @@ public sealed class CashVoucherServiceTests
                 CashDirection.Payment,
                 movementTypeId: 10,
                 amount: 1001m));
-
-        Assert.Equal(
-            "CashVouchers.InsufficientCashboxBalance",
-            result.Error.Code);
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(1001m, result.Value.Amount);
+        Assert.Equal(1001m, result.Value.BaseAmount);
+        Assert.Equal(-1m, result.Value.CashboxBalance);
         var stored = Assert.Single(await database.Context.CashVouchers
             .AsNoTracking()
             .ToListAsync());
-        Assert.False(stored.IsPosted);
-        var cashbox = await database.CreateCashboxService(1)
-            .GetByIdAsync(1);
-        Assert.Equal(1000m, cashbox.Value.CurrentBalance);
+        Assert.True(stored.IsPosted);
+        await AssertPostedCashboxBalanceAsync(database, -1m, 1001m);
+
+        var furtherPayment = await AddVoucherAsync(service,
+            CreateRequest("CV-NEGATIVE", CashDirection.Payment, amount: 20m));
+        Assert.True(furtherPayment.IsSuccess, furtherPayment.Error.Description);
+        Assert.Equal(-21m, furtherPayment.Value.CashboxBalance);
+        var receipt = await AddVoucherAsync(service,
+            CreateRequest("CV-NEGATIVE-RECEIPT", CashDirection.Receipt, amount: 5m));
+        Assert.True(receipt.IsSuccess, receipt.Error.Description);
+        Assert.Equal(-16m, receipt.Value.CashboxBalance);
+        await AssertPostedCashboxBalanceAsync(database, -16m, 1021m);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PaymentUpdateAndReceiptDeletionAllowNegativeCashbox(bool useBulk)
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        await database.ConfigurePaymentPostingAsync();
+        var service = database.CreatePostingVoucherService(companyId: 1);
+        var receipt = await AddVoucherAsync(service,
+            CreatePartnerRequest("RECEIPT", CashDirection.Receipt, partnerId: 1, amount: 100m));
+        var payment = await AddVoucherAsync(service,
+            CreatePartnerRequest("PAYMENT", CashDirection.Payment, partnerId: 1, amount: 10m));
+        Assert.True(receipt.IsSuccess, receipt.Error.Description);
+        Assert.True(payment.IsSuccess, payment.Error.Description);
+        database.Context.ChangeTracker.Clear();
+
+        if (useBulk)
+        {
+            var result = await service.BulkAsync(new CashVoucherBulkRequest(Items:
+            [
+                new CashVoucherBulkUpdateItemRequest(
+                    Id: payment.Value.Id,
+                    RowVersion: payment.Value.RowVersion,
+                    Voucher: CreateBulkVoucher(CashDirection.Payment, movementTypeId: null, amount: 1101m)),
+                new CashVoucherBulkDeleteItemRequest(
+                    Id: receipt.Value.Id,
+                    RowVersion: receipt.Value.RowVersion),
+                new CashVoucherBulkAddItemRequest(
+                    Voucher: CreateBulkVoucher(CashDirection.Payment, movementTypeId: null, amount: 20m))
+            ]));
+            Assert.True(result.IsSuccess, result.Error.Description);
+            Assert.Equal(1, result.Value.Summary.Updated);
+            Assert.Equal(1, result.Value.Summary.Deleted);
+            Assert.Equal(1, result.Value.Summary.Added);
+            Assert.Equal(1101m, result.Value.Items[0].Voucher!.Amount);
+            Assert.Equal(1101m, result.Value.Items[0].Voucher!.BaseAmount);
+            Assert.Equal(-121m, result.Value.Items[2].Voucher!.CashboxBalance);
+            await AssertPostedCashboxBalanceAsync(database, -121m, 1121m);
+        }
+        else
+        {
+            var updated = await service.UpdateAsync(payment.Value.Id,
+                ToUpdateRequest(payment.Value, amount: 1101m));
+            Assert.True(updated.IsSuccess, updated.Error.Description);
+            Assert.Equal(1101m, updated.Value.Amount);
+            Assert.Equal(1101m, updated.Value.BaseAmount);
+            Assert.Equal(-1m, updated.Value.CashboxBalance);
+            await AssertPostedCashboxBalanceAsync(database, -1m, 1101m);
+            database.Context.ChangeTracker.Clear();
+            var deleted = await service.DeleteAsync(receipt.Value.Id);
+            Assert.True(deleted.IsSuccess, deleted.Error.Description);
+            await AssertPostedCashboxBalanceAsync(database, -101m, 1101m);
+        }
+        Assert.False(await database.Context.CashVouchers.AnyAsync(row => row.Id == receipt.Value.Id));
     }
 
     [Theory]
@@ -2648,6 +2713,29 @@ public sealed class CashVoucherServiceTests
             line.PartyType == JournalPartyType.Cashbox);
         Assert.Equal(0m, cashboxLine.Debit);
         Assert.Equal(150m, cashboxLine.Credit);
+    }
+
+    private static async Task AssertPostedCashboxBalanceAsync(
+        CashManagementTestDatabase database,
+        decimal expectedBalance,
+        decimal expectedPayments)
+    {
+        var cashbox = await database.CreateCashboxService(1).GetByIdAsync(1);
+        Assert.True(cashbox.IsSuccess, cashbox.Error.Description);
+        Assert.Equal(expectedBalance, cashbox.Value.CurrentBalance);
+        var statement = await database.CreateStatementService(1).GetCashboxStatementAsync(
+            new PaginationRequest { PageNumber = 1, PageSize = 50 },
+            new CashboxStatementFilterRequest(CashboxId: 1));
+        Assert.True(statement.IsSuccess, statement.Error.Description);
+        Assert.Equal(expectedBalance, statement.Value.Summary.ClosingBalance);
+        Assert.Equal(expectedBalance, statement.Value.Summary.BaseClosingBalance);
+        Assert.Equal(expectedPayments, statement.Value.Items.Sum(row => row.PaymentAmount));
+        var lines = await database.Context.JournalEntryLines.AsNoTracking()
+            .Where(line => line.JournalEntry.SourceType == JournalEntrySourceType.CashVoucher &&
+                line.PartyType == JournalPartyType.Cashbox && line.PartyId == 1)
+            .ToListAsync();
+        Assert.Equal(expectedPayments, lines.Sum(line => line.Credit));
+        Assert.Equal(expectedPayments, lines.Sum(line => line.TransactionCredit));
     }
 
     private static CashVoucherBulkVoucherRequest CreateBulkVoucher(

@@ -115,15 +115,6 @@ public sealed class CashboxRevaluationService(
             .Sum(line => line.TransactionDebit - line.TransactionCredit));
         var carryingBaseAmount = ExchangeRateRules.RoundBaseAmount(lines
             .Sum(line => line.Debit - line.Credit));
-        // Physical cash cannot be negative, but the carrying amount can be:
-        // receiving at a low rate and paying at a higher rate may leave a
-        // credit base balance that the revaluation must still correct.
-        if (foreignAmount < 0m)
-        {
-            return Result<CashboxRevaluationResponse>.Failure(
-                NegativeBalance());
-        }
-
         // Ledger lines are stored at four decimal places.  Keep the reported
         // carrying amount precise, but round the target and posted delta to
         // the same journal precision so the next period starts from exactly

@@ -1134,18 +1134,6 @@ public sealed class CashVoucherService(
             return Result.Failure(TransferGeneratedReadOnly());
         }
 
-        var balanceError = await ValidateFinalBalancesAsync(
-            voucher,
-            proposedCashboxId: null,
-            proposedDirection: null,
-            proposedAmount: null,
-            cancellationToken);
-        if (balanceError is not null)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            return Result.Failure(balanceError);
-        }
-
         try
         {
             var partnerMovements = await dbContext.BusinessPartnerMovements
@@ -1460,17 +1448,6 @@ public sealed class CashVoucherService(
         {
             return Result<CashVoucherBulkItemResponse>.Failure(
                 TransferGeneratedReadOnly());
-        }
-
-        var balanceError = await ValidateFinalBalancesAsync(
-            voucher,
-            proposedCashboxId: null,
-            proposedDirection: null,
-            proposedAmount: null,
-            cancellationToken);
-        if (balanceError is not null)
-        {
-            return Result<CashVoucherBulkItemResponse>.Failure(balanceError);
         }
 
         var entry = dbContext.Entry(voucher);
@@ -1833,17 +1810,6 @@ public sealed class CashVoucherService(
             }
         }
 
-        var balanceError = await ValidateFinalBalancesAsync(
-            currentVoucher,
-            proposedCashboxId: cashboxId,
-            proposedDirection: request.Direction,
-            proposedAmount: request.Amount,
-            cancellationToken);
-        if (balanceError is not null)
-        {
-            return Result<VoucherPreparation>.Failure(balanceError);
-        }
-
         return Result<VoucherPreparation>.Success(
             new VoucherPreparation(
                 Cashbox: cashbox,
@@ -1859,68 +1825,6 @@ public sealed class CashVoucherService(
                             CashMovementClassification.Revenue,
                         _ => movementType?.Classification
                     }));
-    }
-
-    private async Task<Error?> ValidateFinalBalancesAsync(
-        CashVoucher? currentVoucher,
-        int? proposedCashboxId,
-        CashDirection? proposedDirection,
-        decimal? proposedAmount,
-        CancellationToken cancellationToken)
-    {
-        var affectedCashboxIds = new HashSet<int>();
-        if (currentVoucher is
-            {
-                CashboxId: int currentCashboxId
-            } &&
-            currentVoucher.IsPosted)
-        {
-            affectedCashboxIds.Add(currentCashboxId);
-        }
-
-        if (proposedCashboxId.HasValue)
-        {
-            affectedCashboxIds.Add(proposedCashboxId.Value);
-        }
-
-        foreach (var cashboxId in affectedCashboxIds)
-        {
-            var excludedVoucherId = currentVoucher?.Id;
-            var balance = await dbContext.Cashboxes
-                .AsNoTracking()
-                .Where(cashbox =>
-                    cashbox.CompanyId == companyId &&
-                    cashbox.Id == cashboxId)
-                .Select(cashbox =>
-                    cashbox.OpeningBalance +
-                    (cashbox.Vouchers
-                        .Where(voucher =>
-                            voucher.IsPosted &&
-                            (!excludedVoucherId.HasValue ||
-                             voucher.Id != excludedVoucherId.Value))
-                        .Sum(voucher =>
-                            (decimal?)(voucher.Direction ==
-                                CashDirection.Receipt
-                                ? voucher.Amount
-                                : -voucher.Amount)) ?? 0m))
-                .SingleAsync(cancellationToken);
-
-            if (proposedCashboxId == cashboxId &&
-                proposedDirection.HasValue &&
-                proposedAmount.HasValue)
-            {
-                balance += proposedDirection == CashDirection.Receipt
-                    ? proposedAmount.Value
-                    : -proposedAmount.Value;
-            }
-
-            if (balance < 0m)
-            {
-                return InsufficientCashboxBalance(cashboxId);
-            }
-        }
-
-        return null;
     }
 
     private BusinessPartnerMovement CreatePartnerMovement(

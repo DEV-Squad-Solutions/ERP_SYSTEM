@@ -168,24 +168,6 @@ public sealed class CashboxTransferService(
                 preparation.Error);
         }
 
-        var balanceError = await ValidateFinalBalancesAsync(
-            excludedVouchers: [],
-            proposals:
-            [
-                new CashboxBalanceProposal(
-                    CashboxId: request.SourceCashboxId,
-                    Direction: CashDirection.Payment,
-                    Amount: request.Amount),
-                new CashboxBalanceProposal(
-                    CashboxId: request.DestinationCashboxId,
-                    Direction: CashDirection.Receipt,
-                    Amount: preparation.Value.DestinationAmount)
-            ],
-            cancellationToken);
-        if (balanceError is not null)
-        {
-            return Result<CashboxTransferResponse>.Failure(balanceError);
-        }
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var transferNumber = await GenerateIdentifierAsync(
@@ -373,24 +355,6 @@ public sealed class CashboxTransferService(
                 preparation.Error);
         }
 
-        var balanceError = await ValidateFinalBalancesAsync(
-            excludedVouchers: [paymentVoucher, receiptVoucher],
-            proposals:
-            [
-                new CashboxBalanceProposal(
-                    CashboxId: request.SourceCashboxId,
-                    Direction: CashDirection.Payment,
-                    Amount: request.Amount),
-                new CashboxBalanceProposal(
-                    CashboxId: request.DestinationCashboxId,
-                    Direction: CashDirection.Receipt,
-                    Amount: preparation.Value.DestinationAmount)
-            ],
-            cancellationToken);
-        if (balanceError is not null)
-        {
-            return Result<CashboxTransferResponse>.Failure(balanceError);
-        }
 
         var entry = dbContext.Entry(transfer);
         entry.Property(entity => entity.RowVersion).OriginalValue =
@@ -506,14 +470,6 @@ public sealed class CashboxTransferService(
             return Result.Failure(InvalidVoucherPair());
         }
 
-        var balanceError = await ValidateFinalBalancesAsync(
-            excludedVouchers: [paymentVoucher, receiptVoucher],
-            proposals: [],
-            cancellationToken);
-        if (balanceError is not null)
-        {
-            return Result.Failure(balanceError);
-        }
 
         try
         {
@@ -875,64 +831,6 @@ public sealed class CashboxTransferService(
         }
     }
 
-    private async Task<Error?> ValidateFinalBalancesAsync(
-        IReadOnlyCollection<CashVoucher> excludedVouchers,
-        IReadOnlyCollection<CashboxBalanceProposal> proposals,
-        CancellationToken cancellationToken)
-    {
-        var excludedVoucherIds = excludedVouchers
-            .Select(voucher => voucher.Id)
-            .ToArray();
-        var affectedCashboxIds = excludedVouchers
-            .Where(voucher => voucher.CashboxId.HasValue)
-            .Select(voucher => voucher.CashboxId!.Value)
-            .Concat(proposals.Select(proposal => proposal.CashboxId))
-            .Distinct()
-            .ToArray();
-
-        var balances = await dbContext.Cashboxes
-            .AsNoTracking()
-            .Where(cashbox =>
-                cashbox.CompanyId == companyId &&
-                affectedCashboxIds.Contains(cashbox.Id))
-            .Select(cashbox => new
-            {
-                cashbox.Id,
-                Balance = cashbox.OpeningBalance +
-                    (cashbox.Vouchers
-                        .Where(voucher =>
-                            voucher.IsPosted &&
-                            !excludedVoucherIds.Contains(voucher.Id))
-                        .Sum(voucher =>
-                            (decimal?)(voucher.Direction ==
-                                CashDirection.Receipt
-                                ? voucher.Amount
-                                : -voucher.Amount)) ?? 0m)
-            })
-            .ToDictionaryAsync(
-                cashbox => cashbox.Id,
-                cashbox => cashbox.Balance,
-                cancellationToken);
-
-        foreach (var proposal in proposals)
-        {
-            balances[proposal.CashboxId] +=
-                proposal.Direction == CashDirection.Receipt
-                    ? proposal.Amount
-                    : -proposal.Amount;
-        }
-
-        foreach (var (cashboxId, balance) in balances)
-        {
-            if (balance < 0m)
-            {
-                return InsufficientCashboxBalance(cashboxId);
-            }
-        }
-
-        return null;
-    }
-
     private CashVoucher CreateVoucher(
         CashboxTransfer transfer,
         Cashbox cashbox,
@@ -1193,9 +1091,4 @@ public sealed class CashboxTransferService(
         decimal DestinationAmount,
         ResolvedExchangeRate SourceExchangeRate,
         ResolvedExchangeRate DestinationExchangeRate);
-
-    private sealed record CashboxBalanceProposal(
-        int CashboxId,
-        CashDirection Direction,
-        decimal Amount);
 }
