@@ -14,6 +14,10 @@ public sealed record CashboxStatementItemResponse(
     decimal Balance,
     string? ReferenceNumber)
 {
+    public bool IsOpeningBalance { get; init; }
+
+    public bool IsReadOnly { get; init; }
+
     public int? JournalEntryId { get; init; }
 
     public int? JournalEntryLineId { get; init; }
@@ -81,6 +85,10 @@ public sealed record PartnerStatementItemResponse(
     string BalanceDescription,
     string? ReferenceNumber)
 {
+    public bool IsOpeningBalance { get; init; }
+
+    public bool IsReadOnly { get; init; }
+
     public int? JournalEntryId { get; init; }
 
     public int? JournalEntryLineId { get; init; }
@@ -139,6 +147,10 @@ public sealed record DriverStatementItemResponse(
     string? CashboxName,
     string? ReferenceNumber)
 {
+    public bool IsOpeningBalance { get; init; }
+
+    public bool IsReadOnly { get; init; }
+
     public int? JournalEntryId { get; init; }
 
     public int? JournalEntryLineId { get; init; }
@@ -267,6 +279,10 @@ public sealed record EmployeeStatementItemResponse(
     string BalanceDescription,
     string? ReferenceNumber)
 {
+    public bool IsOpeningBalance { get; init; }
+
+    public bool IsReadOnly { get; init; }
+
     public int? JournalEntryId { get; init; }
 
     public int? JournalEntryLineId { get; init; }

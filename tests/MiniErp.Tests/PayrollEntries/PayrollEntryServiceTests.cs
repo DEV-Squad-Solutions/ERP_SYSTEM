@@ -2160,7 +2160,12 @@ public sealed class PayrollEntryServiceTests
             pagination: new PaginationRequest { PageNumber = 1, PageSize = 10 },
             filters: new EmployeeStatementFilterRequest(EmployeeId: 1));
         Assert.True(statementBeforeMove.IsSuccess);
-        Assert.Empty(statementBeforeMove.Value.Items);
+        var openingBeforeMove = Assert.Single(statementBeforeMove.Value.Items);
+        Assert.True(openingBeforeMove.IsOpeningBalance);
+        Assert.True(openingBeforeMove.IsReadOnly);
+        Assert.Equal(0m, openingBeforeMove.DebitAmount);
+        Assert.Equal(0m, openingBeforeMove.CreditAmount);
+        Assert.Equal(0m, openingBeforeMove.RunningBalance);
         Assert.Equal(0m, statementBeforeMove.Value.Summary.ClosingBalanceAmount);
 
         // Step 2: Move Salary to Employee Account
@@ -2200,8 +2205,13 @@ public sealed class PayrollEntryServiceTests
             pagination: new PaginationRequest { PageNumber = 1, PageSize = 10 },
             filters: new EmployeeStatementFilterRequest(EmployeeId: 1));
         Assert.True(statementAfterMove.IsSuccess);
-        Assert.Single(statementAfterMove.Value.Items);
-        var statementItem = statementAfterMove.Value.Items[0];
+        Assert.Equal(2, statementAfterMove.Value.Items.Count);
+        var openingAfterMove = Assert.Single(statementAfterMove.Value.Items, item => item.IsOpeningBalance);
+        Assert.True(openingAfterMove.IsReadOnly);
+        Assert.Equal(0m, openingAfterMove.DebitAmount);
+        Assert.Equal(0m, openingAfterMove.CreditAmount);
+        Assert.Equal(0m, openingAfterMove.RunningBalance);
+        var statementItem = Assert.Single(statementAfterMove.Value.Items, item => !item.IsOpeningBalance);
         Assert.Equal(EmployeeStatementSourceType.SalaryTransfer, statementItem.SourceType);
         Assert.Equal(18000m, statementItem.CreditAmount);
         Assert.Equal(0m, statementItem.DebitAmount);

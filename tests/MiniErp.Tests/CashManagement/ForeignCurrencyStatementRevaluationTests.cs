@@ -33,7 +33,7 @@ public sealed class ForeignCurrencyStatementRevaluationTests
         Assert.True(current.IsSuccess);
         Assert.Equal(CurrencyCode.USD, current.Value.Currency);
         Assert.Equal(CurrencyCode.EGP, current.Value.BaseCurrency);
-        Assert.Equal(2, current.Value.TotalCount);
+        Assert.Equal(3, current.Value.TotalCount);
         Assert.Equal(100m, current.Value.Summary.ClosingBalanceAmount);
         Assert.Equal(5_100m, current.Value.Summary.BaseClosingBalanceAmount);
         Assert.Equal(isSupplier ? "له" : "عليه", current.Value.Summary.ClosingBalanceDescription);
@@ -49,10 +49,23 @@ public sealed class ForeignCurrencyStatementRevaluationTests
         Assert.Equal(100m, adjustment.BalanceAmount);
         Assert.Equal(5_100m, adjustment.BaseBalanceAmount);
 
-        // Pagination must keep both running balances when the first native
-        // movement is on a preceding page.
-        var secondPage = await statements.GetPartnerStatementAsync(
+        // The anchor occupies page one; native movement and revaluation keep
+        // both running balances on subsequent pages.
+        var openingPage = await statements.GetPartnerStatementAsync(
+            Page(pageSize: 1),
+            new PartnerStatementFilterRequest(BusinessPartnerId: 5));
+        Assert.True(openingPage.IsSuccess);
+        Assert.True(Assert.Single(openingPage.Value.Items).IsOpeningBalance);
+        var nativePage = await statements.GetPartnerStatementAsync(
             Page(pageNumber: 2, pageSize: 1),
+            new PartnerStatementFilterRequest(BusinessPartnerId: 5));
+        Assert.True(nativePage.IsSuccess);
+        var nativeMovement = Assert.Single(nativePage.Value.Items);
+        Assert.False(nativeMovement.IsOpeningBalance);
+        Assert.Equal(100m, nativeMovement.BalanceAmount);
+        Assert.Equal(5_000m, nativeMovement.BaseBalanceAmount);
+        var secondPage = await statements.GetPartnerStatementAsync(
+            Page(pageNumber: 3, pageSize: 1),
             new PartnerStatementFilterRequest(BusinessPartnerId: 5));
         Assert.True(secondPage.IsSuccess);
         var pagedAdjustment = Assert.Single(secondPage.Value.Items);
@@ -64,7 +77,13 @@ public sealed class ForeignCurrencyStatementRevaluationTests
             Page(), new PartnerStatementFilterRequest(
                 BusinessPartnerId: 5, FromDate: new DateOnly(2026, 2, 1)));
         Assert.True(laterPeriod.IsSuccess);
-        Assert.Empty(laterPeriod.Value.Items);
+        var periodOpening = Assert.Single(laterPeriod.Value.Items);
+        Assert.True(periodOpening.IsOpeningBalance);
+        Assert.True(periodOpening.IsReadOnly);
+        Assert.Equal("رصيد افتتاحي للفترة", periodOpening.MovementName);
+        Assert.Equal(new DateOnly(2026, 2, 1), periodOpening.Date);
+        Assert.Equal(100m, periodOpening.BalanceAmount);
+        Assert.Equal(5_100m, periodOpening.BaseBalanceAmount);
         Assert.Equal(100m, laterPeriod.Value.Summary.OpeningBalanceAmount);
         Assert.Equal(5_100m, laterPeriod.Value.Summary.BaseOpeningBalanceAmount);
 
@@ -72,13 +91,44 @@ public sealed class ForeignCurrencyStatementRevaluationTests
         var nextYear = await statements.GetPartnerStatementAsync(
             Page(), new PartnerStatementFilterRequest(BusinessPartnerId: 5, FiscalYearId: 3));
         Assert.True(nextYear.IsSuccess);
-        Assert.Empty(nextYear.Value.Items);
-        Assert.Equal(0, nextYear.Value.TotalCount);
+        var carriedOpening = Assert.Single(nextYear.Value.Items);
+        Assert.True(carriedOpening.IsOpeningBalance);
+        Assert.True(carriedOpening.IsReadOnly);
+        Assert.Equal(PartnerStatementSourceType.OpeningBalance, carriedOpening.SourceType);
+        Assert.Equal("رصيد افتتاحي مرحل", carriedOpening.MovementName);
+        Assert.Equal(new DateOnly(2027, 1, 1), carriedOpening.Date);
+        Assert.Null(carriedOpening.JournalEntryId);
+        Assert.Null(carriedOpening.JournalEntryLineId);
+        Assert.Equal(0m, carriedOpening.DebitAmount);
+        Assert.Equal(0m, carriedOpening.CreditAmount);
+        Assert.Equal(0m, carriedOpening.BaseDebitAmount);
+        Assert.Equal(0m, carriedOpening.BaseCreditAmount);
+        Assert.Equal(100m, carriedOpening.BalanceAmount);
+        Assert.Equal(5_100m, carriedOpening.BaseBalanceAmount);
+        Assert.Equal(isSupplier ? "له" : "عليه", carriedOpening.BalanceDescription);
+        Assert.Equal(1, nextYear.Value.TotalCount);
         Assert.Equal(100m, nextYear.Value.Summary.OpeningBalanceAmount);
         Assert.Equal(5_100m, nextYear.Value.Summary.BaseOpeningBalanceAmount);
         Assert.Equal(100m, nextYear.Value.Summary.ClosingBalanceAmount);
         Assert.Equal(5_100m, nextYear.Value.Summary.BaseClosingBalanceAmount);
         Assert.Equal(isSupplier ? "له" : "عليه", nextYear.Value.Summary.ClosingBalanceDescription);
+
+        var searchedOpening = await statements.GetPartnerStatementAsync(
+            Page(pageSize: 1), new PartnerStatementFilterRequest(
+                BusinessPartnerId: 5,
+                Search: "no matching movement",
+                SourceType: PartnerStatementSourceType.Invoice,
+                FiscalYearId: 3));
+        Assert.True(searchedOpening.IsSuccess);
+        Assert.True(Assert.Single(searchedOpening.Value.Items).IsOpeningBalance);
+        Assert.Equal(100m, searchedOpening.Value.Items[0].BalanceAmount);
+        Assert.Equal(5_100m, searchedOpening.Value.Items[0].BaseBalanceAmount);
+        Assert.Equal(1, searchedOpening.Value.TotalPages);
+        var beyondOpening = await statements.GetPartnerStatementAsync(
+            Page(pageNumber: 2, pageSize: 1), new PartnerStatementFilterRequest(
+                BusinessPartnerId: 5, FiscalYearId: 3));
+        Assert.True(beyondOpening.IsSuccess);
+        Assert.Empty(beyondOpening.Value.Items);
     }
 
     [Fact]

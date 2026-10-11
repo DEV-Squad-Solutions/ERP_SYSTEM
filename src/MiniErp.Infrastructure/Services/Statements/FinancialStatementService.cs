@@ -217,6 +217,8 @@ public sealed partial class FinancialStatementService(
                 BaseReceiptAmount = 0m,
                 BasePaymentAmount = 0m,
                 BaseBalance = baseOpeningBalance,
+                IsOpeningBalance = true,
+                IsReadOnly = true,
                 JournalEntryId = null,
                 JournalEntryLineId = null,
                 SourceType = JournalEntrySourceType.CashboxOpeningBalance
@@ -330,6 +332,7 @@ public sealed partial class FinancialStatementService(
 
         var allRows = CreatePartnerRows(partner.Id, partner.Currency, fiscalYear.Id);
         var openingRows = allRows.Where(row => row.IsOpening);
+        var hasCarriedOpening = await openingRows.AnyAsync(cancellationToken);
         var nonOpeningRows = allRows.Where(row => !row.IsOpening);
         var openingBalance = await openingRows
                 .SumAsync(row => (decimal?)(row.Debit - row.Credit),
@@ -367,7 +370,7 @@ public sealed partial class FinancialStatementService(
                 (row.ReferenceNumber != null &&
                  row.ReferenceNumber.Contains(search)));
 
-        var totalCount = await query.CountAsync(cancellationToken);
+        var movementCount = await query.CountAsync(cancellationToken);
         var totals = await query
             .GroupBy(_ => 1)
             .Select(rows => new
@@ -387,27 +390,55 @@ public sealed partial class FinancialStatementService(
             .ThenBy(row => row.CreatedOn)
             .ThenBy(row => row.DocumentNumber)
             .ThenBy(row => row.JournalEntryLineId);
+        var totalCount = movementCount + 1;
         var offset = GetOffset(pagination, totalCount);
-        var precedingEffect = offset == 0
+        var openingRowIncluded = offset == 0;
+        var movementOffset = openingRowIncluded ? 0 : offset - 1;
+        var movementPageSize = openingRowIncluded
+            ? Math.Max(pagination.PageSize - 1, 0)
+            : pagination.PageSize;
+        var precedingEffect = movementOffset == 0
             ? 0m
-            : await ordered.Take(offset).SumAsync(
+            : await ordered.Take(movementOffset).SumAsync(
                 row => (decimal?)(row.Debit - row.Credit), cancellationToken)
                 ?? 0m;
-        var precedingBaseEffect = offset == 0
+        var precedingBaseEffect = movementOffset == 0
             ? 0m
-            : await ordered.Take(offset).SumAsync(
+            : await ordered.Take(movementOffset).SumAsync(
                 row => (decimal?)(row.BaseDebit - row.BaseCredit),
                 cancellationToken) ?? 0m;
-        var pageRows = offset >= totalCount
+        var pageRows = movementPageSize == 0 || movementOffset >= movementCount
             ? []
             : await ordered
-                .Skip(offset)
-                .Take(pagination.PageSize)
+                .Skip(movementOffset)
+                .Take(movementPageSize)
                 .ToListAsync(cancellationToken);
 
         var runningBalance = openingBalance + precedingEffect;
         var runningBaseBalance = baseOpeningBalance + precedingBaseEffect;
-        var items = pageRows.Select(row =>
+        var items = new List<PartnerStatementItemResponse>(pagination.PageSize);
+        if (openingRowIncluded)
+        {
+            var openingName = OpeningBalanceName(fromDate, fiscalYear.StartDate, hasCarriedOpening);
+            items.Add(new PartnerStatementItemResponse(
+                Date: fromDate,
+                DocumentNumber: "OPENING-BALANCE",
+                MovementName: openingName,
+                Description: openingName,
+                DebitAmount: 0m,
+                CreditAmount: 0m,
+                BalanceAmount: Math.Abs(openingBalance),
+                BalanceDescription: PartnerBalanceDescription(openingBalance),
+                ReferenceNumber: null)
+            {
+                SourceType = PartnerStatementSourceType.OpeningBalance,
+                ExchangeRate = partner.Currency == partner.BaseCurrency ? 1m : 0m,
+                BaseBalanceAmount = Math.Abs(baseOpeningBalance),
+                IsOpeningBalance = true,
+                IsReadOnly = true
+            });
+        }
+        items.AddRange(pageRows.Select(row =>
         {
             runningBalance += row.Debit - row.Credit;
             runningBaseBalance += row.BaseDebit - row.BaseCredit;
@@ -433,7 +464,7 @@ public sealed partial class FinancialStatementService(
                 JournalEntryLineId = row.JournalEntryLineId,
                 SourceType = row.SourceType
             };
-        }).ToArray();
+        }));
 
         var closingBalance = openingBalance + totalDebit - totalCredit;
         var baseClosingBalance =
@@ -510,6 +541,7 @@ public sealed partial class FinancialStatementService(
 
         var allRows = CreateDriverRows(driver.Id, fiscalYear.Id);
         var openingRows = allRows.Where(row => row.IsOpening);
+        var hasCarriedOpening = await openingRows.AnyAsync(cancellationToken);
         var nonOpeningRows = allRows.Where(row => !row.IsOpening);
         var openingBalance = await openingRows
             .SumAsync(row => (decimal?)(row.Debit - row.Credit),
@@ -555,7 +587,7 @@ public sealed partial class FinancialStatementService(
                 (row.ReferenceNumber != null &&
                  row.ReferenceNumber.Contains(search)));
 
-        var totalCount = await query.CountAsync(cancellationToken);
+        var movementCount = await query.CountAsync(cancellationToken);
         var totals = await query
             .GroupBy(_ => 1)
             .Select(rows => new
@@ -577,21 +609,54 @@ public sealed partial class FinancialStatementService(
             .ThenBy(row => row.CreatedOn)
             .ThenBy(row => row.DocumentNumber)
             .ThenBy(row => row.JournalEntryLineId);
+        var totalCount = movementCount + 1;
         var offset = GetOffset(pagination, totalCount);
-        var precedingEffect = offset == 0
+        var openingRowIncluded = offset == 0;
+        var movementOffset = openingRowIncluded ? 0 : offset - 1;
+        var movementPageSize = openingRowIncluded
+            ? Math.Max(pagination.PageSize - 1, 0)
+            : pagination.PageSize;
+        var precedingEffect = movementOffset == 0
             ? 0m
-            : await ordered.Take(offset).SumAsync(
+            : await ordered.Take(movementOffset).SumAsync(
                 row => (decimal?)(row.Debit - row.Credit), cancellationToken)
                 ?? 0m;
-        var pageRows = offset >= totalCount
+        var pageRows = movementPageSize == 0 || movementOffset >= movementCount
             ? []
             : await ordered
-                .Skip(offset)
-                .Take(pagination.PageSize)
+                .Skip(movementOffset)
+                .Take(movementPageSize)
                 .ToListAsync(cancellationToken);
 
         var runningBalance = openingBalance + precedingEffect;
-        var items = pageRows.Select(row =>
+        var items = new List<DriverStatementItemResponse>(pagination.PageSize);
+        if (openingRowIncluded)
+        {
+            var openingName = OpeningBalanceName(fromDate, fiscalYear.StartDate, hasCarriedOpening);
+            items.Add(new DriverStatementItemResponse(
+                SourceId: 0,
+                Date: fromDate,
+                DocumentNumber: "OPENING-BALANCE",
+                SourceName: openingName,
+                InvoiceNumber: null,
+                DriverTripId: null,
+                DriverTripNumber: null,
+                MovementName: openingName,
+                Description: openingName,
+                AmountPaidToDriver: 0m,
+                AmountReceivedFromDriver: 0m,
+                TripCost: 0m,
+                BalanceAmount: Math.Abs(openingBalance),
+                BalanceDescription: DriverBalanceDescription(openingBalance),
+                CashboxName: null,
+                ReferenceNumber: null)
+            {
+                SourceType = DriverStatementSourceType.OpeningBalance,
+                IsOpeningBalance = true,
+                IsReadOnly = true
+            });
+        }
+        items.AddRange(pageRows.Select(row =>
         {
             runningBalance += row.Debit - row.Credit;
             return new DriverStatementItemResponse(
@@ -623,7 +688,7 @@ public sealed partial class FinancialStatementService(
                 JournalEntryLineId = row.JournalEntryLineId,
                 SourceType = row.SourceType
             };
-        }).ToArray();
+        }));
 
         var closingBalance = openingBalance + totalDebit - totalCredit;
         return Result<DriverStatementResponse>.Success(
@@ -1117,6 +1182,11 @@ public sealed partial class FinancialStatementService(
             _ when entryType == JournalEntryType.Opening => "قيد افتتاحي",
             _ => "قيد محاسبي"
         };
+
+    private static string OpeningBalanceName(DateOnly fromDate, DateOnly fiscalYearStart, bool hasCarriedOpening) =>
+        fromDate > fiscalYearStart
+            ? "رصيد افتتاحي للفترة"
+            : hasCarriedOpening ? "رصيد افتتاحي مرحل" : "رصيد افتتاحي";
 
     private static string DriverSourceName(DriverStatementSourceType sourceType) =>
         sourceType switch

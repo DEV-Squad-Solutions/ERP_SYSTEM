@@ -214,6 +214,26 @@ public sealed class StatementsSwaggerDocumentation : IOperationFilter
 
         operation.Summary = documentation.Item1;
         operation.Description = documentation.Item2;
+        if (context.MethodInfo.Name is
+            nameof(StatementsController.GetCashboxStatement) or
+            nameof(StatementsController.GetPartnerStatement) or
+            nameof(StatementsController.GetDriverStatement) or
+            nameof(StatementsController.GetEmployeeStatement))
+        {
+            operation.Description += """
+
+
+                **صف الرصيد الافتتاحي:** أول صف منطقي في `items` يعرض رصيد بداية الفترة، حتى إذا لم توجد حركات. يحمل `isOpeningBalance=true` و`isReadOnly=true` ويُحتسب ضمن `totalCount` و`totalPages`. عند `pageSize=1` تعرض الصفحة الأولى الرصيد فقط، وتبدأ الحركات في الصفحة الثانية. البحث وفلاتر الحركات لا تُخفي هذا الصف.
+
+                اعرض قيمة الرصيد ووصفه من حقول `balance` أو `balanceAmount` و`balanceDescription`، والرصيد الأساسي من `baseBalance` أو `baseBalanceAmount`. مبالغ المدين والدائن والقبض والصرف والتكلفة لهذا الصف صفر؛ الأرصدة داخلة بالفعل في `summary` ولا تُضاف إليه مرة أخرى. صف افتتاح السائق أو الموظف يستخدم `sourceId=0` للعرض فقط، ولا يُفتح كحركة أو رحلة قابلة للتعديل. مراجع القيد قد تكون `null` لأن الصف يجمع أكثر من سطر.
+
+                في كشف الشريك والسائق والموظف يكون الوصف «رصيد افتتاحي مرحل» عند بداية السنة مع وجود ترحيل، أو «رصيد افتتاحي للفترة» عند اختيار `fromDate` لاحق. الرصيد مرتبط بالشركة والسنة المالية المختارتين.
+
+                صف البداية بعملة أساسية واحدة يستخدم `exchangeRate=1`. صف الشريك بعملة أجنبية قد يجمع أسعارًا تاريخية وتسويات عملة؛ قيمة `exchangeRate=0` تعني أنه لا يوجد سعر واحد للمجموعة. اعتمد `baseBalanceAmount` المحسوب ولا تضرب الرصيد في سعر الصف.
+
+                كشف السائق يعرض `balanceAmount` بعملة الشركة الأساسية `baseCurrency` مباشرة، ولا يحتوي صفه على `exchangeRate` أو `baseBalanceAmount` منفصلين.
+                """;
+        }
         operation.OperationId = $"Statements_{context.MethodInfo.Name}";
     }
 }

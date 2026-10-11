@@ -155,11 +155,22 @@ public sealed class FinancialStatementReportTests
                 SourceType: PartnerStatementSourceType.JournalEntry));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(2, result.Value.TotalCount);
+        Assert.Equal(3, result.Value.TotalCount);
         Assert.Equal(80m, result.Value.Summary.ClosingBalanceAmount);
         Assert.Equal(4000m, result.Value.Summary.BaseClosingBalanceAmount);
         Assert.Collection(
             result.Value.Items,
+            opening =>
+            {
+                Assert.True(opening.IsOpeningBalance);
+                Assert.True(opening.IsReadOnly);
+                Assert.Equal(0m, opening.DebitAmount);
+                Assert.Equal(0m, opening.CreditAmount);
+                Assert.Equal(0m, opening.BaseDebitAmount);
+                Assert.Equal(0m, opening.BaseCreditAmount);
+                Assert.Equal(0m, opening.BalanceAmount);
+                Assert.Equal(0m, opening.BaseBalanceAmount);
+            },
             debit =>
             {
                 Assert.Equal(100m, debit.DebitAmount);
@@ -350,8 +361,13 @@ public sealed class FinancialStatementReportTests
         Assert.NotNull(cashItem.JournalEntryLineId);
 
         Assert.True(employeeStatement.IsSuccess);
-        Assert.Equal(1, employeeStatement.Value.TotalCount);
-        var employeeItem = Assert.Single(employeeStatement.Value.Items);
+        Assert.Equal(2, employeeStatement.Value.TotalCount);
+        var employeeOpening = Assert.Single(employeeStatement.Value.Items, item => item.IsOpeningBalance);
+        Assert.True(employeeOpening.IsReadOnly);
+        Assert.Equal(0m, employeeOpening.DebitAmount);
+        Assert.Equal(0m, employeeOpening.CreditAmount);
+        Assert.Equal(0m, employeeOpening.BalanceAmount);
+        var employeeItem = Assert.Single(employeeStatement.Value.Items, item => !item.IsOpeningBalance);
         Assert.Equal(250m, employeeItem.DebitAmount);
         Assert.Equal(250m, employeeItem.BaseDebitAmount);
         Assert.Equal(CurrencyCode.EGP, employeeStatement.Value.Currency);
@@ -366,8 +382,13 @@ public sealed class FinancialStatementReportTests
         Assert.Equal(0m, employeeSummary.Value.TotalSalaryMoved);
 
         Assert.True(driverStatement.IsSuccess);
-        Assert.Equal(1, driverStatement.Value.TotalCount);
-        var driverItem = Assert.Single(driverStatement.Value.Items);
+        Assert.Equal(2, driverStatement.Value.TotalCount);
+        var driverOpening = Assert.Single(driverStatement.Value.Items, item => item.IsOpeningBalance);
+        Assert.True(driverOpening.IsReadOnly);
+        Assert.Equal(0m, driverOpening.DebitAmount);
+        Assert.Equal(0m, driverOpening.CreditAmount);
+        Assert.Equal(0m, driverOpening.BalanceAmount);
+        var driverItem = Assert.Single(driverStatement.Value.Items, item => !item.IsOpeningBalance);
         Assert.Equal(40m, driverItem.DebitAmount);
         Assert.Equal(40m, driverStatement.Value.Summary.TotalDebits);
         Assert.Equal(DriverStatementSourceType.JournalEntry,
