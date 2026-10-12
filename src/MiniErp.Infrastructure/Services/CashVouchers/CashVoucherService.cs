@@ -1009,18 +1009,23 @@ public sealed class CashVoucherService(
                 Summary: summary));
     }
 
-    public async Task<Result<CashVoucherResponse>> UpdateDraftRateAsync(
+    public async Task<Result<CashVoucherResponse>> UpdateDraftAsync(
         int id,
-        CashVoucherDraftRateRequest request,
+        CashVoucherDraftUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
             return Result<CashVoucherResponse>.Failure(InvalidId());
         if (request.RowVersion is not { Length: 8 })
             return Result<CashVoucherResponse>.Failure(RowVersionRequired());
-        if (!ExchangeRateRules.IsValidRate(request.ExchangeRate) ||
-            request.ExchangeRate >= 10_000_000_000_000_000m)
+        if (request.ExchangeRate.HasValue &&
+            (!ExchangeRateRules.IsValidRate(request.ExchangeRate.Value) ||
+             request.ExchangeRate.Value >= 10_000_000_000_000_000m))
             return Result<CashVoucherResponse>.Failure(ExchangeRateErrors.InvalidRate());
+        var validation = new CashVoucherDraftUpdateRequestValidator().Validate(request);
+        if (!validation.IsValid)
+            return Result<CashVoucherResponse>.Failure(validation.Errors.Select(error =>
+                Error.Validation($"CashVouchers.{error.PropertyName}", error.ErrorMessage, error.PropertyName)));
 
         await using var transaction = await dbContext.Database
             .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
@@ -1049,11 +1054,23 @@ public sealed class CashVoucherService(
             cancellationToken: cancellationToken);
         if (fiscalYearScope.IsFailure)
             return Result<CashVoucherResponse>.Failure(fiscalYearScope.Errors);
+        fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: voucher.FiscalYearId,
+            fromDate: request.VoucherDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYearScope.IsFailure)
+            return Result<CashVoucherResponse>.Failure(fiscalYearScope.Errors);
         if (fiscalYearPeriodGuard is not null)
         {
             var openYear = await fiscalYearPeriodGuard.EnsureOpenAsync(
                 voucher.VoucherDate,
                 nameof(CashVoucherRequest.VoucherDate),
+                cancellationToken);
+            if (openYear.IsFailure)
+                return Result<CashVoucherResponse>.Failure(openYear.Errors);
+            openYear = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                request.VoucherDate,
+                nameof(CashVoucherDraftUpdateRequest.VoucherDate),
                 cancellationToken);
             if (openYear.IsFailure)
                 return Result<CashVoucherResponse>.Failure(openYear.Errors);
@@ -1065,19 +1082,52 @@ public sealed class CashVoucherService(
         if (voucher.IsPosted)
             return Result<CashVoucherResponse>.Failure(DraftRequired());
 
-        var resolvedRate = await exchangeRateResolver.ResolveAsync(
-            currency: voucher.Currency,
-            date: voucher.VoucherDate,
-            requestedRate: request.ExchangeRate,
-            cancellationToken: cancellationToken);
-        if (resolvedRate.IsFailure)
-            return Result<CashVoucherResponse>.Failure(resolvedRate.Errors);
+        access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, request.CashboxId, cancellationToken);
+        if (access.IsFailure)
+            return Result<CashVoucherResponse>.Failure(access.Errors);
+        var cashbox = await dbContext.Cashboxes.AsNoTracking().FirstOrDefaultAsync(
+            entity => entity.Id == request.CashboxId && entity.CompanyId == companyId, cancellationToken);
+        if (cashbox is null)
+            return Result<CashVoucherResponse>.Failure(CashboxNotFound(request.CashboxId));
+        if (!cashbox.IsActive && cashbox.Id != voucher.CashboxId)
+            return Result<CashVoucherResponse>.Failure(CashboxInactive());
+
+        // No daily-rate lookup is required for an unpriced operational draft.
+        // Only preserve a captured rate for the same currency and date. Keep
+        // its rate id as well, rather than silently detaching a linked snapshot.
+        decimal? rate = null;
+        int? rateId = null;
+        if (request.ExchangeRate.HasValue)
+        {
+            var resolvedRate = await exchangeRateResolver.ResolveAsync(
+                currency: cashbox.Currency,
+                date: request.VoucherDate,
+                requestedRate: request.ExchangeRate,
+                cancellationToken: cancellationToken);
+            if (resolvedRate.IsFailure)
+                return Result<CashVoucherResponse>.Failure(resolvedRate.Errors);
+            rate = resolvedRate.Value.Rate;
+            rateId = resolvedRate.Value.ExchangeRateId;
+        }
+        else if (cashbox.Currency == voucher.Currency && request.VoucherDate == voucher.VoucherDate &&
+            (voucher.ExchangeRate != 1m || voucher.BaseAmount != 0m || voucher.ExchangeRateId.HasValue))
+        {
+            rate = voucher.ExchangeRate;
+            rateId = voucher.ExchangeRateId;
+        }
+        else if (cashbox.Currency == (await dbContext.CompanySettings.AsNoTracking()
+            .Where(settings => settings.CompanyId == companyId)
+            .Select(settings => (CurrencyCode?)settings.BaseCurrency)
+            .SingleOrDefaultAsync(cancellationToken) ?? CurrencyCode.EGP))
+        {
+            rate = 1m;
+        }
 
         // Match SQL decimal(28,8) storage and avoid decimal multiplication
         // overflow before changing the draft snapshot.
         try
         {
-            if (ExchangeRateRules.ConvertToBase(voucher.Amount, resolvedRate.Value.Rate)
+            if (rate.HasValue && ExchangeRateRules.ConvertToBase(request.Amount, rate.Value)
                 >= 100_000_000_000_000_000_000m)
                 return Result<CashVoucherResponse>.Failure(Error.Validation(
                     "CashVouchers.BaseAmountOutOfRange",
@@ -1093,9 +1143,16 @@ public sealed class CashVoucherService(
         }
 
         entry.Property(entity => entity.RowVersion).OriginalValue = request.RowVersion;
-        voucher.ApplyExchangeRate(
-            exchangeRateId: resolvedRate.Value.ExchangeRateId,
-            exchangeRate: resolvedRate.Value.Rate);
+        voucher.VoucherDate = request.VoucherDate;
+        voucher.Direction = request.Direction;
+        voucher.CashboxId = cashbox.Id;
+        voucher.Amount = request.Amount;
+        voucher.ReferenceNumber = NormalizeText(request.ReferenceNumber);
+        voucher.Description = NormalizeText(request.Description);
+        voucher.Notes = NormalizeText(request.Notes);
+        voucher.InitializeDraft(cashbox.Currency);
+        if (rate.HasValue)
+            voucher.ApplyExchangeRate(exchangeRateId: rateId, exchangeRate: rate.Value);
         voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
         entry.Property(entity => entity.LastModifiedAt).IsModified = true;
         try

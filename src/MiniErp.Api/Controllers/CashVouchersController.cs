@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MiniErp.Api.Extensions;
+using MiniErp.Api.Features.Cashboxes.Jobs;
 using MiniErp.Api.Features.CashVouchers.Jobs;
 using MiniErp.Api.Features.ExchangeRates.Jobs;
 using MiniErp.Application.Common.Models;
@@ -187,25 +188,38 @@ public sealed class CashVouchersController(
         return this.ToActionResult(result);
     }
 
-    [HttpPatch("{id:int}/draft-rate")]
+    [HttpPut("{id:int}/draft")]
     [ProducesResponseType<CashVoucherResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> UpdateDraftRate(
+    public async Task<IActionResult> UpdateDraft(
         int id,
-        CashVoucherDraftRateRequest request,
+        CashVoucherDraftUpdateRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await cashVoucherService.UpdateDraftRateAsync(
+        var previous = await cashVoucherService.GetByIdAsync(id, cancellationToken: cancellationToken);
+        if (previous.IsFailure)
+            return this.ToActionResult(previous);
+        var result = await cashVoucherService.UpdateDraftAsync(
             id,
             request,
             cancellationToken);
         if (result.IsSuccess)
         {
+            var operationId = Guid.NewGuid();
             TryEnqueueRealtime<CashVouchersRealtimeJob>(
                 "Updated",
                 id,
-                realtime => job => job.ExecuteAsync(realtime));
+                realtime => job => job.ExecuteAsync(realtime),
+                operationId: operationId);
+            // Viewers of only the old cashbox must invalidate their draft list
+            // without receiving an event about the now-inaccessible voucher.
+            if (previous.Value.RowVersion.SequenceEqual(request.RowVersion!) &&
+                previous.Value.CashboxId is int oldCashboxId && oldCashboxId != result.Value.CashboxId)
+                TryEnqueueRealtime<CashboxesRealtimeJob>(
+                    "Updated", oldCashboxId,
+                    realtime => job => job.ExecuteAsync(realtime),
+                    operationId: operationId);
         }
         return this.ToActionResult(result);
     }

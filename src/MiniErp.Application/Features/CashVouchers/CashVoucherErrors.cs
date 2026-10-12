@@ -28,7 +28,7 @@ public static class CashVoucherErrors
     public static Error DraftRequired() =>
         Error.Conflict(
             "CashVouchers.DraftRequired",
-            "يمكن تعديل سعر الصرف بهذه العملية قبل توصيف السند فقط؛ استخدم تعديل السند للحركات المرحّلة.");
+            "يمكن تعديل المسودة بهذه العملية قبل توصيف السند فقط؛ استخدم تعديل السند للحركات المرحّلة.");
 
     public static Error InvoiceGeneratedReadOnly() =>
         Error.Conflict(
