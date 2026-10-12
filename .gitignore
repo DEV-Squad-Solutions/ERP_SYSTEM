@@ -18,4 +18,5 @@ docs/*
 !docs/frontend-cashbox-permissions.md
 !docs/frontend-cross-currency-partner-settlements.md
 !docs/frontend-updates-2026-10-11.md
+!docs/frontend-cashvoucher-draft-rate.md
 tmp

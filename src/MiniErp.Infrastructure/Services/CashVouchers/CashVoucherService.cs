@@ -1009,6 +1009,116 @@ public sealed class CashVoucherService(
                 Summary: summary));
     }
 
+    public async Task<Result<CashVoucherResponse>> UpdateDraftRateAsync(
+        int id,
+        CashVoucherDraftRateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (id <= 0)
+            return Result<CashVoucherResponse>.Failure(InvalidId());
+        if (request.RowVersion is not { Length: 8 })
+            return Result<CashVoucherResponse>.Failure(RowVersionRequired());
+        if (!ExchangeRateRules.IsValidRate(request.ExchangeRate) ||
+            request.ExchangeRate >= 10_000_000_000_000_000m)
+            return Result<CashVoucherResponse>.Failure(ExchangeRateErrors.InvalidRate());
+
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        var voucher = await dbContext.CashVouchers.FirstOrDefaultAsync(
+            entity => entity.Id == id && entity.CompanyId == companyId,
+            cancellationToken);
+        if (voucher is null)
+            return Result<CashVoucherResponse>.Failure(NotFound(id));
+
+        // A scoped context may already track this voucher. Check the database
+        // snapshot, not the earlier tracked RowVersion, inside the transaction.
+        var entry = dbContext.Entry(voucher);
+        await entry.ReloadAsync(cancellationToken);
+        if (entry.State == EntityState.Detached || voucher.CompanyId != companyId || voucher.IsDeleted)
+            return Result<CashVoucherResponse>.Failure(NotFound(id));
+
+        var access = await EnsureVoucherExecuteAsync(voucher, cancellationToken);
+        if (access.IsFailure)
+            return Result<CashVoucherResponse>.Failure(access.Errors);
+        if (!voucher.RowVersion.SequenceEqual(request.RowVersion))
+            return Result<CashVoucherResponse>.Failure(Concurrency());
+
+        var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
+            fiscalYearId: voucher.FiscalYearId,
+            fromDate: voucher.VoucherDate,
+            cancellationToken: cancellationToken);
+        if (fiscalYearScope.IsFailure)
+            return Result<CashVoucherResponse>.Failure(fiscalYearScope.Errors);
+        if (fiscalYearPeriodGuard is not null)
+        {
+            var openYear = await fiscalYearPeriodGuard.EnsureOpenAsync(
+                voucher.VoucherDate,
+                nameof(CashVoucherRequest.VoucherDate),
+                cancellationToken);
+            if (openYear.IsFailure)
+                return Result<CashVoucherResponse>.Failure(openYear.Errors);
+        }
+        if (voucher.InvoiceId.HasValue)
+            return Result<CashVoucherResponse>.Failure(InvoiceGeneratedReadOnly());
+        if (voucher.CashboxTransferId.HasValue)
+            return Result<CashVoucherResponse>.Failure(TransferGeneratedReadOnly());
+        if (voucher.IsPosted)
+            return Result<CashVoucherResponse>.Failure(DraftRequired());
+
+        var resolvedRate = await exchangeRateResolver.ResolveAsync(
+            currency: voucher.Currency,
+            date: voucher.VoucherDate,
+            requestedRate: request.ExchangeRate,
+            cancellationToken: cancellationToken);
+        if (resolvedRate.IsFailure)
+            return Result<CashVoucherResponse>.Failure(resolvedRate.Errors);
+
+        // Match SQL decimal(28,8) storage and avoid decimal multiplication
+        // overflow before changing the draft snapshot.
+        try
+        {
+            if (ExchangeRateRules.ConvertToBase(voucher.Amount, resolvedRate.Value.Rate)
+                >= 100_000_000_000_000_000_000m)
+                return Result<CashVoucherResponse>.Failure(Error.Validation(
+                    "CashVouchers.BaseAmountOutOfRange",
+                    "المقابل بالعملة الأساسية أكبر من الحد المسموح؛ راجع سعر الصرف.",
+                    nameof(request.ExchangeRate)));
+        }
+        catch (OverflowException)
+        {
+            return Result<CashVoucherResponse>.Failure(Error.Validation(
+                "CashVouchers.BaseAmountOutOfRange",
+                "المقابل بالعملة الأساسية أكبر من الحد المسموح؛ راجع سعر الصرف.",
+                nameof(request.ExchangeRate)));
+        }
+
+        entry.Property(entity => entity.RowVersion).OriginalValue = request.RowVersion;
+        voucher.ApplyExchangeRate(
+            exchangeRateId: resolvedRate.Value.ExchangeRateId,
+            exchangeRate: resolvedRate.Value.Rate);
+        voucher.Touch(timeProvider.GetUtcNow().UtcDateTime);
+        entry.Property(entity => entity.LastModifiedAt).IsModified = true;
+        try
+        {
+            // Draft-only snapshot: deliberately no movements or ledger posting.
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return Result<CashVoucherResponse>.Failure(Concurrency());
+        }
+        // Keep the tracked revision aligned with trigger-generated versions,
+        // too, for callers that complete the draft in the same scoped context.
+        await entry.ReloadAsync(cancellationToken);
+        var response = await ProjectResponseQuery(id, voucher.FiscalYearId)
+            .AsNoTracking()
+            .FirstAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return Result<CashVoucherResponse>.Success(response);
+    }
+
     public async Task<Result<CashVoucherResponse>> UpdateAsync(
         int id,
         CashVoucherUpdateRequest request,

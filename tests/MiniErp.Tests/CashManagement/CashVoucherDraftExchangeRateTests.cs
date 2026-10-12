@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
+using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.CashVouchers;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
@@ -16,6 +17,230 @@ public sealed class CashVoucherDraftExchangeRateTests
 {
     static CashVoucherDraftExchangeRateTests() =>
         MappingConfiguration.Register(typeof(InfrastructureAssemblyMarker).Assembly);
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("50")]
+    public async Task PatchDraftRateChangesOnlySnapshotAndCompletionKeepsIt(string? initialRate)
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        await SeedRatesAsync(database);
+        var service = CreateService(database, postToLedger: true);
+        var journalCount = await database.Context.JournalEntries.CountAsync();
+        var draft = (await service.AddAsync(DraftRequest(initialRate is null ? null : decimal.Parse(initialRate)))).Value;
+        var patched = await service.UpdateDraftRateAsync(draft.Id,
+            new CashVoucherDraftRateRequest(ExchangeRate: 52.25m, RowVersion: draft.RowVersion));
+        Assert.True(patched.IsSuccess, patched.Error.Description);
+        Assert.True(patched.Value.IsDraft);
+        Assert.False(draft.RowVersion.SequenceEqual(patched.Value.RowVersion));
+        Assert.Equal(52.25m, patched.Value.ExchangeRate);
+        Assert.Equal(522.5m, patched.Value.BaseAmount);
+        Assert.Equal(draft.Id, patched.Value.Id);
+        Assert.Equal(draft.VoucherNumber, patched.Value.VoucherNumber);
+        Assert.Equal(draft.FiscalYearId, patched.Value.FiscalYearId);
+        Assert.Equal(draft.VoucherDate, patched.Value.VoucherDate);
+        Assert.Equal(draft.CashboxId, patched.Value.CashboxId);
+        Assert.Equal(draft.Direction, patched.Value.Direction);
+        Assert.Equal(draft.Amount, patched.Value.Amount);
+        Assert.Equal(draft.Currency, patched.Value.Currency);
+        Assert.Equal(draft.Description, patched.Value.Description);
+        Assert.Equal(CashPartyType.None, patched.Value.PartyType);
+        Assert.Null(patched.Value.CashMovementTypeId);
+        Assert.Null(patched.Value.PartnerAmount);
+        Assert.Equal(100m, patched.Value.CashboxBalance);
+        Assert.Equal(journalCount, await database.Context.JournalEntries.CountAsync());
+        Assert.Empty(await database.Context.BusinessPartnerMovements.Where(x => x.CashVoucherId == draft.Id).ToListAsync());
+        Assert.Empty(await database.Context.EmployeeMovements.Where(x => x.CashVoucherId == draft.Id).ToListAsync());
+        Assert.False((await database.Context.CashVouchers.AsNoTracking().SingleAsync(x => x.Id == draft.Id)).IsPosted);
+        await AssertRatesUnchangedAsync(database);
+        var handover = await service.GetHandoverReportAsync(new PaginationRequest());
+        Assert.Equal(52.25m, Assert.Single(handover.Value.Items).ExchangeRate);
+        Assert.Equal(522.5m, handover.Value.Items[0].BaseAmount);
+
+        var completed = await service.UpdateAsync(draft.Id, CompletionRequest(patched.Value));
+        Assert.True(completed.IsSuccess, completed.Error.Description);
+        Assert.False(completed.Value.IsDraft);
+        Assert.Equal(52.25m, completed.Value.ExchangeRate);
+        Assert.Equal(522.5m, completed.Value.BaseAmount);
+    }
+
+    [Fact]
+    public async Task SameRateRotatesVersionAndRejectsStaleVersionInTrackedContext()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = CreateService(database);
+        var draft = (await service.AddAsync(DraftRequest(50m))).Value;
+        var patch = new CashVoucherDraftRateRequest(ExchangeRate: 50m, RowVersion: draft.RowVersion);
+        var first = await service.UpdateDraftRateAsync(draft.Id, patch);
+        Assert.True(first.IsSuccess);
+        Assert.False(draft.RowVersion.SequenceEqual(first.Value.RowVersion));
+        var stale = await service.UpdateDraftRateAsync(draft.Id, patch with { ExchangeRate = 55m });
+        Assert.Equal("CashVouchers.Concurrency", stale.Error.Code);
+        Assert.Equal(50m, (await service.GetByIdAsync(draft.Id)).Value.ExchangeRate);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-2")]
+    [InlineData("0.0000000000001")]
+    [InlineData("10000000000000000")]
+    public async Task InvalidPatchRateIsRejectedWithoutChangingSnapshot(string rateText)
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = CreateService(database);
+        var draft = (await service.AddAsync(DraftRequest(50m))).Value;
+        var request = new CashVoucherDraftRateRequest(
+            ExchangeRate: decimal.Parse(rateText, CultureInfo.InvariantCulture), RowVersion: draft.RowVersion);
+        Assert.False(new CashVoucherDraftRateRequestValidator().Validate(request).IsValid);
+        var result = await service.UpdateDraftRateAsync(draft.Id, request);
+        Assert.True(result.IsFailure);
+        Assert.Equal("ExchangeRates.InvalidRate", result.Error.Code);
+        Assert.Equal(50m, (await service.GetByIdAsync(draft.Id)).Value.ExchangeRate);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(7)]
+    [InlineData(9)]
+    public async Task MissingOrInvalidVersionIsRejected(int? length)
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = CreateService(database);
+        var draft = (await service.AddAsync(DraftRequest(50m))).Value;
+        var request = new CashVoucherDraftRateRequest(ExchangeRate: 51m,
+            RowVersion: length.HasValue ? new byte[length.Value] : null);
+        Assert.False(new CashVoucherDraftRateRequestValidator().Validate(request).IsValid);
+        Assert.Equal("CashVouchers.RowVersionRequired", (await service.UpdateDraftRateAsync(draft.Id, request)).Error.Code);
+    }
+
+    [Fact]
+    public async Task PatchRequiresExecuteAndCannotAccessAnotherCompany()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = CreateService(database);
+        var draft = (await service.AddAsync(DraftRequest(50m))).Value;
+        var request = new CashVoucherDraftRateRequest(ExchangeRate: 51m, RowVersion: draft.RowVersion);
+        var restricted = database.CreateVoucherService(companyId: 1,
+            cashboxAccessService: new RestrictedCashboxAccess(view: [5], execute: []));
+        Assert.Equal(ErrorType.Forbidden, (await restricted.UpdateDraftRateAsync(draft.Id, request)).Error.Type);
+        Assert.Equal("CashVouchers.NotFound", (await database.CreateVoucherService(companyId: 2)
+            .UpdateDraftRateAsync(draft.Id, request)).Error.Code);
+        Assert.Equal(50m, (await service.GetByIdAsync(draft.Id)).Value.ExchangeRate);
+    }
+
+    [Fact]
+    public async Task PostedVoucherCannotBePatched()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = CreateService(database);
+        var draft = (await service.AddAsync(DraftRequest(50m))).Value;
+        var posted = (await service.UpdateAsync(draft.Id, CompletionRequest(draft))).Value;
+        var result = await service.UpdateDraftRateAsync(draft.Id,
+            new CashVoucherDraftRateRequest(ExchangeRate: 51m, RowVersion: posted.RowVersion));
+        Assert.Equal("CashVouchers.DraftRequired", result.Error.Code);
+        Assert.Equal(50m, (await service.GetByIdAsync(draft.Id)).Value.ExchangeRate);
+    }
+
+    [Fact]
+    public async Task ClosedYearRejectsPatch()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = CreateService(database);
+        var draft = (await service.AddAsync(DraftRequest(50m))).Value;
+        await database.Context.Database.ExecuteSqlRawAsync("UPDATE FiscalYears SET Status = 2 WHERE Id = 1");
+        var result = await service.UpdateDraftRateAsync(draft.Id,
+            new CashVoucherDraftRateRequest(ExchangeRate: 51m, RowVersion: draft.RowVersion));
+        Assert.Equal("FiscalYears.Closed", result.Error.Code);
+        Assert.Equal(50m, (await service.GetByIdAsync(draft.Id)).Value.ExchangeRate);
+    }
+
+    [Fact]
+    public async Task DifferentSelectedYearRejectsPatchWithoutChangingDraft()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = CreateService(database);
+        var draft = (await service.AddAsync(DraftRequest(50m))).Value;
+        await database.Context.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE FiscalYears SET IsCurrent = 0 WHERE CompanyId = 1;
+            INSERT INTO FiscalYears (Id, CompanyId, Name, StartDate, EndDate, Status,
+                IsCurrent, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (100, 1, '2027', '2027-01-01', '2027-12-31', 1,
+                1, 'test', '2026-01-01', 'test', 0);
+            """);
+        var result = await service.UpdateDraftRateAsync(draft.Id,
+            new CashVoucherDraftRateRequest(ExchangeRate: 51m, RowVersion: draft.RowVersion));
+        Assert.Equal("FiscalYears.QueryDateOutsideRange", result.Error.Code);
+        var stored = await database.Context.CashVouchers.AsNoTracking().SingleAsync(x => x.Id == draft.Id);
+        Assert.Equal(50m, stored.ExchangeRate);
+        Assert.False(stored.IsPosted);
+    }
+
+    [Fact]
+    public async Task TransferGeneratedVoucherRejectsDraftRatePatch()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var transfer = await database.CreateCashboxTransferService(1).AddAsync(
+            new MiniErp.Application.Features.CashboxTransfers.CashboxTransferRequest(
+                TransferDate: new DateOnly(2026, 8, 1), SourceCashboxId: 1,
+                DestinationCashboxId: 2, Amount: 10m, Description: "Generated voucher", Notes: null));
+        Assert.True(transfer.IsSuccess, transfer.Error.Description);
+        var service = CreateService(database);
+        var generated = (await service.GetByIdAsync(transfer.Value.PaymentVoucherId)).Value;
+        var result = await service.UpdateDraftRateAsync(generated.Id,
+            new CashVoucherDraftRateRequest(ExchangeRate: 1m, RowVersion: generated.RowVersion));
+        Assert.Equal("CashVouchers.TransferGeneratedReadOnly", result.Error.Code);
+    }
+
+    [Theory]
+    [InlineData(0, "CashVouchers.InvalidId")]
+    [InlineData(-1, "CashVouchers.InvalidId")]
+    [InlineData(999999, "CashVouchers.NotFound")]
+    public async Task InvalidOrMissingVoucherIsRejected(int id, string expectedCode)
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var result = await CreateService(database).UpdateDraftRateAsync(id,
+            new CashVoucherDraftRateRequest(ExchangeRate: 51m, RowVersion: new byte[8]));
+        Assert.Equal(expectedCode, result.Error.Code);
+    }
+
+    [Fact]
+    public void DraftRateEndpointIsPatchNotCompletionPut()
+    {
+        var action = typeof(MiniErp.Api.Controllers.CashVouchersController).GetMethod("UpdateDraftRate")!;
+        var route = Assert.Single(action.GetCustomAttributes(typeof(Microsoft.AspNetCore.Mvc.HttpPatchAttribute), false)
+            .Cast<Microsoft.AspNetCore.Mvc.HttpPatchAttribute>());
+        Assert.Equal("{id:int}/draft-rate", route.Template);
+    }
+
+    [Fact]
+    public async Task BaseCurrencyRequiresOne()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = CreateService(database);
+        var draft = (await service.AddAsync(DraftRequest(null) with { CashboxId = 1 })).Value;
+        var bad = await service.UpdateDraftRateAsync(draft.Id,
+            new CashVoucherDraftRateRequest(ExchangeRate: 2m, RowVersion: draft.RowVersion));
+        Assert.Equal("ExchangeRates.BaseCurrencyRateMustBeOne", bad.Error.Code);
+        var good = await service.UpdateDraftRateAsync(draft.Id,
+            new CashVoucherDraftRateRequest(ExchangeRate: 1m, RowVersion: draft.RowVersion));
+        Assert.True(good.IsSuccess);
+        Assert.True(good.Value.IsDraft);
+        Assert.Equal(1m, good.Value.ExchangeRate);
+        Assert.Equal(10m, good.Value.BaseAmount);
+    }
+
+    [Fact]
+    public async Task BaseAmountStorageOverflowIsValidationNotServerError()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var service = CreateService(database);
+        var draft = (await service.AddAsync(DraftRequest(null) with { Amount = 1_000_000_000m })).Value;
+        var result = await service.UpdateDraftRateAsync(draft.Id,
+            new CashVoucherDraftRateRequest(ExchangeRate: 1_000_000_000_000m, RowVersion: draft.RowVersion));
+        Assert.Equal("CashVouchers.BaseAmountOutOfRange", result.Error.Code);
+        Assert.Equal(0m, (await service.GetByIdAsync(draft.Id)).Value.BaseAmount);
+    }
 
     [Fact]
     public async Task ManualDraftRateIsVisibleOnEveryReadWithoutFinancialEffects()

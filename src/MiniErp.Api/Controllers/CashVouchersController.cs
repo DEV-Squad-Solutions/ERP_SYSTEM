@@ -187,6 +187,29 @@ public sealed class CashVouchersController(
         return this.ToActionResult(result);
     }
 
+    [HttpPatch("{id:int}/draft-rate")]
+    [ProducesResponseType<CashVoucherResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> UpdateDraftRate(
+        int id,
+        CashVoucherDraftRateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await cashVoucherService.UpdateDraftRateAsync(
+            id,
+            request,
+            cancellationToken);
+        if (result.IsSuccess)
+        {
+            TryEnqueueRealtime<CashVouchersRealtimeJob>(
+                "Updated",
+                id,
+                realtime => job => job.ExecuteAsync(realtime));
+        }
+        return this.ToActionResult(result);
+    }
+
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]

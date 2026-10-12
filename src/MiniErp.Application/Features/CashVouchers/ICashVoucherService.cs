@@ -36,6 +36,11 @@ public interface ICashVoucherService
         CashVoucherUpdateRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<Result<CashVoucherResponse>> UpdateDraftRateAsync(
+        int id,
+        CashVoucherDraftRateRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<Result> DeleteAsync(
         int id,
         CancellationToken cancellationToken = default);
