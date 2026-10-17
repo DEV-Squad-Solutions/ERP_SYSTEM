@@ -87,6 +87,14 @@ public static class AccountErrors
         "Accounts.HasStatementMappings",
         "لا يمكن حذف الحساب لوجود ربط حالي أو تاريخي بالقوائم المالية. يمكن إلغاء تنشيطه بدلًا من ذلك.");
 
+    public static Error HasOperationalMappings() => Error.Conflict(
+        "Accounts.HasOperationalMappings",
+        "لا يمكن حذف الحساب لأنه مستخدم في إعدادات الربط المحاسبي. غيّر حساب الربط أولًا أو ألغِ تنشيط الحساب.");
+
+    public static Error HasRevaluations() => Error.Conflict(
+        "Accounts.HasRevaluations",
+        "لا يمكن حذف الحساب لوجود حركات إعادة تقييم عملة مرتبطة به. يمكن إلغاء تنشيطه بدلًا من ذلك.");
+
     public static Error HasCashVouchers() => Error.Conflict(
         "Accounts.HasCashVouchers",
         "لا يمكن حذف الحساب لوجود سندات قبض أو صرف مرتبطة به. يمكن إلغاء تنشيطه بدلًا من ذلك.");

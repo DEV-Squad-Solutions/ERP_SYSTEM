@@ -284,10 +284,247 @@ public sealed class AccountingSetupServiceTests
         Assert.True(second.IsSuccess);
         Assert.Equal("1000", first.Value.Code);
         Assert.Equal("2000", second.Value.Code);
-        Assert.Equal("1100", child.Value.Code);
-        Assert.Equal("2100", child2.Value.Code);
-        Assert.Equal("2200", child3.Value.Code);
-        Assert.Equal("2110", grandchild.Value.Code);
+        Assert.Equal("1001", child.Value.Code);
+        Assert.Equal("2001", child2.Value.Code);
+        Assert.Equal("2002", child3.Value.Code);
+        Assert.Equal("200101", grandchild.Value.Code);
+        Assert.Equal(child2.Value.Id, grandchild.Value.ParentAccountId);
+    }
+
+    [Fact]
+    public async Task NewExpenseAccounts_ContinueAfter5900InSameLevelUntilBranchIsExhausted()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        await database.SeedAccountAsync(code: "5000", isPosting: false);
+        var parent = (await database.GetAccountByCodeAsync("5000"))!;
+        var oldCodes = Enumerable.Range(1, 9).Select(number => $"5{number}00").ToArray();
+        foreach (var code in oldCodes)
+            await database.SeedAccountAsync(code: code, parentAccountId: parent.Id);
+
+        var service = database.CreateAccountService(companyId: 1);
+        for (var sequence = 1; sequence <= 99; sequence++)
+        {
+            var result = await service.AddAsync(new AccountRequest(
+                Code: null,
+                Name: $"مصروف {sequence}",
+                ParentAccountId: parent.Id,
+                AccountType: AccountType.Asset,
+                NormalBalance: NormalBalance.Credit,
+                IsPosting: true));
+
+            Assert.True(result.IsSuccess);
+            Assert.Equal((5900 + sequence).ToString(System.Globalization.CultureInfo.InvariantCulture), result.Value.Code);
+            Assert.Equal(parent.Id, result.Value.ParentAccountId);
+            Assert.Equal(AccountType.Expense, result.Value.AccountType);
+            Assert.Equal(NormalBalance.Debit, result.Value.NormalBalance);
+            Assert.True(result.Value.IsPosting);
+        }
+
+        var tree = await service.GetTreeAsync();
+        var root = Assert.Single(tree.Value);
+        Assert.Equal("5000", root.Code);
+        Assert.Equal(108, root.Children.Count);
+        Assert.All(oldCodes, code => Assert.Contains(root.Children, child => child.Code == code));
+        Assert.All(root.Children, child => Assert.Empty(child.Children));
+
+        var exhausted = await service.AddAsync(new AccountRequest(
+            Code: null,
+            Name: "مصروف خارج النطاق",
+            ParentAccountId: parent.Id,
+            AccountType: AccountType.Expense,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+        Assert.True(exhausted.IsFailure);
+        Assert.Equal("Accounts.AutomaticCodeUnavailable", exhausted.Error.Code);
+        Assert.Null(await database.GetAccountByCodeAsync("6000"));
+    }
+
+    [Fact]
+    public async Task NewAccount_SkipsCompanyWideAndInactiveCollisionsButReusesDeletedAndOtherCompanyCodes()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        await database.SeedAccountAsync(code: "5000", isPosting: false);
+        var parent = (await database.GetAccountByCodeAsync("5000"))!;
+        await database.SeedAccountAsync(code: "6000", isPosting: false);
+        var otherParent = (await database.GetAccountByCodeAsync("6000"))!;
+        await database.SeedAccountAsync(code: "5900", parentAccountId: parent.Id, isActive: false);
+        await database.SeedAccountAsync(code: "5901", parentAccountId: otherParent.Id, isActive: false);
+        await database.SeedAccountAsync(code: "5902", parentAccountId: parent.Id, isDeleted: true);
+        await database.SeedAccountAsync(code: "5902", companyId: 2);
+
+        var result = await database.CreateAccountService(companyId: 1).AddAsync(new AccountRequest(
+            Code: null,
+            Name: "مصروف جديد",
+            ParentAccountId: parent.Id,
+            AccountType: AccountType.Expense,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("5902", result.Value.Code);
+        Assert.Equal(parent.Id, result.Value.ParentAccountId);
+        Assert.Equal("5901", (await database.GetAccountByCodeAsync("5901"))!.Code);
+        Assert.Equal(otherParent.Id, (await database.GetAccountByCodeAsync("5901"))!.ParentAccountId);
+    }
+
+    [Theory]
+    [InlineData("1000", "1900", "1901")]
+    [InlineData("5000", "5900", "5901")]
+    [InlineData("5000", "5902", "5903")]
+    [InlineData("5200", "5250", "5251")]
+    [InlineData("5250", "5255", "5256")]
+    public async Task NewAccount_ContinuesAfterHighestDirectChildWithoutFillingEarlierGaps(
+        string parentCode,
+        string existingChildCode,
+        string expectedCode)
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        await database.SeedAccountAsync(code: parentCode, isPosting: false);
+        var parent = (await database.GetAccountByCodeAsync(parentCode))!;
+        await database.SeedAccountAsync(code: existingChildCode, parentAccountId: parent.Id);
+        // Previously generated long codes and unrelated branches must not affect the sequence.
+        await database.SeedAccountAsync(code: parentCode + "01", parentAccountId: parent.Id);
+        await database.SeedAccountAsync(code: "9999", parentAccountId: parent.Id);
+        await database.SeedAccountAsync(code: "5998");
+
+        var result = await database.CreateAccountService(companyId: 1).AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حساب متتابع",
+            ParentAccountId: parent.Id,
+            AccountType: AccountType.Expense,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expectedCode, result.Value.Code);
+        Assert.Equal(parent.Id, result.Value.ParentAccountId);
+        Assert.Equal(parentCode + "01", (await database.GetAccountByCodeAsync(parentCode + "01"))!.Code);
+        Assert.Equal(parent.Id, (await database.GetAccountByCodeAsync(parentCode + "01"))!.ParentAccountId);
+    }
+
+    [Theory]
+    [InlineData("5000", "5999")]
+    [InlineData("5200", "5299")]
+    [InlineData("5250", "5259")]
+    public async Task NewAccount_RejectsExhaustedFourDigitBranchInsteadOfOverflowing(
+        string parentCode,
+        string lastChildCode)
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        await database.SeedAccountAsync(code: parentCode, isPosting: false);
+        var parent = (await database.GetAccountByCodeAsync(parentCode))!;
+        await database.SeedAccountAsync(code: lastChildCode, parentAccountId: parent.Id);
+
+        var result = await database.CreateAccountService(companyId: 1).AddAsync(new AccountRequest(
+            Code: null,
+            Name: "حساب خارج النطاق",
+            ParentAccountId: parent.Id,
+            AccountType: AccountType.Expense,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Accounts.AutomaticCodeUnavailable", result.Error.Code);
+        var tree = await database.CreateAccountService(companyId: 1).GetTreeAsync();
+        Assert.Single(Assert.Single(tree.Value).Children);
+    }
+
+    [Theory]
+    [InlineData("5111")]
+    [InlineData("0001")]
+    [InlineData("123456789012345678901234567890")]
+    [InlineData("123456789012345678901234567890123456789012345678")]
+    public async Task NewAccount_UsesNumericParentPrefixWithoutIntegerOrTrailingZeroRestrictions(string parentCode)
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        await database.SeedAccountAsync(code: parentCode, isPosting: false);
+        var parent = (await database.GetAccountByCodeAsync(parentCode))!;
+
+        var result = await database.CreateAccountService(companyId: 1).AddAsync(new AccountRequest(
+            Code: null,
+            Name: "مصروف جديد",
+            ParentAccountId: parent.Id,
+            AccountType: AccountType.Expense,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(parentCode + "01", result.Value.Code);
+        Assert.Equal(parent.Id, result.Value.ParentAccountId);
+    }
+
+    [Theory]
+    [InlineData("1234567890123456789012345678901234567890123456789")]
+    [InlineData("12345678901234567890123456789012345678901234567890")]
+    [InlineData("EXPENSES")]
+    public async Task NewAccount_ReturnsValidationWhenParentCannotProduceNumericCodeWithinFiftyCharacters(string parentCode)
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        await database.SeedAccountAsync(code: parentCode, isPosting: false);
+        var parent = (await database.GetAccountByCodeAsync(parentCode))!;
+
+        var result = await database.CreateAccountService(companyId: 1).AddAsync(new AccountRequest(
+            Code: null,
+            Name: "مصروف جديد",
+            ParentAccountId: parent.Id,
+            AccountType: AccountType.Expense,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Accounts.AutomaticCodeUnavailable", result.Error.Code);
+        var tree = await database.CreateAccountService(companyId: 1).GetTreeAsync();
+        Assert.Empty(Assert.Single(tree.Value).Children);
+    }
+
+    [Fact]
+    public async Task NewAccount_ReturnsValidationWhenNextSuffixWouldExceedFiftyCharacters()
+    {
+        const string parentCode = "123456789012345678901234567890123456789012345678";
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        await database.SeedAccountAsync(code: parentCode, isPosting: false);
+        var parent = (await database.GetAccountByCodeAsync(parentCode))!;
+        for (var sequence = 1; sequence <= 99; sequence++)
+            await database.SeedAccountAsync(
+                code: parentCode + sequence.ToString("D2", System.Globalization.CultureInfo.InvariantCulture),
+                parentAccountId: parent.Id);
+
+        var result = await database.CreateAccountService(companyId: 1).AddAsync(new AccountRequest(
+            Code: null,
+            Name: "مصروف جديد",
+            ParentAccountId: parent.Id,
+            AccountType: AccountType.Expense,
+            NormalBalance: NormalBalance.Debit,
+            IsPosting: true));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Accounts.AutomaticCodeUnavailable", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task NewRootAccounts_ContinueAfterNineWithoutRenumberingExistingRoots()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        var service = database.CreateAccountService(companyId: 1);
+        for (var sequence = 1; sequence <= 11; sequence++)
+        {
+            var result = await service.AddAsync(new AccountRequest(
+                Code: null,
+                Name: $"مجموعة {sequence}",
+                ParentAccountId: null,
+                AccountType: AccountType.Asset,
+                NormalBalance: NormalBalance.Debit,
+                IsPosting: false));
+
+            Assert.True(result.IsSuccess);
+            Assert.Equal((sequence * 1000).ToString(System.Globalization.CultureInfo.InvariantCulture), result.Value.Code);
+            Assert.Null(result.Value.ParentAccountId);
+        }
+
+        var tree = await service.GetTreeAsync();
+        Assert.Equal(11, tree.Value.Count);
+        Assert.Contains(tree.Value, account => account.Code == "1000");
+        Assert.Contains(tree.Value, account => account.Code == "9000");
     }
 
     [Fact]
@@ -616,6 +853,116 @@ public sealed class AccountingSetupServiceTests
         Assert.Null(await AddAsync(1));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeleteUnusedAccount_SoftDeletesCurrentClassificationAndPreservesDeletedHistory(bool closeYear)
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        await database.SeedAccountAsync(code: "5901");
+        var account = (await database.GetAccountByCodeAsync("5901"))!;
+        await database.SeedStatementMappingAsync(account.Id, fiscalYearId: 1, isDeleted: false);
+        await database.SeedStatementMappingAsync(account.Id, fiscalYearId: 100, isDeleted: true);
+        var before = await database.GetStatementMappingsIncludingDeletedAsync(account.Id);
+        var historical = Assert.Single(before, mapping => mapping.IsDeleted);
+        if (closeYear)
+            await database.CloseFiscalYearAsync(1);
+        database.ClearTracking();
+
+        var result = await database.CreateAccountService(companyId: 1).DeleteAsync(account.Id);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(await database.GetAccountByCodeAsync("5901"));
+        Assert.True((await database.GetAccountIncludingDeletedAsync(account.Id)).IsDeleted);
+        var mappings = await database.GetStatementMappingsIncludingDeletedAsync(account.Id);
+        Assert.Equal(2, mappings.Count);
+        Assert.All(mappings, mapping => Assert.True(mapping.IsDeleted));
+        Assert.Equal(historical.DeletedOn, Assert.Single(mappings, mapping => mapping.Id == historical.Id).DeletedOn);
+        Assert.NotNull(Assert.Single(mappings, mapping => mapping.Id != historical.Id).DeletedOn);
+    }
+
+    [Fact]
+    public async Task DeleteUnusedAccount_WithOnlyDeletedClassificationIsAllowed()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        await database.SeedAccountAsync(code: "5901");
+        var account = (await database.GetAccountByCodeAsync("5901"))!;
+        await database.SeedStatementMappingAsync(account.Id, fiscalYearId: 1, isDeleted: true);
+        database.ClearTracking();
+
+        var result = await database.CreateAccountService(companyId: 1).DeleteAsync(account.Id);
+
+        Assert.True(result.IsSuccess);
+        Assert.True((await database.GetAccountIncludingDeletedAsync(account.Id)).IsDeleted);
+        Assert.True(Assert.Single(await database.GetStatementMappingsIncludingDeletedAsync(account.Id)).IsDeleted);
+    }
+
+    [Theory]
+    [InlineData("cash", false, "Accounts.HasCashVouchers")]
+    [InlineData("cash", true, "Accounts.HasCashVouchers")]
+    [InlineData("journal", false, "Accounts.HasJournalEntries")]
+    [InlineData("journal", true, "Accounts.HasJournalEntries")]
+    [InlineData("revaluation", false, "Accounts.HasRevaluations")]
+    [InlineData("revaluation", true, "Accounts.HasRevaluations")]
+    [InlineData("operational", false, "Accounts.HasOperationalMappings")]
+    [InlineData("operational", true, "Accounts.HasOperationalMappings")]
+    public async Task DeleteUsedAccount_BlocksHistoricalFinancialOrOperationalUseWithoutRemovingClassification(
+        string historyType,
+        bool isDeleted,
+        string expectedError)
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        await database.SeedAccountAsync(code: "5901");
+        var account = (await database.GetAccountByCodeAsync("5901"))!;
+        await database.SeedStatementMappingAsync(account.Id, fiscalYearId: 1, isDeleted: false);
+        await database.SeedAccountDeleteHistoryAsync(account.Id, historyType, isDeleted, companyId: 1);
+        database.ClearTracking();
+
+        var result = await database.CreateAccountService(companyId: 1).DeleteAsync(account.Id);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(expectedError, result.Error.Code);
+        Assert.False((await database.GetAccountIncludingDeletedAsync(account.Id)).IsDeleted);
+        Assert.False(Assert.Single(await database.GetStatementMappingsIncludingDeletedAsync(account.Id)).IsDeleted);
+    }
+
+    [Fact]
+    public async Task DeleteUnusedAccount_WhenSaveFailsRollsBackClassificationAndAccountTogether()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        await database.SeedAccountAsync(code: "5901");
+        var account = (await database.GetAccountByCodeAsync("5901"))!;
+        await database.SeedStatementMappingAsync(account.Id, fiscalYearId: 1, isDeleted: false);
+        await database.RejectAccountDeletionAsync();
+        database.ClearTracking();
+
+        await Assert.ThrowsAsync<DbUpdateException>(() =>
+            database.CreateAccountService(companyId: 1).DeleteAsync(account.Id));
+
+        Assert.False((await database.GetAccountIncludingDeletedAsync(account.Id)).IsDeleted);
+        Assert.False(Assert.Single(await database.GetStatementMappingsIncludingDeletedAsync(account.Id)).IsDeleted);
+    }
+
+    [Fact]
+    public async Task DeleteAccount_PreservesChildGuardAndCompanyScope()
+    {
+        await using var database = await AccountingTestDatabase.CreateAsync();
+        await database.SeedAccountAsync(code: "5000", isPosting: false);
+        var parent = (await database.GetAccountByCodeAsync("5000"))!;
+        await database.SeedAccountAsync(code: "5901", parentAccountId: parent.Id);
+        var child = (await database.GetAccountByCodeAsync("5901"))!;
+        var service = database.CreateAccountService(companyId: 1);
+
+        Assert.Equal("Accounts.HasChildren", (await service.DeleteAsync(parent.Id)).Error.Code);
+        Assert.Equal("Accounts.NotFound", (await database.CreateAccountService(companyId: 2).DeleteAsync(child.Id)).Error.Code);
+        await database.SeedAccountDeleteHistoryAsync(child.Id, historyType: "cash", isDeleted: false, companyId: 2);
+        var result = await service.DeleteAsync(child.Id);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(await database.GetAccountByCodeAsync("5000"));
+        Assert.Null(await database.GetAccountByCodeAsync("5901"));
+    }
+
     [Fact]
     public async Task NewAccount_ReusesCodeOfSoftDeletedAccount()
     {
@@ -902,6 +1249,124 @@ public sealed class AccountingSetupServiceTests
                 Context,
                 new PaginationService(),
                 new TestCurrentCompanyContext(companyId));
+
+        public Task SeedAccountAsync(
+            string code,
+            int companyId = 1,
+            int? parentAccountId = null,
+            bool isPosting = true,
+            bool isActive = true,
+            bool isDeleted = false) =>
+            Context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO Accounts (
+                    CompanyId, Code, Name, ParentAccountId, AccountType,
+                    NormalBalance, IsPosting, IsActive,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES (
+                    {companyId}, {code}, {"حساب " + code}, {parentAccountId}, 5,
+                    1, {isPosting}, {isActive},
+                    'test', CURRENT_TIMESTAMP, 'test', {isDeleted});
+                """);
+
+        public Task<Account> GetAccountIncludingDeletedAsync(int accountId) =>
+            Context.Accounts.IgnoreQueryFilters().AsNoTracking()
+                .SingleAsync(account => account.Id == accountId);
+
+        public Task<List<AccountStatementMapping>> GetStatementMappingsIncludingDeletedAsync(int accountId) =>
+            Context.AccountStatementMappings.IgnoreQueryFilters().AsNoTracking()
+                .Where(mapping => mapping.AccountId == accountId).ToListAsync();
+
+        public async Task SeedStatementMappingAsync(int accountId, int fiscalYearId, bool isDeleted)
+        {
+            if (fiscalYearId == 100)
+                await SeedHistoricalFiscalYearAsync();
+            var line = new FinancialStatementLine
+            {
+                CompanyId = 1,
+                FiscalYearId = fiscalYearId,
+                StatementType = FinancialStatementType.IncomeStatement,
+                Code = $"IS-{accountId}-{fiscalYearId}",
+                Name = "تصنيف مصروف",
+                IsAssignable = true
+            };
+            Context.AccountStatementMappings.Add(new AccountStatementMapping
+            {
+                CompanyId = 1,
+                FiscalYearId = fiscalYearId,
+                StatementType = FinancialStatementType.IncomeStatement,
+                AccountId = accountId,
+                FinancialStatementLine = line,
+                IsDeleted = isDeleted,
+                DeletedOn = isDeleted ? new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc) : null
+            });
+            await Context.SaveChangesAsync();
+        }
+
+        public async Task SeedAccountDeleteHistoryAsync(int accountId, string historyType, bool isDeleted, int companyId)
+        {
+            if (companyId == 1)
+                await SeedHistoricalFiscalYearAsync();
+            var fiscalYearId = companyId == 1 ? 100 : 2;
+            switch (historyType)
+            {
+                case "cash":
+                    await Context.Database.ExecuteSqlInterpolatedAsync($"""
+                        INSERT INTO CashVouchers (CompanyId, FiscalYearId, AccountId, IsDeleted)
+                        VALUES ({companyId}, {fiscalYearId}, {accountId}, {isDeleted});
+                        """);
+                    break;
+                case "journal":
+                    await Context.Database.ExecuteSqlInterpolatedAsync($"""
+                        INSERT INTO JournalEntries (
+                            Id, CompanyId, FiscalYearId, EntryNumber, EntryDate, Description,
+                            EntryType, Status, PostedOn, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                        VALUES (99, {companyId}, {fiscalYearId}, 'HISTORY', '2025-01-01', 'حركة سابقة',
+                            1, 1, CURRENT_TIMESTAMP, 'test', CURRENT_TIMESTAMP, 'test', {isDeleted});
+                        INSERT INTO JournalEntryLines (
+                            CompanyId, JournalEntryId, AccountId, Debit, Credit,
+                            CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                        VALUES ({companyId}, 99, {accountId}, 10, 0,
+                            'test', CURRENT_TIMESTAMP, 'test', {isDeleted});
+                        """);
+                    break;
+                case "revaluation":
+                    await Context.Database.ExecuteSqlInterpolatedAsync($"""
+                        INSERT INTO MonetaryAccountRevaluations (CompanyId, FiscalYearId, AccountId, IsDeleted)
+                        VALUES ({companyId}, {fiscalYearId}, {accountId}, {isDeleted});
+                        """);
+                    break;
+                case "operational":
+                    await Context.Database.ExecuteSqlInterpolatedAsync($"""
+                        INSERT INTO AccountMappings (
+                            CompanyId, FiscalYearId, MappingType, AccountId,
+                            CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                        VALUES ({companyId}, 1, 1, {accountId},
+                            'test', CURRENT_TIMESTAMP, 'test', {isDeleted});
+                        """);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(historyType));
+            }
+        }
+
+        private Task SeedHistoricalFiscalYearAsync() =>
+            Context.Database.ExecuteSqlRawAsync("""
+                INSERT OR IGNORE INTO FiscalYears (
+                    Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent,
+                    CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+                VALUES (100, 1, '2025', '2025-01-01', '2025-12-31', 2, 0,
+                    'test', CURRENT_TIMESTAMP, 'test', 0);
+                """);
+
+        public Task RejectAccountDeletionAsync() =>
+            Context.Database.ExecuteSqlRawAsync("""
+                CREATE TRIGGER RejectAccountDeletion
+                BEFORE UPDATE ON Accounts
+                WHEN NEW.IsDeleted = 1
+                BEGIN
+                    SELECT RAISE(ABORT, 'Simulated account save failure');
+                END;
+                """);
 
         public JournalEntryService CreateJournalEntryService(int companyId) =>
             new(
@@ -1496,6 +1961,13 @@ public sealed class AccountingSetupServiceTests
                     CompanyId INTEGER NOT NULL,
                     AccountId INTEGER NULL,
                     Classification INTEGER NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE MonetaryAccountRevaluations (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CompanyId INTEGER NOT NULL,
+                    AccountId INTEGER NOT NULL,
                     IsDeleted INTEGER NOT NULL DEFAULT 0
                 );
 

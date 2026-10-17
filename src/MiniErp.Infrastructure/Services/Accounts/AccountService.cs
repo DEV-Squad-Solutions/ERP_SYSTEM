@@ -425,6 +425,17 @@ public sealed class AccountService(
         await using var transaction = await dbContext.Database
             .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
+        if (dbContext.Database.IsSqlServer())
+        {
+            // Serialize automatic allocations for this company before reading parents or codes.
+            // The transaction owns this lock until the account has been saved and committed.
+            _ = await dbContext.Database.SqlQuery<int>($"""
+                SELECT [Id] AS [Value]
+                FROM [Companies] WITH (UPDLOCK, HOLDLOCK)
+                WHERE [Id] = {companyId}
+                """).SingleAsync(cancellationToken);
+        }
+
         var parentValidation = await ValidateParentAsync(
             request.ParentAccountId,
             accountId: null,
@@ -466,32 +477,64 @@ public sealed class AccountService(
             ? await accounts.Where(account => account.Id == parentAccountId.Value)
                 .Select(account => account.Code).FirstOrDefaultAsync(cancellationToken)
             : null;
-        var parsedParent = 0;
         if (parentAccountId.HasValue &&
-            (!int.TryParse(parentCode, out parsedParent) ||
-             parentCode!.Length != 4 ||
-             parsedParent is < 1000 or > 9999))
+            (string.IsNullOrEmpty(parentCode) ||
+             parentCode.Length > 48 ||
+             parentCode.Any(character => character is < '0' or > '9')))
             return null;
-        var allCodes = await accounts.Select(account => account.Code).ToListAsync(cancellationToken);
-        var used = allCodes.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var step = parentAccountId.HasValue ? GetHierarchyStep(parsedParent) : 1000;
-        if (step <= 0) return null;
-        var candidate = parentAccountId.HasValue ? parsedParent + step : 1000;
-        var limit = parentAccountId.HasValue
-            ? parsedParent + 9 * step
-            : 9000;
-        while (candidate <= limit && used.Contains(candidate.ToString(System.Globalization.CultureInfo.InvariantCulture)))
-        {
-            candidate += step;
-        }
-        return candidate <= limit ? candidate.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
-    }
+        var existingAccounts = await accounts
+            .Select(account => new { account.Code, account.ParentAccountId })
+            .ToListAsync(cancellationToken);
+        var used = existingAccounts.Select(account => account.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-    private static int GetHierarchyStep(int parentCode)
-    {
-        var text = parentCode.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var trailingZeros = text.Length - text.TrimEnd('0').Length;
-        return trailingZeros switch { >= 3 => 100, 2 => 10, 1 => 1, _ => 0 };
+        // Keep established four-digit branches readable without changing their hierarchy.
+        // Continue after the highest direct child, rather than filling earlier gaps.
+        if (parentCode is { Length: 4 } && parentCode[0] != '0' && parentCode[^1] == '0')
+        {
+            var parentNumber = int.Parse(parentCode, System.Globalization.CultureInfo.InvariantCulture);
+            var branchSize = 1;
+            for (var index = parentCode.Length - 1; index >= 0 && parentCode[index] == '0'; index--)
+                branchSize *= 10;
+            var lastCode = parentNumber + branchSize - 1;
+            var nextCode = parentNumber + 1;
+            foreach (var existing in existingAccounts)
+            {
+                if (existing.ParentAccountId == parentAccountId &&
+                    existing.Code.Length == 4 &&
+                    existing.Code.All(character => character is >= '0' and <= '9'))
+                {
+                    var number = int.Parse(existing.Code, System.Globalization.CultureInfo.InvariantCulture);
+                    if (number > parentNumber && number <= lastCode)
+                        nextCode = Math.Max(nextCode, number + 1);
+                }
+            }
+
+            for (var number = nextCode; number <= lastCode; number++)
+            {
+                var candidate = number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (!used.Contains(candidate))
+                    return candidate;
+            }
+
+            return null;
+        }
+
+        // Preserve suffix generation for other existing numeric parent formats.
+        // Hierarchy always comes from ParentAccountId, never from the generated code.
+        // At most used.Count candidates can be occupied, even by accounts under other parents.
+        for (long sequence = 1; sequence <= (long)used.Count + 1; sequence++)
+        {
+            var candidate = parentAccountId.HasValue
+                ? parentCode + sequence.ToString("D2", System.Globalization.CultureInfo.InvariantCulture)
+                : (sequence * 1000).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (candidate.Length > 50)
+                return null;
+            if (!used.Contains(candidate))
+                return candidate;
+        }
+
+        return null;
     }
 
     public async Task<Result<AccountResponse>> UpdateAsync(
@@ -619,6 +662,9 @@ public sealed class AccountService(
             return Result.Failure(InvalidId());
         }
 
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
         var account = await dbContext.Accounts.FirstOrDefaultAsync(
             entity => entity.CompanyId == companyId && entity.Id == id,
             cancellationToken);
@@ -632,28 +678,6 @@ public sealed class AccountService(
                 cancellationToken))
         {
             return Result.Failure(HasChildren());
-        }
-
-        if (await dbContext.AccountStatementMappings
-                .IgnoreQueryFilters()
-                .AnyAsync(
-                    mapping =>
-                        mapping.CompanyId == companyId &&
-                        mapping.AccountId == id,
-                    cancellationToken))
-        {
-            return Result.Failure(HasStatementMappings());
-        }
-
-        if (await dbContext.AccountMappings
-                .IgnoreQueryFilters()
-                .AnyAsync(
-                    mapping =>
-                        mapping.CompanyId == companyId &&
-                        mapping.AccountId == id,
-                    cancellationToken))
-        {
-            return Result.Failure(HasStatementMappings());
         }
 
         if (await dbContext.CashVouchers
@@ -678,8 +702,37 @@ public sealed class AccountService(
             return Result.Failure(HasJournalEntries());
         }
 
+        if (await dbContext.MonetaryAccountRevaluations
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    revaluation =>
+                        revaluation.CompanyId == companyId &&
+                        revaluation.AccountId == id,
+                    cancellationToken))
+        {
+            return Result.Failure(HasRevaluations());
+        }
+
+        if (await dbContext.AccountMappings
+                .IgnoreQueryFilters()
+                .AnyAsync(
+                    mapping =>
+                        mapping.CompanyId == companyId &&
+                        mapping.AccountId == id,
+                    cancellationToken))
+        {
+            return Result.Failure(HasOperationalMappings());
+        }
+
+        // Classification alone is not financial use. Remove live links atomically with
+        // the unused account; already soft-deleted links keep their original audit history.
+        var statementMappings = await dbContext.AccountStatementMappings
+            .Where(mapping => mapping.CompanyId == companyId && mapping.AccountId == id)
+            .ToListAsync(cancellationToken);
+        dbContext.AccountStatementMappings.RemoveRange(statementMappings);
         dbContext.Accounts.Remove(account);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Result.Success();
     }
 
