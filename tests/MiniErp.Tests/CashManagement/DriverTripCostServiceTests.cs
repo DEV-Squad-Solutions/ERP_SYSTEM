@@ -168,11 +168,8 @@ public sealed class DriverTripCostServiceTests
     {
         await using var database =
             await CashManagementTestDatabase.CreateAsync();
-        var original = Assert.Single(
-            (await database.CreateDriverTripService(1).GetCostEntryAsync(
-                Page(),
-                new DriverTripCostFilterRequest(TripNumber: "TR-1")))
-            .Value.Items);
+        var original = (await database.CreateDriverTripService(1).GetCostEntryAsync(Page()))
+            .Value.Items.ToDictionary(item => item.DriverTripId);
 
         await using var winnerContext = database.CreateAdditionalContext();
         await using var staleContext = database.CreateAdditionalContext();
@@ -183,10 +180,10 @@ public sealed class DriverTripCostServiceTests
             new DriverTripBulkCostUpdateRequest(
             [
                 new DriverTripCostUpdateItem(
-                    1,
+                    2,
                     50m,
                     null,
-                    original.RowVersion)
+                    original[2].RowVersion)
             ]));
         var staleResult = await stale.UpdateCostsAsync(
             new DriverTripBulkCostUpdateRequest(
@@ -195,15 +192,25 @@ public sealed class DriverTripCostServiceTests
                     1,
                     60m,
                     null,
-                    original.RowVersion)
+                    original[1].RowVersion),
+                new DriverTripCostUpdateItem(
+                    2,
+                    70m,
+                    null,
+                    original[2].RowVersion)
             ]));
 
         Assert.True(winnerResult.IsSuccess);
         Assert.Equal("DriverTrips.Concurrency", staleResult.Error.Code);
+        Assert.False(staleContext.ChangeTracker.HasChanges());
+        Assert.Null(await database.Context.DriverTrips
+            .Where(item => item.Id == 1)
+            .Select(item => item.Cost)
+            .SingleAsync());
         Assert.Equal(
             50m,
             await database.Context.DriverTrips
-                .Where(item => item.Id == 1)
+                .Where(item => item.Id == 2)
                 .Select(item => item.Cost)
                 .SingleAsync());
     }
@@ -246,7 +253,7 @@ public sealed class DriverTripCostServiceTests
 
         Assert.True(update.IsFailure);
         Assert.Equal(
-            "FiscalYears.QueryDateOutsideRange",
+            "FiscalYears.Closed",
             update.Error.Code);
         Assert.Null(
             await database.Context.DriverTrips

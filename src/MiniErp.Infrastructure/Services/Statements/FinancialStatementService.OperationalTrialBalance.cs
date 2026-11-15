@@ -211,6 +211,8 @@ public sealed partial class FinancialStatementService
                     JournalEntryType.Opening ||
                     line.JournalEntry.SourceType ==
                     JournalEntrySourceType.FiscalYearClosing ||
+                    line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.DriverOpeningBalance ||
                     line.JournalEntry.EntryDate < filters.FromDate
             })
             .Select(group => new AccountMovementGroup(

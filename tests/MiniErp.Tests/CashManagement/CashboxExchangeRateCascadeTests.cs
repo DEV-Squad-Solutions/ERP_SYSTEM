@@ -180,15 +180,17 @@ public sealed class CashboxExchangeRateCascadeTests
         Assert.Equal(1_200m, invoiceLine.BaseTotal);
 
         Assert.Equal(1_800m, partnerOpening.BaseAmount);
-        Assert.Equal(600m, partnerVoucher.BaseAmount);
-        Assert.Equal(1_200m, employeeVoucher.BaseAmount);
+        Assert.Equal(500m, partnerVoucher.BaseAmount);
+        Assert.Equal(50m, partnerVoucher.ExchangeRate);
+        Assert.Equal(1_000m, employeeVoucher.BaseAmount);
+        Assert.Equal(50m, employeeVoucher.ExchangeRate);
         Assert.Contains(movements, movement =>
             movement.InvoiceId.HasValue &&
             movement.BaseDebit == 1_080m);
         Assert.Contains(movements, movement =>
             movement.CashVoucherId == partnerVoucher.Id &&
-            movement.BaseCredit == 600m);
-        Assert.Equal(1_200m, employeeMovement.BaseDebit);
+            movement.BaseCredit == 500m);
+        Assert.Equal(1_000m, employeeMovement.BaseDebit);
 
         Assert.Equal(300m, invoicePayment.AppliedBaseAmount);
         Assert.Equal(275m, invoicePayment.CashboxBaseAmount);
@@ -241,8 +243,8 @@ public sealed class CashboxExchangeRateCascadeTests
         Assert.Equal(60m, invoice.ExchangeRate);
         Assert.Equal(1_080m, invoice.BaseTotal);
         Assert.Equal(6_000m, cashbox.BaseOpeningBalance);
-        Assert.Contains(600m, voucherBaseAmounts);
-        Assert.Contains(1_200m, voucherBaseAmounts);
+        Assert.Contains(500m, voucherBaseAmounts);
+        Assert.Contains(1_000m, voucherBaseAmounts);
     }
 
     [Fact]

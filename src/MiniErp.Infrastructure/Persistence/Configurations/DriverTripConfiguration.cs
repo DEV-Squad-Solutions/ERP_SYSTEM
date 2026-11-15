@@ -31,15 +31,8 @@ public sealed class DriverTripConfiguration : AuditableEntityConfiguration<Drive
         builder.Property(trip => trip.ActualDriverName)
             .HasMaxLength(200);
 
-        builder.Property(trip => trip.InvoiceId)
-            .IsRequired();
-
-        builder.Property(trip => trip.BusinessPartnerId)
-            .IsRequired();
-
         builder.Property(trip => trip.InvoiceNumber)
-            .HasMaxLength(100)
-            .IsRequired();
+            .HasMaxLength(100);
 
         builder.Property(trip => trip.ExportInvoiceCode)
             .HasMaxLength(100);
@@ -67,7 +60,7 @@ public sealed class DriverTripConfiguration : AuditableEntityConfiguration<Drive
             trip.InvoiceId
         })
             .IsUnique()
-            .HasFilter("[IsDeleted] = 0");
+            .HasFilter("[IsDeleted] = 0 AND [InvoiceId] IS NOT NULL");
 
         builder.HasIndex(trip => new
         {

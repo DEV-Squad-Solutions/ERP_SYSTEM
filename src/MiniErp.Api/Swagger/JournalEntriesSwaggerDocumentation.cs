@@ -19,7 +19,7 @@ public sealed class JournalEntriesSwaggerDocumentation : IOperationFilter
         {
             nameof(JournalEntriesController.GetAll) => (
                 "عرض القيود اليومية",
-                "يعرض القيود المرحلة تلقائيًا مع البحث والتصفية بالسنة المالية والنوع والحالة والتاريخ."),
+                "يعرض القيود المرحلة تلقائيًا مع البحث والتصفية بالسنة المالية والنوع والحالة والتاريخ. يمكن إرسال sourceType وsourceId معًا للوصول إلى قيد حركة محددة، مع استمرار نطاق الشركة والسنة وصلاحيات عرض الخزائن."),
             nameof(JournalEntriesController.GetById) => (
                 "تفاصيل قيد يومية",
                 "يعرض رأس القيد وكل أسطر المدين والدائن ومصدر القيد إن كان تلقائيًا، ومع كل سطر بيانات الطرف التحليلية إن وجدت. Debit/Credit هما دائمًا بعملة الشركة الأساسية، بينما Currency وExchangeRate وTransactionDebit/TransactionCredit تحفظ العملة الأصلية للسطر."),

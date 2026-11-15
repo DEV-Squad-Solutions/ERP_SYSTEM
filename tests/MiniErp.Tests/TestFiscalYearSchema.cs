@@ -64,6 +64,7 @@ internal static class TestFiscalYearSchema
             );
             """,
             cancellationToken);
+        await EnsureDriverOpeningBalancesAsync(context, cancellationToken);
 
         foreach (var table in TransactionTables)
         {
@@ -166,6 +167,25 @@ internal static class TestFiscalYearSchema
                 cancellationToken);
         }
     }
+
+    public static Task EnsureDriverOpeningBalancesAsync(
+        ApplicationDbContext context, CancellationToken cancellationToken = default) =>
+        context.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS DriverOpeningBalances (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT, CompanyId INTEGER NOT NULL, FiscalYearId INTEGER NOT NULL,
+                DriverId INTEGER NOT NULL, DocumentNumber TEXT NOT NULL, DocumentDate TEXT NOT NULL,
+                Amount decimal(17,2) NOT NULL, Currency INTEGER NOT NULL, BalanceType INTEGER NOT NULL,
+                Notes TEXT NULL, RowVersion BLOB NOT NULL DEFAULT (randomblob(8)), CreatedById TEXT NOT NULL,
+                CreatedOn TEXT NOT NULL, CreatedByPc TEXT NOT NULL, UpdatedById TEXT NULL,
+                UpdatedOn TEXT NULL, UpdatedByPc TEXT NULL, IsDeleted INTEGER NOT NULL,
+                DeletedById TEXT NULL, DeletedOn TEXT NULL, DeletedByPc TEXT NULL);
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_DriverOpeningBalances_CompanyId_FiscalYearId_DriverId
+                ON DriverOpeningBalances (CompanyId, FiscalYearId, DriverId) WHERE IsDeleted = 0;
+            CREATE TRIGGER IF NOT EXISTS AdvanceDriverOpeningBalanceRowVersion AFTER UPDATE ON DriverOpeningBalances
+                BEGIN UPDATE DriverOpeningBalances SET RowVersion = randomblob(8) WHERE Id = NEW.Id; END;
+            """,
+            cancellationToken);
 
     private static async Task<bool> TableExistsAsync(
         ApplicationDbContext context,

@@ -147,7 +147,7 @@ public sealed class CashVoucherService(
                 (voucher.Account != null &&
                  (voucher.Account.Code.Contains(search) ||
                   voucher.Account.Name.Contains(search))) ||
-                (voucher.DriverTrip != null &&
+                (voucher.DriverTrip != null && voucher.DriverTrip.InvoiceNumber != null &&
                  voucher.DriverTrip.InvoiceNumber.Contains(search)) ||
                 (voucher.Invoice != null &&
                  (voucher.Invoice.InvoiceNumber.Contains(search) ||
@@ -824,6 +824,25 @@ public sealed class CashVoucherService(
         CashVoucherRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var transaction = await dbContext.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        var result = await AddDraftAsync(request, cancellationToken);
+        if (result.IsFailure)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return result;
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    // Both single and incomplete bulk creation use the same operational draft
+    // semantics. The caller owns the transaction so a bulk batch stays atomic.
+    private async Task<Result<CashVoucherResponse>> AddDraftAsync(
+        CashVoucherRequest request,
+        CancellationToken cancellationToken)
+    {
         if (request.PartnerExchangeRate.HasValue)
             return Result<CashVoucherResponse>.Failure(Error.Validation(
                 "CashVouchers.PartnerRateRequiresCompletion",
@@ -831,9 +850,6 @@ public sealed class CashVoucherService(
                 nameof(request.PartnerExchangeRate)));
         var access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, request.CashboxId, cancellationToken);
         if (access.IsFailure) return Result<CashVoucherResponse>.Failure(access.Errors);
-        await using var transaction = await dbContext.Database
-            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-
         if (fiscalYearPeriodGuard is not null)
         {
             var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
@@ -856,14 +872,12 @@ public sealed class CashVoucherService(
                 cancellationToken);
         if (cashbox is null)
         {
-            await transaction.RollbackAsync(cancellationToken);
             return Result<CashVoucherResponse>.Failure(
                 CashboxNotFound(request.CashboxId));
         }
 
         if (!cashbox.IsActive)
         {
-            await transaction.RollbackAsync(cancellationToken);
             return Result<CashVoucherResponse>.Failure(CashboxInactive());
         }
 
@@ -897,7 +911,7 @@ public sealed class CashVoucherService(
             DriverTripId = null,
             ExternalPartyName = null,
             Amount = request.Amount,
-            ReferenceNumber = null,
+            ReferenceNumber = NormalizeText(request.ReferenceNumber),
             Description = NormalizeText(request.Description),
             Notes = NormalizeText(request.Notes),
             IsPosted = false
@@ -912,7 +926,6 @@ public sealed class CashVoucherService(
                 cancellationToken: cancellationToken);
             if (exchangeRateResult.IsFailure)
             {
-                await transaction.RollbackAsync(cancellationToken);
                 return Result<CashVoucherResponse>.Failure(exchangeRateResult.Errors);
             }
 
@@ -933,7 +946,6 @@ public sealed class CashVoucherService(
             .AsNoTracking()
             .FirstAsync(cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
         return Result<CashVoucherResponse>.Success(response);
     }
 
@@ -1045,6 +1057,12 @@ public sealed class CashVoucherService(
         var access = await EnsureVoucherExecuteAsync(voucher, cancellationToken);
         if (access.IsFailure)
             return Result<CashVoucherResponse>.Failure(access.Errors);
+        if (voucher.InvoiceId.HasValue)
+            return Result<CashVoucherResponse>.Failure(InvoiceGeneratedReadOnly());
+        if (voucher.CashboxTransferId.HasValue)
+            return Result<CashVoucherResponse>.Failure(TransferGeneratedReadOnly());
+        if (voucher.IsPosted)
+            return Result<CashVoucherResponse>.Failure(PostedReadOnly());
         if (!voucher.RowVersion.SequenceEqual(request.RowVersion))
             return Result<CashVoucherResponse>.Failure(Concurrency());
 
@@ -1062,26 +1080,21 @@ public sealed class CashVoucherService(
             return Result<CashVoucherResponse>.Failure(fiscalYearScope.Errors);
         if (fiscalYearPeriodGuard is not null)
         {
-            var openYear = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            var openYear = await fiscalYearPeriodGuard.EnsureOpenForFiscalYearAsync(
+                voucher.FiscalYearId,
                 voucher.VoucherDate,
                 nameof(CashVoucherRequest.VoucherDate),
                 cancellationToken);
             if (openYear.IsFailure)
                 return Result<CashVoucherResponse>.Failure(openYear.Errors);
-            openYear = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            openYear = await fiscalYearPeriodGuard.EnsureOpenForFiscalYearAsync(
+                voucher.FiscalYearId,
                 request.VoucherDate,
                 nameof(CashVoucherDraftUpdateRequest.VoucherDate),
                 cancellationToken);
             if (openYear.IsFailure)
                 return Result<CashVoucherResponse>.Failure(openYear.Errors);
         }
-        if (voucher.InvoiceId.HasValue)
-            return Result<CashVoucherResponse>.Failure(InvoiceGeneratedReadOnly());
-        if (voucher.CashboxTransferId.HasValue)
-            return Result<CashVoucherResponse>.Failure(TransferGeneratedReadOnly());
-        if (voucher.IsPosted)
-            return Result<CashVoucherResponse>.Failure(DraftRequired());
-
         access = await CashboxPermissionGuard.ExecuteAsync(cashboxAccessService, request.CashboxId, cancellationToken);
         if (access.IsFailure)
             return Result<CashVoucherResponse>.Failure(access.Errors);
@@ -1205,13 +1218,20 @@ public sealed class CashVoucherService(
             return Result<CashVoucherResponse>.Failure(NotFound(id));
         }
 
-        if (!voucher.RowVersion.SequenceEqual(request.RowVersion))
-        {
-            return Result<CashVoucherResponse>.Failure(Concurrency());
-        }
-
+        var entry = dbContext.Entry(voucher);
+        await entry.ReloadAsync(cancellationToken);
+        if (entry.State == EntityState.Detached || voucher.CompanyId != companyId || voucher.IsDeleted)
+            return Result<CashVoucherResponse>.Failure(NotFound(id));
         var access = await EnsureVoucherExecuteAsync(voucher, cancellationToken);
         if (access.IsFailure) return Result<CashVoucherResponse>.Failure(access.Errors);
+        if (voucher.InvoiceId.HasValue)
+            return Result<CashVoucherResponse>.Failure(InvoiceGeneratedReadOnly());
+        if (voucher.CashboxTransferId.HasValue)
+            return Result<CashVoucherResponse>.Failure(TransferGeneratedReadOnly());
+        if (voucher.IsPosted)
+            return Result<CashVoucherResponse>.Failure(PostedReadOnly());
+        if (!voucher.RowVersion.SequenceEqual(request.RowVersion))
+            return Result<CashVoucherResponse>.Failure(Concurrency());
 
         var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
             fiscalYearId: voucher.FiscalYearId,
@@ -1225,7 +1245,8 @@ public sealed class CashVoucherService(
 
         if (fiscalYearPeriodGuard is not null)
         {
-            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenForFiscalYearAsync(
+                voucher.FiscalYearId,
                 voucher.VoucherDate,
                 nameof(CashVoucherRequest.VoucherDate),
                 cancellationToken);
@@ -1235,7 +1256,8 @@ public sealed class CashVoucherService(
                     fiscalYearResult.Errors);
             }
 
-            fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenForFiscalYearAsync(
+                voucher.FiscalYearId,
                 request.VoucherDate,
                 nameof(CashVoucherUpdateRequest.VoucherDate),
                 cancellationToken);
@@ -1244,18 +1266,6 @@ public sealed class CashVoucherService(
                 return Result<CashVoucherResponse>.Failure(
                     fiscalYearResult.Errors);
             }
-        }
-
-        if (voucher.InvoiceId.HasValue)
-        {
-            return Result<CashVoucherResponse>.Failure(
-                InvoiceGeneratedReadOnly());
-        }
-
-        if (voucher.CashboxTransferId.HasValue)
-        {
-            return Result<CashVoucherResponse>.Failure(
-                TransferGeneratedReadOnly());
         }
 
         request = await NormalizeEmployeeMovementTypeAsync(
@@ -1274,7 +1284,6 @@ public sealed class CashVoucherService(
             return Result<CashVoucherResponse>.Failure(preparation.Error);
         }
 
-        var entry = dbContext.Entry(voucher);
         entry.Property(entity => entity.RowVersion).OriginalValue =
             request.RowVersion!;
 
@@ -1327,7 +1336,8 @@ public sealed class CashVoucherService(
             return Result<CashVoucherResponse>.Failure(Concurrency());
         }
 
-        var response = await ProjectResponseQuery(id)
+        await entry.ReloadAsync(cancellationToken);
+        var response = await ProjectResponseQuery(id, voucher.FiscalYearId)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
 
@@ -1340,92 +1350,20 @@ public sealed class CashVoucherService(
         CancellationToken cancellationToken = default)
     {
         if (id <= 0)
-        {
             return Result.Failure(InvalidId());
-        }
 
-        await using var transaction = await dbContext.Database
-            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-
-        var voucher = await dbContext.CashVouchers.FirstOrDefaultAsync(
-            entity =>
-                entity.Id == id &&
-                entity.CompanyId == companyId,
+        var voucher = await dbContext.CashVouchers.AsNoTracking().FirstOrDefaultAsync(
+            entity => entity.Id == id && entity.CompanyId == companyId,
             cancellationToken);
         if (voucher is null)
-        {
             return Result.Failure(NotFound(id));
-        }
-
         var access = await EnsureVoucherExecuteAsync(voucher, cancellationToken);
         if (access.IsFailure) return access;
-
-        var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
-            fiscalYearId: voucher.FiscalYearId,
-            fromDate: voucher.VoucherDate,
-            cancellationToken: cancellationToken);
-        if (fiscalYearScope.IsFailure)
-        {
-            return Result.Failure(fiscalYearScope.Errors);
-        }
-
-        if (fiscalYearPeriodGuard is not null)
-        {
-            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
-                voucher.VoucherDate,
-                nameof(CashVoucherRequest.VoucherDate),
-                cancellationToken);
-            if (fiscalYearResult.IsFailure)
-            {
-                return Result.Failure(fiscalYearResult.Errors);
-            }
-        }
-
         if (voucher.InvoiceId.HasValue)
-        {
             return Result.Failure(InvoiceGeneratedReadOnly());
-        }
-
         if (voucher.CashboxTransferId.HasValue)
-        {
             return Result.Failure(TransferGeneratedReadOnly());
-        }
-
-        try
-        {
-            var partnerMovements = await dbContext.BusinessPartnerMovements
-                .Where(movement =>
-                    movement.CompanyId == companyId &&
-                    movement.CashVoucherId == id)
-                .ToListAsync(cancellationToken);
-            dbContext.BusinessPartnerMovements.RemoveRange(partnerMovements);
-            await SynchronizeEmployeeMovementAsync(
-                voucher,
-                shouldExist: false,
-                movementType: null,
-                cancellationToken);
-            dbContext.CashVouchers.Remove(voucher);
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            var postingResult = await cashVoucherPostingService.DeleteAsync(
-                voucher.Id,
-                cancellationToken);
-            if (postingResult.IsFailure)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                dbContext.ChangeTracker.Clear();
-                return Result.Failure(postingResult.Errors);
-            }
-
-            await transaction.CommitAsync(cancellationToken);
-            return Result.Success();
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            dbContext.ChangeTracker.Clear();
-            return Result.Failure(Concurrency());
-        }
+        return Result.Failure(DeleteNotAllowed());
     }
 
     private async Task<Result<CashVoucherBulkItemResponse>> AddBulkItemAsync(
@@ -1433,6 +1371,25 @@ public sealed class CashVoucherService(
         CancellationToken cancellationToken)
     {
         var request = ToUpdateRequest(item.Voucher!, rowVersion: null);
+        if (!HasExactlyOnePostingTarget(request))
+        {
+            var draft = await AddDraftAsync(new CashVoucherRequest(
+                VoucherDate: request.VoucherDate,
+                Direction: request.Direction,
+                CashboxId: request.CashboxId!.Value,
+                Amount: request.Amount,
+                Description: request.Description,
+                ReferenceNumber: request.ReferenceNumber,
+                Notes: request.Notes,
+                ExchangeRate: request.ExchangeRate), cancellationToken);
+            return draft.IsFailure
+                ? Result<CashVoucherBulkItemResponse>.Failure(draft.Errors)
+                : Result<CashVoucherBulkItemResponse>.Success(new CashVoucherBulkItemResponse(
+                    Action: CashVoucherBulkAction.Add,
+                    Status: "Added",
+                    Id: draft.Value.Id,
+                    Voucher: draft.Value));
+        }
         request = await NormalizeEmployeeMovementTypeAsync(
             request,
             currentVoucher: null,
@@ -1453,9 +1410,7 @@ public sealed class CashVoucherService(
         var preparation = await PrepareAsync(
             request,
             currentVoucher: null,
-            // Bulk keeps its legacy behavior and may contain an
-            // unclassified posted cash movement.
-            enforceManualPostingTarget: false,
+            enforceManualPostingTarget: true,
             cancellationToken: cancellationToken);
         if (preparation.IsFailure)
         {
@@ -1525,13 +1480,20 @@ public sealed class CashVoucherService(
                 NotFound(id));
         }
 
-        if (!voucher.RowVersion.SequenceEqual(item.RowVersion!))
-        {
-            return Result<CashVoucherBulkItemResponse>.Failure(Concurrency());
-        }
-
+        var entry = dbContext.Entry(voucher);
+        await entry.ReloadAsync(cancellationToken);
+        if (entry.State == EntityState.Detached || voucher.CompanyId != companyId || voucher.IsDeleted)
+            return Result<CashVoucherBulkItemResponse>.Failure(NotFound(id));
         var access = await EnsureVoucherExecuteAsync(voucher, cancellationToken);
         if (access.IsFailure) return Result<CashVoucherBulkItemResponse>.Failure(access.Errors);
+        if (voucher.InvoiceId.HasValue)
+            return Result<CashVoucherBulkItemResponse>.Failure(InvoiceGeneratedReadOnly());
+        if (voucher.CashboxTransferId.HasValue)
+            return Result<CashVoucherBulkItemResponse>.Failure(TransferGeneratedReadOnly());
+        if (voucher.IsPosted)
+            return Result<CashVoucherBulkItemResponse>.Failure(PostedReadOnly());
+        if (!voucher.RowVersion.SequenceEqual(item.RowVersion!))
+            return Result<CashVoucherBulkItemResponse>.Failure(Concurrency());
 
         var request = ToUpdateRequest(item.Voucher!, item.RowVersion);
         var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
@@ -1546,7 +1508,8 @@ public sealed class CashVoucherService(
 
         if (fiscalYearPeriodGuard is not null)
         {
-            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenForFiscalYearAsync(
+                voucher.FiscalYearId,
                 voucher.VoucherDate,
                 nameof(CashVoucherBulkVoucherRequest.VoucherDate),
                 cancellationToken);
@@ -1556,7 +1519,8 @@ public sealed class CashVoucherService(
                     fiscalYearResult.Errors);
             }
 
-            fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
+            fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenForFiscalYearAsync(
+                voucher.FiscalYearId,
                 request.VoucherDate,
                 nameof(CashVoucherBulkVoucherRequest.VoucherDate),
                 cancellationToken);
@@ -1567,18 +1531,6 @@ public sealed class CashVoucherService(
             }
         }
 
-        if (voucher.InvoiceId.HasValue)
-        {
-            return Result<CashVoucherBulkItemResponse>.Failure(
-                InvoiceGeneratedReadOnly());
-        }
-
-        if (voucher.CashboxTransferId.HasValue)
-        {
-            return Result<CashVoucherBulkItemResponse>.Failure(
-                TransferGeneratedReadOnly());
-        }
-
         request = await NormalizeEmployeeMovementTypeAsync(
             request,
             voucher,
@@ -1587,9 +1539,7 @@ public sealed class CashVoucherService(
         var preparation = await PrepareAsync(
             request,
             voucher,
-            // Bulk keeps its legacy behavior and may contain an
-            // unclassified posted cash movement.
-            enforceManualPostingTarget: false,
+            enforceManualPostingTarget: true,
             cancellationToken: cancellationToken);
         if (preparation.IsFailure)
         {
@@ -1597,7 +1547,6 @@ public sealed class CashVoucherService(
                 preparation.Errors);
         }
 
-        var entry = dbContext.Entry(voucher);
         entry.Property(entity => entity.RowVersion).OriginalValue =
             item.RowVersion!;
         var originalPartnerReferences = (
@@ -1643,7 +1592,8 @@ public sealed class CashVoucherService(
             return Result<CashVoucherBulkItemResponse>.Failure(Concurrency());
         }
 
-        var response = await ProjectResponseQuery(voucher.Id)
+        await entry.ReloadAsync(cancellationToken);
+        var response = await ProjectResponseQuery(voucher.Id, voucher.FiscalYearId)
             .AsNoTracking()
             .FirstAsync(cancellationToken);
         return Result<CashVoucherBulkItemResponse>.Success(
@@ -1658,102 +1608,8 @@ public sealed class CashVoucherService(
         CashVoucherBulkDeleteItemRequest item,
         CancellationToken cancellationToken)
     {
-        var id = item.Id;
-        var voucher = await dbContext.CashVouchers.FirstOrDefaultAsync(
-            entity =>
-                entity.Id == id &&
-                entity.CompanyId == companyId,
-            cancellationToken);
-        if (voucher is null)
-        {
-            return Result<CashVoucherBulkItemResponse>.Failure(
-                NotFound(id));
-        }
-
-        var access = await EnsureVoucherExecuteAsync(voucher, cancellationToken);
-        if (access.IsFailure) return Result<CashVoucherBulkItemResponse>.Failure(access.Errors);
-
-        if (!voucher.RowVersion.SequenceEqual(item.RowVersion!))
-        {
-            return Result<CashVoucherBulkItemResponse>.Failure(Concurrency());
-        }
-
-        var fiscalYearScope = await fiscalYearQueryScopeResolver.ResolveAsync(
-            fiscalYearId: voucher.FiscalYearId,
-            fromDate: voucher.VoucherDate,
-            cancellationToken: cancellationToken);
-        if (fiscalYearScope.IsFailure)
-        {
-            return Result<CashVoucherBulkItemResponse>.Failure(
-                fiscalYearScope.Errors);
-        }
-
-        if (fiscalYearPeriodGuard is not null)
-        {
-            var fiscalYearResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
-                voucher.VoucherDate,
-                nameof(CashVoucherBulkVoucherRequest.VoucherDate),
-                cancellationToken);
-            if (fiscalYearResult.IsFailure)
-            {
-                return Result<CashVoucherBulkItemResponse>.Failure(
-                    fiscalYearResult.Errors);
-            }
-        }
-
-        if (voucher.InvoiceId.HasValue)
-        {
-            return Result<CashVoucherBulkItemResponse>.Failure(
-                InvoiceGeneratedReadOnly());
-        }
-
-        if (voucher.CashboxTransferId.HasValue)
-        {
-            return Result<CashVoucherBulkItemResponse>.Failure(
-                TransferGeneratedReadOnly());
-        }
-
-        var entry = dbContext.Entry(voucher);
-        entry.Property(entity => entity.RowVersion).OriginalValue =
-            item.RowVersion!;
-
-        try
-        {
-            var partnerMovements = await dbContext.BusinessPartnerMovements
-                .Where(movement =>
-                    movement.CompanyId == companyId &&
-                    movement.CashVoucherId == voucher.Id)
-                .ToListAsync(cancellationToken);
-            dbContext.BusinessPartnerMovements.RemoveRange(partnerMovements);
-            await SynchronizeEmployeeMovementAsync(
-                voucher,
-                shouldExist: false,
-                movementType: null,
-                cancellationToken);
-            dbContext.CashVouchers.Remove(voucher);
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            var postingResult = await cashVoucherPostingService.DeleteAsync(
-                voucher.Id,
-                cancellationToken);
-            if (postingResult.IsFailure)
-            {
-                return Result<CashVoucherBulkItemResponse>.Failure(
-                    postingResult.Errors);
-            }
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            dbContext.ChangeTracker.Clear();
-            return Result<CashVoucherBulkItemResponse>.Failure(Concurrency());
-        }
-
-        return Result<CashVoucherBulkItemResponse>.Success(
-            new CashVoucherBulkItemResponse(
-                Action: CashVoucherBulkAction.Delete,
-                Status: "Deleted",
-                Id: voucher.Id,
-                Voucher: null));
+        var result = await DeleteAsync(item.Id, cancellationToken);
+        return Result<CashVoucherBulkItemResponse>.Failure(result.Errors);
     }
 
     private async Task<string> GenerateVoucherNumberAsync(
@@ -2124,11 +1980,21 @@ public sealed class CashVoucherService(
 
             if (request.DriverTripId.HasValue)
             {
+                var tripFiscalYearId = currentVoucher?.FiscalYearId;
+                if (!tripFiscalYearId.HasValue)
+                {
+                    tripFiscalYearId = await dbContext.FiscalYears.AsNoTracking()
+                        .Where(year => year.CompanyId == companyId &&
+                            year.StartDate <= request.VoucherDate && year.EndDate >= request.VoucherDate)
+                        .Select(year => (int?)year.Id)
+                        .SingleOrDefaultAsync(cancellationToken);
+                }
                 var tripExists = await dbContext.DriverTrips
                     .AsNoTracking()
                     .AnyAsync(
                         trip =>
                             trip.CompanyId == companyId &&
+                            trip.FiscalYearId == tripFiscalYearId &&
                             trip.Id == request.DriverTripId.Value &&
                             trip.DriverId == driver.Id,
                         cancellationToken);

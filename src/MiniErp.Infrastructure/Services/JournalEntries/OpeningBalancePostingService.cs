@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.AccountMappings;
+using MiniErp.Application.Features.DriverOpeningBalances;
 using MiniErp.Application.Features.EmployeeOpeningBalances;
 using MiniErp.Application.Features.FiscalYears;
 using MiniErp.Application.Features.JournalEntries;
@@ -263,6 +264,43 @@ public sealed class OpeningBalancePostingService(
             JournalPartyType.Employee,
             balance.EmployeeId,
             cancellationToken);
+    }
+
+    public async Task<Result> SynchronizeDriverAsync(
+        int openingBalanceId,
+        CancellationToken cancellationToken = default)
+    {
+        var balance = await dbContext.DriverOpeningBalances
+            .AsNoTracking()
+            .SingleOrDefaultAsync(row =>
+                row.CompanyId == companyId && row.Id == openingBalanceId,
+                cancellationToken);
+        if (balance is null)
+        {
+            return Result.Failure(DriverOpeningBalanceErrors.NotFound(openingBalanceId));
+        }
+
+        var controlResult = await accountMappingResolver.ResolveAsync(
+            balance.FiscalYearId,
+            AccountingMappingType.DriverControl,
+            cancellationToken: cancellationToken);
+
+        return await SynchronizeAsync(
+            fiscalYearId: balance.FiscalYearId,
+            documentDate: balance.DocumentDate,
+            documentNumber: balance.DocumentNumber,
+            sourceType: JournalEntrySourceType.DriverOpeningBalance,
+            sourceId: balance.Id,
+            amount: balance.Amount,
+            currency: balance.Currency,
+            exchangeRate: 1m,
+            transactionAmount: balance.Amount,
+            controlIsDebit: balance.BalanceType == DriverOpeningBalanceType.Receivable,
+            controlResult: controlResult,
+            description: "رصيد افتتاحي سائق",
+            partyType: JournalPartyType.Driver,
+            partyId: balance.DriverId,
+            cancellationToken: cancellationToken);
     }
 
     public Task<Result> DeleteAsync(

@@ -33,6 +33,7 @@ public sealed class DriverTripPostingService(
                 entity.Id,
                 entity.InvoiceNumber,
                 entity.TripDate,
+                entity.FiscalYearId,
                 entity.DriverId,
                 entity.Cost
             })
@@ -51,6 +52,7 @@ public sealed class DriverTripPostingService(
             .AsNoTracking()
             .Where(year =>
                 year.CompanyId == companyId &&
+                year.Id == trip.FiscalYearId &&
                 year.StartDate <= trip.TripDate &&
                 year.EndDate >= trip.TripDate)
             .Select(year => new
@@ -99,17 +101,17 @@ public sealed class DriverTripPostingService(
             new AutomaticJournalEntryRequest(
                 FiscalYearId: fiscalYear.Id,
                 EntryDate: trip.TripDate,
-                Description: $"تكلفة رحلة الفاتورة {trip.InvoiceNumber}",
+                Description: trip.InvoiceNumber == null ? $"تكلفة رحلة سائق TR-{trip.Id}" : $"تكلفة رحلة الفاتورة {trip.InvoiceNumber}",
                 SourceType: JournalEntrySourceType.DriverTrip,
                 SourceId: trip.Id,
                 SourceNumber: $"TR-{trip.Id}",
                 Lines:
                 [
                     new JournalEntryLineRequest(
-                        expenseResult.Value,
-                        "مصروف رحلة سائق",
-                        trip.Cost.Value,
-                        0m),
+                        AccountId: expenseResult.Value,
+                        Description: "مصروف رحلة سائق",
+                        Debit: trip.Cost.Value,
+                        Credit: 0m),
                     new JournalEntryLineRequest(
                         AccountId: driverResult.Value,
                         Description: "مستحقات السائق عن الرحلة",

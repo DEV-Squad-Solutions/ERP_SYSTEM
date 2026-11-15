@@ -318,9 +318,9 @@ public sealed class CashVoucherBulkVoucherRequestValidator
             .Must(name => name is null || !string.IsNullOrWhiteSpace(name))
             .WithMessage("اسم الطرف الخارجي لا يمكن أن يكون فارغاً.");
         RuleFor(request => request)
-            .Must(HasExactlyOnePostingTarget)
+            .Must(HasAtMostOnePostingTarget)
             .WithMessage(
-                "اختر طرفاً واحداً أو حساباً واحداً للسند المرحّل.")
+                "اختر طرفاً واحداً أو حساباً واحداً فقط عند توصيف السند.")
             .OverridePropertyName(nameof(CashVoucherBulkVoucherRequest.EmployeeId));
         RuleFor(request => request.Amount)
             .GreaterThan(0)
@@ -337,7 +337,7 @@ public sealed class CashVoucherBulkVoucherRequestValidator
             .WithMessage("يجب أن يكون سعر صرف سند النقدية أكبر من صفر.");
     }
 
-    private static bool HasExactlyOnePostingTarget(
+    private static bool HasAtMostOnePostingTarget(
         CashVoucherBulkVoucherRequest request)
     {
         var selectedTargetCount =
@@ -347,7 +347,7 @@ public sealed class CashVoucherBulkVoucherRequestValidator
             (request.DriverId.HasValue ? 1 : 0) +
             (!string.IsNullOrWhiteSpace(request.ExternalPartyName) ? 1 : 0);
 
-        return selectedTargetCount == 1;
+        return selectedTargetCount <= 1;
     }
 
     private static bool IsEmployeeMovementDirectionCompatible(

@@ -686,6 +686,10 @@ public sealed class AccountingReadinessService(
                         source.Key.SourceId,
                         cancellationToken);
 
+            case JournalEntrySourceType.DriverOpeningBalance:
+                return await openingBalancePostingService.SynchronizeDriverAsync(
+                    source.Key.SourceId, cancellationToken);
+
             case JournalEntrySourceType.CashboxOpeningBalance:
                 return await openingBalancePostingService
                     .SynchronizeCashboxAsync(
@@ -862,6 +866,19 @@ public sealed class AccountingReadinessService(
                 balance.DocumentDate))
             .ToListAsync(cancellationToken));
 
+        sources.AddRange(await dbContext.DriverOpeningBalances
+            .AsNoTracking()
+            .Where(balance =>
+                balance.CompanyId == companyId &&
+                balance.FiscalYearId == fiscalYearId &&
+                balance.DocumentDate >= startDate &&
+                balance.DocumentDate <= endDate)
+            .Select(balance => new SourceDescriptor(
+                new SourceKey(JournalEntrySourceType.DriverOpeningBalance, balance.Id),
+                balance.DocumentNumber,
+                balance.DocumentDate))
+            .ToListAsync(cancellationToken));
+
         sources.AddRange(await dbContext.Cashboxes
             .AsNoTracking()
             .Where(cashbox =>
@@ -888,7 +905,7 @@ public sealed class AccountingReadinessService(
                 trip.TripDate <= endDate)
             .Select(trip => new SourceDescriptor(
                 new SourceKey(JournalEntrySourceType.DriverTrip, trip.Id),
-                trip.InvoiceNumber,
+                trip.InvoiceNumber ?? "TR-" + trip.Id,
                 trip.TripDate))
             .ToListAsync(cancellationToken));
 
@@ -1390,7 +1407,10 @@ public sealed class AccountingReadinessService(
                 null));
         }
 
-        if (hasStockOpenings || hasOtherOpenings)
+        var hasDriverOpenings = await dbContext.DriverOpeningBalances.AnyAsync(balance =>
+            balance.CompanyId == companyId && balance.FiscalYearId == fiscalYearId &&
+            balance.DocumentDate >= startDate && balance.DocumentDate <= endDate, cancellationToken);
+        if (hasStockOpenings || hasOtherOpenings || hasDriverOpenings)
         {
             requirements.Add(MappingRequirement.For(
                 AccountingMappingType.OpeningBalanceEquity,
@@ -1461,6 +1481,9 @@ public sealed class AccountingReadinessService(
             requirements.Add(MappingRequirement.For(
                 AccountingMappingType.DriverTripExpense,
                 null));
+        }
+        if (hasTrips || hasDriverOpenings)
+        {
             requirements.Add(MappingRequirement.For(
                 AccountingMappingType.DriverControl,
                 null));

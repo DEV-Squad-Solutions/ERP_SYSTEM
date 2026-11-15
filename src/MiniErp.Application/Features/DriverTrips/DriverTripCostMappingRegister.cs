@@ -1,5 +1,6 @@
 using Mapster;
 using MiniErp.Domain.Entities.Logistics;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Application.Features.DriverTrips;
 
@@ -20,15 +21,17 @@ public sealed class DriverTripCostMappingRegister : IRegister
                 trip => trip.BusinessPartnerId)
             .Map(
                 response => response.BusinessPartnerName,
-                trip => trip.BusinessPartner.Name)
+                trip => trip.BusinessPartner == null ? null : trip.BusinessPartner.Name)
             .Map(
                 response => response.DriverName,
                 trip => trip.Driver.Name)
             .Map(
                 response => response.CountryName,
-                trip => trip.Invoice.Country == null
+                trip => trip.Invoice == null || trip.Invoice.Country == null
                     ? null
                     : trip.Invoice.Country.Name)
-            .Map(response => response.CostNotes, trip => trip.CostNotes);
+            .Map(response => response.CostNotes, trip => trip.CostNotes)
+            .Map(response => response.IsReadOnly, trip => trip.FiscalYear.Status != FiscalYearStatus.Open)
+            .Map(response => response.BaseCurrency, trip => trip.Company.Settings == null ? CurrencyCode.EGP : trip.Company.Settings.BaseCurrency);
     }
 }

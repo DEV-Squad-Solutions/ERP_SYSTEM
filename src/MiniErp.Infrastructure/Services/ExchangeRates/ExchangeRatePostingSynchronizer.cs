@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.CashboxTransfers;
-using MiniErp.Application.Features.CashVouchers;
 using MiniErp.Application.Features.ExchangeRates;
 using MiniErp.Application.Features.Invoices;
 using MiniErp.Application.Features.JournalEntries;
@@ -14,7 +13,6 @@ public sealed class ExchangeRatePostingSynchronizer(
     ApplicationDbContext dbContext,
     ICurrentCompanyContext currentCompanyContext,
     IInvoicePostingService invoicePostingService,
-    ICashVoucherPostingService cashVoucherPostingService,
     ICashboxTransferPostingService cashboxTransferPostingService,
     IOpeningBalancePostingService openingBalancePostingService)
     : IExchangeRatePostingSynchronizer, IScopedService
@@ -41,15 +39,8 @@ public sealed class ExchangeRatePostingSynchronizer(
             .Distinct()
             .ToListAsync(cancellationToken);
 
-        var standaloneVouchers = await dbContext.CashVouchers
-            .Where(voucher =>
-                voucher.CompanyId == companyId &&
-                voucher.IsPosted &&
-                (voucher.ExchangeRateId == exchangeRateId ||
-                 voucher.PartnerExchangeRateId == exchangeRateId) &&
-                !voucher.InvoiceId.HasValue &&
-                !voucher.CashboxTransferId.HasValue)
-            .ToListAsync(cancellationToken);
+        // Standalone posted vouchers retain the rate and journal captured at
+        // completion. Readiness repairs can still rebuild from that snapshot.
         var transferIds = await dbContext.CashVouchers
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
@@ -81,17 +72,6 @@ public sealed class ExchangeRatePostingSynchronizer(
         {
             var result = await invoicePostingService.SynchronizeAsync(
                 invoiceId,
-                cancellationToken);
-            if (result.IsFailure)
-            {
-                return Result.Failure(result.Errors);
-            }
-        }
-
-        foreach (var voucher in standaloneVouchers)
-        {
-            var result = await cashVoucherPostingService.SynchronizeAsync(
-                voucher,
                 cancellationToken);
             if (result.IsFailure)
             {

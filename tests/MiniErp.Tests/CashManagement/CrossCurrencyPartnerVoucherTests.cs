@@ -138,7 +138,7 @@ public sealed class CrossCurrencyPartnerVoucherTests
     }
 
     [Fact]
-    public async Task MissingPartnerRateFailsAtomicallyAndChangingTargetClearsSnapshot()
+    public async Task MissingPartnerRateFailsAtomicallyAndPostedTargetCannotChange()
     {
         await using var database = await CashManagementTestDatabase.CreateAsync();
         await database.ConfigurePaymentPostingAsync();
@@ -159,12 +159,13 @@ public sealed class CrossCurrencyPartnerVoucherTests
         database.Context.ChangeTracker.Clear();
         var changed = await service.UpdateAsync(posted.Value.Id,
             Complete(posted.Value, 5) with { BusinessPartnerId = null, AccountId = 1 });
-        Assert.True(changed.IsSuccess, changed.Error.Description);
-        Assert.Null(changed.Value.PartnerCurrency);
-        Assert.Null(changed.Value.PartnerAmount);
-        Assert.Null(changed.Value.PartnerExchangeRate);
-        Assert.Null(changed.Value.PartnerBaseAmount);
-        Assert.Empty(await database.Context.BusinessPartnerMovements.Where(m => m.CashVoucherId == draft.Value.Id).ToListAsync());
+        Assert.Equal("CashVouchers.PostedReadOnly", changed.Error.Code);
+        var unchanged = (await service.GetByIdAsync(posted.Value.Id)).Value;
+        Assert.Equal(CurrencyCode.USD, unchanged.PartnerCurrency);
+        Assert.Equal(500m, unchanged.PartnerAmount);
+        Assert.Equal(50m, unchanged.PartnerExchangeRate);
+        Assert.Equal(25_000m, unchanged.PartnerBaseAmount);
+        Assert.Single(await database.Context.BusinessPartnerMovements.Where(m => m.CashVoucherId == draft.Value.Id).ToListAsync());
     }
 
     [Fact]
@@ -203,7 +204,7 @@ public sealed class CrossCurrencyPartnerVoucherTests
             CashboxId: cashboxId, Amount: amount, Description: "Cross-currency settlement", ExchangeRate: rate);
 
     [Fact]
-    public async Task RateCascadePreservesSettledNativeQuantityAndProtectsBothReferences()
+    public async Task RateCascadeFreezesPostedSnapshotsAndJournalButUpdatesLinkedDraft()
     {
         await using var database = await CashManagementTestDatabase.CreateAsync();
         await database.ConfigurePaymentPostingAsync();
@@ -212,14 +213,10 @@ public sealed class CrossCurrencyPartnerVoucherTests
         var context = database.Context;
         var company = new TestCompanyContext();
         var resolver = new ExchangeRateResolver(context, company, TimeProvider.System);
-        var mapping = new AccountMappingResolver(context, company);
-        var automaticPosting = new AutomaticPostingService(context, company, TimeProvider.System,
-            NullLogger<AutomaticPostingService>.Instance);
-        var voucherPosting = new CashVoucherPostingService(context, company, mapping, automaticPosting);
         // This fixture contains only standalone vouchers linked to these rates;
         // unused synchronizer dependencies deliberately fail if invoked.
         var postingSynchronizer = new ExchangeRatePostingSynchronizer(context, company,
-            null!, voucherPosting, null!, null!);
+            null!, null!, null!);
         var rates = new ExchangeRateService(context, new PaginationService(), company,
             TimeProvider.System, resolver, new FiscalYearQueryScopeResolver(context, company),
             new FiscalYearPeriodGuard(context, company), exchangeRatePostingSynchronizer: postingSynchronizer);
@@ -238,11 +235,25 @@ public sealed class CrossCurrencyPartnerVoucherTests
         context.ChangeTracker.Clear();
         var notesEdit = await service.UpdateAsync(posted.Value.Id,
             Complete(posted.Value, 5) with { ExchangeRate = null, Notes = "Notes only" });
-        Assert.True(notesEdit.IsSuccess, notesEdit.Error.Description);
+        Assert.Equal("CashVouchers.PostedReadOnly", notesEdit.Error.Code);
         context.ChangeTracker.Clear();
         var stored = await context.CashVouchers.SingleAsync(v => v.Id == posted.Value.Id);
         Assert.Equal(usdRate.Value.Id, stored.PartnerExchangeRateId);
         Assert.Equal(eurRate.Value.Id, stored.ExchangeRateId);
+        var journalBefore = await context.JournalEntryLines.AsNoTracking().Where(line =>
+            line.JournalEntry.SourceType == JournalEntrySourceType.CashVoucher &&
+            line.JournalEntry.SourceId == posted.Value.Id)
+            .Select(line => new { line.Id, line.Debit, line.Credit, line.ExchangeRate,
+                line.TransactionDebit, line.TransactionCredit }).ToListAsync();
+        var linkedDraft = new MiniErp.Domain.Entities.CashManagement.CashVoucher
+        {
+            CompanyId = 1, CashboxId = 5, VoucherNumber = "LINKED-DRAFT",
+            VoucherDate = new DateOnly(2026, 8, 1), Direction = CashDirection.Payment,
+            Currency = CurrencyCode.EUR, Amount = 10m, PartyType = CashPartyType.None, IsPosted = false
+        };
+        linkedDraft.ApplyExchangeRate(eurRate.Value.Id, 55m);
+        context.CashVouchers.Add(linkedDraft);
+        await context.SaveChangesAsync();
         var deleted = await rates.DeleteAsync(usdRate.Value.Id);
         Assert.True(deleted.IsFailure);
         Assert.Equal("ExchangeRates.Referenced", deleted.Error.Code);
@@ -254,8 +265,8 @@ public sealed class CrossCurrencyPartnerVoucherTests
         context.ChangeTracker.Clear();
         stored = await context.CashVouchers.SingleAsync(v => v.Id == posted.Value.Id);
         Assert.Equal(110m, stored.PartnerAmount);
-        Assert.Equal(60m, stored.PartnerExchangeRate);
-        Assert.Equal(6_600m, stored.PartnerBaseAmount);
+        Assert.Equal(50m, stored.PartnerExchangeRate);
+        Assert.Equal(5_500m, stored.PartnerBaseAmount);
         Assert.Equal(100m, stored.Amount);
         Assert.Equal(5_500m, stored.BaseAmount);
         var changedCashRate = await rates.UpdateAsync(eurRate.Value.Id,
@@ -266,19 +277,30 @@ public sealed class CrossCurrencyPartnerVoucherTests
         context.ChangeTracker.Clear();
         stored = await context.CashVouchers.SingleAsync(v => v.Id == posted.Value.Id);
         Assert.Equal(110m, stored.PartnerAmount);
-        Assert.Equal(6_600m, stored.PartnerBaseAmount);
+        Assert.Equal(5_500m, stored.PartnerBaseAmount);
         Assert.Equal(100m, stored.Amount);
-        Assert.Equal(5_600m, stored.BaseAmount);
+        Assert.Equal(55m, stored.ExchangeRate);
+        Assert.Equal(5_500m, stored.BaseAmount);
+        var refreshedDraft = await context.CashVouchers.AsNoTracking().SingleAsync(v => v.Id == linkedDraft.Id);
+        Assert.False(refreshedDraft.IsPosted);
+        Assert.Equal(eurRate.Value.Id, refreshedDraft.ExchangeRateId);
+        Assert.Equal(56m, refreshedDraft.ExchangeRate);
+        Assert.Equal(560m, refreshedDraft.BaseAmount);
         var movement = await context.BusinessPartnerMovements.SingleAsync(m => m.CashVoucherId == posted.Value.Id);
         Assert.Equal(CurrencyCode.USD, movement.Currency);
         Assert.Equal(110m, movement.Debit);
-        Assert.Equal(60m, movement.ExchangeRate);
-        Assert.Equal(6_600m, movement.BaseDebit);
+        Assert.Equal(50m, movement.ExchangeRate);
+        Assert.Equal(5_500m, movement.BaseDebit);
         var lines = await context.JournalEntryLines.Where(l =>
             l.JournalEntry.SourceType == JournalEntrySourceType.CashVoucher && l.JournalEntry.SourceId == posted.Value.Id).ToListAsync();
         Assert.Equal(lines.Sum(l => l.Debit), lines.Sum(l => l.Credit));
-        var difference = Assert.Single(lines, l => l.PartyType == null);
-        Assert.Equal(1_000m, difference.Credit);
+        Assert.DoesNotContain(lines, l => l.PartyType == null);
+        var journalAfter = await context.JournalEntryLines.AsNoTracking().Where(line =>
+            line.JournalEntry.SourceType == JournalEntrySourceType.CashVoucher &&
+            line.JournalEntry.SourceId == posted.Value.Id)
+            .Select(line => new { line.Id, line.Debit, line.Credit, line.ExchangeRate,
+                line.TransactionDebit, line.TransactionCredit }).ToListAsync();
+        Assert.Equal(journalBefore, journalAfter);
     }
 
     private sealed class TestCompanyContext : ICurrentCompanyContext

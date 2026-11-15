@@ -753,7 +753,18 @@ public sealed class AutomaticPostingService(
                 return PartyNotFound(line.PartyId.Value, index);
             }
 
-            if (!partyState.IsActive)
+            // Existing driver documents can be repaired after deactivation. A trip
+            // exception is scoped to its live source and exact driver/year.
+            var isExistingDriverTrip = !partyState.IsActive &&
+                sourceType == JournalEntrySourceType.DriverTrip &&
+                line.PartyType == JournalPartyType.Driver &&
+                await dbContext.DriverTrips.AsNoTracking().AnyAsync(trip =>
+                    trip.CompanyId == companyId && trip.Id == sourceId &&
+                    trip.FiscalYearId == fiscalYearId && trip.DriverId == line.PartyId,
+                    cancellationToken);
+            if (!partyState.IsActive &&
+                !(sourceType == JournalEntrySourceType.DriverOpeningBalance &&
+                  line.PartyType == JournalPartyType.Driver) && !isExistingDriverTrip)
             {
                 return PartyInactive(line.PartyId.Value, index);
             }

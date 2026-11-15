@@ -47,5 +47,5 @@ public static class DriverErrors
     public static Error HasDependencies() =>
         Error.Conflict(
             "Drivers.HasDependencies",
-            "لا يمكن حذف السائق لارتباطه بفواتير أو رحلات أو سندات نقدية حالية أو تاريخية.");
+            "لا يمكن حذف السائق لارتباطه بفواتير أو رحلات أو سندات نقدية أو أرصدة افتتاحية حالية أو تاريخية.");
 }

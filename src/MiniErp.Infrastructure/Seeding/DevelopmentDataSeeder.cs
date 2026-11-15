@@ -2371,13 +2371,13 @@ public static class DevelopmentDataSeeder
             .IgnoreQueryFilters()
             .Where(trip =>
                 trip.CompanyId == companyId &&
-                invoiceIds.Contains(trip.InvoiceId))
+                trip.InvoiceId.HasValue && invoiceIds.Contains(trip.InvoiceId.Value))
             .OrderBy(trip => trip.IsDeleted)
             .ThenBy(trip => trip.Id)
             .ToListAsync(cancellationToken);
         foreach (var trip in driverTrips)
         {
-            maps.DriverTrips.TryAdd(trip.InvoiceId, trip);
+            maps.DriverTrips.TryAdd(trip.InvoiceId!.Value, trip);
         }
 
         return maps;

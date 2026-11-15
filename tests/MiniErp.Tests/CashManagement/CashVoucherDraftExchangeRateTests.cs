@@ -135,7 +135,7 @@ public sealed class CashVoucherDraftExchangeRateTests
         var draft = (await service.AddAsync(DraftRequest(50m))).Value;
         var posted = (await service.UpdateAsync(draft.Id, CompletionRequest(draft))).Value;
         var result = await service.UpdateDraftAsync(draft.Id, DraftUpdate(posted, exchangeRate: 51m));
-        Assert.Equal("CashVouchers.DraftRequired", result.Error.Code);
+        Assert.Equal("CashVouchers.PostedReadOnly", result.Error.Code);
         Assert.Equal(50m, (await service.GetByIdAsync(draft.Id)).Value.ExchangeRate);
     }
 
@@ -152,7 +152,7 @@ public sealed class CashVoucherDraftExchangeRateTests
     }
 
     [Fact]
-    public async Task DifferentSelectedYearRejectsUpdateWithoutChangingDraft()
+    public async Task DifferentCurrentYearStillAllowsDraftInItsOwnOpenYear()
     {
         await using var database = await CashManagementTestDatabase.CreateAsync();
         var service = CreateService(database);
@@ -166,10 +166,14 @@ public sealed class CashVoucherDraftExchangeRateTests
                 1, 'test', '2026-01-01', 'test', 0);
             """);
         var result = await service.UpdateDraftAsync(draft.Id, DraftUpdate(draft, exchangeRate: 51m));
-        Assert.Equal("FiscalYears.QueryDateOutsideRange", result.Error.Code);
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(1, result.Value.FiscalYearId);
         var stored = await database.Context.CashVouchers.AsNoTracking().SingleAsync(x => x.Id == draft.Id);
-        Assert.Equal(50m, stored.ExchangeRate);
+        Assert.Equal(51m, stored.ExchangeRate);
         Assert.False(stored.IsPosted);
+        var completed = await service.UpdateAsync(draft.Id, CompletionRequest(result.Value));
+        Assert.True(completed.IsSuccess, completed.Error.Description);
+        Assert.Equal(1, completed.Value.FiscalYearId);
     }
 
     [Fact]
@@ -411,7 +415,6 @@ public sealed class CashVoucherDraftExchangeRateTests
     [InlineData("legacy")]
     [InlineData("currency")]
     [InlineData("date")]
-    [InlineData("posted")]
     public async Task CompletionResolvesRegisteredRateWhenDraftSnapshotDoesNotApply(string scenario)
     {
         await using var database = await CashManagementTestDatabase.CreateAsync();
@@ -428,13 +431,6 @@ public sealed class CashVoucherDraftExchangeRateTests
         };
         var completed = await service.UpdateAsync(draft.Value.Id, request);
         Assert.True(completed.IsSuccess, completed.Error.Description);
-        if (scenario == "posted")
-        {
-            Assert.Equal(50m, completed.Value.ExchangeRate);
-            database.Context.ChangeTracker.Clear();
-            completed = await service.UpdateAsync(completed.Value.Id, CompletionRequest(completed.Value));
-            Assert.True(completed.IsSuccess, completed.Error.Description);
-        }
         var expectedRate = scenario == "currency" ? 60m : 40m;
         Assert.Equal(expectedRate, completed.Value.ExchangeRate);
         Assert.Equal(10m * expectedRate, completed.Value.BaseAmount);

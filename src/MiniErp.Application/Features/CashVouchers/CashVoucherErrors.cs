@@ -28,7 +28,17 @@ public static class CashVoucherErrors
     public static Error DraftRequired() =>
         Error.Conflict(
             "CashVouchers.DraftRequired",
-            "يمكن تعديل المسودة بهذه العملية قبل توصيف السند فقط؛ استخدم تعديل السند للحركات المرحّلة.");
+            "يمكن تعديل المسودة قبل توصيف وترحيل السند فقط؛ السند المرحّل متاح للعرض فقط.");
+
+    public static Error PostedReadOnly() =>
+        Error.Conflict(
+            "CashVouchers.PostedReadOnly",
+            "تم توصيف وترحيل سند النقدية؛ لا يمكن تعديله بعد الترحيل. السند متاح للعرض فقط.");
+
+    public static Error DeleteNotAllowed() =>
+        Error.Conflict(
+            "CashVouchers.DeleteNotAllowed",
+            "لا يمكن حذف سند النقدية المستقل سواء كان مسودة أو مرحّلاً.");
 
     public static Error InvoiceGeneratedReadOnly() =>
         Error.Conflict(

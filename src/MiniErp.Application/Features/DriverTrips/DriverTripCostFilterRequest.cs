@@ -8,4 +8,5 @@ public sealed record DriverTripCostFilterRequest(
     string? InvoiceNumber = null,
     string? TripNumber = null,
     bool? HasCost = null,
-    int? FiscalYearId = null);
+    int? FiscalYearId = null,
+    bool? IsStandalone = null);

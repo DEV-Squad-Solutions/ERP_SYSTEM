@@ -14,6 +14,7 @@ using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
+using MiniErp.Infrastructure.Services.DriverOpeningBalances;
 using MiniErp.Infrastructure.Services.ExchangeRates;
 
 namespace MiniErp.Infrastructure.Services.FiscalYears;
@@ -272,6 +273,15 @@ public sealed class FiscalYearService(
         if (!fiscalYear.RowVersion.SequenceEqual(request.RowVersion))
         {
             return Result<FiscalYearResponse>.Failure(Concurrency());
+        }
+
+        if (request.StartDate != fiscalYear.StartDate &&
+            (await dbContext.DriverOpeningBalances.AnyAsync(row =>
+                row.CompanyId == companyId && row.FiscalYearId == id, cancellationToken) ||
+             await DriverOpeningBalanceLedgerQueries.CarriedLines(dbContext, companyId, id)
+                 .AnyAsync(cancellationToken)))
+        {
+            return Result<FiscalYearResponse>.Failure(DriverOpeningBalanceStartDateLocked());
         }
 
         if (request.IsCurrent)
@@ -631,6 +641,25 @@ public sealed class FiscalYearService(
             })
             .Where(row => row.Balance != 0m || row.TransactionBalance != 0m)
             .ToListAsync(cancellationToken);
+
+        var carriedDrivers = balances
+            .Where(row => row.PartyType == JournalPartyType.Driver && row.PartyId > 0)
+            .GroupBy(row => row.PartyId!.Value)
+            .Where(group => group.Sum(row => row.Balance) != 0m)
+            .Select(group => group.Key)
+            .ToArray();
+        if (carriedDrivers.Length > 0 &&
+            (await dbContext.DriverOpeningBalances.AnyAsync(row =>
+                row.CompanyId == companyId && row.FiscalYearId == nextYear.Id &&
+                carriedDrivers.Contains(row.DriverId), cancellationToken) ||
+             await DriverOpeningBalanceLedgerQueries.LegacyOpeningLines(
+                    dbContext, companyId, nextYear.Id, nextYear.StartDate)
+                .Where(line => carriedDrivers.Contains(line.PartyId!.Value))
+                .GroupBy(line => line.PartyId!.Value)
+                .AnyAsync(group => group.Sum(line => line.Debit - line.Credit) != 0m, cancellationToken)))
+        {
+            return Result.Failure(DriverOpeningBalanceConflict(nextYear.Name));
+        }
 
         var employeeDeltas = await LoadEmployeeOperationalDeltasAsync(
             fiscalYear.Id,

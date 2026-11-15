@@ -145,6 +145,10 @@ public sealed class CashVouchersController(
             }
 
             var response = result.Value.Items[index];
+            if (response.Voucher!.IsDraft)
+            {
+                continue;
+            }
             TryEnqueueRealtime<ExchangeRatesRealtimeJob>(
                 "Updated",
                 $"{response.Voucher!.Currency}:{response.Voucher.VoucherDate}",

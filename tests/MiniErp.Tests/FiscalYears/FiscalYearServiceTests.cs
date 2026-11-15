@@ -632,6 +632,54 @@ public sealed class FiscalYearServiceTests
     }
 
     [Fact]
+    public async Task Close_RejectsDriverCarryWhenTheNextYearHasAManualOpening()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var source = (await service.AddAsync(new FiscalYearRequest(
+            Name: "2026", StartDate: new(2026, 1, 1), EndDate: new(2026, 12, 31)))).Value;
+        var target = (await service.AddAsync(new FiscalYearRequest(
+            Name: "2027", StartDate: new(2027, 1, 1), EndDate: new(2027, 12, 31), IsCurrent: false))).Value;
+        await database.SeedClosingLedgerAsync(source.Id, target.Id, JournalPartyType.Driver, partyId: 99);
+        await database.Context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            INSERT INTO DriverOpeningBalances
+                (CompanyId, FiscalYearId, DriverId, DocumentNumber, DocumentDate,
+                 Amount, Currency, BalanceType, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (1, {target.Id}, 99, 'DOB-0001', '2027-01-01', 55, 1, 1, '', '2027-01-01', '', 0);
+            """);
+
+        var close = await service.CloseAsync(source.Id);
+
+        Assert.Equal("FiscalYears.DriverOpeningBalanceConflict", close.Error.Code);
+        Assert.False(await database.Context.JournalEntries.AnyAsync(
+            entry => entry.SourceType == JournalEntrySourceType.FiscalYearClosing));
+        Assert.Equal(source.Id, (await service.GetCurrentAsync()).Value.Id);
+    }
+
+    [Fact]
+    public async Task Update_CannotMoveStartDateOfYearWithADriverOpening()
+    {
+        await using var database = await FiscalYearTestDatabase.CreateAsync();
+        var service = database.CreateService(companyId: 1);
+        var year = (await service.AddAsync(new FiscalYearRequest(
+            Name: "2026", StartDate: new(2026, 1, 1), EndDate: new(2026, 12, 31)))).Value;
+        await database.Context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            INSERT INTO DriverOpeningBalances
+                (CompanyId, FiscalYearId, DriverId, DocumentNumber, DocumentDate,
+                 Amount, Currency, BalanceType, CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (1, {year.Id}, 99, 'DOB-0001', '2026-01-01', 55, 1, 1, '', '2026-01-01', '', 0);
+            """);
+
+        var result = await service.UpdateAsync(year.Id, new FiscalYearUpdateRequest(
+            Name: year.Name, StartDate: new(2026, 1, 2), EndDate: year.EndDate,
+            IsCurrent: true, RowVersion: year.RowVersion));
+
+        Assert.Equal("FiscalYears.DriverOpeningBalanceStartDateLocked", result.Error.Code);
+    }
+
+    [Fact]
     public async Task Close_CreatesAndPromotesNextFiscalYearWhenMissing()
     {
         await using var database = await FiscalYearTestDatabase.CreateAsync();
@@ -1067,6 +1115,7 @@ public sealed class FiscalYearServiceTests
             var context = new ApplicationDbContext(options);
 
             await CreateSchemaAsync(context);
+            await TestFiscalYearSchema.EnsureDriverOpeningBalancesAsync(context);
 
             return new FiscalYearTestDatabase(connection, context);
         }

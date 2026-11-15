@@ -23,15 +23,15 @@ public sealed class DriverTrip : AuditableEntity
 
     public string? ActualDriverName { get; set; }
 
-    public int InvoiceId { get; set; }
+    public int? InvoiceId { get; set; }
 
-    public Invoice Invoice { get; set; } = null!;
+    public Invoice? Invoice { get; set; }
 
-    public int BusinessPartnerId { get; set; }
+    public int? BusinessPartnerId { get; set; }
 
-    public BusinessPartner BusinessPartner { get; set; } = null!;
+    public BusinessPartner? BusinessPartner { get; set; }
 
-    public string InvoiceNumber { get; set; } = string.Empty;
+    public string? InvoiceNumber { get; set; }
 
     public string? ExportInvoiceCode { get; set; }
 

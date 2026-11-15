@@ -94,6 +94,11 @@ public sealed record PartnerStatementItemResponse(
     public int? JournalEntryLineId { get; init; }
 
     public PartnerStatementSourceType SourceType { get; init; }
+    public int? CashVoucherId { get; init; }
+    public int? CashboxId { get; init; }
+    public string? CashboxName { get; init; }
+    public CashDirection? CashDirection { get; init; }
+    public int? FiscalYearId { get; init; }
 
     public decimal ExchangeRate { get; init; }
 

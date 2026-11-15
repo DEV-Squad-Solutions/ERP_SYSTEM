@@ -27,6 +27,7 @@ public sealed partial class ApplicationDbContext
         typeof(PartnerOpeningBalance),
         typeof(BusinessPartnerMovement),
         typeof(EmployeeOpeningBalance),
+        typeof(DriverOpeningBalance),
         typeof(EmployeeMovement),
         typeof(EmployeeAttendance),
         typeof(PayrollEntry),
@@ -165,6 +166,9 @@ public sealed partial class ApplicationDbContext
             EmployeeOpeningBalance row =>
                 (row.CompanyId, row.FiscalYearId, row.DocumentDate,
                     nameof(EmployeeOpeningBalance.DocumentDate)),
+            DriverOpeningBalance row =>
+                (row.CompanyId, row.FiscalYearId, row.DocumentDate,
+                    nameof(DriverOpeningBalance.DocumentDate)),
             EmployeeMovement row =>
                 (row.CompanyId, row.FiscalYearId, row.MovementDate,
                     nameof(EmployeeMovement.MovementDate)),

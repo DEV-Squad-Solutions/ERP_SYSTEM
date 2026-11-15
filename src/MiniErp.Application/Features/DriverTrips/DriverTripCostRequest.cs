@@ -1,8 +1,10 @@
+using System.Text.Json.Serialization;
+
 namespace MiniErp.Application.Features.DriverTrips;
 
 public sealed record DriverTripCostUpdateItem(
     int DriverTripId,
-    decimal? Cost,
+    [property: JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)] decimal? Cost,
     string? Notes,
     byte[]? RowVersion);
 

@@ -148,6 +148,7 @@ public sealed partial class ApplicationDbContext
     public DbSet<EmployeeAttendance> EmployeeAttendances => Set<EmployeeAttendance>();
     public DbSet<EmployeeMovement> EmployeeMovements => Set<EmployeeMovement>();
     public DbSet<EmployeeOpeningBalance> EmployeeOpeningBalances => Set<EmployeeOpeningBalance>();
+    public DbSet<DriverOpeningBalance> DriverOpeningBalances => Set<DriverOpeningBalance>();
     public DbSet<EntityIdentifierSequence> EntityIdentifierSequences =>Set<EntityIdentifierSequence>();
 
     protected override void OnModelCreating(ModelBuilder builder)

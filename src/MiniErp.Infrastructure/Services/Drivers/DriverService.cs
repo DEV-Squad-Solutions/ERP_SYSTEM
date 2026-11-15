@@ -1,3 +1,4 @@
+using System.Data;
 using Mapster;
 using static MiniErp.Application.Features.Drivers.DriverErrors;
 using Microsoft.EntityFrameworkCore;
@@ -6,6 +7,7 @@ using MiniErp.Application.Common.Models;
 using MiniErp.Application.Common.Results;
 using MiniErp.Application.Features.Drivers;
 using MiniErp.Domain.Entities.Logistics;
+using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.Drivers;
@@ -184,6 +186,8 @@ public sealed class DriverService(
             return Result.Failure(InvalidId());
         }
 
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable, cancellationToken);
         var driver = await dbContext.Drivers.FirstOrDefaultAsync(
             entity => entity.Id == id && entity.CompanyId == companyId,
             cancellationToken);
@@ -212,7 +216,15 @@ public sealed class DriverService(
                     voucher =>
                         voucher.CompanyId == companyId &&
                         voucher.DriverId == id,
-                    cancellationToken);
+                    cancellationToken) ||
+            await dbContext.DriverOpeningBalances
+                .IgnoreQueryFilters()
+                .AnyAsync(balance => balance.CompanyId == companyId && balance.DriverId == id,
+                    cancellationToken) ||
+            await dbContext.JournalEntryLines
+                .IgnoreQueryFilters()
+                .AnyAsync(line => line.CompanyId == companyId &&
+                    line.PartyType == JournalPartyType.Driver && line.PartyId == id, cancellationToken);
         if (hasDependencies)
         {
             return Result.Failure(HasDependencies());
@@ -221,6 +233,7 @@ public sealed class DriverService(
         driver.IsActive = false;
         dbContext.Drivers.Remove(driver);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         return Result.Success();
     }

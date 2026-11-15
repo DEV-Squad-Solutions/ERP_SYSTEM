@@ -383,6 +383,11 @@ public sealed class DriverServiceTests
             await CreateSchemaAsync(context);
             await SeedAsync(context);
             await TestFiscalYearSchema.EnsureAsync(context);
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE JournalEntryLines (
+                    CompanyId INTEGER NOT NULL, PartyType INTEGER NULL, PartyId INTEGER NULL);
+                """);
 
             return new DriverTestDatabase(
                 connection,

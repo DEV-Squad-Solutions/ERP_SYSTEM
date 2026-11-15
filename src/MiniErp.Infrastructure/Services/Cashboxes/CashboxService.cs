@@ -272,9 +272,24 @@ public sealed class CashboxService(
             return Result<CashboxResponse>.Failure(NotFound(id));
         }
 
+        var entry = dbContext.Entry(cashbox);
+        await entry.ReloadAsync(cancellationToken);
+        if (entry.State == EntityState.Detached || cashbox.CompanyId != companyId || cashbox.IsDeleted)
+        {
+            return Result<CashboxResponse>.Failure(NotFound(id));
+        }
+
         if (!cashbox.RowVersion.SequenceEqual(request.RowVersion))
         {
             return Result<CashboxResponse>.Failure(Concurrency());
+        }
+
+        var deactivating = cashbox.IsActive && !request.IsActive;
+        if (deactivating)
+        {
+            var balanceCheck = await EnsureZeroCurrentBalanceAsync(id, cancellationToken);
+            if (balanceCheck.IsFailure)
+                return Result<CashboxResponse>.Failure(balanceCheck.Errors);
         }
 
         var normalized = request.Adapt<Cashbox>();
@@ -298,12 +313,15 @@ public sealed class CashboxService(
 
         var openingDate = request.OpeningBalanceDate ??
             cashbox.OpeningBalanceDate;
+        var previousOpening = (cashbox.Currency, cashbox.OpeningBalance, cashbox.OpeningBalanceDate,
+            cashbox.OpeningExchangeRate);
         int? exchangeRateId;
         decimal exchangeRate;
         var keepsExistingRateReference =
             cashbox.Currency == request.Currency &&
             cashbox.OpeningBalanceDate == openingDate &&
             (!request.OpeningExchangeRate.HasValue ||
+             request.OpeningExchangeRate.Value == cashbox.OpeningExchangeRate ||
              (request.UpdateLinkedTransactions &&
               cashbox.OpeningExchangeRateId.HasValue));
         if (keepsExistingRateReference)
@@ -352,22 +370,37 @@ public sealed class CashboxService(
             }
         }
 
-        var entry = dbContext.Entry(cashbox);
         entry.Property(entity => entity.RowVersion).OriginalValue =
             request.RowVersion;
         var code = cashbox.Code;
         request.Adapt(cashbox);
         cashbox.Code = code;
-        cashbox.ApplyOpeningExchangeRate(
-            openingDate,
-            exchangeRateId,
-            exchangeRate);
+        var openingChanged = previousOpening != (cashbox.Currency, cashbox.OpeningBalance, openingDate, exchangeRate);
+        if (openingChanged)
+        {
+            cashbox.ApplyOpeningExchangeRate(openingDate, exchangeRateId, exchangeRate);
+        }
 
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            if (openingBalancePostingService is not null)
+            if (deactivating && openingChanged)
+            {
+                // Full PUT can change opening fields together with activity.
+                // Check the resulting native balance before posting anything.
+                var balanceCheck = await EnsureZeroCurrentBalanceAsync(id, cancellationToken);
+                if (balanceCheck.IsFailure)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    return Result<CashboxResponse>.Failure(balanceCheck.Errors);
+                }
+            }
+
+            // Metadata/status edits must not rewrite an unchanged opening
+            // journal after its year closes or its cashbox becomes inactive.
+            if (openingChanged && openingBalancePostingService is not null)
             {
                 var postingResult = await openingBalancePostingService
                     .SynchronizeCashboxAsync(cashbox.Id, cancellationToken);
@@ -439,13 +472,29 @@ public sealed class CashboxService(
             return Result.Failure(NotFound(id));
         }
 
-        if (await HasVouchersAsync(id, cancellationToken))
+        var entry = dbContext.Entry(cashbox);
+        await entry.ReloadAsync(cancellationToken);
+        if (entry.State == EntityState.Detached || cashbox.CompanyId != companyId || cashbox.IsDeleted)
+            return Result.Failure(NotFound(id));
+
+        // Deletion depends on remaining movements in every fiscal year.
+        // Deleted voucher history still protects currency/opening edits, but
+        // no longer makes an otherwise unused cashbox undeletable forever.
+        if (await dbContext.CashVouchers.IgnoreQueryFilters().AnyAsync(
+                voucher => voucher.CompanyId == companyId &&
+                    voucher.CashboxId == id && !voucher.IsDeleted,
+                cancellationToken))
         {
             return Result.Failure(HasVouchers());
         }
 
+        if (await HasOtherCurrentMovementsAsync(id, cancellationToken))
+            return Result.Failure(HasMovements());
+
         cashbox.IsActive = false;
-        dbContext.Cashboxes.Remove(cashbox);
+        // Set soft-delete directly so EF does not sever required relationships
+        // to already-deleted historical children tracked by this context.
+        cashbox.IsDeleted = true;
         await dbContext.SaveChangesAsync(cancellationToken);
 
         if (openingBalancePostingService is not null)
@@ -511,7 +560,9 @@ public sealed class CashboxService(
             .SingleOrDefaultAsync(cancellationToken);
         if (fiscalYear is null)
         {
-            return ids.ToDictionary(id => id, _ => 0m);
+            // Readers retain the zero display fallback, but a missing year
+            // cannot authorize a balance-dependent write.
+            return new Dictionary<int, decimal>();
         }
 
         return await dbContext.Cashboxes
@@ -560,12 +611,35 @@ public sealed class CashboxService(
                             (voucher.Direction == CashDirection.Receipt
                                 ? voucher.Amount
                                 : -voucher.Amount))
+                        .Sum() ?? 0m) +
+                    (dbContext.JournalEntryLines
+                        .Where(line =>
+                            line.CompanyId == companyId && !line.IsDeleted &&
+                            line.JournalEntry.CompanyId == companyId && !line.JournalEntry.IsDeleted &&
+                            line.JournalEntry.FiscalYearId == fiscalYear.Id &&
+                            line.JournalEntry.Status == JournalEntryStatus.Posted &&
+                            line.JournalEntry.ReversalOfEntryId == null && line.JournalEntry.ReversedOn == null &&
+                            line.JournalEntry.SourceType == null &&
+                            (line.JournalEntry.EntryType == JournalEntryType.Manual ||
+                             line.JournalEntry.EntryType == JournalEntryType.Adjustment ||
+                             line.JournalEntry.EntryType == JournalEntryType.Opening) &&
+                            line.PartyType == JournalPartyType.Cashbox && line.PartyId == cashbox.Id &&
+                            line.Currency == cashbox.Currency)
+                        .Select(line => (decimal?)(line.TransactionDebit - line.TransactionCredit))
                         .Sum() ?? 0m)
             })
             .ToDictionaryAsync(
                 row => row.Id,
                 row => row.Balance,
                 cancellationToken);
+    }
+
+    private async Task<Result> EnsureZeroCurrentBalanceAsync(int cashboxId, CancellationToken cancellationToken)
+    {
+        var balances = await LoadCurrentFiscalYearBalancesAsync([cashboxId], cancellationToken);
+        if (!balances.TryGetValue(cashboxId, out var balance))
+            return Result.Failure(Application.Features.FiscalYears.FiscalYearErrors.CurrentNotFound());
+        return balance == 0m ? Result.Success() : Result.Failure(NonZeroBalance());
     }
 
     private async Task<IReadOnlyList<Error>> FindDuplicateAsync(
@@ -615,5 +689,22 @@ public sealed class CashboxService(
                     voucher.CompanyId == companyId &&
                     voucher.CashboxId == cashboxId,
                 cancellationToken);
+
+    private async Task<bool> HasOtherCurrentMovementsAsync(int cashboxId, CancellationToken cancellationToken) =>
+        await dbContext.CashboxTransfers.IgnoreQueryFilters().AnyAsync(
+            transfer => transfer.CompanyId == companyId && !transfer.IsDeleted &&
+                (transfer.SourceCashboxId == cashboxId || transfer.DestinationCashboxId == cashboxId),
+            cancellationToken) ||
+        await dbContext.JournalEntryLines.IgnoreQueryFilters().AnyAsync(
+            line => line.CompanyId == companyId && !line.IsDeleted &&
+                line.JournalEntry.CompanyId == companyId && !line.JournalEntry.IsDeleted &&
+                line.JournalEntry.Status == JournalEntryStatus.Posted &&
+                line.JournalEntry.ReversalOfEntryId == null && line.JournalEntry.ReversedOn == null &&
+                line.PartyType == JournalPartyType.Cashbox && line.PartyId == cashboxId &&
+                // The cashbox's own opening is removed by the existing posting
+                // service in this transaction. Other live entries must remain.
+                !(line.JournalEntry.SourceType == JournalEntrySourceType.CashboxOpeningBalance &&
+                  line.JournalEntry.SourceId == cashboxId),
+            cancellationToken);
 
 }

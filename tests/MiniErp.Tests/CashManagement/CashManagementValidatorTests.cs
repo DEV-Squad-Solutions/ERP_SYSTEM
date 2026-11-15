@@ -155,7 +155,7 @@ public sealed class CashManagementValidatorTests
     }
 
     [Fact]
-    public void UpdateAcceptsPartyWithNullMovementAndBulkRequiresTarget()
+    public void UpdateAcceptsPartyWithNullMovementAndBulkAllowsOperationalDraft()
     {
         var updateResult = new CashVoucherUpdateRequestValidator().Validate(
             CreateVoucher(
@@ -174,7 +174,7 @@ public sealed class CashManagementValidatorTests
             });
 
         Assert.True(updateResult.IsValid);
-        Assert.False(bulkResult.IsValid);
+        Assert.True(bulkResult.IsValid);
     }
 
     [Fact]

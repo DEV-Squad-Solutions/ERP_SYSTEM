@@ -148,6 +148,14 @@ public static class JournalEntryErrors
         "JournalEntries.AutomaticReadOnly",
         "لا يمكن تعديل أو حذف القيد التلقائي مباشرة. عدّل الحركة المصدر أولًا.");
 
+    public static Error DriverCarryForwardReadOnly() => Error.Conflict(
+        "JournalEntries.DriverCarryForwardReadOnly",
+        "لا يمكن تعديل أو حذف قيد ترحيل أرصدة السائقين مباشرة. أعد فتح السنة المالية المصدر لمعالجة الرصيد.");
+
+    public static Error DriverOpeningBalanceConflict() => Error.Conflict(
+        "JournalEntries.DriverOpeningBalanceConflict",
+        "يوجد رصيد افتتاحي مسجل أو مرحّل لأحد السائقين في السنة المالية المحددة.");
+
     public static Error AutomaticCannotBeCreatedManually() => Error.Validation(
         "JournalEntries.AutomaticCannotBeCreatedManually",
         "القيد التلقائي يتم إنشاؤه من الحركة المصدر فقط.",

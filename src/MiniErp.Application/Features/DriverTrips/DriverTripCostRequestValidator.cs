@@ -11,8 +11,8 @@ public sealed class DriverTripCostUpdateItemValidator
             .GreaterThan(0);
 
         RuleFor(item => item.Cost)
-            .GreaterThanOrEqualTo(0)
-            .PrecisionScale(18, 2, ignoreTrailingZeros: true)
+            .InclusiveBetween(0m, DriverTripRequest.MaximumCost)
+            .PrecisionScale(17, 2, ignoreTrailingZeros: true)
             .When(item => item.Cost.HasValue);
 
         RuleFor(item => item.Notes)
@@ -36,18 +36,19 @@ public sealed class DriverTripBulkCostUpdateRequestValidator
             .NotNull()
             .NotEmpty()
             .Must(items =>
-                items.Count <=
+                items is not null && items.Count <=
                 DriverTripBulkCostUpdateRequest.MaximumItemCount)
             .WithMessage(
                 $"لا يمكن تعديل أكثر من {DriverTripBulkCostUpdateRequest.MaximumItemCount} رحلة في طلب واحد.");
 
         RuleForEach(request => request.Items)
+            .NotNull()
             .SetValidator(new DriverTripCostUpdateItemValidator());
 
         RuleFor(request => request.Items)
             .Must(items =>
-                items.Select(item => item.DriverTripId).Distinct().Count() ==
-                items.Count)
+                items.All(item => item is not null) &&
+                items.Select(item => item.DriverTripId).Distinct().Count() == items.Count)
             .When(request => request.Items is { Count: > 0 })
             .WithMessage(
                 "لا يجوز تكرار رقم رحلة السائق داخل الطلب.");

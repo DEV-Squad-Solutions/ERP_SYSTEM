@@ -17,6 +17,10 @@ public interface IOpeningBalancePostingService
         int openingBalanceId,
         CancellationToken cancellationToken = default);
 
+    Task<Result> SynchronizeDriverAsync(
+        int openingBalanceId,
+        CancellationToken cancellationToken = default);
+
     Task<Result> DeleteAsync(
         JournalEntrySourceType sourceType,
         int sourceId,

@@ -19,4 +19,6 @@ docs/*
 !docs/frontend-cross-currency-partner-settlements.md
 !docs/frontend-updates-2026-10-11.md
 !docs/frontend-cashvoucher-draft-update.md
+!docs/2026-11-13/
+!docs/2026-11-14/
 tmp

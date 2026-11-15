@@ -366,6 +366,9 @@ public sealed class CompanyService(
         await dbContext.PartnerOpeningBalances
             .IgnoreQueryFilters()
             .AnyAsync(balance => balance.CompanyId == targetCompanyId, cancellationToken) ||
+        await dbContext.DriverOpeningBalances
+            .IgnoreQueryFilters()
+            .AnyAsync(balance => balance.CompanyId == targetCompanyId, cancellationToken) ||
         await dbContext.ItemMovements
             .IgnoreQueryFilters()
             .AnyAsync(movement => movement.CompanyId == targetCompanyId, cancellationToken) ||
@@ -419,6 +422,8 @@ public sealed class CompanyService(
                 entity => entity.CompanyId == targetCompanyId, cancellationToken)) return "exchange-rate";
         if (await dbContext.PartnerOpeningBalances.IgnoreQueryFilters().AnyAsync(
                 entity => entity.CompanyId == targetCompanyId, cancellationToken)) return "partner opening-balance";
+        if (await dbContext.DriverOpeningBalances.IgnoreQueryFilters().AnyAsync(
+                entity => entity.CompanyId == targetCompanyId, cancellationToken)) return "driver opening-balance";
         if (await dbContext.BusinessPartnerMovements.IgnoreQueryFilters().AnyAsync(
                 entity => entity.CompanyId == targetCompanyId, cancellationToken)) return "partner movement";
         if (await dbContext.ItemMovements.IgnoreQueryFilters().AnyAsync(

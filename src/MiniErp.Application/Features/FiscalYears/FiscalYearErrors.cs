@@ -100,6 +100,17 @@ public static class FiscalYearErrors
             "FiscalYears.NextFiscalYearClosed",
             $"السنة المالية التالية '{fiscalYearName}' مغلقة، ولا يمكن ترحيل الأرصدة الافتتاحية إليها.");
 
+    public static Error DriverOpeningBalanceConflict(string fiscalYearName) =>
+        Error.Conflict(
+            "FiscalYears.DriverOpeningBalanceConflict",
+            $"لا يمكن ترحيل أرصدة السائقين إلى السنة المالية '{fiscalYearName}' لوجود رصيد افتتاحي مسجل لأحد السائقين فيها.");
+
+    public static Error DriverOpeningBalanceStartDateLocked() =>
+        Error.Conflict(
+            "FiscalYears.DriverOpeningBalanceStartDateLocked",
+            "لا يمكن تغيير تاريخ بدء السنة المالية لوجود أرصدة افتتاحية مسجلة للسائقين.",
+            nameof(FiscalYearUpdateRequest.StartDate));
+
     public static Error LaterFiscalYearClosed(string fiscalYearName) =>
         Error.Conflict(
             "FiscalYears.LaterFiscalYearClosed",

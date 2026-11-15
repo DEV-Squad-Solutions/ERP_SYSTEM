@@ -233,6 +233,16 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
     {
         var serviceContext = context ?? Context;
         var companyContext = new TestCurrentCompanyContext(companyId);
+        serviceContext.Database.ExecuteSqlRaw("""
+            INSERT OR IGNORE INTO Accounts (Id,CompanyId,Code,Name,ParentAccountId,AccountType,NormalBalance,IsPosting,IsActive,IsDeleted)
+            VALUES (150,1,'2399','Driver Control',50,2,2,1,1,0),(151,1,'5199','Trip Expense',50,5,1,1,1,0);
+            INSERT INTO AccountMappings (CompanyId,FiscalYearId,MappingType,AccountId,CreatedById,CreatedOn,CreatedByPc,IsDeleted)
+            SELECT 1,Id,12,150,'test','2026-01-01','test',0 FROM FiscalYears
+            WHERE CompanyId=1 AND NOT EXISTS (SELECT 1 FROM AccountMappings WHERE CompanyId=1 AND FiscalYearId=FiscalYears.Id AND MappingType=12 AND IsDeleted=0);
+            INSERT INTO AccountMappings (CompanyId,FiscalYearId,MappingType,AccountId,CreatedById,CreatedOn,CreatedByPc,IsDeleted)
+            SELECT 1,Id,19,151,'test','2026-01-01','test',0 FROM FiscalYears
+            WHERE CompanyId=1 AND NOT EXISTS (SELECT 1 FROM AccountMappings WHERE CompanyId=1 AND FiscalYearId=FiscalYears.Id AND MappingType=19 AND IsDeleted=0);
+            """);
         return new DriverTripService(
             serviceContext,
             new PaginationService(),
@@ -242,15 +252,19 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 companyContext),
             new FiscalYearPeriodGuard(
                 serviceContext,
-                companyContext));
+                companyContext),
+            new DriverTripPostingService(serviceContext, companyContext, new AccountMappingResolver(serviceContext, companyContext),
+                new AutomaticPostingService(serviceContext, companyContext, TimeProvider.System, NullLogger<AutomaticPostingService>.Instance)));
     }
 
     public FinancialStatementService CreateStatementService(
         int companyId,
-        ApplicationDbContext? context = null) =>
+        ApplicationDbContext? context = null,
+        ICashboxAccessService? cashboxAccessService = null) =>
         new(
             context ?? Context,
-            new TestCurrentCompanyContext(companyId));
+            new TestCurrentCompanyContext(companyId),
+            cashboxAccessService);
 
     public CashboxRevaluationService CreateCashboxRevaluationService(
         int companyId,
@@ -883,9 +897,9 @@ internal sealed class CashManagementTestDatabase : IAsyncDisposable
                 CompanyId INTEGER NOT NULL,
                 DriverId INTEGER NOT NULL,
                 ActualDriverName TEXT NULL,
-                InvoiceId INTEGER NOT NULL,
-                BusinessPartnerId INTEGER NOT NULL,
-                InvoiceNumber TEXT NOT NULL,
+                InvoiceId INTEGER NULL,
+                BusinessPartnerId INTEGER NULL,
+                InvoiceNumber TEXT NULL,
                 ExportInvoiceCode TEXT NULL,
                 TripDate TEXT NOT NULL,
                 Price NUMERIC NULL,

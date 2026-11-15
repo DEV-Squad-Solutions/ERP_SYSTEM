@@ -452,6 +452,9 @@ public sealed partial class FinancialStatementService(
         {
             runningBalance += row.Debit - row.Credit;
             runningBaseBalance += row.BaseDebit - row.BaseCredit;
+            var canViewVoucher = row.CashVoucherId.HasValue &&
+                row.CashboxId is int cashboxId &&
+                (accessScope is null || accessScope.Value.CanView(cashboxId));
             return new PartnerStatementItemResponse(
                 Date: row.Date,
                 DocumentNumber: row.DocumentNumber,
@@ -472,7 +475,12 @@ public sealed partial class FinancialStatementService(
                 BaseBalanceAmount = Math.Abs(runningBaseBalance),
                 JournalEntryId = accessScope is null || accessScope.Value.HasAllCashboxes ? row.JournalEntryId : null,
                 JournalEntryLineId = row.JournalEntryLineId,
-                SourceType = row.SourceType
+                SourceType = row.SourceType,
+                CashVoucherId = canViewVoucher ? row.CashVoucherId : null,
+                CashboxId = canViewVoucher ? row.CashboxId : null,
+                CashboxName = canViewVoucher ? row.CashboxName : null,
+                CashDirection = canViewVoucher ? row.CashDirection : null,
+                FiscalYearId = canViewVoucher ? fiscalYear.Id : null
             };
         }));
 
@@ -553,12 +561,13 @@ public sealed partial class FinancialStatementService(
         }
 
         var allRows = CreateDriverRows(driver.Id, fiscalYear.Id);
-        var openingRows = allRows.Where(row => row.IsOpening);
-        var hasCarriedOpening = await openingRows.AnyAsync(cancellationToken);
-        var nonOpeningRows = allRows.Where(row => !row.IsOpening);
-        var openingBalance = await openingRows
-            .SumAsync(row => (decimal?)(row.Debit - row.Credit),
-                cancellationToken) ?? 0m;
+        var carriedOpening = await allRows.Where(row => row.IsCarriedOpening)
+            .SumAsync(row => (decimal?)(row.Debit - row.Credit), cancellationToken);
+        var manualOpening = await allRows.Where(row => row.IsManualOpening)
+            .SumAsync(row => (decimal?)(row.Debit - row.Credit), cancellationToken);
+        var hasCarriedOpening = carriedOpening.GetValueOrDefault() != 0m;
+        var nonOpeningRows = allRows.Where(row => !row.IsCarriedOpening && !row.IsManualOpening);
+        var openingBalance = carriedOpening.GetValueOrDefault() + manualOpening.GetValueOrDefault();
         if (fromDate > fiscalYear.StartDate)
         {
             openingBalance += await nonOpeningRows
@@ -645,7 +654,9 @@ public sealed partial class FinancialStatementService(
         var items = new List<DriverStatementItemResponse>(pagination.PageSize);
         if (openingRowIncluded)
         {
-            var openingName = OpeningBalanceName(fromDate, fiscalYear.StartDate, hasCarriedOpening);
+            var openingName = manualOpening.GetValueOrDefault() != 0m && !hasCarriedOpening && fromDate == fiscalYear.StartDate
+                ? "رصيد افتتاحي مدخل"
+                : OpeningBalanceName(fromDate, fiscalYear.StartDate, hasCarriedOpening);
             items.Add(new DriverStatementItemResponse(
                 SourceId: 0,
                 Date: fromDate,
@@ -961,6 +972,15 @@ public sealed partial class FinancialStatementService(
             {
                 JournalEntryLineId = line.Id,
                 JournalEntryId = line.JournalEntryId,
+                CashVoucherId = voucher != null && voucher.IsPosted &&
+                    voucher.FiscalYearId == fiscalYearId && voucher.BusinessPartnerId == partnerId &&
+                    voucher.InvoiceId == null && voucher.InvoicePayment == null &&
+                    voucher.CashboxTransferId == null && voucher.Cashbox != null
+                    ? voucher.Id
+                    : null,
+                CashboxId = voucher == null ? null : voucher.CashboxId,
+                CashboxName = voucher == null || voucher.Cashbox == null ? null : voucher.Cashbox.Name,
+                CashDirection = voucher == null ? null : voucher.Direction,
                 IsOpening = line.JournalEntry.SourceType ==
                     JournalEntrySourceType.FiscalYearClosing,
                 SourceId = line.Id,
@@ -1077,8 +1097,10 @@ public sealed partial class FinancialStatementService(
             {
                 JournalEntryLineId = line.Id,
                 JournalEntryId = line.JournalEntryId,
-                IsOpening = line.JournalEntry.SourceType ==
+                IsCarriedOpening = line.JournalEntry.SourceType ==
                     JournalEntrySourceType.FiscalYearClosing,
+                IsManualOpening = line.JournalEntry.SourceType ==
+                    JournalEntrySourceType.DriverOpeningBalance,
                 SourceType = line.JournalEntry.SourceType ==
                     JournalEntrySourceType.CashVoucher
                         ? DriverStatementSourceType.CashVoucher
@@ -1091,7 +1113,7 @@ public sealed partial class FinancialStatementService(
                 DocumentNumber = voucher != null
                     ? voucher.VoucherNumber
                     : trip != null
-                        ? line.JournalEntry.SourceNumber ?? trip.InvoiceNumber
+                        ? line.JournalEntry.SourceNumber ?? trip.InvoiceNumber ?? "TR-" + trip.Id
                         : line.JournalEntry.SourceNumber ??
                           line.JournalEntry.EntryNumber,
                 InvoiceNumber = trip != null
@@ -1110,12 +1132,12 @@ public sealed partial class FinancialStatementService(
                         ? voucher.DriverTrip.BusinessPartnerId
                         : null,
                 BusinessPartnerName = trip != null
-                    ? trip.BusinessPartner.Name
-                    : voucher != null && voucher.DriverTrip != null
+                    ? trip.BusinessPartner == null ? null : trip.BusinessPartner.Name
+                    : voucher != null && voucher.DriverTrip != null && voucher.DriverTrip.BusinessPartner != null
                         ? voucher.DriverTrip.BusinessPartner.Name
                         : null,
                 CountryName = trip != null
-                    ? trip.Invoice.Country == null
+                    ? trip.Invoice == null || trip.Invoice.Country == null
                         ? null
                         : trip.Invoice.Country.Name
                     : voucher != null && voucher.DriverTrip != null &&
@@ -1261,6 +1283,10 @@ public sealed partial class FinancialStatementService(
     {
         public int JournalEntryLineId { get; init; }
         public int JournalEntryId { get; init; }
+        public int? CashVoucherId { get; init; }
+        public int? CashboxId { get; init; }
+        public string? CashboxName { get; init; }
+        public CashDirection? CashDirection { get; init; }
         public bool IsOpening { get; init; }
         public int SourceId { get; init; }
         public PartnerStatementSourceType SourceType { get; init; }
@@ -1284,7 +1310,8 @@ public sealed partial class FinancialStatementService(
     {
         public int JournalEntryLineId { get; init; }
         public int JournalEntryId { get; init; }
-        public bool IsOpening { get; init; }
+        public bool IsCarriedOpening { get; init; }
+        public bool IsManualOpening { get; init; }
         public DriverStatementSourceType SourceType { get; init; }
         public DateOnly Date { get; init; }
         public DateTime CreatedOn { get; init; }

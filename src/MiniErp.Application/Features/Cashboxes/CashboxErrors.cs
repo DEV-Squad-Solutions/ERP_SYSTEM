@@ -40,7 +40,18 @@ public static class CashboxErrors
     public static Error HasVouchers() =>
         Error.Conflict(
             "Cashboxes.HasVouchers",
-            "لا يمكن حذف صندوق النقدية لارتباطه بسندات نقدية حالية أو تاريخية. يمكن إلغاء تنشيطه بدلاً من ذلك.");
+            "لا يمكن حذف صندوق النقدية لوجود سندات نقدية غير محذوفة عليه. يمكن إلغاء تنشيطه بعد تصفير رصيده.");
+
+    public static Error NonZeroBalance() =>
+        Error.Conflict(
+            "Cashboxes.NonZeroBalance",
+            "لا يمكن إلغاء تنشيط الخزينة إلا بعد أن يصبح رصيدها الحالي في السنة المالية الحالية صفراً بعملة الخزينة.",
+            nameof(CashboxUpdateRequest.IsActive));
+
+    public static Error HasMovements() =>
+        Error.Conflict(
+            "Cashboxes.HasMovements",
+            "لا يمكن حذف الخزينة لوجود تحويلات أو قيود مالية قائمة مرتبطة بها.");
 
     public static Error OpeningOrCurrencyChangeNotAllowed() =>
         Error.Conflict(

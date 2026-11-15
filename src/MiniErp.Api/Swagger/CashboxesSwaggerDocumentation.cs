@@ -48,17 +48,17 @@ public sealed class CashboxesSwaggerDocumentation : IOperationFilter
             nameof(CashboxesController.Update) => (
                 "Update a cashbox",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Updates a cashbox using optimistic concurrency.",
+                    "Requires Execute permission on the cashbox. Updates its fields using optimistic concurrency. Transitioning from active to inactive requires exactly zero current native-currency balance in the company's current fiscal year; a missing current fiscal year cannot authorize deactivation.",
                     "Editable fields plus the original base64 rowVersion. updateLinkedTransactions is optional and defaults to false.",
-                    "Opening balance and currency cannot change after any current or historical voucher exists. An edited openingExchangeRate affects this cashbox only unless updateLinkedTransactions is true; cascading updates the shared exchange-rate row and recalculates every linked financial base-currency amount atomically.",
-                    "A stale token returns Cashboxes.Concurrency and requires reload.")),
+                    "Opening balance and currency cannot change after any current or historical voucher exists. Name, notes, and activity-only edits preserve the unchanged opening journal. An edited openingExchangeRate affects this cashbox only unless updateLinkedTransactions is true; the cascade preserves posted standalone voucher snapshots. Inactive cashboxes disappear from active selectors while their records remain readable.",
+                    "A stale token returns Cashboxes.Concurrency and requires reload. A nonzero native balance returns Cashboxes.NonZeroBalance (409); positive and negative balances both prevent deactivation.")),
             nameof(CashboxesController.Delete) => (
                 "Delete an unused cashbox",
                 SwaggerOperationDescription.Create(
-                    "Admin only. Soft-deletes an unused cashbox.",
+                    "Requires Execute permission on the cashbox. Soft-deletes a cashbox after its remaining transaction dependencies have been cleared.",
                     "A positive route id.",
-                    "Cashboxes referenced by current or historical vouchers cannot be deleted; deactivate them instead.",
-                    "Dependencies return 409.")),
+                    "Deleted voucher history does not prevent deletion. Any non-deleted voucher in any fiscal year, active transfer, or live cashbox journal entry prevents deletion. The cashbox's own opening journal is removed atomically through the existing posting workflow; closed-year accounting restrictions still apply.",
+                    "Remaining vouchers return Cashboxes.HasVouchers (409); other live movements return Cashboxes.HasMovements (409).")),
             _ => default
         };
 

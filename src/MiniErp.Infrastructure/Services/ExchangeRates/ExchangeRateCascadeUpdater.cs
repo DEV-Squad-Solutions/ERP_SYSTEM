@@ -55,6 +55,7 @@ internal static class ExchangeRateCascadeUpdater
             .IgnoreQueryFilters()
             .Where(voucher =>
                 voucher.CompanyId == companyId &&
+                (!voucher.IsPosted || voucher.InvoiceId.HasValue || voucher.CashboxTransferId.HasValue) &&
                 (voucher.ExchangeRateId == exchangeRateId ||
                  voucher.PartnerExchangeRateId == exchangeRateId))
             .ToListAsync(cancellationToken);

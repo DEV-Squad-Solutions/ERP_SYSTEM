@@ -5052,6 +5052,111 @@ namespace MiniErp.Infrastructure.Migrations
                     b.ToTable("Drivers", (string)null);
                 });
 
+            modelBuilder.Entity("MiniErp.Domain.Entities.Logistics.DriverOpeningBalance", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(17, 2)
+                        .HasColumnType("decimal(17,2)");
+
+                    b.Property<int>("BalanceType")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("CreatedByPc")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Currency")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DeletedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DeletedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("DeletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateOnly>("DocumentDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("DocumentNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("DriverId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("FiscalYearId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("UpdatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("UpdatedByPc")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("UpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "DocumentNumber")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "DriverId");
+
+                    b.HasIndex("CompanyId", "FiscalYearId")
+                        .HasDatabaseName("IX_DriverOpeningBalances_Company_FiscalYear");
+
+                    b.HasIndex("CompanyId", "FiscalYearId", "DriverId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("DriverOpeningBalances", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_DriverOpeningBalances_Amount_Positive", "[Amount] > 0");
+
+                            t.HasCheckConstraint("CK_DriverOpeningBalances_BalanceType", "[BalanceType] IN (1, 2)");
+                        });
+                });
+
             modelBuilder.Entity("MiniErp.Domain.Entities.Logistics.DriverTrip", b =>
                 {
                     b.Property<int>("Id")
@@ -5064,7 +5169,7 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<int>("BusinessPartnerId")
+                    b.Property<int?>("BusinessPartnerId")
                         .HasColumnType("int");
 
                     b.Property<int>("CompanyId")
@@ -5112,11 +5217,10 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Property<int>("FiscalYearId")
                         .HasColumnType("int");
 
-                    b.Property<int>("InvoiceId")
+                    b.Property<int?>("InvoiceId")
                         .HasColumnType("int");
 
                     b.Property<string>("InvoiceNumber")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
@@ -5156,7 +5260,7 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.HasIndex("CompanyId", "InvoiceId")
                         .IsUnique()
-                        .HasFilter("[IsDeleted] = 0");
+                        .HasFilter("[IsDeleted] = 0 AND [InvoiceId] IS NOT NULL");
 
                     b.HasIndex("CompanyId", "DriverId", "TripDate", "Id");
 
@@ -7113,6 +7217,35 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Navigation("Company");
                 });
 
+            modelBuilder.Entity("MiniErp.Domain.Entities.Logistics.DriverOpeningBalance", b =>
+                {
+                    b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Logistics.Driver", "Driver")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "DriverId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MiniErp.Domain.Entities.Accounting.FiscalYear", "FiscalYear")
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "FiscalYearId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Driver");
+
+                    b.Navigation("FiscalYear");
+                });
+
             modelBuilder.Entity("MiniErp.Domain.Entities.Logistics.DriverTrip", b =>
                 {
                     b.HasOne("MiniErp.Domain.Entities.Companies.Company", "Company")
@@ -7125,8 +7258,7 @@ namespace MiniErp.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("CompanyId", "BusinessPartnerId")
                         .HasPrincipalKey("CompanyId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("MiniErp.Domain.Entities.Logistics.Driver", "Driver")
                         .WithMany()
@@ -7146,8 +7278,7 @@ namespace MiniErp.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("CompanyId", "InvoiceId")
                         .HasPrincipalKey("CompanyId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("BusinessPartner");
 

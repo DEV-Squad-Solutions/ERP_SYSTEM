@@ -31,6 +31,6 @@ Content-Type: application/json
 - Invalid fields/rate/revision or date outside the selected fiscal year: `400`; no Execute access: `403`; missing/other-company voucher/cashbox: `404`; stale revision, closed/missing fiscal period, inactive new cashbox, posted voucher, or invoice/transfer-generated voucher: `409`. Reload on conflict; never retry with a guessed revision.
 - A CashVouchers Updated realtime notification is emitted after success. If the cashbox changes, a scoped Cashboxes Updated notification also invalidates the old cashbox's viewers without exposing the moved voucher. This is a voucher-local rate, not an ExchangeRates update.
 
-Frontend action: add a separate **Save draft** button calling this PUT with the complete operational fields above. Keep completion/classification on `PUT /CashVouchers/{id}`, which requires a posting target and posts the voucher. The new endpoint is implemented in the backend; wiring the separate draft action into the frontend is not part of this change.
+Frontend now has separate **Edit draft** and **Classify and post** actions. Saving the draft uses this PUT; completion uses `PUT /CashVouchers/{id}` once. Posted independent vouchers are readonly and independent deletion is prohibited. See the [2026-11-14 behavior and endpoint summary](2026-11-14/frontend-cash-voucher-edit-lock.md).
 
 No migration or database update is required.

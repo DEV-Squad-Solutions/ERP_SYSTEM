@@ -8,6 +8,7 @@ using MiniErp.Domain.Entities.Accounting;
 using MiniErp.Domain.Enums;
 using MiniErp.Infrastructure.Persistence;
 using MiniErp.Infrastructure.Services.CashboxRevaluations;
+using MiniErp.Infrastructure.Services.DriverOpeningBalances;
 using static MiniErp.Application.Features.JournalEntries.JournalEntryErrors;
 
 namespace MiniErp.Infrastructure.Services.JournalEntries;
@@ -35,6 +36,11 @@ public sealed class JournalEntryService(
         }
 
         filters ??= new JournalEntryFilterRequest();
+        var validation = new JournalEntryFilterRequestValidator().Validate(filters);
+        if (!validation.IsValid)
+            return Result<PagedResponse<JournalEntryResponse>>.Failure(
+                validation.Errors.Select(error => Error.Validation(
+                    "JournalEntries.FilterValidation", error.ErrorMessage, error.PropertyName)));
         var fiscalYear = await fiscalYearQueryScopeResolver.ResolveAsync(
             fiscalYearId: filters.FiscalYearId,
             fromDate: filters.FromDate,
@@ -77,6 +83,10 @@ public sealed class JournalEntryService(
             .Where(entry =>
                 !filters.Status.HasValue ||
                 entry.Status == filters.Status.Value)
+            .Where(entry =>
+                !filters.SourceType.HasValue ||
+                (entry.SourceType == filters.SourceType.Value &&
+                 entry.SourceId == filters.SourceId))
             .Where(entry =>
                 !filters.FromDate.HasValue ||
                 entry.EntryDate >= filters.FromDate.Value)
@@ -183,6 +193,12 @@ public sealed class JournalEntryService(
         {
             return Result<JournalEntryResponse>.Failure(
                 fiscalYearValidation.Errors);
+        }
+
+        if (request.EntryType == JournalEntryType.Opening &&
+            await HasDriverOpeningConflictAsync(request.FiscalYearId, request.EntryDate, lines, cancellationToken))
+        {
+            return Result<JournalEntryResponse>.Failure(DriverOpeningBalanceConflict());
         }
 
         var accountValidation = await ValidateAccountsAsync(
@@ -313,6 +329,13 @@ public sealed class JournalEntryService(
             return Result<JournalEntryResponse>.Failure(AutomaticReadOnly());
         }
 
+        if (entry.SourceType == JournalEntrySourceType.FiscalYearClosing &&
+            (entry.Lines.Any(line => line.PartyType == JournalPartyType.Driver) ||
+             lines.Any(line => line.PartyType == JournalPartyType.Driver)))
+        {
+            return Result<JournalEntryResponse>.Failure(DriverCarryForwardReadOnly());
+        }
+
         if (entry.Status == JournalEntryStatus.Reversed ||
             entry.ReversalOfEntryId.HasValue)
         {
@@ -376,6 +399,12 @@ public sealed class JournalEntryService(
         {
             return Result<JournalEntryResponse>.Failure(
                 accountValidation.Errors);
+        }
+
+        if (entry.EntryType == JournalEntryType.Opening && entry.SourceType == null &&
+            await HasDriverOpeningConflictAsync(entry.FiscalYearId, request.EntryDate, lines, cancellationToken))
+        {
+            return Result<JournalEntryResponse>.Failure(DriverOpeningBalanceConflict());
         }
 
         var entryState = dbContext.Entry(entry);
@@ -460,6 +489,12 @@ public sealed class JournalEntryService(
             return Result.Failure(AutomaticReadOnly());
         }
 
+        if (entry.SourceType == JournalEntrySourceType.FiscalYearClosing &&
+            entry.Lines.Any(line => line.PartyType == JournalPartyType.Driver))
+        {
+            return Result.Failure(DriverCarryForwardReadOnly());
+        }
+
         if (entry.Status == JournalEntryStatus.Reversed ||
             entry.ReversalOfEntryId.HasValue)
         {
@@ -502,6 +537,31 @@ public sealed class JournalEntryService(
             dbContext.ChangeTracker.Clear();
             return Result.Failure(Concurrency());
         }
+    }
+
+    private async Task<bool> HasDriverOpeningConflictAsync(
+        int fiscalYearId, DateOnly entryDate, IReadOnlyList<JournalEntryLineRequest> lines,
+        CancellationToken cancellationToken)
+    {
+        var driverIds = lines.Where(line => line.PartyType == JournalPartyType.Driver && line.PartyId > 0)
+            .GroupBy(line => line.PartyId!.Value)
+            .Where(group => group.Sum(line => line.Debit - line.Credit) != 0m)
+            .Select(group => group.Key)
+            .ToArray();
+        if (driverIds.Length == 0 || !await dbContext.FiscalYears.AsNoTracking().AnyAsync(
+            year => year.CompanyId == companyId && year.Id == fiscalYearId && year.StartDate == entryDate,
+            cancellationToken))
+        {
+            return false;
+        }
+
+        return await dbContext.DriverOpeningBalances.AnyAsync(row =>
+                   row.CompanyId == companyId && row.FiscalYearId == fiscalYearId &&
+                   driverIds.Contains(row.DriverId), cancellationToken) ||
+               await DriverOpeningBalanceLedgerQueries.CarriedLines(dbContext, companyId, fiscalYearId)
+                   .Where(line => driverIds.Contains(line.PartyId!.Value))
+                   .GroupBy(line => line.PartyId!.Value)
+                   .AnyAsync(group => group.Sum(line => line.Debit - line.Credit) != 0m, cancellationToken);
     }
 
     private async Task<Result> ValidateFiscalYearAsync(

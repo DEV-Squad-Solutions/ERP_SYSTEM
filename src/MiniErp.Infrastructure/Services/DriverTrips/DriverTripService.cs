@@ -1,5 +1,7 @@
 using Mapster;
+using System.Data;
 using static MiniErp.Application.Features.DriverTrips.DriverTripErrors;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Abstractions;
 using MiniErp.Application.Common.Models;
@@ -10,7 +12,7 @@ using MiniErp.Infrastructure.Persistence;
 
 namespace MiniErp.Infrastructure.Services.DriverTrips;
 
-public sealed class DriverTripService(
+public sealed partial class DriverTripService(
     ApplicationDbContext dbContext,
     IPaginationService paginationService,
     ICurrentCompanyContext currentCompanyContext,
@@ -52,7 +54,7 @@ public sealed class DriverTripService(
                 trip.FiscalYearId == fiscalYear.Value.FiscalYearId)
             .Where(trip =>
                 string.IsNullOrEmpty(search) ||
-                trip.InvoiceNumber.Contains(search) ||
+                (trip.InvoiceNumber != null && trip.InvoiceNumber.Contains(search)) ||
                 (trip.ExportInvoiceCode != null &&
                  trip.ExportInvoiceCode.Contains(search)) ||
                 trip.Driver.Code.Contains(search) ||
@@ -70,7 +72,8 @@ public sealed class DriverTripService(
                 trip.DriverId == filters.DriverId.Value)
             .Where(trip =>
                 string.IsNullOrEmpty(invoiceNumber) ||
-                trip.InvoiceNumber.Contains(invoiceNumber))
+                (trip.InvoiceNumber != null && trip.InvoiceNumber.Contains(invoiceNumber)))
+            .Where(trip => !filters.IsStandalone.HasValue || (trip.InvoiceId == null) == filters.IsStandalone.Value)
             .Where(trip =>
                 string.IsNullOrEmpty(tripNumber) ||
                 (numericTripNumber.HasValue &&
@@ -98,7 +101,7 @@ public sealed class DriverTripService(
     {
         if (request.Items is not { Count: > 0 } ||
             request.Items.Count >
-            DriverTripBulkCostUpdateRequest.MaximumItemCount)
+            DriverTripBulkCostUpdateRequest.MaximumItemCount || request.Items.Any(item => item is null))
         {
             return Result<DriverTripBulkCostUpdateResponse>.Failure(
                 InvalidItems());
@@ -116,106 +119,106 @@ public sealed class DriverTripService(
 
         if (request.Items.Any(item =>
                 item.DriverTripId <= 0 ||
-                item.Cost < 0m ||
+                !ValidCost(item.Cost) ||
+                item.Notes?.Length > DriverTripRequest.MaximumNotesLength ||
                 item.RowVersion is not { Length: 8 }))
         {
             return Result<DriverTripBulkCostUpdateResponse>.Failure(
                 InvalidItems());
         }
 
+        if (driverTripPostingService is null)
+        {
+            return Result<DriverTripBulkCostUpdateResponse>.Failure(PostingUnavailable());
+        }
+
         await using var transaction =
-            await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
-        var trips = await dbContext.DriverTrips
-            .Where(trip =>
-                trip.CompanyId == companyId &&
-                ids.Contains(trip.Id))
-            .ToListAsync(cancellationToken);
-        if (trips.Count != ids.Length)
-        {
-            return Result<DriverTripBulkCostUpdateResponse>.Failure(
-                TripsNotFound());
-        }
-
-        foreach (var tripDate in trips
-                     .Select(trip => trip.TripDate)
-                     .Distinct())
-        {
-            var periodResult = await fiscalYearPeriodGuard.EnsureOpenAsync(
-                tripDate,
-                nameof(DriverTripCostResponse.TripDate),
-                cancellationToken);
-            if (periodResult.IsFailure)
-            {
-                return Result<DriverTripBulkCostUpdateResponse>.Failure(
-                    periodResult.Errors);
-            }
-        }
-
-        var requestById = request.Items.ToDictionary(
-            item => item.DriverTripId);
-
-        foreach (var trip in trips)
-        {
-            var requested = requestById[trip.Id];
-            if (!trip.RowVersion.SequenceEqual(requested.RowVersion!))
-            {
-                return Result<DriverTripBulkCostUpdateResponse>.Failure(
-                    Concurrency(trip.Id));
-            }
-
-            var entry = dbContext.Entry(trip);
-            entry.Property(item => item.RowVersion).OriginalValue =
-                requested.RowVersion!;
-            trip.Cost = requested.Cost;
-            trip.CostNotes = string.IsNullOrWhiteSpace(requested.Notes)
-                ? null
-                : requested.Notes.Trim();
-        }
-
+        var committed = false;
         try
         {
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            if (driverTripPostingService is not null)
+            var trips = await dbContext.DriverTrips.AsNoTracking()
+                .Where(trip => trip.CompanyId == companyId && ids.Contains(trip.Id))
+                .ToListAsync(cancellationToken);
+            if (trips.Count != ids.Length)
             {
-                foreach (var trip in trips)
+                return Result<DriverTripBulkCostUpdateResponse>.Failure(TripsNotFound());
+            }
+
+            foreach (var tripScope in trips
+                         .Select(trip => new { trip.FiscalYearId, trip.TripDate })
+                         .Distinct())
+            {
+                var periodResult = await fiscalYearPeriodGuard.EnsureOpenForFiscalYearAsync(
+                    tripScope.FiscalYearId,
+                    tripScope.TripDate,
+                    nameof(DriverTripCostResponse.TripDate),
+                    cancellationToken);
+                if (periodResult.IsFailure)
                 {
-                    var postingResult = await driverTripPostingService
-                        .SynchronizeAsync(trip.Id, cancellationToken);
-                    if (postingResult.IsFailure)
-                    {
-                        await transaction.RollbackAsync(cancellationToken);
-                        dbContext.ChangeTracker.Clear();
-                        return Result<DriverTripBulkCostUpdateResponse>.Failure(
-                            postingResult.Errors);
-                    }
+                    return Result<DriverTripBulkCostUpdateResponse>.Failure(periodResult.Errors);
                 }
             }
+
+            var requestById = request.Items.ToDictionary(item => item.DriverTripId);
+            var staleTrip = trips.Find(trip => !trip.RowVersion.AsSpan().SequenceEqual(requestById[trip.Id].RowVersion));
+            if (staleTrip is not null)
+            {
+                return Result<DriverTripBulkCostUpdateResponse>.Failure(Concurrency(staleTrip.Id));
+            }
+
+            foreach (var trip in trips)
+            {
+                var requested = requestById[trip.Id];
+                var trackedTrip = TrackForWrite(trip);
+                trackedTrip.Cost = requested.Cost;
+                trackedTrip.CostNotes = string.IsNullOrWhiteSpace(requested.Notes) ? null : requested.Notes.Trim();
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            foreach (var trip in trips)
+            {
+                var postingResult = await driverTripPostingService.SynchronizeAsync(trip.Id, cancellationToken);
+                if (postingResult.IsFailure)
+                {
+                    return Result<DriverTripBulkCostUpdateResponse>.Failure(postingResult.Errors);
+                }
+            }
+
+            var response = await dbContext.DriverTrips.AsNoTracking()
+                .Where(trip => trip.CompanyId == companyId && ids.Contains(trip.Id))
+                .OrderBy(trip => trip.Id)
+                .ProjectToType<DriverTripCostResponse>()
+                .ToListAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+            committed = true;
+            return Result<DriverTripBulkCostUpdateResponse>.Success(new DriverTripBulkCostUpdateResponse(response));
         }
         catch (DbUpdateConcurrencyException exception)
         {
-            await transaction.RollbackAsync(cancellationToken);
-            dbContext.ChangeTracker.Clear();
             var failedId = exception.Entries
                 .Select(entry => (entry.Entity as DriverTrip)?.Id)
-                .FirstOrDefault(id => id.HasValue) ?? 0;
-            return Result<DriverTripBulkCostUpdateResponse>.Failure(
-                Concurrency(failedId));
+                .FirstOrDefault(id => id.HasValue);
+            return Result<DriverTripBulkCostUpdateResponse>.Failure(Concurrency(failedId));
         }
-
-        var response = await dbContext.DriverTrips
-            .AsNoTracking()
-            .Where(trip =>
-                trip.CompanyId == companyId &&
-                ids.Contains(trip.Id))
-            .OrderBy(trip => trip.Id)
-            .ProjectToType<DriverTripCostResponse>()
-            .ToListAsync(cancellationToken);
-
-        await transaction.CommitAsync(cancellationToken);
-        return Result<DriverTripBulkCostUpdateResponse>.Success(
-            new DriverTripBulkCostUpdateResponse(response));
+        catch (DbUpdateException exception) when (exception.InnerException is SqlException { Number: 1205 })
+        {
+            return Result<DriverTripBulkCostUpdateResponse>.Failure(Concurrency());
+        }
+        catch (SqlException exception) when (exception.Number == 1205)
+        {
+            return Result<DriverTripBulkCostUpdateResponse>.Failure(Concurrency());
+        }
+        finally
+        {
+            if (!committed)
+            {
+                dbContext.ChangeTracker.Clear();
+            }
+        }
     }
 
     private static int? ParseTripNumber(string? value)

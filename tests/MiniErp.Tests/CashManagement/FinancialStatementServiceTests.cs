@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Models;
@@ -577,6 +579,123 @@ public sealed class FinancialStatementServiceTests
     }
 
     [Fact]
+    public async Task PartnerStatementExposesVoucherDetailsOnlyWithViewAccessToItsCashbox()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var voucherService = database.CreateVoucherService(1);
+        var receipt = await AddVoucherAsync(database, voucherService,
+            CreatePartnerVoucher("Partner receipt", new DateOnly(2026, 7, 15),
+                CashDirection.Receipt, amount: 50m));
+        var payment = await AddVoucherAsync(database, voucherService,
+            CreatePartnerVoucher("Partner payment", new DateOnly(2026, 7, 16),
+                CashDirection.Payment, amount: 30m) with { CashboxId = 2 });
+        Assert.True(receipt.IsSuccess);
+        Assert.True(payment.IsSuccess);
+
+        var filters = new PartnerStatementFilterRequest(BusinessPartnerId: 1, FiscalYearId: 1);
+        var receiptAccess = await database.CreateStatementService(1,
+                cashboxAccessService: new RestrictedCashboxAccess(view: [1], execute: []))
+            .GetPartnerStatementAsync(Page(), filters);
+        var paymentAccess = await database.CreateStatementService(1,
+                cashboxAccessService: new RestrictedCashboxAccess(view: [2], execute: []))
+            .GetPartnerStatementAsync(Page(), filters);
+        Assert.True(receiptAccess.IsSuccess);
+        Assert.True(paymentAccess.IsSuccess);
+
+        var receiptRow = Assert.Single(receiptAccess.Value.Items,
+            row => row.DocumentNumber == receipt.Value.VoucherNumber);
+        var paymentRow = Assert.Single(paymentAccess.Value.Items,
+            row => row.DocumentNumber == payment.Value.VoucherNumber);
+        AssertVoucherMetadata(receiptRow, receipt.Value.Id, 1, "Main Cashbox", "Receipt", 1);
+        AssertVoucherMetadata(paymentRow, payment.Value.Id, 2, "Second Cashbox", "Payment", 1);
+        Assert.NotEqual(receiptRow.JournalEntryLineId, receipt.Value.Id);
+        Assert.NotEqual(paymentRow.JournalEntryLineId, payment.Value.Id);
+        Assert.Equal(0m, receiptRow.DebitAmount);
+        Assert.Equal(50m, receiptRow.CreditAmount);
+        Assert.Equal(30m, paymentRow.DebitAmount);
+        Assert.Equal(0m, paymentRow.CreditAmount);
+
+        AssertVoucherMetadata(Assert.Single(paymentAccess.Value.Items,
+            row => row.DocumentNumber == receipt.Value.VoucherNumber), null, null, null, null, null);
+        AssertVoucherMetadata(Assert.Single(receiptAccess.Value.Items,
+            row => row.DocumentNumber == payment.Value.VoucherNumber), null, null, null, null, null);
+        Assert.Equal(receiptAccess.Value.TotalCount, paymentAccess.Value.TotalCount);
+        Assert.Equal(receiptAccess.Value.Summary, paymentAccess.Value.Summary);
+        Assert.Equal(receiptAccess.Value.Items.Select(row => new
+            {
+                row.DocumentNumber, row.DebitAmount, row.CreditAmount, row.BalanceAmount,
+                row.BaseDebitAmount, row.BaseCreditAmount, row.BaseBalanceAmount
+            }), paymentAccess.Value.Items.Select(row => new
+            {
+                row.DocumentNumber, row.DebitAmount, row.CreditAmount, row.BalanceAmount,
+                row.BaseDebitAmount, row.BaseCreditAmount, row.BaseBalanceAmount
+            }));
+    }
+
+    [Fact]
+    public async Task PartnerStatementLinksOnlyVouchersInTheRequestedFiscalYear()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var voucherService = database.CreateVoucherService(1);
+        var receipt = await AddVoucherAsync(database, voucherService,
+            CreatePartnerVoucher("Partner receipt", new DateOnly(2026, 7, 15),
+                CashDirection.Receipt, amount: 50m));
+        var payment = await AddVoucherAsync(database, voucherService,
+            CreatePartnerVoucher("Partner payment", new DateOnly(2026, 7, 16),
+                CashDirection.Payment, amount: 30m));
+        Assert.True(receipt.IsSuccess);
+        Assert.True(payment.IsSuccess);
+        await database.Context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            UPDATE FiscalYears SET IsCurrent = 0 WHERE Id = 1;
+            INSERT INTO FiscalYears (
+                Id, CompanyId, Name, StartDate, EndDate, Status, IsCurrent,
+                CreatedById, CreatedOn, CreatedByPc, IsDeleted)
+            VALUES (3, 1, '2027', '2027-01-01', '2027-12-31', 1, 1,
+                'test', '2027-01-01', 'test', 0);
+            UPDATE CashVouchers SET FiscalYearId = 3, VoucherDate = '2027-01-01'
+            WHERE Id = {payment.Value.Id};
+            """);
+
+        var result = await database.CreateStatementService(1).GetPartnerStatementAsync(
+            Page(), new PartnerStatementFilterRequest(BusinessPartnerId: 1, FiscalYearId: 1));
+        Assert.True(result.IsSuccess);
+
+        var receiptRow = Assert.Single(result.Value.Items,
+            row => row.DocumentNumber == receipt.Value.VoucherNumber);
+        var paymentRow = Assert.Single(result.Value.Items,
+            row => row.DocumentNumber == payment.Value.VoucherNumber);
+        AssertVoucherMetadata(receiptRow, receipt.Value.Id, 1, "Main Cashbox", "Receipt", 1);
+        AssertVoucherMetadata(paymentRow, null, null, null, null, null);
+        Assert.Equal(30m, paymentRow.DebitAmount);
+    }
+
+    [Fact]
+    public async Task PartnerStatementLeavesVoucherMetadataEmptyOnNonVoucherLedgerRows()
+    {
+        await using var database = await CashManagementTestDatabase.CreateAsync();
+        var voucher = await AddVoucherAsync(database, database.CreateVoucherService(1),
+            CreatePartnerVoucher("Partner receipt", new DateOnly(2026, 7, 15),
+                CashDirection.Receipt, amount: 50m));
+        Assert.True(voucher.IsSuccess);
+        await database.SeedPostedJournalEntryAsync(
+            journalEntryId: 930, entryNumber: "JE-PARTNER-MANUAL",
+            entryDate: new DateOnly(2026, 7, 17), entryType: JournalEntryType.Manual,
+            sourceType: null, sourceId: voucher.Value.Id, sourceNumber: null,
+            lines: [new CashManagementTestDatabase.JournalEntryLineSeed(
+                AccountId: 1, PartyType: JournalPartyType.Customer, PartyId: 1,
+                Debit: 20m, Credit: 0m, Currency: CurrencyCode.EGP,
+                ExchangeRate: 1m, TransactionDebit: 20m, TransactionCredit: 0m)]);
+
+        var result = await database.CreateStatementService(1).GetPartnerStatementAsync(
+            Page(), new PartnerStatementFilterRequest(BusinessPartnerId: 1, FiscalYearId: 1));
+        Assert.True(result.IsSuccess);
+        Assert.Equal(5, result.Value.Items.Count);
+        Assert.All(result.Value.Items.Where(row => row.SourceType != PartnerStatementSourceType.CashVoucher),
+            row => AssertVoucherMetadata(row, null, null, null, null, null));
+    }
+
+    [Fact]
     public async Task ForeignCurrencyPartnerStatementReturnsOriginalAndEgpValues()
     {
         await using var database =
@@ -711,37 +830,16 @@ public sealed class FinancialStatementServiceTests
                 Page(),
                 new DriverTripCostFilterRequest(TripNumber: "TR-1")))
             .Value.Items);
-        await trips.UpdateCostsAsync(
+        var costUpdate = await trips.UpdateCostsAsync(
             new DriverTripBulkCostUpdateRequest(
             [
                 new DriverTripCostUpdateItem(
-                    1,
-                    60m,
-                    "Trip cost",
-                    trip.RowVersion)
+                    DriverTripId: 1,
+                    Cost: 60m,
+                    Notes: "Trip cost",
+                    RowVersion: trip.RowVersion)
             ]));
-        await database.SeedPostedJournalEntryAsync(
-            journalEntryId: 3020,
-            entryNumber: "JE-DRIVER-TRIP-1",
-            entryDate: new DateOnly(2026, 7, 20),
-            entryType: JournalEntryType.Automatic,
-            sourceType: JournalEntrySourceType.DriverTrip,
-            sourceId: 1,
-            sourceNumber: "INV-1",
-            lines:
-            [
-                new CashManagementTestDatabase.JournalEntryLineSeed(
-                    AccountId: 2,
-                    PartyType: JournalPartyType.Driver,
-                    PartyId: 1,
-                    Debit: 0m,
-                    Credit: 60m,
-                    Currency: CurrencyCode.EGP,
-                    ExchangeRate: 1m,
-                    TransactionDebit: 0m,
-                    TransactionCredit: 60m,
-                    Description: "Trip cost")
-            ]);
+        Assert.True(costUpdate.IsSuccess, costUpdate.Error.Description);
 
         var statements = database.CreateStatementService(1);
         var overall = await statements.GetDriverStatementAsync(
@@ -1198,6 +1296,23 @@ public sealed class FinancialStatementServiceTests
             PageNumber = 1,
             PageSize = 20
         };
+
+    private static void AssertVoucherMetadata(PartnerStatementItemResponse row,
+        int? voucherId, int? cashboxId, string? cashboxName, string? direction, int? fiscalYearId)
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter());
+        var json = JsonSerializer.SerializeToElement(row, options);
+
+        Assert.True(json.TryGetProperty("cashVoucherId", out var id), "Missing cashVoucherId");
+        Assert.Equal(voucherId, id.ValueKind == JsonValueKind.Null ? (int?)null : id.GetInt32());
+        var boxId = json.GetProperty("cashboxId");
+        Assert.Equal(cashboxId, boxId.ValueKind == JsonValueKind.Null ? (int?)null : boxId.GetInt32());
+        Assert.Equal(cashboxName, json.GetProperty("cashboxName").GetString());
+        Assert.Equal(direction, json.GetProperty("cashDirection").GetString());
+        var yearId = json.GetProperty("fiscalYearId");
+        Assert.Equal(fiscalYearId, yearId.ValueKind == JsonValueKind.Null ? (int?)null : yearId.GetInt32());
+    }
 
     private static VoucherTestRequest CreateGeneralVoucher(
         string number,
