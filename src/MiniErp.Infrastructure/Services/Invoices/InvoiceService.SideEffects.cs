@@ -34,6 +34,7 @@ public sealed partial class InvoiceService
                         ContainerId = line.ContainerId,
                         InvoiceId = invoice.Id,
                         InvoiceNumber = invoice.InvoiceNumber,
+                        SourceType = ContainerMovementSourceType.Invoice,
                         MovementDate = invoice.InvoiceDate,
                         OutgoingUnits = line.OutgoingUnits,
                         IncomingUnits = line.IncomingUnits,

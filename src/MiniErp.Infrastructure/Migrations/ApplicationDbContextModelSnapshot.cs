@@ -2652,11 +2652,10 @@ namespace MiniErp.Infrastructure.Migrations
                     b.Property<int>("IncomingUnits")
                         .HasColumnType("int");
 
-                    b.Property<int>("InvoiceId")
+                    b.Property<int?>("InvoiceId")
                         .HasColumnType("int");
 
                     b.Property<string>("InvoiceNumber")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
@@ -2667,6 +2666,15 @@ namespace MiniErp.Infrastructure.Migrations
                         .HasColumnType("date");
 
                     b.Property<int>("OutgoingUnits")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("SourceType")
                         .HasColumnType("int");
 
                     b.Property<string>("UpdatedById")
@@ -2693,7 +2701,7 @@ namespace MiniErp.Infrastructure.Migrations
 
                     b.HasIndex("CompanyId", "InvoiceId", "ContainerId")
                         .IsUnique()
-                        .HasFilter("[IsDeleted] = 0");
+                        .HasFilter("[IsDeleted] = 0 AND [InvoiceId] IS NOT NULL");
 
                     b.HasIndex("CompanyId", "BusinessPartnerId", "ContainerId", "MovementDate");
 
@@ -6426,8 +6434,7 @@ namespace MiniErp.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("CompanyId", "InvoiceId")
                         .HasPrincipalKey("CompanyId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("BusinessPartner");
 

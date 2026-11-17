@@ -45,12 +45,16 @@ public sealed class ContainerMovementConfiguration
         builder.Property(movement => movement.ContainerId)
             .IsRequired();
 
-        builder.Property(movement => movement.InvoiceId)
-            .IsRequired();
+        builder.Property(movement => movement.InvoiceId);
 
         builder.Property(movement => movement.InvoiceNumber)
-            .HasMaxLength(100)
+            .HasMaxLength(100);
+
+        builder.Property(movement => movement.SourceType)
             .IsRequired();
+
+        builder.Property(movement => movement.RowVersion)
+            .IsRowVersion();
 
         builder.Property(movement => movement.MovementDate)
             .HasColumnType("date")
@@ -72,7 +76,8 @@ public sealed class ContainerMovementConfiguration
             movement.ContainerId
         })
             .IsUnique()
-            .HasFilter("[IsDeleted] = 0");
+            .HasFilter(
+                "[IsDeleted] = 0 AND [InvoiceId] IS NOT NULL");
 
         builder.HasIndex(movement => new
         {

@@ -2322,14 +2322,15 @@ public static class DevelopmentDataSeeder
             .IgnoreQueryFilters()
             .Where(movement =>
                 movement.CompanyId == companyId &&
-                invoiceIds.Contains(movement.InvoiceId))
+                movement.InvoiceId.HasValue &&
+                invoiceIds.Contains(movement.InvoiceId.Value))
             .OrderBy(movement => movement.IsDeleted)
             .ThenBy(movement => movement.Id)
             .ToListAsync(cancellationToken);
         foreach (var movement in containerMovements)
         {
             maps.ContainerMovements.TryAdd(
-                (movement.InvoiceId, movement.ContainerId),
+                (movement.InvoiceId!.Value, movement.ContainerId),
                 movement);
         }
 
@@ -2404,6 +2405,7 @@ public static class DevelopmentDataSeeder
                     CompanyId = companyId,
                     ContainerId = containerLine.ContainerId,
                     InvoiceId = invoice.Id,
+                    SourceType = ContainerMovementSourceType.Invoice,
                     CreatedById = SeedActor,
                     CreatedByPc = createdByPc,
                     CreatedOn = createdOn
@@ -2420,6 +2422,7 @@ public static class DevelopmentDataSeeder
             containerMovement.ContainerStoreId =
                 invoice.ContainerStoreId!.Value;
             containerMovement.InvoiceNumber = invoice.InvoiceNumber;
+            containerMovement.SourceType = ContainerMovementSourceType.Invoice;
             containerMovement.MovementDate = invoice.InvoiceDate;
             containerMovement.OutgoingUnits = containerLine.OutgoingUnits;
             containerMovement.IncomingUnits = containerLine.IncomingUnits;

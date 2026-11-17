@@ -221,10 +221,11 @@ public sealed record ContainerStoreHeaderResponse(
 public sealed record ContainerStoreStatementItemResponse(
     int MovementId,
     DateOnly MovementDate,
-    int InvoiceId,
-    string InvoiceNumber,
+    int? InvoiceId,
+    string? InvoiceNumber,
     string? PartnerInvoiceNumber,
-    InvoiceType InvoiceType,
+    InvoiceType? InvoiceType,
+    ContainerMovementSourceType SourceType,
     int ContainerId,
     string ContainerCode,
     string ContainerName,
@@ -236,7 +237,8 @@ public sealed record ContainerStoreStatementItemResponse(
     int NetUnits,
     int RunningBalanceUnits,
     string? MovementDescription,
-    DateTime CreatedOn);
+    DateTime CreatedOn,
+    byte[] RowVersion);
 
 public sealed record ContainerStoreContainerSummaryResponse(
     int ContainerId,

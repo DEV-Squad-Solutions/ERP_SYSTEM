@@ -137,11 +137,14 @@ public sealed partial class FinancialStatementService
             .Where(movement => movement.MovementDate <= toDate)
             .Where(movement =>
                 !filters.InvoiceType.HasValue ||
-                movement.Invoice.InvoiceType == filters.InvoiceType.Value)
+                (movement.Invoice != null &&
+                 movement.Invoice.InvoiceType == filters.InvoiceType.Value))
             .Where(movement =>
                 string.IsNullOrEmpty(invoiceNumber) ||
-                movement.InvoiceNumber.Contains(invoiceNumber) ||
-                (movement.Invoice.PartnerInvoiceNo != null &&
+                (movement.InvoiceNumber != null &&
+                 movement.InvoiceNumber.Contains(invoiceNumber)) ||
+                (movement.Invoice != null &&
+                 movement.Invoice.PartnerInvoiceNo != null &&
                  movement.Invoice.PartnerInvoiceNo.Contains(invoiceNumber)))
             .Where(movement =>
                 !filters.Direction.HasValue ||
@@ -150,8 +153,10 @@ public sealed partial class FinancialStatementService
                     : movement.IncomingUnits > 0))
             .Where(movement =>
                 string.IsNullOrEmpty(search) ||
-                movement.InvoiceNumber.Contains(search) ||
-                (movement.Invoice.PartnerInvoiceNo != null &&
+                (movement.InvoiceNumber != null &&
+                 movement.InvoiceNumber.Contains(search)) ||
+                (movement.Invoice != null &&
+                 movement.Invoice.PartnerInvoiceNo != null &&
                  movement.Invoice.PartnerInvoiceNo.Contains(search)) ||
                 movement.Container.Code.Contains(search) ||
                 movement.Container.Name.Contains(search) ||
@@ -222,9 +227,13 @@ public sealed partial class FinancialStatementService
                     MovementDate = movement.MovementDate,
                     InvoiceId = movement.InvoiceId,
                     InvoiceNumber = movement.InvoiceNumber,
-                    PartnerInvoiceNumber =
-                        movement.Invoice.PartnerInvoiceNo,
-                    InvoiceType = movement.Invoice.InvoiceType,
+                    PartnerInvoiceNumber = movement.Invoice == null
+                        ? null
+                        : movement.Invoice.PartnerInvoiceNo,
+                    InvoiceType = movement.Invoice == null
+                        ? (InvoiceType?)null
+                        : movement.Invoice.InvoiceType,
+                    SourceType = movement.SourceType,
                     ContainerId = movement.ContainerId,
                     ContainerCode = movement.Container.Code,
                     ContainerName = movement.Container.Name,
@@ -239,7 +248,8 @@ public sealed partial class FinancialStatementService
                     OutgoingUnits = movement.OutgoingUnits,
                     IncomingUnits = movement.IncomingUnits,
                     MovementDescription = movement.Description,
-                    CreatedOn = movement.CreatedOn
+                    CreatedOn = movement.CreatedOn,
+                    RowVersion = movement.RowVersion
                 })
                 .ToListAsync(cancellationToken);
 
@@ -266,6 +276,7 @@ public sealed partial class FinancialStatementService
                 InvoiceNumber: row.InvoiceNumber,
                 PartnerInvoiceNumber: row.PartnerInvoiceNumber,
                 InvoiceType: row.InvoiceType,
+                SourceType: row.SourceType,
                 ContainerId: row.ContainerId,
                 ContainerCode: row.ContainerCode,
                 ContainerName: row.ContainerName,
@@ -278,7 +289,8 @@ public sealed partial class FinancialStatementService
                 NetUnits: netUnits,
                 RunningBalanceUnits: runningUnits,
                 MovementDescription: row.MovementDescription,
-                CreatedOn: row.CreatedOn);
+                CreatedOn: row.CreatedOn,
+                RowVersion: row.RowVersion);
         }).ToList();
 
         var containerMetadata = await LoadContainerMetadataAsync(
@@ -425,10 +437,11 @@ public sealed partial class FinancialStatementService
     {
         public int MovementId { get; init; }
         public DateOnly MovementDate { get; init; }
-        public int InvoiceId { get; init; }
-        public string InvoiceNumber { get; init; } = string.Empty;
+        public int? InvoiceId { get; init; }
+        public string? InvoiceNumber { get; init; }
         public string? PartnerInvoiceNumber { get; init; }
-        public InvoiceType InvoiceType { get; init; }
+        public InvoiceType? InvoiceType { get; init; }
+        public ContainerMovementSourceType SourceType { get; init; }
         public int ContainerId { get; init; }
         public string ContainerCode { get; init; } = string.Empty;
         public string ContainerName { get; init; } = string.Empty;
@@ -439,6 +452,7 @@ public sealed partial class FinancialStatementService
         public int IncomingUnits { get; init; }
         public string? MovementDescription { get; init; }
         public DateTime CreatedOn { get; init; }
+        public byte[] RowVersion { get; init; } = [];
     }
 
     private sealed class ContainerStoreContainerPeriodRaw

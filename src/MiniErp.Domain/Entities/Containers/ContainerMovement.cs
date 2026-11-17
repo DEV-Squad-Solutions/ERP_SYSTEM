@@ -3,6 +3,7 @@ using MiniErp.Domain.Entities.BusinessPartners;
 using MiniErp.Domain.Entities.Companies;
 using MiniErp.Domain.Entities.Inventory;
 using MiniErp.Domain.Entities.Invoicing;
+using MiniErp.Domain.Enums;
 
 namespace MiniErp.Domain.Entities.Containers;
 
@@ -30,11 +31,25 @@ public sealed class ContainerMovement : AuditableEntity
 
     public Container Container { get; set; } = null!;
 
-    public int InvoiceId { get; set; }
+    /// <summary>
+    /// فاتورة المصدر. null يعني حركة يدوية مباشرة على مخزن العبوات.
+    /// </summary>
+    public int? InvoiceId { get; set; }
 
-    public Invoice Invoice { get; set; } = null!;
+    public Invoice? Invoice { get; set; }
 
-    public string InvoiceNumber { get; set; } = string.Empty;
+    public string? InvoiceNumber { get; set; }
+
+    /// <summary>
+    /// مصدر الحركة: فاتورة أو إدخال يدوي.
+    /// </summary>
+    public ContainerMovementSourceType SourceType { get; set; } =
+        ContainerMovementSourceType.Invoice;
+
+    /// <summary>
+    /// بصمة التعديل لمنع التعارض في الحركات اليدوية.
+    /// </summary>
+    public byte[] RowVersion { get; set; } = [];
 
     public DateOnly MovementDate { get; set; }
 
