@@ -18,11 +18,18 @@ using MiniErp.Application.Common.Mappings;
 using MiniErp.Application.Common.Validation;
 using MiniErp.Infrastructure;
 using MiniErp.Infrastructure.Persistence;
+using Serilog;
 using SharpGrip.FluentValidation.AutoValidation.Mvc.Extensions;
 
 const string AllowAnyFrontendPolicy = "AllowAnyFrontend";
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog((context, services, configuration) => configuration
+    .ReadFrom.Configuration(context.Configuration)
+    .ReadFrom.Services(services)
+    .Enrich.FromLogContext()
+    .WriteTo.Console());
 
 builder.Host.UseDefaultServiceProvider((_, options) =>
 {

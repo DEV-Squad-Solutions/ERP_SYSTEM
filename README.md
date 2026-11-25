@@ -127,10 +127,30 @@ GET /api/v1/ItemUnits?pageNumber=1&pageSize=20
 size is `100`. The response includes `items`, `pageNumber`, `pageSize`,
 `totalCount`, and `totalPages`.
 
+## Configuration and secrets
+
+Secrets are not stored in the repository. `appsettings.json` has no connection string, no JWT signing key and no seed password. Provide them with environment variables (production, Docker, CI) or .NET user-secrets (local development):
+
+| Setting | Environment variable | Used for |
+| --- | --- | --- |
+| `ConnectionStrings:DefaultConnection` | `ConnectionStrings__DefaultConnection` | SQL Server connection (required, the app will not start without it) |
+| `Jwt:SigningKey` | `Jwt__SigningKey` | Token signing key, at least 32 bytes (required in production; `appsettings.Development.json` carries a dev-only key) |
+| `Seed:Password` | `Seed__Password` | Password for seeded demo users, only needed when `Seed:Enabled` is `true` |
+
+Local development with user-secrets:
+
+```bash
+cd src/MiniErp.Api
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "<your connection string>"
+dotnet user-secrets set "Seed:Password" "<a password>"   # only if you enable seeding
+```
+
+`src/MiniErp.Api/appsettings.example.json` shows the expected shape with placeholders.
+
 ## JWT authentication
 
 The API issues short-lived JWT access tokens and rotating refresh tokens. All
-development token settings are under `Jwt` in `appsettings.json`. In
+token settings are under `Jwt` in `appsettings.json`. In
 production, replace the development signing key with a key containing at least
 32 bytes through a secret provider or the `Jwt__SigningKey` environment
 variable.
